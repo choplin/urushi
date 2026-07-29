@@ -28,10 +28,12 @@
 
 mod border;
 mod color;
+mod join;
 mod style;
 mod text;
 
 pub use border::Border;
 pub use color::Color;
+pub use join::{VerticalAlign, join_horizontal, join_vertical};
 pub use style::{Align, Sides, Style};
 pub use text::visible_width;
