@@ -45,7 +45,8 @@ pub fn render_showcase() -> String {
         .border_foreground(Color::BRIGHT_BLACK)
         .render("ANSI を保ったまま組み立てる");
 
-    join_vertical(Align::Center, &[title, cards, footer])
+    let composition = join_vertical(Align::Center, &[title, cards, footer]);
+    Style::new().margin(1).render(&composition)
 }
 
 #[cfg_attr(test, allow(dead_code))]
