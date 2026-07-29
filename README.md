@@ -32,28 +32,21 @@ output, interactive prompts, and full TUIs. `urushi` aims to fill that gap:
 
 ## Example
 
-```rust
-use urushi::{Align, Border, Color, Style};
+Run the end-to-end showcase to see colored boxes, nested styles, CJK-aware
+alignment, and horizontal and vertical composition:
 
-let style = Style::new()
-    .foreground(Color::Ansi256(212))
-    .border(Border::ROUNDED)
-    .border_foreground(Color::MAGENTA)
-    .padding((0, 1))
-    .align(Align::Center)
-    .width(24);
-
-println!("{}", style.render("こんにちは, urushi!"));
+```sh
+cargo run --example showcase
 ```
 
 ## Roadmap
 
 - [x] `Style` builder: colors, modifiers, padding, margin, border, width, align
 - [x] ANSI-aware width measurement and CJK-aware word wrap
-- [ ] Composition helpers (`join_horizontal`, `join_vertical`, `place`)
+- [x] Composition helpers (`join_horizontal`, `join_vertical`)
 - [ ] Color profile detection and degradation (truecolor → 256 → 16), `NO_COLOR`, non-TTY
 - [ ] Adaptive colors (light/dark terminal backgrounds)
-- [ ] Correct re-styling of content that already contains ANSI sequences (nested styles)
+- [x] Correct re-styling of content that already contains ANSI sequences (nested styles)
 - [ ] Theme layer: per-component style sets derived from a small set of semantic tokens
 - [ ] `ratatui` feature: `impl Widget`, `From<Style>` for the stylable subset
 - [ ] `urushi-prompt`: huh-style `Form` / `Group` / fields with validation and theming
