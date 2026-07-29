@@ -1,0 +1,11 @@
+[package]
+name = "urushi"
+description = "Box-model styling for terminal output that renders to plain ANSI strings"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+keywords = ["cli", "terminal", "style", "ansi", "tui"]
+categories = ["command-line-interface"]
+
+[dependencies]
+unicode-width.workspace = true
