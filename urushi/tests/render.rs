@@ -105,6 +105,44 @@ fn styled_content_is_measured_by_visible_width() {
 }
 
 #[test]
+fn nested_style_restores_outer_style_after_inner_reset() {
+    let inner = Style::new().foreground(Color::RED).render("hi");
+    let out = Style::new()
+        .background(Color::BLUE)
+        .bold()
+        .underline()
+        .padding((0, 1))
+        .width(8)
+        .border(Border::NORMAL)
+        .render(&inner);
+
+    assert_eq!(
+        out,
+        "┌────────┐\n\
+         │\x1b[1;4;44m \x1b[31mhi\x1b[0m\x1b[1;4;44m     \x1b[0m│\n\
+         └────────┘"
+    );
+    assert!(out.lines().all(|line| visible_width(line) == 10));
+}
+
+#[test]
+fn nested_style_preserves_osc_hyperlinks() {
+    let link = "\x1b]8;;https://example.com\x1b\\link\x1b]8;;\x1b\\";
+    let inner = Style::new().foreground(Color::RED).render(link);
+    let out = Style::new()
+        .background(Color::BLUE)
+        .bold()
+        .padding((0, 1))
+        .render(&inner);
+
+    assert_eq!(
+        out,
+        "\x1b[1;44m \x1b[31m\x1b]8;;https://example.com\x1b\\link\x1b]8;;\x1b\\\x1b[0m\x1b[1;44m \x1b[0m"
+    );
+    assert_eq!(visible_width(&out), 6);
+}
+
+#[test]
 fn rendered_block_width_is_consistent() {
     let style = Style::new()
         .padding(1)

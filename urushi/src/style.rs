@@ -241,6 +241,7 @@ impl Style {
                 Align::Center => (gap / 2, gap - gap / 2),
                 Align::Right => (gap, 0),
             };
+            let line = reapply_after_reset(line, &sgr);
             rows.push(format!(
                 "{sgr}{}{line}{}{reset}",
                 " ".repeat(pl + left),
@@ -338,4 +339,12 @@ impl Style {
             format!("\x1b[{}m", params.join(";"))
         }
     }
+}
+
+fn reapply_after_reset(content: &str, sgr: &str) -> String {
+    if sgr.is_empty() || !content.contains(RESET) {
+        return content.to_string();
+    }
+
+    content.replace(RESET, &format!("{RESET}{sgr}"))
 }
