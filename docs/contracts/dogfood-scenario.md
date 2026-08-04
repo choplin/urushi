@@ -287,7 +287,9 @@ M4 で変更できる範囲は次に限る。
 - urushi 側は M1 から M3 で確定した公開 API の欠陥修正に限る。
   agentlog 固有の語彙や lifecycle を汎用 API へ移さない。
 
-M0 ではこの文書だけを変更し、agentlog と urushi の製品コードを変更しない。
+M0 では `docs/contracts/theme.md`、`docs/contracts/prompt-runtime.md`、
+`docs/contracts/dogfood-scenario.md` だけを変更し、agentlog と urushi の製品コードを変更しない。
+M1 以降の実装は、これら三契約に対する人間の明示承認後にだけ開始する。
 
 ## 対象外
 
