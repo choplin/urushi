@@ -86,6 +86,81 @@ field は次の製品設定を収集し、既存の固定値または既存 UI �
 この Form は agentlog の汎用設定画面ではない。
 動的 option、MultiSelect、provider path 設定、retention 設定は追加しない。
 
+## browse setup と既存 TUI の境界
+
+M4 では `src/tui.rs` が Prompt から受け取る値を `BrowseOptions` に閉じ込める。
+`src/cli.rs` は Form の型付き値をこの型へ変換し、TUI の内部状態を直接構築しない。
+
+```rust
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct BrowseOptions {
+    session_limit: usize,
+    initial_grouping: InitialGrouping,
+    sync_on_start: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum InitialGrouping {
+    Recent,
+    Provider,
+    Repository,
+}
+
+impl BrowseOptions {
+    pub(crate) fn new(
+        session_limit: usize,
+        initial_grouping: InitialGrouping,
+        sync_on_start: bool,
+    ) -> Result<Self, BrowseOptionsError>;
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum BrowseOptionsError {
+    SessionLimitOutOfRange { value: usize },
+}
+```
+
+`BrowseOptions::new` は `session_limit` が `1..=500` に含まれることを再検証する。
+CLI の Input validator が同じ条件を検証していても、TUI 境界はその実装詳細を信用しない。
+範囲外なら `BrowseOptionsError::SessionLimitOutOfRange` を返し、TUI session を開始しない。
+
+`src/cli.rs` の browse setup Form は次の型付き key を使う。
+
+```rust
+let maximum_sessions = FieldKey::<String>::new("maximum_sessions");
+let initial_grouping = FieldKey::<InitialGrouping>::new("initial_grouping");
+let sync_on_start = FieldKey::<ConfirmAnswer>::new("sync_on_start");
+```
+
+Input は required と `1..=500` の同期 validator を通した後、`maximum_sessions` の `String` を `usize` に parse する。
+Select option は label とは別に `InitialGrouping` を値として所有し、`FieldKey<InitialGrouping>` からそのまま取得する。
+option は `Recent`、`Provider`、`Repository` の順に構築し、初期選択は `Recent` とする。
+Confirm は `ConfirmAnswer.value` だけを `sync_on_start` に変換し、default または explicit という source は Prompt の観察結果として保持しても `BrowseOptions` には入れない。
+三値を `BrowseOptions::new` に渡し、再検証に成功した場合だけ TUI を開始する。
+
+TUI の入口は次の signature とする。
+
+```rust
+pub(crate) async fn run(
+    paths: &AppPaths,
+    theme: &Theme<AgentlogThemeExtension>,
+    profile: &TerminalProfile,
+    options: BrowseOptions,
+) -> anyhow::Result<()>;
+```
+
+`theme` は同じ process で `theme_set()` から選択した参照であり、`profile` は stderr に対して一度検出した参照である。
+`tui::run` は ThemeSet と `TerminalProfile` を再構築または再検出しない。
+
+`tui::run` は `options.session_limit` を既存 `list_shell` の取得 limit へ渡す。
+`list_shell` が要求する型への変換は `BrowseOptions::new` の範囲検査後に行い、初回取得と `r` 後の再取得の両方で同じ limit を使う。
+`options.initial_grouping` は `BrowseState::new(anchor_now, options.initial_grouping)` へ渡し、後から state field を上書きしない。
+`BrowseState::new` は `InitialGrouping::Recent`、`Provider`、`Repository` を既存の `Grouping::Recent`、`Provider`、`Repository` へ一対一に変換する。
+
+`options.sync_on_start` が true の場合だけ、初回 session 取得後に現行の `sync_loader.request(paths, &mut state)` を呼ぶ。
+false の場合は startup background sync を開始せず、status line は `Sync: not started` の idle 状態を表示する。
+どちらの場合も TUI 内の `r` による明示 sync を残し、false から `r` を押した場合は既存の単一実行制御を使って sync を開始する。
+
 ## 実ユーザーフロー
 
 主シナリオは「local history を同期し、閲覧件数と初期 grouping を決め、catalog から一つの session を読む」という一つの利用目的を完了する。
@@ -242,6 +317,7 @@ M0 ではこの文書だけを変更し、agentlog と urushi の製品コード
 4. `browse` の session selection、full preview、background sync status が実 catalog の内容と一致することを確認する。
 5. `theme_set()` の呼び出しが process ごとに一度であり、consumer ごとに color literal や同義 Style 定義が残っていないことを差分と `rg` で確認する。
 6. human-readable stdout と stderr consumer がそれぞれ実際の stream に `TerminalProfile::detect_for` を適用し、`browse` の Prompt と TUI が同じ stderr profile を参照することを確認する。
+7. `tui::run` が Prompt の回答どおり `session_limit = 50`、`initial_grouping = Provider`、`sync_on_start = true` を受け取り、取得件数、初期 grouping、startup sync に反映することを確認する。
 
 ### cancel と error recovery
 
@@ -250,6 +326,8 @@ M0 ではこの文書だけを変更し、agentlog と urushi の製品コード
 3. いずれも TUI が開始せず、部分値が出力または保存されず、shell の echo と cursor が正常であることを確認する。
 4. TUI を開始し、`q` で終了する。
 5. test seam では Prompt cleanup failure と TUI setup failure を注入し、後続 session を開始せず取得済み資源だけを一度 cleanup することを確認する。
+6. Confirm で no を明示選択して TUI を開始し、status line が `Sync: not started` のまま既存 catalog を表示することを確認する。
+7. 続けて `r` を押し、background sync が一度だけ始まることを確認する。
 
 ### profile 別観察
 
@@ -269,6 +347,9 @@ unit test と TestBackend の結果は回帰根拠として併記できるが、
 - 三つの consumer が同じ application Theme definition を使い、同義の color と modifier を consumer 内で再定義していない。
 - application Theme の所有が `src/theme.rs` に閉じ、各 process が `theme_set()` を一度だけ呼んで `DEFAULT_COLOR_SCHEME` の Theme を選んだ。
 - human-readable stdout と stderr consumer が実際の出力 stream ごとに profile を検出し、JSON が装飾経路を通らず、`browse` の Prompt と TUI が同じ stderr profile を順番に使った。
+- CLI が三つの型付き key から `BrowseOptions` を構築し、`tui::run(paths, theme, profile, options)` が session limit、初期 grouping、startup sync を既存 TUI の対応箇所へ反映した。
+- `BrowseOptions::new` が `0` と `501` を拒否し、`1` と `500` を受理した。
+- `sync_on_start = false` では startup sync が始まらず idle status を表示し、`r` では sync を開始できた。
 - 色あり TTY と `NO_COLOR` の実 TTY の双方で主シナリオと cancel を観察した。
 - 非 TTY の JSON と text に ANSI sequence が混入せず、`browse` は terminal state を変更する前に拒否された。
 - Prompt submit、Prompt cancel、TUI quit、注入可能な I/O error、panic の対象経路で terminal restore を検証した。
@@ -290,7 +371,7 @@ unit test と TestBackend の結果は回帰根拠として併記できるが、
 | Deliverable | この契約から渡す作業 | 完了 evidence |
 | --- | --- | --- |
 | 実在 CLI の通常出力を共有 Theme へ移行する | agentlog dependency、新規 `src/theme.rs`、`AgentlogThemeExtension`、`theme_set()`、`DEFAULT_COLOR_SCHEME`、`paths/sync/list/show` の human-readable output、stream ごとの profile、`NO_COLOR`、非 TTY、JSON 非装飾 | 通常利用、redirect、pipe、constructor の単一定義、既存 checks、Style 重複の差分 |
-| 実在 CLI の Prompt と ratatui 画面を共有 Theme へ統合する | 完成済みの `src/theme.rs` と通常出力移行を入力として、`browse` setup Form の Input、validation、Select、Confirm、`purge` Confirm 移行、同じ stderr profile の Prompt と ratatui への受け渡し、Prompt から TUI への lifecycle 境界 | 主シナリオと cancel の実 terminal 完走、terminal failure seam、agentlog checks |
+| 実在 CLI の Prompt と ratatui 画面を共有 Theme へ統合する | 完成済みの `src/theme.rs` と通常出力移行を入力として、型付き Form key、`BrowseOptions` と `InitialGrouping`、`tui::run(paths, theme, profile, options)`、session limit と初期 grouping と startup sync の既存 TUI への接続、`purge` Confirm 移行、同じ stderr profile、Prompt から TUI への lifecycle 境界 | 主シナリオと no-confirm 後の手動 sync、境界値 test、cancel の実 terminal 完走、terminal failure seam、agentlog checks |
 | MVP 受け入れ検証を実施する | 本文の手動観察手順を色あり TTY、`NO_COLOR`、非 TTY で実施し、合格条件を項目ごとに判定する | command と exit status、保存した stdout と stderr、目視記録、blocker と残余リスク、人間の明示承認 |
 | M4 の control ledger | 上記三つの deliverable と M4 で発見した blocker を追跡し、scenario status と次の action を管理する | 全対象 deliverable の完了、Evidence 表、MVP 成立の人間承認 |
 
