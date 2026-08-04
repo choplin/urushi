@@ -125,12 +125,38 @@ Style の解決順序を次で固定する。
 1. 呼び出し側が `ColorScheme` を決める。
 2. `ThemeSet::select` が選択済みの `&Theme<E>` を返す。
 3. `Theme::style(role)` が full-fidelity の論理 `&Style` を返す。
-4. `TerminalProfile::resolve_style(&Style)` が出力先の色深度、`NO_COLOR`、TTY 方針に従う所有 `Style` を返す。
-5. 解決済み `Style` を plain ANSI renderer、Prompt renderer、または ratatui adapter が消費する。
+4. 呼び出し側が実際の出力writerを `TerminalProfile::detect_for` に渡すか、明示overrideを `TerminalProfile::new` に渡す。
+5. `TerminalProfile::resolve_style(&Style)` が選択済みprofileに従う所有 `Style` を返す。
+6. 解決済み `Style` を plain ANSI renderer、Prompt renderer、または ratatui adapter が消費する。
 
 `TerminalProfile` は foreground、background、border color を決定的に縮退または除去する。
 semantic role、modifier、padding、margin、border glyph、width、alignment は変更しない。
-`NO_COLOR` と非 TTY の具体的な profile 選択規則は TerminalProfile の契約が所有し、Theme は環境変数や出力先を参照しない。
+
+### TerminalProfile の検出
+
+`TerminalProfile::detect_for` は、ANSI bytes を最終的に書き込む writer を受け取る。
+通常出力なら `stdout`、診断出力なら `stderr`、Prompt と ratatui なら各 renderer または backend が書き込む terminal writer を渡す。
+`stdout` の検出結果を `stderr`、pipe、file、buffer に流用しない。
+
+検出は呼び出すたびに writer の TTY 状態と現在の process environment を読み、次の順で最初に一致した `ColorProfile` を返す。
+
+1. writer が TTY でなければ `Monochrome`。
+2. `NO_COLOR` が存在し、値が空でなければ `Monochrome`。
+3. `TERM` が `dumb` なら `Monochrome`。
+4. `COLORTERM` が `truecolor` または `24bit` なら `TrueColor`。
+5. `TERM` が `256color` を含むなら `Ansi256`。
+6. どれにも一致しなければ `Ansi16`。
+
+`NO_COLOR` が存在しても値が空文字なら、`NO_COLOR` は未指定として手順3以降を続ける。
+`TERM` と `COLORTERM` の既知値は ASCII の大文字と小文字を区別せず、前後の空白は除去せずに比較する。
+値がUnicodeとして読めない場合、その変数は既知値に一致しなかったものとして次の手順へ進む。
+
+明示 override には `TerminalProfile::new(ColorProfile)` を使う。
+`new` は writer、TTY、`NO_COLOR`、`TERM`、`COLORTERM` を一切参照せず、指定された profile をそのまま保持する。
+強制色出力を提供するアプリは利用者の明示指定を `new` に渡し、自動検出結果を後から上書きする二段階APIを作らない。
+
+`Theme`、`ThemeSet`、`ColorScheme` は writer と environment を参照しない。
+light と dark の選択は端末の色数とは独立しており、`TerminalProfile` の検出前後で変化しない。
 
 ratatui 変換は profile 解決後に行う。
 先に ratatui の色へ変換すると、plain renderer と異なる縮退経路が生まれるためである。
@@ -139,6 +165,7 @@ ratatui 変換は profile 解決後に行う。
 ColorScheme
     -> ThemeSet::select
     -> Theme::style
+    -> TerminalProfile::detect_for(writer) | TerminalProfile::new(profile)
     -> TerminalProfile::resolve_style
     -> plain ANSI | Prompt renderer | ratatui adapter
 ```
@@ -259,14 +286,61 @@ impl<E> ThemeSet<E> {
 `Theme::from_tokens` は `ComponentStyles::from_tokens` と `()` を組み合わせる便宜 constructor である。
 `Theme::new` は共通 component を差し替える利用者向けであり、application extension を別 registry に逃がさない。
 
-M1 の `TerminalProfile` は少なくとも次の境界を公開する。
-profile の検出 constructor と `NO_COLOR`、非 TTY の既定規則は TerminalProfile 側で確定する。
+M1 の `TerminalProfile` は次の境界を公開する。
+`Default` は実装しない。
+既定値では検出対象の writer が隠れてしまうためである。
 
 ```rust
+use std::io::IsTerminal;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ColorProfile {
+    TrueColor,
+    Ansi256,
+    Ansi16,
+    Monochrome,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct TerminalProfile {
+    // Private field: color_profile.
+}
+
 impl TerminalProfile {
+    pub const fn new(color_profile: ColorProfile) -> Self;
+    pub fn detect_for(output: &impl IsTerminal) -> Self;
+    pub const fn color_profile(&self) -> ColorProfile;
     pub fn resolve_style(&self, style: &Style) -> Style;
 }
 ```
+
+`detect_for` は `output` を TTY 判定にだけ使い、`TerminalProfile` に参照または file descriptor を保持しない。
+`color_profile` getter は検出結果と明示 override を同じ方法で検証し、consumer がprofileごとの分岐を必要とする場合にも使う。
+
+### TerminalProfile のテスト表
+
+M1 は環境変数を直接変更する並列testに依存せず、TTYの真偽と環境値を入力できる非公開の純粋な検出関数を用意する。
+公開 `detect_for` は writer の `is_terminal()` と process environment をその関数へ渡す薄い境界にする。
+
+| writer is TTY | `NO_COLOR` | `TERM` | `COLORTERM` | expected |
+| --- | --- | --- | --- | --- |
+| false | unset | `xterm-256color` | `truecolor` | `Monochrome` |
+| true | `1` | `xterm-256color` | `truecolor` | `Monochrome` |
+| true | empty | `xterm` | `truecolor` | `TrueColor` |
+| true | unset | `dumb` | `truecolor` | `Monochrome` |
+| true | unset | `xterm` | `TRUECOLOR` | `TrueColor` |
+| true | unset | `xterm` | `24bit` | `TrueColor` |
+| true | unset | `xterm-256color` | unset | `Ansi256` |
+| true | unset | `screen-256color` | unknown | `Ansi256` |
+| true | unset | `xterm-color` | unset | `Ansi16` |
+| true | unset | unset | unset | `Ansi16` |
+
+表に加えて、次の公開境界をtestする。
+
+- `TerminalProfile::new(ColorProfile::TrueColor)` は、非TTY writerと非空 `NO_COLOR` があるprocessでも `TrueColor` を保持する。
+- TTYの `stdout` と非TTYの `stderr` を別々に検出した場合、前者のprofileを後者へ流用せず別の結果を得る。
+- `Monochrome` の `resolve_style` は三種類のcolor propertyを除去し、modifierとbox modelを保持する。
+- `TrueColor`、`Ansi256`、`Ansi16` の `resolve_style` は同じ論理 `Style` から決定的な結果を返す。
 
 ## Application extension
 
@@ -389,6 +463,8 @@ let widget = urushi::ratatui::StyledBlock::new("Deployment report").style(panel)
 - `Theme::style` は同じ Theme と role に対して同じ論理 `Style` を返す。
 - `Theme` と `ThemeSet` は構築後に不変であり、内部可変性とグローバル状態を持たない。
 - `Theme` の構築と role 解決は terminal I/O、環境変数、ratatui、Prompt runtime に依存しない。
+- `TerminalProfile::detect_for` は実際の出力writerごとに呼び、別のwriterの検出結果を流用しない。
+- `TerminalProfile::new` はTTYと環境変数を参照せず、明示された `ColorProfile` を保持する。
 - `TerminalProfile` の適用は Theme 選択と role 解決の後、consumer adapter の前に一度だけ行う。
 - Prompt と ratatui は semantic token の `Color` を直接参照せず、component role または application role から `Style` を得る。
 - application extension は `Theme<E>` 内にあり、light と dark で同じ `E` を使う。
@@ -409,7 +485,7 @@ let widget = urushi::ratatui::StyledBlock::new("Deployment report").style(panel)
 
 ## 後続実装への割り当て
 
-M1 は `SemanticTokens`、`ComponentRole`、`ComponentStyles`、`Theme<E>`、`ThemeRole<E>`、`ThemeSet<E>`、`ColorScheme` と `TerminalProfile::resolve_style` を実装する。
+M1 は `SemanticTokens`、`ComponentRole`、`ComponentStyles`、`Theme<E>`、`ThemeRole<E>`、`ThemeSet<E>`、`ColorScheme`、`ColorProfile` と `TerminalProfile` の検出、明示override、Style解決を実装する。
 M1 の plain CLI test は同じ Theme を light と dark で選び、profile 別に解決してから現行 `Style::render` へ渡す。
 
 M2 は optional `ratatui` feature の内側で、解決済み `&Style` または `Style` から ratatui text style への変換と、box model を保持する urushi 所有 Widget を実装する。
