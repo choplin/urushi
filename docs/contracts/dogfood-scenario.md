@@ -34,11 +34,44 @@ agentlog は三つの表示面をすでに持ち、現行 TUI の色定義重複
 
 | command | 現行挙動 | M4 の到達状態 |
 | --- | --- | --- |
-| `agentlog sync` | progress と summary を stderr に出す。TTY かつ利用可能な terminal control では cliclack、非 TTY、`TERM=dumb`、`NO_COLOR` では plain report を使う。`--json` の product は stdout に残す | application Theme を一度構築し、status、success、warning、error、muted text を通常出力へ適用する。stdout と stderr の分離は維持する |
+| `agentlog paths` | Agentlog-owned path と provider-source boundary を stdout に出す。`--json` を持つ | human-readable 出力だけを共有 Theme へ移し、JSON は装飾しない |
+| `agentlog sync` | progress と summary を stderr に出す。TTY かつ利用可能な terminal control では cliclack、非 TTY、`TERM=dumb`、`NO_COLOR` では plain report を使う。`--json` の product は stdout に残す | 共通 constructor で application Theme を一度構築し、status、success、warning、error、muted text を通常出力へ適用する。stdout と stderr の分離は維持する |
 | `agentlog list` | catalog session を stdout に一行ずつ出す。`--json` を持つ | human-readable 出力だけを共有 Theme へ移し、JSON は装飾しない |
 | `agentlog show` | session metadata と transcript preview を stdout に出す。`--json` を持つ | human-readable label と transcript role を共有 Theme へ移し、JSON は装飾しない |
 | `agentlog purge` | report の後に cliclack の default-No Confirm を行う。Prompt 不可なら preview-only、`--yes` なら非対話で実行する | cliclack Confirm を `urushi-prompt` の Confirm へ置き換える。安全条件、default-No、preview-only、`--yes` は変えない。Input と Select は追加しない |
 | `agentlog browse` | 直ちに raw mode と alternate screen を取得し、既存 catalog を表示して background sync を開始する | TUI へ入る前に Input、Select、Confirm からなる browse setup Form を追加する。Form submit 後にだけ ratatui session を開始し、同じ Theme を渡す |
+
+## application Theme と出力 profile の所有
+
+M4 で追加する agentlog の application Theme は、新規 `src/theme.rs` だけが所有する。
+この module は次の三項目を定義する。
+
+```rust
+pub(crate) struct AgentlogThemeExtension {
+    // Agentlog-specific roles only.
+}
+
+pub(crate) const DEFAULT_COLOR_SCHEME: ColorScheme = ColorScheme::Dark;
+
+pub(crate) fn theme_set() -> ThemeSet<AgentlogThemeExtension>;
+```
+
+`AgentlogThemeExtension` は agentlog 固有の意味だけを保持し、urushi の共通 `ComponentRole` と同義の style を複製しない。
+MVP では `DEFAULT_COLOR_SCHEME` を常に使い、config、CLI option、terminal 背景の推測による scheme 選択を追加しない。
+`TerminalProfile` も light と dark を選ばない。
+
+各 process は `theme_set()` を一度だけ呼び、`ThemeSet::select(DEFAULT_COLOR_SCHEME)` で選択した `&Theme<AgentlogThemeExtension>` を process 内の consumer へ渡す。
+通常出力、Prompt、ratatui は ThemeSet を再構築せず、選択済み Theme から role を解決する。
+別 process である `agentlog sync` と `agentlog browse` は同じ constructor と定数を使うため、同じ Theme definition を得る。
+
+`TerminalProfile::detect_for` は ANSI bytes を最終的に書き込む stream ごとに呼ぶ。
+human-readable な `paths`、`list`、`show` の stdout は stdout に対して検出した profile を使う。
+`sync` と `purge` の report および progress、Prompt、ratatui TUI は stderr に対して検出した profile を使う。
+JSON 出力は Theme と profile による装飾を通さず、既存の serialization result だけを stdout に書く。
+
+`agentlog browse` は stderr に対して `TerminalProfile::detect_for` を一度呼ぶ。
+Prompt はその `&TerminalProfile` を使って終了と cleanup まで実行し、ratatui は cleanup 後に同じ profile の参照を受け取って style を解決する。
+Prompt 用と TUI 用に profile を再検出せず、二つの terminal session を重ねない。
 
 `browse` の setup Form は M4 で追加する。
 field は次の製品設定を収集し、既存の固定値または既存 UI 内操作へ接続する。
@@ -76,7 +109,7 @@ M4 完了後に、実 catalog と実 terminal で次の順序を実行する。
 10. `q` で終了する。
     alternate screen を離れ、raw mode を解除し、cursor を表示して shell prompt を正常に操作できる状態へ戻す。
 
-手順 1 と手順 2 は別 process だが、同じ application Theme definition を使う。
+手順 1 と手順 2 は別 process だが、どちらも `src/theme.rs` の `theme_set()` と `DEFAULT_COLOR_SCHEME` を使う。
 手順 2 から手順 10 では、一つの `agentlog browse` process が Prompt と ratatui の terminal lifecycle を順番に所有し、二つを同時に取得しない。
 
 ## cancel のシナリオ
@@ -97,7 +130,7 @@ Prompt cancel と TUI quit を同じ状態として実装しない。
 ### 色あり TTY
 
 通常の foreground terminal で `TERM=xterm-256color` 相当かつ `NO_COLOR` を未設定にして主シナリオを実行する。
-`ThemeSet::select` で選んだ一つの Theme から role を取得し、`TerminalProfile::resolve_style` を経て通常出力、Prompt、ratatui へ渡す。
+`ThemeSet::select(DEFAULT_COLOR_SCHEME)` で選んだ一つの Theme から role を取得し、実際の出力 stream に対する `TerminalProfile::detect_for` と `resolve_style` を経て通常出力、Prompt、ratatui へ渡す。
 consumer は色値を再指定しない。
 
 ### NO_COLOR
@@ -140,7 +173,7 @@ process abort、`SIGKILL`、電源断での復元は保証対象外とする。
 
 ## 同一 Theme role の適用表
 
-agentlog は process ごとに application Theme を一度構築する。
+agentlog は process ごとに `src/theme.rs` の `theme_set()` を一度だけ呼び、`DEFAULT_COLOR_SCHEME` で application Theme を選ぶ。
 通常出力、Prompt、TUI の各 adapter は `Theme::style(role)`、`TerminalProfile::resolve_style` の順で解決し、下表の role を共有する。
 
 | 意味または部品 | 通常出力 | browse setup Prompt | ratatui browse |
@@ -171,9 +204,10 @@ agentlog 固有の source status で共通 role では意味が足りない場�
 M4 で変更できる範囲は次に限る。
 
 - agentlog の root `Cargo.toml` と lockfileへ、local または公開済み urushi、`urushi-prompt`、ratatui feature の dependency を追加する。
-- `src/cli.rs` で Theme の構築と通常出力 adapter、browse setup Form、purge Confirm を接続する。
+- 新規 `src/theme.rs` に `AgentlogThemeExtension`、`theme_set()`、`DEFAULT_COLOR_SCHEME` と application Theme の全定義を置く。
+- `src/cli.rs` で `theme_set()` を process ごとに一度呼び、選択済み Theme と stream ごとの `TerminalProfile` を通常出力 adapter、browse setup Form、purge Confirm へ渡す。
 - `src/tui.rs` で Theme と `TerminalProfile` を受け取り、直接指定した ratatui の color と modifier を共有 role へ置き換える。
-- 必要なら `src/display.rs` または新しい小さな theme module に agentlog application Theme と出力 helper を置く。
+- 必要なら `src/display.rs` に出力 helper を置くが、application Theme の定義と constructor は置かない。
 - agentlog の tests、README、手動検証手順を最終挙動に合わせる。
 - urushi 側は M1 から M3 で確定した公開 API の欠陥修正に限る。
   agentlog 固有の語彙や lifecycle を汎用 API へ移さない。
@@ -206,7 +240,8 @@ M0 ではこの文書だけを変更し、agentlog と urushi の製品コード
 2. Input の invalid state、修正後の遷移、Select の Provider、Confirm の default yes をそれぞれ観察結果として記録する。
 3. Prompt 終了時に一度通常画面へ戻ってから alternate screen が始まり、TUI 終了後に scrollback と shell prompt が残ることを確認する。
 4. `browse` の session selection、full preview、background sync status が実 catalog の内容と一致することを確認する。
-5. 同一 Theme role の適用表について、consumer ごとに color literal や同義 Style 定義が残っていないことを差分と `rg` で確認する。
+5. `theme_set()` の呼び出しが process ごとに一度であり、consumer ごとに color literal や同義 Style 定義が残っていないことを差分と `rg` で確認する。
+6. human-readable stdout と stderr consumer がそれぞれ実際の stream に `TerminalProfile::detect_for` を適用し、`browse` の Prompt と TUI が同じ stderr profile を参照することを確認する。
 
 ### cancel と error recovery
 
@@ -232,6 +267,8 @@ unit test と TestBackend の結果は回帰根拠として併記できるが、
 
 - 実在する agentlog の利用目的として、通常出力、Input、validation recovery、Select、Confirm、ratatui browse、session preview を順に完走した。
 - 三つの consumer が同じ application Theme definition を使い、同義の color と modifier を consumer 内で再定義していない。
+- application Theme の所有が `src/theme.rs` に閉じ、各 process が `theme_set()` を一度だけ呼んで `DEFAULT_COLOR_SCHEME` の Theme を選んだ。
+- human-readable stdout と stderr consumer が実際の出力 stream ごとに profile を検出し、JSON が装飾経路を通らず、`browse` の Prompt と TUI が同じ stderr profile を順番に使った。
 - 色あり TTY と `NO_COLOR` の実 TTY の双方で主シナリオと cancel を観察した。
 - 非 TTY の JSON と text に ANSI sequence が混入せず、`browse` は terminal state を変更する前に拒否された。
 - Prompt submit、Prompt cancel、TUI quit、注入可能な I/O error、panic の対象経路で terminal restore を検証した。
@@ -252,10 +289,12 @@ unit test と TestBackend の結果は回帰根拠として併記できるが、
 
 | Deliverable | この契約から渡す作業 | 完了 evidence |
 | --- | --- | --- |
-| 実在 CLI の通常出力を共有 Theme へ移行する | agentlog dependency、application Theme、`sync/list/show` の human-readable output、TTY profile、`NO_COLOR`、非 TTY、JSON 非装飾 | 通常利用、redirect、pipe、既存 checks、Style 重複の差分 |
-| 実在 CLI の Prompt と ratatui 画面を共有 Theme へ統合する | `browse` setup Form の Input、validation、Select、Confirm、`purge` Confirm 移行、Theme の Prompt と ratatui への受け渡し、Prompt から TUI への lifecycle 境界 | 主シナリオと cancel の実 terminal 完走、terminal failure seam、agentlog checks |
+| 実在 CLI の通常出力を共有 Theme へ移行する | agentlog dependency、新規 `src/theme.rs`、`AgentlogThemeExtension`、`theme_set()`、`DEFAULT_COLOR_SCHEME`、`paths/sync/list/show` の human-readable output、stream ごとの profile、`NO_COLOR`、非 TTY、JSON 非装飾 | 通常利用、redirect、pipe、constructor の単一定義、既存 checks、Style 重複の差分 |
+| 実在 CLI の Prompt と ratatui 画面を共有 Theme へ統合する | 完成済みの `src/theme.rs` と通常出力移行を入力として、`browse` setup Form の Input、validation、Select、Confirm、`purge` Confirm 移行、同じ stderr profile の Prompt と ratatui への受け渡し、Prompt から TUI への lifecycle 境界 | 主シナリオと cancel の実 terminal 完走、terminal failure seam、agentlog checks |
 | MVP 受け入れ検証を実施する | 本文の手動観察手順を色あり TTY、`NO_COLOR`、非 TTY で実施し、合格条件を項目ごとに判定する | command と exit status、保存した stdout と stderr、目視記録、blocker と残余リスク、人間の明示承認 |
 | M4 の control ledger | 上記三つの deliverable と M4 で発見した blocker を追跡し、scenario status と次の action を管理する | 全対象 deliverable の完了、Evidence 表、MVP 成立の人間承認 |
 
-通常出力移行と Prompt・ratatui 統合は実装責務を分けるが、application Theme の所有場所と constructor signature は着手時に一度だけ合意する。
+通常出力移行を先に完了し、この作業が `src/theme.rs` と application Theme constructor を所有する。
+Prompt と ratatui の統合はその完成成果を入力として直列に開始し、既存 constructor を変更せず消費する。
+二つの作業で同じ `src/cli.rs` を並行編集しない。
 追加の対象選定や別シナリオ設計は行わず、この文書の agentlog と手順を使う。
