@@ -125,12 +125,13 @@ Style の解決順序を次で固定する。
 1. 呼び出し側が `ColorScheme` を決める。
 2. `ThemeSet::select` が選択済みの `&Theme<E>` を返す。
 3. `Theme::style(role)` が full-fidelity の論理 `&Style` を返す。
-4. 呼び出し側が実際の出力writerを `TerminalProfile::detect_for` に渡すか、明示overrideを `TerminalProfile::new` に渡す。
+4. 呼び出し側が実際の出力writerを `TerminalProfile::detect_for` に渡すか、明示overrideの `ColorProfile` と `AnsiPolicy` を `TerminalProfile::new` に渡す。
 5. `TerminalProfile::resolve_style(&Style)` が選択済みprofileに従う所有 `Style` を返す。
 6. 解決済み `Style` を plain ANSI renderer、Prompt renderer、または ratatui adapter が消費する。
 
-`TerminalProfile` は foreground、background、border color を決定的に縮退または除去する。
-semantic role、modifier、padding、margin、border glyph、width、alignment は変更しない。
+`ColorProfile` は foreground、background、border color の色量を決定し、`AnsiPolicy` はurushiがSGRを出力してよいかを決定する。
+`AnsiPolicy::Enabled` はmodifierを保持し、`AnsiPolicy::Disabled` は四つのcolor propertyとすべてのtext modifierを除去する。
+いずれもsemantic role、padding、margin、border glyph、width、alignmentは変更しない。
 
 ### TerminalProfile の検出
 
@@ -138,22 +139,27 @@ semantic role、modifier、padding、margin、border glyph、width、alignment �
 通常出力なら `stdout`、診断出力なら `stderr`、Prompt と ratatui なら各 renderer または backend が書き込む terminal writer を渡す。
 `stdout` の検出結果を `stderr`、pipe、file、buffer に流用しない。
 
-検出は呼び出すたびに writer の TTY 状態と現在の process environment を読み、次の順で最初に一致した `ColorProfile` を返す。
+検出は呼び出すたびに writer の TTY 状態と現在の process environment を読み、次の順で最初に一致した `(ColorProfile, AnsiPolicy)` を返す。
 
-1. writer が TTY でなければ `Monochrome`。
-2. `NO_COLOR` が存在し、値が空でなければ `Monochrome`。
-3. `TERM` が `dumb` なら `Monochrome`。
-4. `COLORTERM` が `truecolor` または `24bit` なら `TrueColor`。
-5. `TERM` が `256color` を含むなら `Ansi256`。
-6. どれにも一致しなければ `Ansi16`。
+1. writer がTTYでなければ `(Monochrome, Disabled)`。
+2. `NO_COLOR` が存在し、値が空でなければ `(Monochrome, Enabled)`。
+3. `TERM` が `dumb` なら `(Monochrome, Disabled)`。
+4. `COLORTERM` が `truecolor` または `24bit` なら `(TrueColor, Enabled)`。
+5. `TERM` が `256color` を含むなら `(Ansi256, Enabled)`。
+6. どれにも一致しなければ `(Ansi16, Enabled)`。
 
 `NO_COLOR` が存在しても値が空文字なら、`NO_COLOR` は未指定として手順3以降を続ける。
 `TERM` と `COLORTERM` の既知値は ASCII の大文字と小文字を区別せず、前後の空白は除去せずに比較する。
 値がUnicodeとして読めない場合、その変数は既知値に一致しなかったものとして次の手順へ進む。
 
-明示 override には `TerminalProfile::new(ColorProfile)` を使う。
-`new` は writer、TTY、`NO_COLOR`、`TERM`、`COLORTERM` を一切参照せず、指定された profile をそのまま保持する。
+明示 override には `TerminalProfile::new(ColorProfile, AnsiPolicy)` を使う。
+`new` は writer、TTY、`NO_COLOR`、`TERM`、`COLORTERM` を一切参照せず、指定されたprofileとpolicyをそのまま保持する。
 強制色出力を提供するアプリは利用者の明示指定を `new` に渡し、自動検出結果を後から上書きする二段階APIを作らない。
+
+`Monochrome` と `Enabled` の組は、色を除去してboldやunderlineなどのmodifierを残す。
+これは非空 `NO_COLOR` の意味である。
+`Disabled` は `ColorProfile` にかかわらず、解決済み `Style` 自身がSGRを生成できない状態にする。
+これは非TTY、`TERM=dumb`、またはアプリの明示的なplain-text指定の意味である。
 
 `Theme`、`ThemeSet`、`ColorScheme` は writer と environment を参照しない。
 light と dark の選択は端末の色数とは独立しており、`TerminalProfile` の検出前後で変化しない。
@@ -165,7 +171,7 @@ ratatui 変換は profile 解決後に行う。
 ColorScheme
     -> ThemeSet::select
     -> Theme::style
-    -> TerminalProfile::detect_for(writer) | TerminalProfile::new(profile)
+    -> TerminalProfile::detect_for(writer) | TerminalProfile::new(profile, ansi_policy)
     -> TerminalProfile::resolve_style
     -> plain ANSI | Prompt renderer | ratatui adapter
 ```
@@ -302,45 +308,118 @@ pub enum ColorProfile {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AnsiPolicy {
+    Enabled,
+    Disabled,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct TerminalProfile {
-    // Private field: color_profile.
+    // Private fields: color_profile, ansi_policy.
 }
 
 impl TerminalProfile {
-    pub const fn new(color_profile: ColorProfile) -> Self;
+    pub const fn new(color_profile: ColorProfile, ansi_policy: AnsiPolicy) -> Self;
     pub fn detect_for(output: &impl IsTerminal) -> Self;
     pub const fn color_profile(&self) -> ColorProfile;
+    pub const fn ansi_policy(&self) -> AnsiPolicy;
     pub fn resolve_style(&self, style: &Style) -> Style;
 }
 ```
 
 `detect_for` は `output` を TTY 判定にだけ使い、`TerminalProfile` に参照または file descriptor を保持しない。
-`color_profile` getter は検出結果と明示 override を同じ方法で検証し、consumer がprofileごとの分岐を必要とする場合にも使う。
+二つのgetterは検出結果と明示overrideを同じ方法で検証し、consumerがprofileまたはANSI出力可否の分岐を必要とする場合にも使う。
 
 ### TerminalProfile のテスト表
 
 M1 は環境変数を直接変更する並列testに依存せず、TTYの真偽と環境値を入力できる非公開の純粋な検出関数を用意する。
 公開 `detect_for` は writer の `is_terminal()` と process environment をその関数へ渡す薄い境界にする。
 
-| writer is TTY | `NO_COLOR` | `TERM` | `COLORTERM` | expected |
-| --- | --- | --- | --- | --- |
-| false | unset | `xterm-256color` | `truecolor` | `Monochrome` |
-| true | `1` | `xterm-256color` | `truecolor` | `Monochrome` |
-| true | empty | `xterm` | `truecolor` | `TrueColor` |
-| true | unset | `dumb` | `truecolor` | `Monochrome` |
-| true | unset | `xterm` | `TRUECOLOR` | `TrueColor` |
-| true | unset | `xterm` | `24bit` | `TrueColor` |
-| true | unset | `xterm-256color` | unset | `Ansi256` |
-| true | unset | `screen-256color` | unknown | `Ansi256` |
-| true | unset | `xterm-color` | unset | `Ansi16` |
-| true | unset | unset | unset | `Ansi16` |
+| writer is TTY | `NO_COLOR` | `TERM` | `COLORTERM` | expected profile | expected ANSI policy |
+| --- | --- | --- | --- | --- | --- |
+| false | unset | `xterm-256color` | `truecolor` | `Monochrome` | `Disabled` |
+| true | `1` | `xterm-256color` | `truecolor` | `Monochrome` | `Enabled` |
+| true | empty | `xterm` | `truecolor` | `TrueColor` | `Enabled` |
+| true | unset | `dumb` | `truecolor` | `Monochrome` | `Disabled` |
+| true | unset | `xterm` | `TRUECOLOR` | `TrueColor` | `Enabled` |
+| true | unset | `xterm` | `24bit` | `TrueColor` | `Enabled` |
+| true | unset | `xterm-256color` | unset | `Ansi256` | `Enabled` |
+| true | unset | `screen-256color` | unknown | `Ansi256` | `Enabled` |
+| true | unset | `xterm-color` | unset | `Ansi16` | `Enabled` |
+| true | unset | unset | unset | `Ansi16` | `Enabled` |
 
 表に加えて、次の公開境界をtestする。
 
-- `TerminalProfile::new(ColorProfile::TrueColor)` は、非TTY writerと非空 `NO_COLOR` があるprocessでも `TrueColor` を保持する。
+- `TerminalProfile::new(ColorProfile::TrueColor, AnsiPolicy::Enabled)` は、非TTY writerと非空 `NO_COLOR` があるprocessでも指定された二値を保持する。
+- `TerminalProfile::new(ColorProfile::TrueColor, AnsiPolicy::Disabled)` は色量にかかわらず四つのcolor propertyと全modifierを除去する。
 - TTYの `stdout` と非TTYの `stderr` を別々に検出した場合、前者のprofileを後者へ流用せず別の結果を得る。
-- `Monochrome` の `resolve_style` は三種類のcolor propertyを除去し、modifierとbox modelを保持する。
-- `TrueColor`、`Ansi256`、`Ansi16` の `resolve_style` は同じ論理 `Style` から決定的な結果を返す。
+- `(Monochrome, Enabled)` の `resolve_style` は四つのcolor propertyを除去し、全modifierとbox modelを保持する。
+- `(Monochrome, Disabled)` の `resolve_style` は四つのcolor propertyと全modifierを除去し、box model、border glyph、可視文字、CJK幅、alignmentを保持する。
+- 非TTY dogfood出力は `detect_for` が返す `(Monochrome, Disabled)` を使い、theme由来の `ESC [`、すなわちCSI/SGR sequenceが一つもないことをassertする。
+
+### ColorProfile の量子化
+
+色の縮退先はxterm canonical paletteで固定する。
+システムpalette、端末設定、環境変数、ratatuiの変換規則は参照しない。
+
+index 0から15のRGB値は次のとおりである。
+
+| index | RGB | hex |
+| --- | --- | --- |
+| 0 | `(0, 0, 0)` | `#000000` |
+| 1 | `(128, 0, 0)` | `#800000` |
+| 2 | `(0, 128, 0)` | `#008000` |
+| 3 | `(128, 128, 0)` | `#808000` |
+| 4 | `(0, 0, 128)` | `#000080` |
+| 5 | `(128, 0, 128)` | `#800080` |
+| 6 | `(0, 128, 128)` | `#008080` |
+| 7 | `(192, 192, 192)` | `#c0c0c0` |
+| 8 | `(128, 128, 128)` | `#808080` |
+| 9 | `(255, 0, 0)` | `#ff0000` |
+| 10 | `(0, 255, 0)` | `#00ff00` |
+| 11 | `(255, 255, 0)` | `#ffff00` |
+| 12 | `(0, 0, 255)` | `#0000ff` |
+| 13 | `(255, 0, 255)` | `#ff00ff` |
+| 14 | `(0, 255, 255)` | `#00ffff` |
+| 15 | `(255, 255, 255)` | `#ffffff` |
+
+index 16から231は6段階のcolor cubeである。
+各channelのlevelは `[0, 95, 135, 175, 215, 255]` とし、level indexを `r`、`g`、`b` とするとpalette indexは `16 + 36 * r + 6 * g + b` になる。
+
+index 232から255は24段階のgrayscaleである。
+`n` を0から23とするとpalette indexは `232 + n`、RGB値は三channelとも `8 + 10 * n` になる。
+
+任意のsRGB byte値 `(r, g, b)` と候補 `(cr, cg, cb)` の距離は `(r-cr)^2 + (g-cg)^2 + (b-cb)^2` とする。
+gamma補正や知覚重み付けは行わない。
+最小距離が複数indexで同じなら、最小indexを選ぶ。
+
+profileごとの変換を次で固定する。
+
+- `TrueColor`：`Color::Ansi`、`Color::Ansi256`、`Color::Rgb` をvariantも含めて保持する。
+- `Ansi256`：`Color::Ansi` と `Color::Ansi256` を保持する。
+  `Color::Rgb` はindex 0から255の全候補から最近傍を選び、index 0から15なら `Color::Ansi(index)`、16から255なら `Color::Ansi256(index)` にする。
+- `Ansi16`：すべての色をindex 0から15の候補へ変換し、`Color::Ansi(index)` にする。
+  `Color::Ansi256(index)` は先にxterm paletteのRGB値へ展開する。
+  `Color::Ansi(n)` の `n` が16以上の場合もxterm palette indexとしてRGB値へ展開してから変換する。
+- `Monochrome`：foreground、background、border foreground、border backgroundを除去する。
+
+`AnsiPolicy::Disabled` は量子化結果にかかわらず四種類のcolor propertyとbold、dim、italic、underline、blink、reverse、strikethroughを除去する。
+その解決済み `Style` をurushiがrenderしてもSGRは生成されない。
+呼び出し側がcontentへ直接埋め込んだANSI sequenceのsanitizeは `TerminalProfile` の責務ではないため、dogfoodの非TTY経路はpre-styled contentを渡さない。
+
+代表期待値を次で固定する。
+
+| input | profile | expected |
+| --- | --- | --- |
+| `Color::Rgb(95, 135, 175)` | `TrueColor` | `Color::Rgb(95, 135, 175)` |
+| `Color::Rgb(95, 135, 175)` | `Ansi256` | `Color::Ansi256(67)` |
+| `Color::Rgb(0, 0, 0)` | `Ansi256` | `Color::Ansi(0)` |
+| `Color::Rgb(128, 128, 128)` | `Ansi256` | `Color::Ansi(8)` |
+| `Color::Ansi256(212)` | `Ansi256` | `Color::Ansi256(212)` |
+| `Color::Rgb(255, 0, 0)` | `Ansi16` | `Color::Ansi(9)` |
+| `Color::Ansi256(16)` | `Ansi16` | `Color::Ansi(0)` |
+
+`Rgb(0, 0, 0)` はindex 0と16、`Rgb(128, 128, 128)` はindex 8と244に一致するが、tie規則により小さいindexを選ぶ。
 
 ## Application extension
 
@@ -464,7 +543,7 @@ let widget = urushi::ratatui::StyledBlock::new("Deployment report").style(panel)
 - `Theme` と `ThemeSet` は構築後に不変であり、内部可変性とグローバル状態を持たない。
 - `Theme` の構築と role 解決は terminal I/O、環境変数、ratatui、Prompt runtime に依存しない。
 - `TerminalProfile::detect_for` は実際の出力writerごとに呼び、別のwriterの検出結果を流用しない。
-- `TerminalProfile::new` はTTYと環境変数を参照せず、明示された `ColorProfile` を保持する。
+- `TerminalProfile::new` はTTYと環境変数を参照せず、明示された `ColorProfile` と `AnsiPolicy` を保持する。
 - `TerminalProfile` の適用は Theme 選択と role 解決の後、consumer adapter の前に一度だけ行う。
 - Prompt と ratatui は semantic token の `Color` を直接参照せず、component role または application role から `Style` を得る。
 - application extension は `Theme<E>` 内にあり、light と dark で同じ `E` を使う。
@@ -485,7 +564,7 @@ let widget = urushi::ratatui::StyledBlock::new("Deployment report").style(panel)
 
 ## 後続実装への割り当て
 
-M1 は `SemanticTokens`、`ComponentRole`、`ComponentStyles`、`Theme<E>`、`ThemeRole<E>`、`ThemeSet<E>`、`ColorScheme`、`ColorProfile` と `TerminalProfile` の検出、明示override、Style解決を実装する。
+M1 は `SemanticTokens`、`ComponentRole`、`ComponentStyles`、`Theme<E>`、`ThemeRole<E>`、`ThemeSet<E>`、`ColorScheme`、`ColorProfile`、`AnsiPolicy`、xterm palette量子化と `TerminalProfile` の検出、明示override、Style解決を実装する。
 M1 の plain CLI test は同じ Theme を light と dark で選び、profile 別に解決してから現行 `Style::render` へ渡す。
 
 M2 は optional `ratatui` feature の内側で、解決済み `&Style` または `Style` から ratatui text style への変換と、box model を保持する urushi 所有 Widget を実装する。
