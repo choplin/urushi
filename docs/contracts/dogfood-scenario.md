@@ -134,6 +134,11 @@ Prompt と TUI は対話可能なままであり、`NO_COLOR` を非対話指定
 現行実装が `NO_COLOR` で plain sync progress を選ぶのは `src/cli.rs:385-395` と `src/cli.rs:506-516` に確認できる。
 現行 TUI は `NO_COLOR` を参照せず ratatui color を直接指定するため、TUI の無色化は M4 で追加する。
 
+`NO_COLOR=""` では、urushi の `TerminalProfile` は `docs/contracts/theme.md` の規約どおり `NO_COLOR` を未指定として扱い、TTY とほかの環境値から色 profile を決める。
+agentlog の sync progress が環境変数の存在だけを見て plain report を選ぶ既存分岐は、色解決とは別の application policy として M4 でも維持する。
+したがって空文字時は、sync progress が plain report でも、ほかの human-readable 出力、Prompt、TUI の色を抑制しない。
+M4 は `NO_COLOR="" agentlog sync` を回帰テストし、この二つの判断が混同されていないことを確認する。
+
 ### 非 TTY
 
 次を terminal から実行する。
@@ -250,8 +255,9 @@ M1 以降の実装は、これら三契約に対する人間の明示承認後�
 
 1. 色あり TTY で三つの表示面を観察し、役割対応を screenshot または terminal recording と文章で記録する。
 2. `NO_COLOR=1` の実 TTY で同じ操作を行い、色なしでも現在位置、warning、error を識別できることを確認する。
-3. 非 TTY の四 command を実行し、JSON parse、ANSI 不在、`purge` の preview-only、`browse` の早期拒否、terminal 未変更を確認する。
-4. `TERM=dumb` の `sync` が plain bounded report へ縮退することを確認する。
+3. `NO_COLOR=""` の実 TTY で `sync` を実行し、既存どおり progress は plain report を使う一方、urushi の色 profile は `NO_COLOR` 未指定時と同じになることを確認する。
+4. 非 TTY の四 command を実行し、JSON parse、ANSI 不在、`purge` の preview-only、`browse` の早期拒否、terminal 未変更を確認する。
+5. `TERM=dumb` の `sync` が plain bounded report へ縮退することを確認する。
 
 手動観察記録には command、exit status、stdout と stderr の保存先、目視結果、未観察項目を残す。
 unit test と TestBackend の結果は回帰根拠として併記できるが、手動観察の代替にはしない。
