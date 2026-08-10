@@ -39,15 +39,34 @@ alignment, and horizontal and vertical composition:
 cargo run --example showcase
 ```
 
+### Theme-aware plain CLI output
+
+Define one light theme and one dark theme, choose `ColorScheme` explicitly,
+then resolve a component role through the profile of the writer that will
+receive it. The runnable example uses the public path from `ThemeSet` to
+`Style::render`:
+
+```sh
+cargo run -p urushi --example themed_output
+```
+
+`TerminalProfile::detect_for` must be called for the actual writer: use
+`stdout` for normal output and `stderr` for diagnostics, rather than carrying a
+profile between streams. File and pipe writers are non-TTY, so their resolved
+styles have no ANSI escape sequences while retaining borders, padding,
+alignment, and visible text. A non-empty `NO_COLOR` similarly removes colors
+while retaining modifiers; use `TerminalProfile::new` for a deterministic
+application override.
+
 ## Roadmap
 
 - [x] `Style` builder: colors, modifiers, padding, margin, border, width, align
 - [x] ANSI-aware width measurement and CJK-aware word wrap
 - [x] Composition helpers (`join_horizontal`, `join_vertical`)
-- [ ] Color profile detection and degradation (truecolor → 256 → 16), `NO_COLOR`, non-TTY
+- [x] Color profile detection and degradation (truecolor → 256 → 16), `NO_COLOR`, non-TTY
 - [ ] Adaptive colors (light/dark terminal backgrounds)
 - [x] Correct re-styling of content that already contains ANSI sequences (nested styles)
-- [ ] Theme layer: per-component style sets derived from a small set of semantic tokens
+- [x] Theme layer: per-component style sets derived from a small set of semantic tokens
 - [ ] `ratatui` feature: `impl Widget`, `From<Style>` for the stylable subset
 - [ ] `urushi-prompt`: huh-style `Form` / `Group` / fields with validation and theming
 
