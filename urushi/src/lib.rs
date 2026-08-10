@@ -30,6 +30,7 @@ mod border;
 mod color;
 mod join;
 mod style;
+mod terminal;
 mod text;
 mod theme;
 
@@ -37,6 +38,7 @@ pub use border::Border;
 pub use color::Color;
 pub use join::{VerticalAlign, join_horizontal, join_vertical};
 pub use style::{Align, Sides, Style};
+pub use terminal::{AnsiPolicy, ColorProfile, TerminalProfile};
 pub use text::visible_width;
 pub use theme::{
     ColorScheme, ComponentRole, ComponentStyles, SemanticTokens, Theme, ThemeRole, ThemeSet,

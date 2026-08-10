@@ -194,6 +194,33 @@ impl Style {
         self
     }
 
+    /// Replaces every color property while preserving the rest of the style.
+    pub(crate) fn map_colors(mut self, map: impl Fn(Color) -> Color) -> Self {
+        self.fg = self.fg.map(&map);
+        self.bg = self.bg.map(&map);
+        self.border_fg = self.border_fg.map(&map);
+        self.border_bg = self.border_bg.map(&map);
+        self
+    }
+
+    /// Removes foreground, background, and border colors while preserving the
+    /// box model and text modifiers.
+    pub(crate) fn without_colors(mut self) -> Self {
+        self.fg = None;
+        self.bg = None;
+        self.border_fg = None;
+        self.border_bg = None;
+        self
+    }
+
+    /// Removes every property that can cause this style to emit an SGR
+    /// sequence while preserving its layout properties.
+    pub(crate) fn without_ansi(mut self) -> Self {
+        self = self.without_colors();
+        self.modifiers = Modifiers::default();
+        self
+    }
+
     /// Renders `content` with this style, returning an ANSI string.
     ///
     /// The returned string contains no trailing newline; multi-line output is
