@@ -60,7 +60,8 @@ impl Confirm {
             source: None,
             yes_label: "Yes".to_owned(),
             no_label: "No".to_owned(),
-            help: "←/→ or y/n choose · Enter submit · Shift+Tab back · Esc cancel".to_owned(),
+            help: "←/→ choose • y yes • n no • enter submit • shift+tab back • esc cancel"
+                .to_owned(),
             unanswered_message: "Choose yes or no.".to_owned(),
             show_unanswered: false,
         })
@@ -152,40 +153,37 @@ impl RuntimeField for Confirm {
 
     fn view(&self) -> PromptView {
         let mut lines = vec![ViewLine {
-            spans: vec![
-                ViewSpan {
-                    text: "? ".to_owned(),
-                    role: ComponentRole::PromptQuestion,
-                },
-                ViewSpan {
-                    text: self.question.clone(),
-                    role: ComponentRole::PromptQuestion,
-                },
-            ],
+            spans: vec![ViewSpan {
+                text: self.question.clone(),
+                role: ComponentRole::PromptQuestion,
+            }],
         }];
-        for (value, label) in [(true, &self.yes_label), (false, &self.no_label)] {
+        let mut buttons = ViewLine { spans: Vec::new() };
+        for (index, (value, label)) in [(true, &self.yes_label), (false, &self.no_label)]
+            .into_iter()
+            .enumerate()
+        {
             let role = if self.selected == Some(value) {
                 ComponentRole::PromptOptionSelected
             } else {
                 ComponentRole::PromptOption
             };
-            lines.push(ViewLine {
-                spans: vec![
-                    ViewSpan {
-                        text: if self.selected == Some(value) {
-                            "› ".to_owned()
-                        } else {
-                            "  ".to_owned()
-                        },
-                        role,
-                    },
-                    ViewSpan {
-                        text: label.clone(),
-                        role,
-                    },
-                ],
+            if index > 0 {
+                buttons.spans.push(ViewSpan {
+                    text: "  ".to_owned(),
+                    role: ComponentRole::Body,
+                });
+            }
+            buttons.spans.push(ViewSpan {
+                text: if self.selected == Some(value) {
+                    format!("[ {label} ]")
+                } else {
+                    format!("  {label}  ")
+                },
+                role,
             });
         }
+        lines.push(buttons);
         if self.show_unanswered {
             lines.push(ViewLine {
                 spans: vec![
@@ -243,9 +241,12 @@ mod tests {
             initial.lines[0].spans[0].role,
             ComponentRole::PromptQuestion
         );
-        assert_eq!(
-            initial.lines[2].spans[0].role,
-            ComponentRole::PromptOptionSelected
+        assert!(
+            initial.lines[1]
+                .spans
+                .iter()
+                .any(|span| span.role == ComponentRole::PromptOptionSelected
+                    && span.text == "[ No ]")
         );
         assert_eq!(confirm.source, None);
 
@@ -287,25 +288,25 @@ mod tests {
             .unanswered_message("Choose an answer.");
         let initial = confirm.view();
         assert_eq!(initial.lines[1].spans[0].role, ComponentRole::PromptOption);
-        assert_eq!(initial.lines[2].spans[0].role, ComponentRole::PromptOption);
-        assert_eq!(initial.lines[1].spans[1].text, "Proceed");
-        assert_eq!(initial.lines[2].spans[1].text, "Stop");
+        assert_eq!(initial.lines[1].spans[2].role, ComponentRole::PromptOption);
+        assert_eq!(initial.lines[1].spans[0].text, "  Proceed  ");
+        assert_eq!(initial.lines[1].spans[2].text, "  Stop  ");
         assert_eq!(confirm.event(key(KeyCode::Enter)), FieldAction::Stay);
         assert_eq!(
-            confirm.view().lines[3].spans[0].role,
+            confirm.view().lines[2].spans[0].role,
             ComponentRole::PromptError
         );
         assert_eq!(
-            confirm.view().lines[4].spans[0].role,
+            confirm.view().lines[3].spans[0].role,
             ComponentRole::PromptHelp
         );
-        assert_eq!(confirm.view().lines[3].spans[1].text, "Choose an answer.");
+        assert_eq!(confirm.view().lines[2].spans[1].text, "Choose an answer.");
         assert_eq!(
-            confirm.view().lines[4].spans[0].text,
+            confirm.view().lines[3].spans[0].text,
             "Choose, then press Enter."
         );
         assert_eq!(confirm.event(key(KeyCode::Right)), FieldAction::Stay);
-        assert_eq!(confirm.view().lines.len(), 4);
+        assert_eq!(confirm.view().lines.len(), 3);
         assert_eq!(confirm.event(key(KeyCode::Enter)), FieldAction::Accept);
     }
 }

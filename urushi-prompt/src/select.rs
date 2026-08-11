@@ -55,7 +55,7 @@ impl<T> Select<T> {
             question: question.into(),
             options,
             selected: 0,
-            help: "↑/↓ select · Enter continue · Shift+Tab back · Esc cancel".to_owned(),
+            help: "↑/↓ select • enter continue • shift+tab back • esc cancel".to_owned(),
         })
     }
 
@@ -111,16 +111,10 @@ impl<T: 'static> RuntimeField for Select<T> {
 
     fn view(&self) -> PromptView {
         let mut lines = vec![ViewLine {
-            spans: vec![
-                ViewSpan {
-                    text: "? ".to_owned(),
-                    role: ComponentRole::PromptQuestion,
-                },
-                ViewSpan {
-                    text: self.question.clone(),
-                    role: ComponentRole::PromptQuestion,
-                },
-            ],
+            spans: vec![ViewSpan {
+                text: self.question.clone(),
+                role: ComponentRole::PromptQuestion,
+            }],
         }];
         lines.extend(
             self.options
@@ -244,7 +238,7 @@ mod tests {
             .help("Use arrows, then Enter.");
         let view = select.view();
         assert_eq!(view.cursor, None);
-        assert_eq!(view.lines[0].spans[0].text, "? ");
+        assert_eq!(view.lines[0].spans[0].text, "Choose");
         assert_eq!(view.lines[0].spans[0].role, ComponentRole::PromptQuestion);
         assert_eq!(view.lines[1].spans[0].text, "› ");
         assert_eq!(
@@ -377,11 +371,11 @@ mod tests {
         );
         assert_eq!(values.get(&tail_key), Some(&"done".to_owned()));
         assert_eq!(
-            renderer.views[1].lines[2].spans[0].role,
+            renderer.views[1].lines[2].spans[1].role,
             ComponentRole::PromptOptionSelected
         );
         assert_eq!(
-            renderer.views[5].lines[2].spans[0].role,
+            renderer.views[5].lines[2].spans[1].role,
             ComponentRole::PromptOptionSelected
         );
     }

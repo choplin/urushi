@@ -61,7 +61,7 @@ impl Input {
             question: question.into(),
             value,
             placeholder: None,
-            help: "Enter continue · Shift+Tab back · Esc cancel".to_owned(),
+            help: "enter continue • shift+tab back • esc cancel".to_owned(),
             required: false,
             required_message: "This field is required.".to_owned(),
             validators: Vec::new(),
@@ -253,26 +253,25 @@ impl RuntimeField for Input {
     }
 
     fn view(&self) -> PromptView {
-        let answer_start = visible_width(&self.question).saturating_add(5);
+        let answer_start = 2_usize;
         let cursor_prefix = &self.value[..self.byte_index(self.cursor)];
         let cursor_column = answer_start.saturating_add(visible_width(cursor_prefix));
-        let mut lines = vec![ViewLine {
-            spans: vec![
-                ViewSpan {
-                    text: "? ".to_owned(),
-                    role: ComponentRole::PromptQuestion,
-                },
-                ViewSpan {
+        let mut answer = ViewLine {
+            spans: vec![ViewSpan {
+                text: "› ".to_owned(),
+                role: ComponentRole::PromptAnswer,
+            }],
+        };
+        answer.spans.extend(self.answer_spans());
+        let mut lines = vec![
+            ViewLine {
+                spans: vec![ViewSpan {
                     text: self.question.clone(),
                     role: ComponentRole::PromptQuestion,
-                },
-                ViewSpan {
-                    text: " › ".to_owned(),
-                    role: ComponentRole::PromptAnswer,
-                },
-            ],
-        }];
-        lines[0].spans.extend(self.answer_spans());
+                }],
+            },
+            answer,
+        ];
         if let Some(message) = &self.validation_error {
             lines.push(ViewLine {
                 spans: vec![
@@ -297,7 +296,7 @@ impl RuntimeField for Input {
         PromptView {
             lines,
             cursor: Some(ViewCursor {
-                row: 0,
+                row: 1,
                 column: cursor_column.min(usize::from(u16::MAX)) as u16,
             }),
         }
@@ -363,43 +362,31 @@ mod tests {
         let view = input.view();
         assert_eq!(
             view.lines[0].spans,
-            vec![
-                ViewSpan {
-                    text: "? ".to_owned(),
-                    role: ComponentRole::PromptQuestion,
-                },
-                ViewSpan {
-                    text: "名前".to_owned(),
-                    role: ComponentRole::PromptQuestion,
-                },
-                ViewSpan {
-                    text: " › ".to_owned(),
-                    role: ComponentRole::PromptAnswer,
-                },
-                ViewSpan {
-                    text: "あ".to_owned(),
-                    role: ComponentRole::PromptCursor,
-                },
-            ]
+            vec![ViewSpan {
+                text: "名前".to_owned(),
+                role: ComponentRole::PromptQuestion,
+            }]
         );
-        assert_eq!(view.cursor, Some(ViewCursor { row: 0, column: 9 }));
-        assert_eq!(view.lines[1].spans[0].role, ComponentRole::PromptHelp);
+        assert_eq!(view.lines[1].spans[0].text, "› ");
+        assert_eq!(view.lines[1].spans[1].role, ComponentRole::PromptCursor);
+        assert_eq!(view.cursor, Some(ViewCursor { row: 1, column: 2 }));
+        assert_eq!(view.lines[2].spans[0].role, ComponentRole::PromptHelp);
 
         let empty = Input::new(FieldKey::new("empty"), "Name", "")
             .expect("input is valid")
             .placeholder("Example");
         assert_eq!(
-            empty.view().lines[0].spans[3].role,
+            empty.view().lines[1].spans[1].role,
             ComponentRole::PromptCursor
         );
         assert_eq!(
-            empty.view().lines[0].spans[4].role,
+            empty.view().lines[1].spans[2].role,
             ComponentRole::PromptPlaceholder
         );
 
         assert_eq!(input.event(key(KeyCode::End)), FieldAction::Stay);
         assert_eq!(
-            input.view().lines[0].spans.last(),
+            input.view().lines[1].spans.last(),
             Some(&ViewSpan {
                 text: " ".to_owned(),
                 role: ComponentRole::PromptCursor,
@@ -530,13 +517,31 @@ mod tests {
             Some(&"done".to_owned())
         );
         assert_eq!(renderer.views.len(), 4);
-        assert_eq!(renderer.views[1].lines.len(), 3);
+        assert_eq!(renderer.views[1].lines.len(), 8);
+        assert!(renderer.views[1].lines.iter().any(|line| {
+            line.spans
+                .iter()
+                .any(|span| span.role == ComponentRole::PromptError)
+        }));
+        assert_eq!(renderer.views[2].lines.len(), 7);
+        assert_eq!(renderer.views[3].lines[3].spans[0].text, "┃ ");
+        assert_eq!(renderer.views[3].lines[3].spans[1].text, "Second");
         assert_eq!(
-            renderer.views[1].lines[1].spans[0].role,
-            ComponentRole::PromptError
+            renderer.views[3].lines[1]
+                .spans
+                .iter()
+                .map(|span| span.text.as_str())
+                .collect::<String>(),
+            "  › 値"
         );
-        assert_eq!(renderer.views[2].lines.len(), 2);
-        assert_eq!(renderer.views[3].lines[0].spans[0].text, "? ");
-        assert_eq!(renderer.views[3].lines[0].spans[1].text, "Second");
+        assert_eq!(
+            renderer.views[3]
+                .lines
+                .iter()
+                .flat_map(|line| &line.spans)
+                .filter(|span| span.role == ComponentRole::PromptHelp)
+                .count(),
+            1
+        );
     }
 }

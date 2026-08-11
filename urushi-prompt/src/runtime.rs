@@ -373,7 +373,91 @@ impl Form {
                 cursor: None,
             };
         };
-        self.groups[group].fields[field].view()
+
+        let mut lines = Vec::new();
+        let mut cursor = None;
+        let mut footer = None;
+        for (index, entry) in self.groups[group].fields.iter().enumerate() {
+            let focused = index == field;
+            let mut field_view = entry.view();
+            if field_view.lines.last().is_some_and(is_help_line) {
+                let help = field_view
+                    .lines
+                    .pop()
+                    .expect("a detected help line is present");
+                if focused {
+                    footer = Some(help);
+                }
+            }
+
+            if !focused {
+                field_view.cursor = None;
+                for line in &mut field_view.lines {
+                    line.spans.retain(|span| {
+                        span.role != ComponentRole::PromptCursor || span.text != " "
+                    });
+                    for span in &mut line.spans {
+                        match span.role {
+                            ComponentRole::PromptCursor => {
+                                span.role = ComponentRole::PromptAnswer;
+                            }
+                            ComponentRole::PromptQuestion => {
+                                span.role = ComponentRole::Muted;
+                            }
+                            _ => {}
+                        }
+                    }
+                }
+            }
+
+            let row_offset = lines.len();
+            for mut line in field_view.lines {
+                line.spans.insert(
+                    0,
+                    ViewSpan {
+                        text: if focused { "┃ " } else { "  " }.to_owned(),
+                        role: if focused {
+                            ComponentRole::Accent
+                        } else {
+                            ComponentRole::Body
+                        },
+                    },
+                );
+                lines.push(line);
+            }
+            if focused {
+                cursor = field_view.cursor.map(|field_cursor| ViewCursor {
+                    row: (row_offset + usize::from(field_cursor.row)).min(usize::from(u16::MAX))
+                        as u16,
+                    column: field_cursor.column.saturating_add(2),
+                });
+            }
+            if index + 1 < self.groups[group].fields.len() {
+                lines.push(ViewLine { spans: Vec::new() });
+            }
+        }
+
+        if let Some(help) = footer {
+            lines.push(ViewLine { spans: Vec::new() });
+            lines.push(ViewLine {
+                spans: vec![
+                    ViewSpan {
+                        text: "  ".to_owned(),
+                        role: ComponentRole::Body,
+                    },
+                    ViewSpan {
+                        text: help
+                            .spans
+                            .into_iter()
+                            .map(|span| span.text)
+                            .collect::<String>(),
+                        role: ComponentRole::PromptHelp,
+                    },
+                ],
+            });
+        }
+
+        PromptView { lines, cursor }
     }
 
     fn into_values(mut self) -> FormValues {
@@ -584,11 +668,20 @@ impl PromptView {
     #[cfg(test)]
     fn active_name(&self) -> Option<&str> {
         self.lines
-            .first()?
+            .iter()
+            .find(|line| line.spans.first().is_some_and(|span| span.text == "┃ "))?
             .spans
-            .first()
+            .get(1)
             .map(|span| span.text.as_str())
     }
+}
+
+fn is_help_line(line: &ViewLine) -> bool {
+    !line.spans.is_empty()
+        && line
+            .spans
+            .iter()
+            .all(|span| span.role == ComponentRole::PromptHelp)
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -772,23 +865,22 @@ impl<W: Write> CrosstermRenderer<W> {
         let mut lines = Vec::new();
         let mut cursor = None;
 
-        if let Some(view_cursor) = view.cursor {
-            if let Some(first_line) = view.lines.first() {
+        for (logical_row, line) in view.lines.iter().enumerate() {
+            if view
+                .cursor
+                .is_some_and(|value| usize::from(value.row) == logical_row)
+            {
+                let view_cursor = view.cursor.expect("the cursor row was matched");
                 let desired_offset = usize::from(view_cursor.column).saturating_sub(width - 1);
-                let (line, offset) = clip_line(first_line, desired_offset, width);
-                lines.push(line);
+                let (line, offset) = clip_line(line, desired_offset, width);
                 cursor = Some(ViewCursor {
-                    row: 0,
+                    row: lines.len().min(usize::from(u16::MAX)) as u16,
                     column: usize::from(view_cursor.column)
                         .saturating_sub(offset)
                         .min(width - 1) as u16,
                 });
-            }
-            for line in view.lines.iter().skip(1) {
-                lines.extend(wrap_line(line, width));
-            }
-        } else {
-            for line in &view.lines {
+                lines.push(line);
+            } else {
                 lines.extend(wrap_line(line, width));
             }
         }
@@ -799,12 +891,41 @@ impl<W: Write> CrosstermRenderer<W> {
 
         let max_rows = usize::from(self.rows.max(1));
         if lines.len() > max_rows {
-            let first_error = lines
-                .iter()
-                .position(|line| line.has_role(ComponentRole::PromptError));
-            lines.truncate(max_rows);
-            if first_error.is_some_and(|index| index >= max_rows) {
-                lines[max_rows - 1] = first_error_line(view, width).unwrap_or_default();
+            let focus_row = cursor.map_or_else(
+                || {
+                    lines
+                        .iter()
+                        .position(|line| line.has_role(ComponentRole::Accent))
+                        .unwrap_or(0)
+                },
+                |value| usize::from(value.row),
+            );
+            let start = focus_row
+                .saturating_sub(max_rows / 2)
+                .min(lines.len() - max_rows);
+            lines = lines.drain(start..start + max_rows).collect();
+            cursor = cursor.and_then(|value| {
+                let row = usize::from(value.row);
+                (start..start + max_rows)
+                    .contains(&row)
+                    .then_some(ViewCursor {
+                        row: (row - start) as u16,
+                        column: value.column,
+                    })
+            });
+
+            if let Some(error) = first_error_line(view, width)
+                && !lines
+                    .iter()
+                    .any(|line| line.has_role(ComponentRole::PromptError))
+            {
+                lines[max_rows - 1] = error;
+            } else if let Some(help) = first_help_line(view, width)
+                && !lines
+                    .iter()
+                    .any(|line| line.has_role(ComponentRole::PromptHelp))
+            {
+                lines[max_rows - 1] = help;
             }
         }
 
@@ -1063,6 +1184,18 @@ fn first_error_line(view: &PromptView, width: usize) -> Option<RenderedLine> {
             line.spans
                 .iter()
                 .any(|span| span.role == ComponentRole::PromptError)
+        })
+        .flat_map(|line| wrap_line(line, width))
+        .next()
+}
+
+fn first_help_line(view: &PromptView, width: usize) -> Option<RenderedLine> {
+    view.lines
+        .iter()
+        .filter(|line| {
+            line.spans
+                .iter()
+                .any(|span| span.role == ComponentRole::PromptHelp)
         })
         .flat_map(|line| wrap_line(line, width))
         .next()
@@ -1884,6 +2017,41 @@ mod tests {
                 String::from_utf8(renderer.writer).expect("renderer writes UTF-8 commands");
             assert!(!output.contains('あ'));
         }
+    }
+
+    #[test]
+    fn short_viewports_keep_the_active_field_and_help_visible() {
+        let theme = test_theme();
+        let profile = TerminalProfile::new(ColorProfile::Monochrome, AnsiPolicy::Disabled);
+        let renderer = CrosstermRenderer::new(&theme, &profile, Vec::new(), (40, 4));
+        let view = renderer_view(
+            vec![
+                view_line("previous question", ComponentRole::Muted),
+                view_line("previous answer", ComponentRole::PromptAnswer),
+                view_line("", ComponentRole::Body),
+                view_line("┃ current question", ComponentRole::Accent),
+                view_line("┃ › current answer", ComponentRole::PromptCursor),
+                view_line("enter continue", ComponentRole::PromptHelp),
+            ],
+            Some(ViewCursor { row: 4, column: 20 }),
+        );
+
+        let layout = renderer.layout(&view);
+
+        assert_eq!(layout.lines.len(), 4);
+        assert!(layout.cursor.is_some_and(|cursor| cursor.row < 4));
+        assert!(
+            layout
+                .lines
+                .iter()
+                .any(|line| line.has_role(ComponentRole::Accent))
+        );
+        assert!(
+            layout
+                .lines
+                .iter()
+                .any(|line| line.has_role(ComponentRole::PromptHelp))
+        );
     }
 
     #[test]

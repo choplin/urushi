@@ -31,7 +31,7 @@ fn main() {
                     Input::new(name_key.clone(), "お名前を入力してください", "")
                         .expect("example key is non-empty")
                         .placeholder("例: 花子")
-                        .help("Enter: 次へ · Shift+Tab: 戻る · Esc: 中止")
+                        .help("enter 次へ • shift+tab 戻る • esc 中止")
                         .required()
                         .required_message("名前を入力してください。"),
                 )
@@ -45,13 +45,15 @@ fn main() {
                         ],
                     )
                     .expect("example options are non-empty")
-                    .help("↑/↓: 選択 · Enter: 次へ · Shift+Tab: 戻る · Esc: 中止"),
+                    .help("↑/↓ 選択 • enter 次へ • shift+tab 戻る • esc 中止"),
                 )
                 .field(
                     Confirm::new(proceed_key.clone(), "この内容で開始しますか？", Some(true))
                         .expect("example key is non-empty")
                         .labels("はい", "いいえ")
-                        .help("←/→ または y/n: 選択 · Enter: 決定 · Shift+Tab: 戻る · Esc: 中止")
+                        .help(
+                            "←/→ 選択 • y はい • n いいえ • enter 決定 • shift+tab 戻る • esc 中止",
+                        )
                         .unanswered_message("はい、またはいいえを選んでください。"),
                 )
                 .build()
