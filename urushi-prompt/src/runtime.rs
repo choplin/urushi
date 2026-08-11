@@ -846,16 +846,20 @@ impl<W: Write> CrosstermRenderer<W> {
 
 impl<W: Write> Renderer for CrosstermRenderer<W> {
     fn draw(&mut self, view: &PromptView) -> io::Result<()> {
+        let layout = self.layout(view);
+        let rows_to_clear = self
+            .previous_rows
+            .max(layout.lines.len().min(usize::from(self.rows)) as u16);
+        // Claim every row this redraw can touch before issuing a fallible
+        // terminal write. Error cleanup can then erase a partially drawn view.
+        self.previous_rows = rows_to_clear;
+
         if !self.origin_saved {
             queue!(self.writer, cursor::SavePosition)?;
             self.origin_saved = true;
         }
         queue!(self.writer, cursor::Hide)?;
 
-        let layout = self.layout(view);
-        let rows_to_clear = self
-            .previous_rows
-            .max(layout.lines.len().min(usize::from(self.rows)) as u16);
         self.clear_owned_rows(rows_to_clear)?;
 
         queue!(self.writer, cursor::RestorePosition)?;
@@ -1669,6 +1673,45 @@ mod tests {
         }
     }
 
+    struct PrefixThenFailWriter {
+        bytes: Vec<u8>,
+        trigger: Vec<u8>,
+        failed: bool,
+        fail_next_write: bool,
+    }
+
+    impl PrefixThenFailWriter {
+        fn new(trigger: &str) -> Self {
+            Self {
+                bytes: Vec::new(),
+                trigger: trigger.as_bytes().to_vec(),
+                failed: false,
+                fail_next_write: false,
+            }
+        }
+    }
+
+    impl io::Write for PrefixThenFailWriter {
+        fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+            if self.fail_next_write {
+                self.fail_next_write = false;
+                return Err(io::Error::other("planned partial draw failure"));
+            }
+            if !self.failed && bytes == self.trigger {
+                self.failed = true;
+                self.fail_next_write = true;
+                self.bytes.push(bytes[0]);
+                return Ok(1);
+            }
+            self.bytes.extend_from_slice(bytes);
+            Ok(bytes.len())
+        }
+
+        fn flush(&mut self) -> io::Result<()> {
+            Ok(())
+        }
+    }
+
     #[test]
     fn inline_renderer_uses_resolved_theme_styles_and_preserves_mid_line_origin() {
         let theme = test_theme();
@@ -1699,6 +1742,72 @@ mod tests {
         assert!(output.contains("\x1b8\x1b[2C"), "{output:?}");
         assert!(!output.contains("\x1b[2J"));
         assert!(!output.contains("?1049"));
+    }
+
+    #[test]
+    fn error_cleanup_clears_rows_claimed_before_a_partial_first_draw() {
+        let theme = test_theme();
+        let profile = TerminalProfile::new(ColorProfile::Monochrome, AnsiPolicy::Disabled);
+        let writer = PrefixThenFailWriter::new("first");
+        let mut renderer = CrosstermRenderer::new(&theme, &profile, writer, (20, 4));
+        let view = renderer_view(
+            vec![
+                view_line("first", ComponentRole::PromptQuestion),
+                view_line("second", ComponentRole::PromptOption),
+                view_line("third", ComponentRole::PromptError),
+            ],
+            None,
+        );
+
+        assert!(renderer.draw(&view).is_err());
+        assert_eq!(renderer.previous_rows, 3);
+        renderer
+            .finish(RenderFinish::Error)
+            .expect("error cleanup succeeds after one draw failure");
+
+        let output =
+            String::from_utf8(renderer.writer.bytes).expect("renderer writes UTF-8 commands");
+        assert!(output.contains('f'));
+        assert!(output.matches("\x1b[2K").count() >= 4, "{output:?}");
+        assert!(output.ends_with("\x1b8"), "{output:?}");
+    }
+
+    #[test]
+    fn error_cleanup_clears_growth_beyond_previous_rows_after_partial_draw() {
+        let theme = test_theme();
+        let profile = TerminalProfile::new(ColorProfile::Monochrome, AnsiPolicy::Disabled);
+        let mut renderer = CrosstermRenderer::new(
+            &theme,
+            &profile,
+            PrefixThenFailWriter::new("growth"),
+            (20, 4),
+        );
+        renderer
+            .draw(&renderer_view(
+                vec![view_line("short", ComponentRole::PromptQuestion)],
+                None,
+            ))
+            .expect("initial draw succeeds");
+        assert_eq!(renderer.previous_rows, 1);
+
+        let growth = renderer_view(
+            vec![
+                view_line("growth", ComponentRole::PromptQuestion),
+                view_line("second", ComponentRole::PromptOption),
+                view_line("third", ComponentRole::PromptError),
+            ],
+            None,
+        );
+        assert!(renderer.draw(&growth).is_err());
+        assert_eq!(renderer.previous_rows, 3);
+        renderer
+            .finish(RenderFinish::Error)
+            .expect("growth cleanup succeeds after one draw failure");
+
+        let output =
+            String::from_utf8(renderer.writer.bytes).expect("renderer writes UTF-8 commands");
+        assert!(output.matches("\x1b[2K").count() >= 4, "{output:?}");
+        assert!(output.ends_with("\x1b8"), "{output:?}");
     }
 
     #[test]
