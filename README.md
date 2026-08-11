@@ -67,14 +67,21 @@ Enable the optional adapter when the application also uses ratatui:
 urushi = { version = "0.1.0", features = ["ratatui"] }
 ```
 
-Resolve a component from the same `Theme` used by plain output, then pass its
-widget adapter to a ratatui frame. Colors and modifiers stay in the Theme; the
-TUI layer does not define a second palette.
+Resolve a component from the same `Theme` used by plain output, apply the
+terminal's `TerminalProfile`, then pass its widget adapter to a ratatui frame.
+Colors and modifiers stay in the Theme; the TUI layer does not define a second
+palette.
 
 ```rust
-let panel = theme.style(ComponentRole::PanelFocused);
+let panel = profile.resolve_style(theme.style(ComponentRole::PanelFocused));
 frame.render_widget(panel.widget("保存しました"), frame.area());
 ```
+
+Apply `TerminalProfile` before either rendering adapter. This keeps truecolor,
+256-color, 16-color, monochrome, and disabled output consistent between plain
+ANSI strings and ratatui. Detect the profile for the writer owned by your
+terminal setup, or construct an explicit profile when the application already
+knows the backend capability.
 
 `Style::widget` carries margin, border, padding, fixed width, and alignment
 into the ratatui `Buffer`, including CJK-aware clipping. It is stateless and

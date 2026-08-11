@@ -72,7 +72,9 @@
 //! [`RatatuiStyle`] or render the full box model with [`Style::widget`]. The
 //! default build does not depend on ratatui. The widget writes only to the
 //! buffer provided by ratatui and leaves terminal lifecycle and event handling
-//! to the application.
+//! to the application. Resolve the Theme style through [`TerminalProfile`]
+//! before adapting it so ratatui follows the same color degradation and ANSI
+//! policy as plain output.
 
 mod border;
 mod color;

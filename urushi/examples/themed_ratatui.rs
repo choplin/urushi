@@ -7,13 +7,9 @@ use urushi::{
 
 fn main() -> Result<(), Box<dyn Error>> {
     let theme = Theme::from_tokens(tokens());
-    let panel = theme.style(ComponentRole::PanelFocused);
-
     let plain_profile = TerminalProfile::new(ColorProfile::TrueColor, AnsiPolicy::Enabled);
-    println!(
-        "plain CLI:\n{}",
-        plain_profile.resolve_style(panel).render("保存しました")
-    );
+    let panel = plain_profile.resolve_style(theme.style(ComponentRole::PanelFocused));
+    println!("plain CLI:\n{}", panel.render("保存しました"));
 
     let backend = TestBackend::new(16, 3);
     let mut terminal = Terminal::new(backend)?;

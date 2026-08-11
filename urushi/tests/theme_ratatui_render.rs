@@ -13,11 +13,10 @@ use urushi::{
 #[test]
 fn one_theme_component_renders_to_plain_cli_and_ratatui() {
     let theme = Theme::from_tokens(tokens());
-    let panel = theme.style(ComponentRole::PanelFocused);
+    let profile = TerminalProfile::new(ColorProfile::TrueColor, AnsiPolicy::Enabled);
+    let panel = profile.resolve_style(theme.style(ComponentRole::PanelFocused));
 
-    let plain = TerminalProfile::new(ColorProfile::TrueColor, AnsiPolicy::Enabled)
-        .resolve_style(panel)
-        .render("保存しました");
+    let plain = panel.render("保存しました");
     assert!(plain.contains("保存しました"));
     assert!(plain.lines().all(|line| visible_width(line) == 16));
     assert!(plain.contains("38;2;80;160;255"));
@@ -44,7 +43,8 @@ fn one_theme_component_renders_to_plain_cli_and_ratatui() {
 #[test]
 fn theme_widget_clips_safely_at_a_boundary_size() {
     let theme = Theme::from_tokens(tokens());
-    let panel = theme.style(ComponentRole::PanelFocused);
+    let profile = TerminalProfile::new(ColorProfile::TrueColor, AnsiPolicy::Enabled);
+    let panel = profile.resolve_style(theme.style(ComponentRole::PanelFocused));
     let backend = TestBackend::new(6, 3);
     let mut terminal = Terminal::new(backend).expect("test terminal");
 
@@ -56,6 +56,49 @@ fn theme_widget_clips_safely_at_a_boundary_size() {
     assert_eq!(visual_line(buffer, 0), "╭────╮");
     assert_eq!(visual_line(buffer, 1), "│ 日 │");
     assert_eq!(visual_line(buffer, 2), "╰────╯");
+}
+
+#[test]
+fn ratatui_uses_the_same_terminal_profile_degradation_as_plain_output() {
+    let theme = Theme::from_tokens(tokens());
+
+    for (color_profile, expected_border) in [
+        (ColorProfile::TrueColor, RatatuiColor::Rgb(80, 160, 255)),
+        (ColorProfile::Ansi256, RatatuiColor::Indexed(75)),
+        (ColorProfile::Ansi16, RatatuiColor::LightCyan),
+    ] {
+        let profile = TerminalProfile::new(color_profile, AnsiPolicy::Enabled);
+        let panel = profile.resolve_style(theme.style(ComponentRole::PanelFocused));
+        let buffer = render_panel(&panel);
+        assert_eq!(
+            buffer.cell((0, 0)).expect("border cell").fg,
+            expected_border
+        );
+        assert!(panel.render("保存しました").contains('\x1b'));
+    }
+
+    for profile in [
+        TerminalProfile::new(ColorProfile::Monochrome, AnsiPolicy::Enabled),
+        TerminalProfile::new(ColorProfile::TrueColor, AnsiPolicy::Disabled),
+    ] {
+        let panel = profile.resolve_style(theme.style(ComponentRole::PanelFocused));
+        let buffer = render_panel(&panel);
+        let border = buffer.cell((0, 0)).expect("border cell");
+        let content = buffer.cell((2, 1)).expect("content cell");
+        assert_eq!(border.fg, RatatuiColor::Reset);
+        assert_eq!(content.fg, RatatuiColor::Reset);
+        assert_eq!(content.bg, RatatuiColor::Reset);
+        assert!(!panel.render("保存しました").contains('\x1b'));
+    }
+}
+
+fn render_panel(style: &urushi::Style) -> ratatui::buffer::Buffer {
+    let backend = TestBackend::new(16, 3);
+    let mut terminal = Terminal::new(backend).expect("test terminal");
+    terminal
+        .draw(|frame| frame.render_widget(style.widget("保存しました"), frame.area()))
+        .expect("draw frame");
+    terminal.backend().buffer().clone()
 }
 
 fn tokens() -> SemanticTokens {
