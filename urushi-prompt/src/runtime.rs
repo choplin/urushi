@@ -895,7 +895,21 @@ impl<W: Write> CrosstermRenderer<W> {
                 || {
                     lines
                         .iter()
-                        .position(|line| line.has_role(ComponentRole::Accent))
+                        .position(|line| {
+                            line.has_role(ComponentRole::Accent)
+                                && line.has_role(ComponentRole::PromptOptionSelected)
+                        })
+                        .or_else(|| {
+                            lines.iter().position(|line| {
+                                line.has_role(ComponentRole::Accent)
+                                    && line.has_role(ComponentRole::PromptOption)
+                            })
+                        })
+                        .or_else(|| {
+                            lines
+                                .iter()
+                                .position(|line| line.has_role(ComponentRole::Accent))
+                        })
                         .unwrap_or(0)
                 },
                 |value| usize::from(value.row),
@@ -918,14 +932,28 @@ impl<W: Write> CrosstermRenderer<W> {
                 && !lines
                     .iter()
                     .any(|line| line.has_role(ComponentRole::PromptError))
+                && let Some(slot) = lines.iter().rposition(|line| {
+                    !line.has_role(ComponentRole::Accent)
+                        && !line.has_role(ComponentRole::PromptCursor)
+                        && !line.has_role(ComponentRole::PromptOptionSelected)
+                        && !line.has_role(ComponentRole::PromptOption)
+                })
             {
-                lines[max_rows - 1] = error;
-            } else if let Some(help) = first_help_line(view, width)
+                lines[slot] = error;
+            }
+            if let Some(help) = first_help_line(view, width)
                 && !lines
                     .iter()
                     .any(|line| line.has_role(ComponentRole::PromptHelp))
+                && let Some(slot) = lines.iter().rposition(|line| {
+                    !line.has_role(ComponentRole::Accent)
+                        && !line.has_role(ComponentRole::PromptCursor)
+                        && !line.has_role(ComponentRole::PromptOptionSelected)
+                        && !line.has_role(ComponentRole::PromptOption)
+                        && !line.has_role(ComponentRole::PromptError)
+                })
             {
-                lines[max_rows - 1] = help;
+                lines[slot] = help;
             }
         }
 
@@ -1041,6 +1069,8 @@ impl<W: Write> Renderer for CrosstermRenderer<W> {
 
 struct PromptStyles {
     body: Style,
+    muted: Style,
+    accent: Style,
     question: Style,
     answer: Style,
     placeholder: Style,
@@ -1055,6 +1085,8 @@ impl PromptStyles {
     fn resolve<E>(theme: &Theme<E>, profile: &TerminalProfile) -> Self {
         Self {
             body: profile.resolve_style(theme.style(ComponentRole::Body)),
+            muted: profile.resolve_style(theme.style(ComponentRole::Muted)),
+            accent: profile.resolve_style(theme.style(ComponentRole::Accent)),
             question: profile.resolve_style(theme.style(ComponentRole::PromptQuestion)),
             answer: profile.resolve_style(theme.style(ComponentRole::PromptAnswer)),
             placeholder: profile.resolve_style(theme.style(ComponentRole::PromptPlaceholder)),
@@ -1070,6 +1102,8 @@ impl PromptStyles {
     fn style(&self, role: ComponentRole) -> &Style {
         match role {
             ComponentRole::Body => &self.body,
+            ComponentRole::Muted => &self.muted,
+            ComponentRole::Accent => &self.accent,
             ComponentRole::PromptQuestion => &self.question,
             ComponentRole::PromptAnswer => &self.answer,
             ComponentRole::PromptPlaceholder => &self.placeholder,
@@ -1078,9 +1112,7 @@ impl PromptStyles {
             ComponentRole::PromptOptionSelected => &self.option_selected,
             ComponentRole::PromptHelp => &self.help,
             ComponentRole::PromptError => &self.error,
-            ComponentRole::Muted
-            | ComponentRole::Accent
-            | ComponentRole::Success
+            ComponentRole::Success
             | ComponentRole::Warning
             | ComponentRole::Error
             | ComponentRole::Panel
@@ -2020,38 +2052,89 @@ mod tests {
     }
 
     #[test]
-    fn short_viewports_keep_the_active_field_and_help_visible() {
+    fn short_viewports_never_replace_the_active_field_with_help() {
         let theme = test_theme();
         let profile = TerminalProfile::new(ColorProfile::Monochrome, AnsiPolicy::Disabled);
-        let renderer = CrosstermRenderer::new(&theme, &profile, Vec::new(), (40, 4));
+        for rows in 1..=4 {
+            let renderer = CrosstermRenderer::new(&theme, &profile, Vec::new(), (40, rows));
+            let view = renderer_view(
+                vec![
+                    view_line("previous question", ComponentRole::Muted),
+                    view_line("previous answer", ComponentRole::PromptAnswer),
+                    view_line("", ComponentRole::Body),
+                    view_line("┃ current question", ComponentRole::Accent),
+                    ViewLine {
+                        spans: vec![
+                            ViewSpan {
+                                text: "┃ ".to_owned(),
+                                role: ComponentRole::Accent,
+                            },
+                            ViewSpan {
+                                text: "› current answer".to_owned(),
+                                role: ComponentRole::PromptCursor,
+                            },
+                        ],
+                    },
+                    view_line("", ComponentRole::Body),
+                    view_line("enter continue", ComponentRole::PromptHelp),
+                ],
+                Some(ViewCursor { row: 4, column: 18 }),
+            );
+
+            let layout = renderer.layout(&view);
+
+            assert_eq!(layout.lines.len(), usize::from(rows));
+            assert!(layout.cursor.is_some_and(|cursor| cursor.row < rows));
+            assert!(
+                layout
+                    .lines
+                    .iter()
+                    .any(|line| line.has_role(ComponentRole::PromptCursor)),
+                "active input missing at {rows} rows"
+            );
+            assert_eq!(
+                layout
+                    .lines
+                    .iter()
+                    .any(|line| line.has_role(ComponentRole::PromptHelp)),
+                rows >= 3,
+                "unexpected help visibility at {rows} rows"
+            );
+        }
+    }
+
+    #[test]
+    fn one_row_viewports_show_the_actionable_choice() {
+        let theme = test_theme();
+        let profile = TerminalProfile::new(ColorProfile::Monochrome, AnsiPolicy::Disabled);
+        let renderer = CrosstermRenderer::new(&theme, &profile, Vec::new(), (40, 1));
         let view = renderer_view(
             vec![
-                view_line("previous question", ComponentRole::Muted),
-                view_line("previous answer", ComponentRole::PromptAnswer),
+                view_line("┃ choose a language", ComponentRole::Accent),
+                view_line("┃   Japanese", ComponentRole::PromptOption),
+                ViewLine {
+                    spans: vec![
+                        ViewSpan {
+                            text: "┃ ".to_owned(),
+                            role: ComponentRole::Accent,
+                        },
+                        ViewSpan {
+                            text: "› English".to_owned(),
+                            role: ComponentRole::PromptOptionSelected,
+                        },
+                    ],
+                },
                 view_line("", ComponentRole::Body),
-                view_line("┃ current question", ComponentRole::Accent),
-                view_line("┃ › current answer", ComponentRole::PromptCursor),
-                view_line("enter continue", ComponentRole::PromptHelp),
+                view_line("↑/↓ select", ComponentRole::PromptHelp),
             ],
-            Some(ViewCursor { row: 4, column: 20 }),
+            None,
         );
 
         let layout = renderer.layout(&view);
 
-        assert_eq!(layout.lines.len(), 4);
-        assert!(layout.cursor.is_some_and(|cursor| cursor.row < 4));
-        assert!(
-            layout
-                .lines
-                .iter()
-                .any(|line| line.has_role(ComponentRole::Accent))
-        );
-        assert!(
-            layout
-                .lines
-                .iter()
-                .any(|line| line.has_role(ComponentRole::PromptHelp))
-        );
+        assert_eq!(layout.lines.len(), 1);
+        assert!(layout.lines[0].has_role(ComponentRole::PromptOptionSelected));
+        assert!(!layout.lines[0].has_role(ComponentRole::PromptHelp));
     }
 
     #[test]
