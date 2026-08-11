@@ -14,10 +14,32 @@ use crossterm::{
 use urushi::{ComponentRole, TerminalProfile, Theme};
 
 /// A typed name used to retrieve a submitted field value.
-#[derive(Clone, PartialEq, Eq, Hash)]
 pub struct FieldKey<T> {
     name: String,
     marker: PhantomData<fn() -> T>,
+}
+
+impl<T> Clone for FieldKey<T> {
+    fn clone(&self) -> Self {
+        Self {
+            name: self.name.clone(),
+            marker: PhantomData,
+        }
+    }
+}
+
+impl<T> PartialEq for FieldKey<T> {
+    fn eq(&self, other: &Self) -> bool {
+        self.name == other.name
+    }
+}
+
+impl<T> Eq for FieldKey<T> {}
+
+impl<T> std::hash::Hash for FieldKey<T> {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        std::hash::Hash::hash(&self.name, state);
+    }
 }
 
 impl<T> FieldKey<T> {
@@ -997,6 +1019,19 @@ mod tests {
             Form::builder().group(first).group(second).build(),
             Err(FormBuildError::DuplicateFieldName(name)) if name == "same"
         ));
+    }
+
+    #[test]
+    fn field_keys_compare_and_hash_without_value_trait_bounds() {
+        struct OpaqueValue;
+
+        let first = FieldKey::<OpaqueValue>::new("answer");
+        let second = first.clone();
+        assert!(first == second);
+
+        let mut keys = std::collections::HashSet::new();
+        keys.insert(first);
+        assert!(keys.contains(&second));
     }
 
     #[test]

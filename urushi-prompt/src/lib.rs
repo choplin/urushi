@@ -7,14 +7,18 @@
 
 pub use urushi;
 
+mod confirm;
 mod input;
 pub(crate) mod runtime;
+mod select;
 
 #[cfg(test)]
 mod runtime_extension_test;
 
+pub use confirm::{Confirm, ConfirmAnswer, ConfirmSource};
 pub use input::{Input, ValidationError, Validator};
 pub use runtime::{
     Field, FieldConfigError, FieldKey, Form, FormBuildError, FormBuilder, FormOutcome, FormValues,
     Group, GroupBuildError, GroupBuilder, IoOperation, RunError,
 };
+pub use select::{Select, SelectOption};
