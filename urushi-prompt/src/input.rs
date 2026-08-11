@@ -35,7 +35,9 @@ pub struct Input {
     question: String,
     value: String,
     placeholder: Option<String>,
+    help: String,
     required: bool,
+    required_message: String,
     validators: Vec<Validator<String>>,
     cursor: usize,
     validation_error: Option<String>,
@@ -59,7 +61,9 @@ impl Input {
             question: question.into(),
             value,
             placeholder: None,
+            help: "Enter continue · Shift+Tab back · Esc cancel".to_owned(),
             required: false,
+            required_message: "This field is required.".to_owned(),
             validators: Vec::new(),
             cursor,
             validation_error: None,
@@ -73,10 +77,24 @@ impl Input {
         self
     }
 
+    /// Sets the navigation hint shown beneath the field.
+    #[must_use]
+    pub fn help(mut self, help: impl Into<String>) -> Self {
+        self.help = help.into();
+        self
+    }
+
     /// Requires a non-empty value before the form can advance.
     #[must_use]
     pub fn required(mut self) -> Self {
         self.required = true;
+        self
+    }
+
+    /// Sets the message shown when a required input is empty.
+    #[must_use]
+    pub fn required_message(mut self, message: impl Into<String>) -> Self {
+        self.required_message = message.into();
         self
     }
 
@@ -118,7 +136,7 @@ impl Input {
 
     fn submit(&mut self) -> FieldAction {
         if self.required && self.value.is_empty() {
-            self.validation_error = Some("This field is required.".to_owned());
+            self.validation_error = Some(self.required_message.clone());
             return FieldAction::Stay;
         }
 
@@ -235,30 +253,46 @@ impl RuntimeField for Input {
     }
 
     fn view(&self) -> PromptView {
-        let answer_start = visible_width(&self.question).saturating_add(1);
+        let answer_start = visible_width(&self.question).saturating_add(5);
         let cursor_prefix = &self.value[..self.byte_index(self.cursor)];
         let cursor_column = answer_start.saturating_add(visible_width(cursor_prefix));
         let mut lines = vec![ViewLine {
             spans: vec![
                 ViewSpan {
+                    text: "? ".to_owned(),
+                    role: ComponentRole::PromptQuestion,
+                },
+                ViewSpan {
                     text: self.question.clone(),
                     role: ComponentRole::PromptQuestion,
                 },
                 ViewSpan {
-                    text: " ".to_owned(),
-                    role: ComponentRole::PromptQuestion,
+                    text: " › ".to_owned(),
+                    role: ComponentRole::PromptAnswer,
                 },
             ],
         }];
         lines[0].spans.extend(self.answer_spans());
         if let Some(message) = &self.validation_error {
             lines.push(ViewLine {
-                spans: vec![ViewSpan {
-                    text: message.clone(),
-                    role: ComponentRole::PromptError,
-                }],
+                spans: vec![
+                    ViewSpan {
+                        text: "! ".to_owned(),
+                        role: ComponentRole::PromptError,
+                    },
+                    ViewSpan {
+                        text: message.clone(),
+                        role: ComponentRole::PromptError,
+                    },
+                ],
             });
         }
+        lines.push(ViewLine {
+            spans: vec![ViewSpan {
+                text: self.help.clone(),
+                role: ComponentRole::PromptHelp,
+            }],
+        });
 
         PromptView {
             lines,
@@ -331,12 +365,16 @@ mod tests {
             view.lines[0].spans,
             vec![
                 ViewSpan {
+                    text: "? ".to_owned(),
+                    role: ComponentRole::PromptQuestion,
+                },
+                ViewSpan {
                     text: "名前".to_owned(),
                     role: ComponentRole::PromptQuestion,
                 },
                 ViewSpan {
-                    text: " ".to_owned(),
-                    role: ComponentRole::PromptQuestion,
+                    text: " › ".to_owned(),
+                    role: ComponentRole::PromptAnswer,
                 },
                 ViewSpan {
                     text: "あ".to_owned(),
@@ -344,17 +382,18 @@ mod tests {
                 },
             ]
         );
-        assert_eq!(view.cursor, Some(ViewCursor { row: 0, column: 5 }));
+        assert_eq!(view.cursor, Some(ViewCursor { row: 0, column: 9 }));
+        assert_eq!(view.lines[1].spans[0].role, ComponentRole::PromptHelp);
 
         let empty = Input::new(FieldKey::new("empty"), "Name", "")
             .expect("input is valid")
             .placeholder("Example");
         assert_eq!(
-            empty.view().lines[0].spans[2].role,
+            empty.view().lines[0].spans[3].role,
             ComponentRole::PromptCursor
         );
         assert_eq!(
-            empty.view().lines[0].spans[3].role,
+            empty.view().lines[0].spans[4].role,
             ComponentRole::PromptPlaceholder
         );
 
@@ -387,9 +426,10 @@ mod tests {
         let mut required = Input::new(FieldKey::new("required"), "Required", "")
             .expect("input is valid")
             .required()
+            .required_message("A value is needed.")
             .validate(Box::new(|_| Err(ValidationError::new("validator failure"))));
         assert_eq!(required.event(key(KeyCode::Tab)), FieldAction::Stay);
-        assert_eq!(required.validation_error(), Some("This field is required."));
+        assert_eq!(required.validation_error(), Some("A value is needed."));
     }
 
     #[derive(Default)]
@@ -490,12 +530,13 @@ mod tests {
             Some(&"done".to_owned())
         );
         assert_eq!(renderer.views.len(), 4);
-        assert_eq!(renderer.views[1].lines.len(), 2);
+        assert_eq!(renderer.views[1].lines.len(), 3);
         assert_eq!(
             renderer.views[1].lines[1].spans[0].role,
             ComponentRole::PromptError
         );
-        assert_eq!(renderer.views[2].lines.len(), 1);
-        assert_eq!(renderer.views[3].lines[0].spans[0].text, "Second");
+        assert_eq!(renderer.views[2].lines.len(), 2);
+        assert_eq!(renderer.views[3].lines[0].spans[0].text, "? ");
+        assert_eq!(renderer.views[3].lines[0].spans[1].text, "Second");
     }
 }

@@ -34,7 +34,11 @@ pub struct Confirm {
     default: Option<bool>,
     selected: Option<bool>,
     source: Option<ConfirmSource>,
-    show_help: bool,
+    yes_label: String,
+    no_label: String,
+    help: String,
+    unanswered_message: String,
+    show_unanswered: bool,
 }
 
 impl Confirm {
@@ -54,14 +58,40 @@ impl Confirm {
             default,
             selected: default,
             source: None,
-            show_help: false,
+            yes_label: "Yes".to_owned(),
+            no_label: "No".to_owned(),
+            help: "←/→ or y/n choose · Enter submit · Shift+Tab back · Esc cancel".to_owned(),
+            unanswered_message: "Choose yes or no.".to_owned(),
+            show_unanswered: false,
         })
+    }
+
+    /// Sets the labels shown for yes and no.
+    #[must_use]
+    pub fn labels(mut self, yes: impl Into<String>, no: impl Into<String>) -> Self {
+        self.yes_label = yes.into();
+        self.no_label = no.into();
+        self
+    }
+
+    /// Sets the navigation hint shown beneath the choices.
+    #[must_use]
+    pub fn help(mut self, help: impl Into<String>) -> Self {
+        self.help = help.into();
+        self
+    }
+
+    /// Sets the message shown when a confirmation without a default is unanswered.
+    #[must_use]
+    pub fn unanswered_message(mut self, message: impl Into<String>) -> Self {
+        self.unanswered_message = message.into();
+        self
     }
 
     fn select_explicit(&mut self, value: bool) {
         self.selected = Some(value);
         self.source = Some(ConfirmSource::Explicit);
-        self.show_help = false;
+        self.show_unanswered = false;
     }
 
     fn submit(&mut self) -> FieldAction {
@@ -73,7 +103,7 @@ impl Confirm {
                 FieldAction::Accept
             }
             (None, None) => {
-                self.show_help = true;
+                self.show_unanswered = true;
                 FieldAction::Stay
             }
         }
@@ -122,31 +152,60 @@ impl RuntimeField for Confirm {
 
     fn view(&self) -> PromptView {
         let mut lines = vec![ViewLine {
-            spans: vec![ViewSpan {
-                text: self.question.clone(),
-                role: ComponentRole::PromptQuestion,
-            }],
+            spans: vec![
+                ViewSpan {
+                    text: "? ".to_owned(),
+                    role: ComponentRole::PromptQuestion,
+                },
+                ViewSpan {
+                    text: self.question.clone(),
+                    role: ComponentRole::PromptQuestion,
+                },
+            ],
         }];
-        for (value, label) in [(true, "Yes"), (false, "No")] {
+        for (value, label) in [(true, &self.yes_label), (false, &self.no_label)] {
+            let role = if self.selected == Some(value) {
+                ComponentRole::PromptOptionSelected
+            } else {
+                ComponentRole::PromptOption
+            };
             lines.push(ViewLine {
-                spans: vec![ViewSpan {
-                    text: label.to_owned(),
-                    role: if self.selected == Some(value) {
-                        ComponentRole::PromptOptionSelected
-                    } else {
-                        ComponentRole::PromptOption
+                spans: vec![
+                    ViewSpan {
+                        text: if self.selected == Some(value) {
+                            "› ".to_owned()
+                        } else {
+                            "  ".to_owned()
+                        },
+                        role,
                     },
-                }],
+                    ViewSpan {
+                        text: label.clone(),
+                        role,
+                    },
+                ],
             });
         }
-        if self.show_help {
+        if self.show_unanswered {
             lines.push(ViewLine {
-                spans: vec![ViewSpan {
-                    text: "Select yes or no.".to_owned(),
-                    role: ComponentRole::PromptHelp,
-                }],
+                spans: vec![
+                    ViewSpan {
+                        text: "! ".to_owned(),
+                        role: ComponentRole::PromptError,
+                    },
+                    ViewSpan {
+                        text: self.unanswered_message.clone(),
+                        role: ComponentRole::PromptError,
+                    },
+                ],
             });
         }
+        lines.push(ViewLine {
+            spans: vec![ViewSpan {
+                text: self.help.clone(),
+                role: ComponentRole::PromptHelp,
+            }],
+        });
 
         PromptView {
             lines,
@@ -221,18 +280,32 @@ mod tests {
 
     #[test]
     fn no_default_requires_an_explicit_choice_and_shows_help() {
-        let mut confirm =
-            Confirm::new(FieldKey::new("confirm"), "Continue?", None).expect("confirm is valid");
+        let mut confirm = Confirm::new(FieldKey::new("confirm"), "Continue?", None)
+            .expect("confirm is valid")
+            .labels("Proceed", "Stop")
+            .help("Choose, then press Enter.")
+            .unanswered_message("Choose an answer.");
         let initial = confirm.view();
         assert_eq!(initial.lines[1].spans[0].role, ComponentRole::PromptOption);
         assert_eq!(initial.lines[2].spans[0].role, ComponentRole::PromptOption);
+        assert_eq!(initial.lines[1].spans[1].text, "Proceed");
+        assert_eq!(initial.lines[2].spans[1].text, "Stop");
         assert_eq!(confirm.event(key(KeyCode::Enter)), FieldAction::Stay);
         assert_eq!(
             confirm.view().lines[3].spans[0].role,
+            ComponentRole::PromptError
+        );
+        assert_eq!(
+            confirm.view().lines[4].spans[0].role,
             ComponentRole::PromptHelp
         );
+        assert_eq!(confirm.view().lines[3].spans[1].text, "Choose an answer.");
+        assert_eq!(
+            confirm.view().lines[4].spans[0].text,
+            "Choose, then press Enter."
+        );
         assert_eq!(confirm.event(key(KeyCode::Right)), FieldAction::Stay);
-        assert_eq!(confirm.view().lines.len(), 3);
+        assert_eq!(confirm.view().lines.len(), 4);
         assert_eq!(confirm.event(key(KeyCode::Enter)), FieldAction::Accept);
     }
 }

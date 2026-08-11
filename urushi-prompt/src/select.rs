@@ -33,6 +33,7 @@ pub struct Select<T> {
     question: String,
     options: Vec<SelectOption<T>>,
     selected: usize,
+    help: String,
 }
 
 impl<T> Select<T> {
@@ -54,7 +55,15 @@ impl<T> Select<T> {
             question: question.into(),
             options,
             selected: 0,
+            help: "↑/↓ select · Enter continue · Shift+Tab back · Esc cancel".to_owned(),
         })
+    }
+
+    /// Sets the navigation hint shown beneath the options.
+    #[must_use]
+    pub fn help(mut self, help: impl Into<String>) -> Self {
+        self.help = help.into();
+        self
     }
 
     fn previous(&mut self) {
@@ -102,26 +111,47 @@ impl<T: 'static> RuntimeField for Select<T> {
 
     fn view(&self) -> PromptView {
         let mut lines = vec![ViewLine {
-            spans: vec![ViewSpan {
-                text: self.question.clone(),
-                role: ComponentRole::PromptQuestion,
-            }],
+            spans: vec![
+                ViewSpan {
+                    text: "? ".to_owned(),
+                    role: ComponentRole::PromptQuestion,
+                },
+                ViewSpan {
+                    text: self.question.clone(),
+                    role: ComponentRole::PromptQuestion,
+                },
+            ],
         }];
         lines.extend(
             self.options
                 .iter()
                 .enumerate()
                 .map(|(index, option)| ViewLine {
-                    spans: vec![ViewSpan {
-                        text: option.label.clone(),
-                        role: if index == self.selected {
+                    spans: {
+                        let role = if index == self.selected {
                             ComponentRole::PromptOptionSelected
                         } else {
                             ComponentRole::PromptOption
-                        },
-                    }],
+                        };
+                        vec![
+                            ViewSpan {
+                                text: if index == self.selected { "› " } else { "  " }.to_owned(),
+                                role,
+                            },
+                            ViewSpan {
+                                text: option.label.clone(),
+                                role,
+                            },
+                        ]
+                    },
                 }),
         );
+        lines.push(ViewLine {
+            spans: vec![ViewSpan {
+                text: self.help.clone(),
+                role: ComponentRole::PromptHelp,
+            }],
+        });
 
         PromptView {
             lines,
@@ -179,9 +209,9 @@ mod tests {
         )
         .expect("single option is valid");
         assert_eq!(single.event(key(KeyCode::Left)), FieldAction::Stay);
-        assert_eq!(single.view().lines[1].spans[0].text, "Only");
+        assert_eq!(single.view().lines[1].spans[1].text, "Only");
         assert_eq!(single.event(key(KeyCode::Right)), FieldAction::Stay);
-        assert_eq!(single.view().lines[1].spans[0].text, "Only");
+        assert_eq!(single.view().lines[1].spans[1].text, "Only");
 
         let mut multiple = Select::new(FieldKey::new("multiple"), "Multiple", options())
             .expect("multiple options are valid");
@@ -209,16 +239,21 @@ mod tests {
 
     #[test]
     fn view_has_question_and_option_semantic_roles() {
-        let select =
-            Select::new(FieldKey::new("choice"), "Choose", options()).expect("select is valid");
+        let select = Select::new(FieldKey::new("choice"), "Choose", options())
+            .expect("select is valid")
+            .help("Use arrows, then Enter.");
         let view = select.view();
         assert_eq!(view.cursor, None);
+        assert_eq!(view.lines[0].spans[0].text, "? ");
         assert_eq!(view.lines[0].spans[0].role, ComponentRole::PromptQuestion);
+        assert_eq!(view.lines[1].spans[0].text, "› ");
         assert_eq!(
             view.lines[1].spans[0].role,
             ComponentRole::PromptOptionSelected
         );
         assert_eq!(view.lines[2].spans[0].role, ComponentRole::PromptOption);
+        assert_eq!(view.lines[3].spans[0].role, ComponentRole::PromptHelp);
+        assert_eq!(view.lines[3].spans[0].text, "Use arrows, then Enter.");
     }
 
     #[derive(Default)]
