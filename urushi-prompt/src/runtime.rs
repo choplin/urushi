@@ -837,6 +837,7 @@ struct CrosstermRenderer<W> {
     writer: W,
     styles: PromptStyles,
     origin_saved: bool,
+    reserved_rows: u16,
     previous_rows: u16,
     columns: u16,
     rows: u16,
@@ -854,6 +855,7 @@ impl<W: Write> CrosstermRenderer<W> {
             writer,
             styles: PromptStyles::resolve(theme, profile),
             origin_saved: false,
+            reserved_rows: 0,
             previous_rows: 0,
             columns: size.0.max(1),
             rows: size.1.max(1),
@@ -984,6 +986,32 @@ impl<W: Write> CrosstermRenderer<W> {
         Ok(())
     }
 
+    fn reserve_owned_rows(&mut self, rows: u16) -> io::Result<()> {
+        let rows = rows.max(1);
+        if !self.origin_saved {
+            queue!(self.writer, cursor::SavePosition)?;
+            self.origin_saved = true;
+            self.reserved_rows = 1;
+        }
+        if rows <= self.reserved_rows {
+            return Ok(());
+        }
+
+        queue!(self.writer, cursor::RestorePosition)?;
+        if self.reserved_rows > 1 {
+            queue!(self.writer, cursor::MoveDown(self.reserved_rows - 1))?;
+        }
+        for _ in self.reserved_rows..rows {
+            self.writer.write_all(b"\n")?;
+        }
+        if rows > 1 {
+            queue!(self.writer, cursor::MoveUp(rows - 1))?;
+        }
+        queue!(self.writer, cursor::SavePosition)?;
+        self.reserved_rows = rows;
+        Ok(())
+    }
+
     fn draw_line(&mut self, line: &RenderedLine) -> io::Result<()> {
         for span in &line.spans {
             self.writer
@@ -1003,11 +1031,8 @@ impl<W: Write> Renderer for CrosstermRenderer<W> {
         // terminal write. Error cleanup can then erase a partially drawn view.
         self.previous_rows = rows_to_clear;
 
-        if !self.origin_saved {
-            queue!(self.writer, cursor::SavePosition)?;
-            self.origin_saved = true;
-        }
         queue!(self.writer, cursor::Hide)?;
+        self.reserve_owned_rows(layout.lines.len() as u16)?;
 
         self.clear_owned_rows(rows_to_clear)?;
 
@@ -1903,10 +1928,34 @@ mod tests {
         let output = String::from_utf8(renderer.writer).expect("renderer writes UTF-8 commands");
         assert!(output.contains("\x1b[1m質問\x1b[0m"));
         assert!(output.contains("\x1b[4m＊\x1b[0m"));
-        assert!(output.contains("\x1b7\x1b[?25l\x1b8\x1b[K"), "{output:?}");
+        assert!(output.contains("\x1b[?25l\x1b7\x1b8\x1b[K"), "{output:?}");
         assert!(output.contains("\x1b8\x1b[2C"), "{output:?}");
         assert!(!output.contains("\x1b[2J"));
         assert!(!output.contains("?1049"));
+    }
+
+    #[test]
+    fn first_draw_reserves_rows_before_saving_the_render_origin() {
+        let theme = test_theme();
+        let profile = TerminalProfile::new(ColorProfile::Monochrome, AnsiPolicy::Disabled);
+        let mut renderer = CrosstermRenderer::new(&theme, &profile, Vec::new(), (20, 4));
+        renderer
+            .draw(&renderer_view(
+                vec![
+                    view_line("first", ComponentRole::PromptQuestion),
+                    view_line("second", ComponentRole::PromptAnswer),
+                    view_line("third", ComponentRole::PromptHelp),
+                ],
+                None,
+            ))
+            .expect("renderer reserves and draws three rows");
+
+        let output = String::from_utf8(renderer.writer).expect("renderer writes UTF-8 commands");
+        assert!(
+            output.contains("\x1b[?25l\x1b7\x1b8\n\n\x1b[2A\x1b7"),
+            "{output:?}"
+        );
+        assert_eq!(renderer.reserved_rows, 3);
     }
 
     #[test]
