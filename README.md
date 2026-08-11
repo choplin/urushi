@@ -28,7 +28,7 @@ output, interactive prompts, and full TUIs. `urushi` aims to fill that gap:
 | Crate | Description | Status |
 |---|---|---|
 | [`urushi`](urushi/) | Style definitions: colors, modifiers, padding, margin, borders, alignment, wrapping | Core rendering works |
-| [`urushi-prompt`](urushi-prompt/) | Interactive prompts modeled after [huh](https://github.com/charmbracelet/huh) | Placeholder |
+| [`urushi-prompt`](urushi-prompt/) | Theme-aware `Input`, `Select`, and `Confirm` fields with synchronous validation | Core prompt flow works |
 
 ## Example
 
@@ -95,6 +95,35 @@ Run the complete Theme → plain CLI / ratatui example with:
 cargo run -p urushi --example themed_ratatui --features ratatui
 ```
 
+### The same Theme in interactive prompts
+
+Run the CJK prompt wizard from the repository root:
+
+```sh
+nix develop --command cargo run -p urushi-prompt --example cjk_wizard
+```
+
+The example passes one `Theme` and the terminal's `TerminalProfile` to a form
+containing `Input`, `Select`, and `Confirm`. The prompt resolves semantic roles
+from that Theme; it does not define a separate palette.
+
+Use this sequence for a terminal smoke test:
+
+1. Press Enter with the name empty. The form shows a validation error and
+   remains on the input.
+2. Enter a CJK name such as `花子`, then press Enter. Use the arrow keys to
+   change the language.
+3. Press Enter to reach confirmation, then press Shift-Tab. The form returns
+   to the language field without losing the selection. Press Enter again.
+4. Press `y` or `n`, then Enter. A submitted form prints the selected name and
+   language below the prompt.
+5. Run the example again and press Escape or Ctrl-C. The form cancels, removes
+   its inline prompt region, and restores raw mode and cursor visibility.
+
+Resize the terminal while editing the CJK name to check narrow layouts. The
+cursor remains inside the prompt viewport, and redraws do not clear text to
+the left of the prompt's starting position.
+
 ## Roadmap
 
 - [x] `Style` builder: colors, modifiers, padding, margin, border, width, align
@@ -105,7 +134,7 @@ cargo run -p urushi --example themed_ratatui --features ratatui
 - [x] Correct re-styling of content that already contains ANSI sequences (nested styles)
 - [x] Theme layer: per-component style sets derived from a small set of semantic tokens
 - [x] `ratatui` feature: box-model Widget and loss-aware stylable-subset conversion
-- [ ] `urushi-prompt`: huh-style `Form` / `Group` / fields with validation and theming
+- [x] `urushi-prompt`: themed `Form` / `Group` with `Input`, `Select`, `Confirm`, and synchronous validation
 
 ## Acknowledgments
 

@@ -133,17 +133,48 @@ impl Input {
         FieldAction::Accept
     }
 
-    fn answer_span(&self) -> ViewSpan {
-        match (&self.value[..], &self.placeholder) {
-            ("", Some(placeholder)) => ViewSpan {
-                text: placeholder.clone(),
-                role: ComponentRole::PromptPlaceholder,
-            },
-            _ => ViewSpan {
-                text: self.value.clone(),
-                role: ComponentRole::PromptAnswer,
-            },
+    fn answer_spans(&self) -> Vec<ViewSpan> {
+        if self.value.is_empty() {
+            let mut spans = vec![ViewSpan {
+                text: " ".to_owned(),
+                role: ComponentRole::PromptCursor,
+            }];
+            if let Some(placeholder) = &self.placeholder {
+                spans.push(ViewSpan {
+                    text: placeholder.clone(),
+                    role: ComponentRole::PromptPlaceholder,
+                });
+            }
+            return spans;
         }
+
+        let cursor_byte = self.byte_index(self.cursor);
+        let mut spans = Vec::new();
+        if cursor_byte > 0 {
+            spans.push(ViewSpan {
+                text: self.value[..cursor_byte].to_owned(),
+                role: ComponentRole::PromptAnswer,
+            });
+        }
+        if let Some(character) = self.value[cursor_byte..].chars().next() {
+            spans.push(ViewSpan {
+                text: character.to_string(),
+                role: ComponentRole::PromptCursor,
+            });
+            let after_cursor = cursor_byte + character.len_utf8();
+            if after_cursor < self.value.len() {
+                spans.push(ViewSpan {
+                    text: self.value[after_cursor..].to_owned(),
+                    role: ComponentRole::PromptAnswer,
+                });
+            }
+        } else {
+            spans.push(ViewSpan {
+                text: " ".to_owned(),
+                role: ComponentRole::PromptCursor,
+            });
+        }
+        spans
     }
 }
 
@@ -217,9 +248,9 @@ impl RuntimeField for Input {
                     text: " ".to_owned(),
                     role: ComponentRole::PromptQuestion,
                 },
-                self.answer_span(),
             ],
         }];
+        lines[0].spans.extend(self.answer_spans());
         if let Some(message) = &self.validation_error {
             lines.push(ViewLine {
                 spans: vec![ViewSpan {
@@ -309,7 +340,7 @@ mod tests {
                 },
                 ViewSpan {
                     text: "あ".to_owned(),
-                    role: ComponentRole::PromptAnswer,
+                    role: ComponentRole::PromptCursor,
                 },
             ]
         );
@@ -320,7 +351,20 @@ mod tests {
             .placeholder("Example");
         assert_eq!(
             empty.view().lines[0].spans[2].role,
+            ComponentRole::PromptCursor
+        );
+        assert_eq!(
+            empty.view().lines[0].spans[3].role,
             ComponentRole::PromptPlaceholder
+        );
+
+        assert_eq!(input.event(key(KeyCode::End)), FieldAction::Stay);
+        assert_eq!(
+            input.view().lines[0].spans.last(),
+            Some(&ViewSpan {
+                text: " ".to_owned(),
+                role: ComponentRole::PromptCursor,
+            })
         );
     }
 

@@ -9,9 +9,10 @@ use std::{
 use crossterm::{
     cursor,
     event::{self, Event as CrosstermEvent, KeyCode as CrosstermKeyCode, KeyEventKind},
-    execute, terminal,
+    execute, queue,
+    terminal::{self, Clear, ClearType},
 };
-use urushi::{ComponentRole, TerminalProfile, Theme};
+use urushi::{ComponentRole, Style, TerminalProfile, Theme, visible_width};
 
 /// A typed name used to retrieve a submitted field value.
 pub struct FieldKey<T> {
@@ -216,18 +217,16 @@ impl Form {
 
     /// Runs this form using the process terminal input and standard error.
     ///
-    /// The supplied theme and terminal profile establish the stable rendering
-    /// boundary for future field renderers. This runtime does not create a
-    /// second palette or expose a terminal backend in its public API.
+    /// The supplied theme and terminal profile are resolved once for the
+    /// inline renderer; fields only emit semantic component roles.
     pub fn run<E>(
         self,
         theme: &Theme<E>,
         profile: &TerminalProfile,
     ) -> Result<FormOutcome, RunError> {
-        let _theme = theme;
-        let _profile = profile;
         let mut events = CrosstermEventSource;
-        let mut renderer = CrosstermRenderer;
+        let mut renderer =
+            CrosstermRenderer::stderr(theme, profile, terminal::size().unwrap_or((80, 24)));
         let mut terminal = CrosstermTerminalControl;
         self.run_with(&mut events, &mut renderer, &mut terminal)
     }
@@ -259,6 +258,9 @@ impl Form {
                 Ok(event) => event,
                 Err(source) => return Err(session.fail(IoOperation::ReadEvent, source)),
             };
+            if let Event::Resize { columns, rows } = &event {
+                session.renderer.resize(*columns, *rows);
+            }
 
             match self.reduce(&mut state, event) {
                 ReducerResult::Running => {}
@@ -474,6 +476,8 @@ pub(crate) trait EventSource {
 pub(crate) trait Renderer {
     fn draw(&mut self, view: &PromptView) -> io::Result<()>;
     fn finish(&mut self, outcome: RenderFinish) -> io::Result<()>;
+
+    fn resize(&mut self, _columns: u16, _rows: u16) {}
 }
 
 pub(crate) trait TerminalControl {
@@ -577,6 +581,7 @@ pub(crate) struct PromptView {
 }
 
 impl PromptView {
+    #[cfg(test)]
     fn active_name(&self) -> Option<&str> {
         self.lines
             .first()?
@@ -735,18 +740,328 @@ fn translate_key(
     })
 }
 
-struct CrosstermRenderer;
+struct CrosstermRenderer<W> {
+    writer: W,
+    styles: PromptStyles,
+    origin_saved: bool,
+    previous_rows: u16,
+    columns: u16,
+    rows: u16,
+}
 
-impl Renderer for CrosstermRenderer {
-    fn draw(&mut self, view: &PromptView) -> io::Result<()> {
-        let _active_name = view.active_name();
+impl CrosstermRenderer<io::Stderr> {
+    fn stderr<E>(theme: &Theme<E>, profile: &TerminalProfile, size: (u16, u16)) -> Self {
+        Self::new(theme, profile, io::stderr(), size)
+    }
+}
+
+impl<W: Write> CrosstermRenderer<W> {
+    fn new<E>(theme: &Theme<E>, profile: &TerminalProfile, writer: W, size: (u16, u16)) -> Self {
+        Self {
+            writer,
+            styles: PromptStyles::resolve(theme, profile),
+            origin_saved: false,
+            previous_rows: 0,
+            columns: size.0.max(1),
+            rows: size.1.max(1),
+        }
+    }
+
+    fn layout(&self, view: &PromptView) -> LaidOutView {
+        let width = usize::from(self.columns.max(1));
+        let mut lines = Vec::new();
+        let mut cursor = None;
+
+        if let Some(view_cursor) = view.cursor {
+            if let Some(first_line) = view.lines.first() {
+                let desired_offset = usize::from(view_cursor.column).saturating_sub(width - 1);
+                let (line, offset) = clip_line(first_line, desired_offset, width);
+                lines.push(line);
+                cursor = Some(ViewCursor {
+                    row: 0,
+                    column: usize::from(view_cursor.column)
+                        .saturating_sub(offset)
+                        .min(width - 1) as u16,
+                });
+            }
+            for line in view.lines.iter().skip(1) {
+                lines.extend(wrap_line(line, width));
+            }
+        } else {
+            for line in &view.lines {
+                lines.extend(wrap_line(line, width));
+            }
+        }
+
+        if lines.is_empty() {
+            lines.push(RenderedLine::default());
+        }
+
+        let max_rows = usize::from(self.rows.max(1));
+        if lines.len() > max_rows {
+            let first_error = lines
+                .iter()
+                .position(|line| line.has_role(ComponentRole::PromptError));
+            lines.truncate(max_rows);
+            if first_error.is_some_and(|index| index >= max_rows) {
+                lines[max_rows - 1] = first_error_line(view, width).unwrap_or_default();
+            }
+        }
+
+        LaidOutView { lines, cursor }
+    }
+
+    fn clear_owned_rows(&mut self, rows: u16) -> io::Result<()> {
+        if !self.origin_saved || rows == 0 {
+            return Ok(());
+        }
+
+        queue!(self.writer, cursor::RestorePosition)?;
+        for row in 0..rows {
+            if row == 0 {
+                queue!(self.writer, Clear(ClearType::UntilNewLine))?;
+            } else {
+                queue!(
+                    self.writer,
+                    cursor::MoveToColumn(0),
+                    Clear(ClearType::CurrentLine)
+                )?;
+            }
+            if row + 1 < rows {
+                queue!(self.writer, cursor::MoveDown(1))?;
+            }
+        }
+        queue!(self.writer, cursor::RestorePosition)?;
         Ok(())
+    }
+
+    fn draw_line(&mut self, line: &RenderedLine) -> io::Result<()> {
+        for span in &line.spans {
+            self.writer
+                .write_all(self.styles.style(span.role).render(&span.text).as_bytes())?;
+        }
+        Ok(())
+    }
+}
+
+impl<W: Write> Renderer for CrosstermRenderer<W> {
+    fn draw(&mut self, view: &PromptView) -> io::Result<()> {
+        if !self.origin_saved {
+            queue!(self.writer, cursor::SavePosition)?;
+            self.origin_saved = true;
+        }
+        queue!(self.writer, cursor::Hide)?;
+
+        let layout = self.layout(view);
+        let rows_to_clear = self
+            .previous_rows
+            .max(layout.lines.len().min(usize::from(self.rows)) as u16);
+        self.clear_owned_rows(rows_to_clear)?;
+
+        queue!(self.writer, cursor::RestorePosition)?;
+        for (index, line) in layout.lines.iter().enumerate() {
+            if index > 0 {
+                queue!(self.writer, cursor::MoveToColumn(0))?;
+            }
+            self.draw_line(line)?;
+            if index + 1 < layout.lines.len() {
+                queue!(self.writer, cursor::MoveToNextLine(1))?;
+            }
+        }
+        self.previous_rows = layout.lines.len() as u16;
+
+        queue!(self.writer, cursor::RestorePosition)?;
+        if let Some(cursor) = layout.cursor {
+            if cursor.row == 0 {
+                queue!(self.writer, cursor::MoveRight(cursor.column))?;
+            } else {
+                queue!(
+                    self.writer,
+                    cursor::MoveDown(cursor.row),
+                    cursor::MoveToColumn(cursor.column)
+                )?;
+            }
+            queue!(self.writer, cursor::Show)?;
+        }
+        self.writer.flush()
     }
 
     fn finish(&mut self, outcome: RenderFinish) -> io::Result<()> {
-        let _outcome = outcome;
-        Ok(())
+        match outcome {
+            RenderFinish::Submitted => {
+                if self.origin_saved {
+                    queue!(
+                        self.writer,
+                        cursor::RestorePosition,
+                        cursor::MoveToNextLine(self.previous_rows.max(1)),
+                        cursor::Show
+                    )?;
+                }
+            }
+            RenderFinish::Cancelled | RenderFinish::Error | RenderFinish::Panicking => {
+                self.clear_owned_rows(self.previous_rows)?;
+                if self.origin_saved {
+                    queue!(self.writer, cursor::RestorePosition)?;
+                }
+            }
+        }
+        self.writer.flush()
     }
+
+    fn resize(&mut self, columns: u16, rows: u16) {
+        self.columns = columns.max(1);
+        self.rows = rows.max(1);
+    }
+}
+
+struct PromptStyles {
+    body: Style,
+    question: Style,
+    answer: Style,
+    placeholder: Style,
+    cursor: Style,
+    option: Style,
+    option_selected: Style,
+    help: Style,
+    error: Style,
+}
+
+impl PromptStyles {
+    fn resolve<E>(theme: &Theme<E>, profile: &TerminalProfile) -> Self {
+        Self {
+            body: profile.resolve_style(theme.style(ComponentRole::Body)),
+            question: profile.resolve_style(theme.style(ComponentRole::PromptQuestion)),
+            answer: profile.resolve_style(theme.style(ComponentRole::PromptAnswer)),
+            placeholder: profile.resolve_style(theme.style(ComponentRole::PromptPlaceholder)),
+            cursor: profile.resolve_style(theme.style(ComponentRole::PromptCursor)),
+            option: profile.resolve_style(theme.style(ComponentRole::PromptOption)),
+            option_selected: profile
+                .resolve_style(theme.style(ComponentRole::PromptOptionSelected)),
+            help: profile.resolve_style(theme.style(ComponentRole::PromptHelp)),
+            error: profile.resolve_style(theme.style(ComponentRole::PromptError)),
+        }
+    }
+
+    fn style(&self, role: ComponentRole) -> &Style {
+        match role {
+            ComponentRole::Body => &self.body,
+            ComponentRole::PromptQuestion => &self.question,
+            ComponentRole::PromptAnswer => &self.answer,
+            ComponentRole::PromptPlaceholder => &self.placeholder,
+            ComponentRole::PromptCursor => &self.cursor,
+            ComponentRole::PromptOption => &self.option,
+            ComponentRole::PromptOptionSelected => &self.option_selected,
+            ComponentRole::PromptHelp => &self.help,
+            ComponentRole::PromptError => &self.error,
+            ComponentRole::Muted
+            | ComponentRole::Accent
+            | ComponentRole::Success
+            | ComponentRole::Warning
+            | ComponentRole::Error
+            | ComponentRole::Panel
+            | ComponentRole::PanelFocused => &self.body,
+        }
+    }
+}
+
+#[derive(Default)]
+struct RenderedLine {
+    spans: Vec<RenderedSpan>,
+}
+
+impl RenderedLine {
+    fn push(&mut self, role: ComponentRole, character: char) {
+        if let Some(span) = self.spans.last_mut().filter(|span| span.role == role) {
+            span.text.push(character);
+        } else {
+            self.spans.push(RenderedSpan {
+                text: character.to_string(),
+                role,
+            });
+        }
+    }
+
+    fn has_role(&self, role: ComponentRole) -> bool {
+        self.spans.iter().any(|span| span.role == role)
+    }
+}
+
+struct RenderedSpan {
+    text: String,
+    role: ComponentRole,
+}
+
+struct LaidOutView {
+    lines: Vec<RenderedLine>,
+    cursor: Option<ViewCursor>,
+}
+
+fn wrap_line(line: &ViewLine, width: usize) -> Vec<RenderedLine> {
+    let mut lines = vec![RenderedLine::default()];
+    let mut used = 0;
+    for span in &line.spans {
+        for character in span.text.chars() {
+            if character == '\n' {
+                lines.push(RenderedLine::default());
+                used = 0;
+                continue;
+            }
+            let character_width = visible_width(&character.to_string());
+            if character_width > width {
+                continue;
+            }
+            if used > 0 && used + character_width > width {
+                lines.push(RenderedLine::default());
+                used = 0;
+            }
+            lines
+                .last_mut()
+                .expect("a wrapped line always has a current row")
+                .push(span.role, character);
+            used += character_width;
+        }
+    }
+    lines
+}
+
+fn clip_line(line: &ViewLine, offset: usize, width: usize) -> (RenderedLine, usize) {
+    let mut clipped = RenderedLine::default();
+    let mut seen = 0;
+    let mut actual_offset = None;
+    let mut used = 0;
+    for span in &line.spans {
+        for character in span.text.chars() {
+            let character_width = visible_width(&character.to_string());
+            if seen + character_width <= offset {
+                seen += character_width;
+                continue;
+            }
+            if character_width > width {
+                seen += character_width;
+                continue;
+            }
+            let start = *actual_offset.get_or_insert(seen);
+            if used > 0 && used + character_width > width {
+                return (clipped, start);
+            }
+            clipped.push(span.role, character);
+            used += character_width;
+            seen += character_width;
+        }
+    }
+    (clipped, actual_offset.unwrap_or(seen))
+}
+
+fn first_error_line(view: &PromptView, width: usize) -> Option<RenderedLine> {
+    view.lines
+        .iter()
+        .filter(|line| {
+            line.spans
+                .iter()
+                .any(|span| span.role == ComponentRole::PromptError)
+        })
+        .flat_map(|line| wrap_line(line, width))
+        .next()
 }
 
 struct CrosstermTerminalControl;
@@ -781,6 +1096,8 @@ mod tests {
     };
 
     use super::*;
+    use crate::{Confirm, ConfirmAnswer, ConfirmSource, Input, Select, SelectOption};
+    use urushi::{AnsiPolicy, Color, ColorProfile, ComponentStyles, SemanticTokens};
 
     #[derive(Clone)]
     struct TestField {
@@ -1120,6 +1437,90 @@ mod tests {
     }
 
     #[test]
+    fn validated_input_select_and_confirm_submit_typed_values() {
+        let name_key = FieldKey::new("name");
+        let language_key = FieldKey::new("language");
+        let confirmation_key = FieldKey::<ConfirmAnswer>::new("confirmation");
+        let form = Form::builder()
+            .group(
+                Group::builder()
+                    .field(
+                        Input::new(name_key.clone(), "Name", "")
+                            .expect("input is valid")
+                            .required(),
+                    )
+                    .field(
+                        Select::new(
+                            language_key.clone(),
+                            "Language",
+                            vec![
+                                SelectOption::new("Japanese", "ja"),
+                                SelectOption::new("English", "en"),
+                            ],
+                        )
+                        .expect("select is valid"),
+                    )
+                    .field(
+                        Confirm::new(confirmation_key.clone(), "Continue?", Some(false))
+                            .expect("confirm is valid"),
+                    )
+                    .build()
+                    .expect("group is valid"),
+            )
+            .build()
+            .expect("form is valid");
+        let mut events = ScriptedEvents::new([
+            Ok(enter()),
+            Ok(Event::Key(KeyEvent {
+                code: KeyCode::Char('名'),
+                modifiers: KeyModifiers::default(),
+            })),
+            Ok(Event::Key(KeyEvent {
+                code: KeyCode::Tab,
+                modifiers: KeyModifiers::default(),
+            })),
+            Ok(Event::Key(KeyEvent {
+                code: KeyCode::Down,
+                modifiers: KeyModifiers::default(),
+            })),
+            Ok(enter()),
+            Ok(Event::Key(KeyEvent {
+                code: KeyCode::Char('y'),
+                modifiers: KeyModifiers::default(),
+            })),
+            Ok(enter()),
+        ]);
+        let mut renderer = RecordingRenderer::default();
+        let mut terminal = RecordingTerminal::interactive();
+
+        let outcome = form
+            .run_with(&mut events, &mut renderer, &mut terminal)
+            .expect("form submits");
+        let FormOutcome::Submitted(values) = outcome else {
+            panic!("expected submitted values");
+        };
+        assert_eq!(values.get(&name_key), Some(&"名".to_owned()));
+        assert_eq!(values.get(&language_key), Some(&"en"));
+        assert_eq!(
+            values.get(&confirmation_key),
+            Some(&ConfirmAnswer {
+                value: true,
+                source: ConfirmSource::Explicit,
+            })
+        );
+        assert_eq!(renderer.finishes, vec![RenderFinish::Submitted]);
+        assert_eq!(
+            terminal.calls,
+            [
+                "enable_raw_mode",
+                "show_cursor",
+                "disable_raw_mode",
+                "flush"
+            ]
+        );
+    }
+
+    #[test]
     fn non_interactive_does_not_change_terminal_state() {
         let mut events = ScriptedEvents::default();
         let mut renderer = RecordingRenderer::default();
@@ -1234,6 +1635,162 @@ mod tests {
                 "flush"
             ]
         );
+    }
+
+    fn test_theme() -> Theme<()> {
+        let tokens = SemanticTokens {
+            text: Color::Rgb(1, 2, 3),
+            text_muted: Color::Rgb(4, 5, 6),
+            background: Color::Rgb(7, 8, 9),
+            surface: Color::Rgb(10, 11, 12),
+            accent: Color::Rgb(13, 14, 15),
+            accent_text: Color::Rgb(16, 17, 18),
+            success: Color::Rgb(19, 20, 21),
+            warning: Color::Rgb(22, 23, 24),
+            error: Color::Rgb(25, 26, 27),
+            border: Color::Rgb(28, 29, 30),
+        };
+        let components = ComponentStyles::from_tokens(&tokens)
+            .with_style(ComponentRole::PromptQuestion, Style::new().bold())
+            .with_style(ComponentRole::PromptCursor, Style::new().underline());
+        Theme::new(tokens, components, ())
+    }
+
+    fn renderer_view(lines: Vec<ViewLine>, cursor: Option<ViewCursor>) -> PromptView {
+        PromptView { lines, cursor }
+    }
+
+    fn view_line(text: &str, role: ComponentRole) -> ViewLine {
+        ViewLine {
+            spans: vec![ViewSpan {
+                text: text.to_owned(),
+                role,
+            }],
+        }
+    }
+
+    #[test]
+    fn inline_renderer_uses_resolved_theme_styles_and_preserves_mid_line_origin() {
+        let theme = test_theme();
+        let profile = TerminalProfile::new(ColorProfile::TrueColor, AnsiPolicy::Enabled);
+        let mut renderer = CrosstermRenderer::new(&theme, &profile, Vec::new(), (20, 4));
+        renderer
+            .draw(&renderer_view(
+                vec![ViewLine {
+                    spans: vec![
+                        ViewSpan {
+                            text: "質問".to_owned(),
+                            role: ComponentRole::PromptQuestion,
+                        },
+                        ViewSpan {
+                            text: "＊".to_owned(),
+                            role: ComponentRole::PromptCursor,
+                        },
+                    ],
+                }],
+                Some(ViewCursor { row: 0, column: 2 }),
+            ))
+            .expect("renderer writes to a buffer");
+
+        let output = String::from_utf8(renderer.writer).expect("renderer writes UTF-8 commands");
+        assert!(output.contains("\x1b[1m質問\x1b[0m"));
+        assert!(output.contains("\x1b[4m＊\x1b[0m"));
+        assert!(output.contains("\x1b7\x1b[?25l\x1b8\x1b[K"), "{output:?}");
+        assert!(output.contains("\x1b8\x1b[2C"), "{output:?}");
+        assert!(!output.contains("\x1b[2J"));
+        assert!(!output.contains("?1049"));
+    }
+
+    #[test]
+    fn inline_renderer_clears_stale_rows_and_clamps_cjk_cursor_in_narrow_viewports() {
+        let theme = test_theme();
+        let profile = TerminalProfile::new(ColorProfile::TrueColor, AnsiPolicy::Enabled);
+        let mut renderer = CrosstermRenderer::new(&theme, &profile, Vec::new(), (4, 2));
+        renderer
+            .draw(&renderer_view(
+                vec![
+                    ViewLine {
+                        spans: vec![
+                            ViewSpan {
+                                text: "名前 ".to_owned(),
+                                role: ComponentRole::PromptQuestion,
+                            },
+                            ViewSpan {
+                                text: "あいうえ".to_owned(),
+                                role: ComponentRole::PromptAnswer,
+                            },
+                        ],
+                    },
+                    view_line("validation message", ComponentRole::PromptError),
+                ],
+                Some(ViewCursor { row: 0, column: 11 }),
+            ))
+            .expect("narrow draw succeeds");
+        let layout = renderer.layout(&renderer_view(
+            vec![view_line("名前 あいうえ", ComponentRole::PromptAnswer)],
+            Some(ViewCursor { row: 0, column: 11 }),
+        ));
+        assert!(layout.lines.len() <= 2);
+        assert!(layout.cursor.is_some_and(|cursor| cursor.column < 4));
+
+        renderer.resize(3, 1);
+        renderer
+            .draw(&renderer_view(
+                vec![view_line("短い", ComponentRole::PromptQuestion)],
+                None,
+            ))
+            .expect("redraw succeeds");
+        assert_eq!(renderer.previous_rows, 1);
+        renderer
+            .finish(RenderFinish::Cancelled)
+            .expect("cancel cleanup succeeds");
+
+        let output = String::from_utf8(renderer.writer).expect("renderer writes UTF-8 commands");
+        assert!(output.matches("\x1b[2K").count() >= 2);
+        assert!(output.contains("\x1b[K"), "{output:?}");
+        assert!(!output.contains("\x1b[2J"));
+    }
+
+    #[test]
+    fn narrow_viewports_omit_wide_scalars_without_losing_cursor_bounds() {
+        let cjk_line = view_line("あ", ComponentRole::PromptCursor);
+        assert!(wrap_line(&cjk_line, 1)[0].spans.is_empty());
+        assert!(clip_line(&cjk_line, 0, 1).0.spans.is_empty());
+
+        let theme = test_theme();
+        let profile = TerminalProfile::new(ColorProfile::TrueColor, AnsiPolicy::Enabled);
+        for columns in [0, 1] {
+            let mut renderer = CrosstermRenderer::new(&theme, &profile, Vec::new(), (columns, 1));
+            let view = renderer_view(
+                vec![cjk_line.clone()],
+                Some(ViewCursor { row: 0, column: 0 }),
+            );
+            let layout = renderer.layout(&view);
+            assert_eq!(layout.lines.len(), 1);
+            assert!(layout.lines[0].spans.is_empty());
+            assert_eq!(layout.cursor, Some(ViewCursor { row: 0, column: 0 }));
+
+            renderer.draw(&view).expect("narrow draw succeeds");
+            let output =
+                String::from_utf8(renderer.writer).expect("renderer writes UTF-8 commands");
+            assert!(!output.contains('あ'));
+        }
+    }
+
+    #[test]
+    fn inline_renderer_applies_terminal_profile_before_writing_styles() {
+        let theme = test_theme();
+        let profile = TerminalProfile::new(ColorProfile::Monochrome, AnsiPolicy::Disabled);
+        let mut renderer = CrosstermRenderer::new(&theme, &profile, Vec::new(), (20, 2));
+        renderer
+            .draw(&renderer_view(
+                vec![view_line("plain", ComponentRole::PromptQuestion)],
+                None,
+            ))
+            .expect("draw succeeds");
+        let output = String::from_utf8(renderer.writer).expect("renderer writes UTF-8 commands");
+        assert!(!output.contains("\x1b[1m"));
+        assert!(output.contains("plain"));
     }
 
     fn assert_io_operation(result: Result<FormOutcome, RunError>, expected: IoOperation) {
