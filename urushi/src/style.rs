@@ -86,6 +86,18 @@ pub(crate) struct StylableParts {
     pub strikethrough: bool,
 }
 
+#[cfg(feature = "ratatui")]
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct BoxParts {
+    pub padding: Sides,
+    pub margin: Sides,
+    pub border: Option<Border>,
+    pub border_foreground: Option<Color>,
+    pub border_background: Option<Color>,
+    pub width: Option<u16>,
+    pub align: Align,
+}
+
 /// A reusable set of styling rules that renders text into an ANSI string.
 ///
 /// A `Style` is an immutable value: builder methods consume and return it, so
@@ -221,6 +233,19 @@ impl Style {
             blink: modifiers.blink,
             reverse: modifiers.reverse,
             strikethrough: modifiers.strikethrough,
+        }
+    }
+
+    #[cfg(feature = "ratatui")]
+    pub(crate) fn box_parts(&self) -> BoxParts {
+        BoxParts {
+            padding: self.padding,
+            margin: self.margin,
+            border: self.border,
+            border_foreground: self.border_fg,
+            border_background: self.border_bg,
+            width: self.width,
+            align: self.align,
         }
     }
 

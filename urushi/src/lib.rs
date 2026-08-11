@@ -77,7 +77,7 @@ mod text;
 mod theme;
 
 #[cfg(feature = "ratatui")]
-pub use self::ratatui::RatatuiStyle;
+pub use self::ratatui::{RatatuiStyle, RatatuiWidget};
 pub use border::Border;
 pub use color::Color;
 pub use join::{VerticalAlign, join_horizontal, join_vertical};
