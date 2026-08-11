@@ -1,9 +1,18 @@
-//! Interactive terminal prompts styled with [`urushi`].
+//! Blocking, inline terminal prompt runtime styled with [`urushi`].
 //!
-//! Not implemented yet. The planned design follows
-//! [huh](https://github.com/charmbracelet/huh): a `Form` → `Group` → field
-//! hierarchy (`Input`, `Select`, `MultiSelect`, `Confirm`, …) with per-field
-//! validation and a theme built from [`urushi::Style`] values. The public
-//! entry point is a blocking `run()`; internally the UI is event-driven.
+//! [`Form::run`] owns a short-lived terminal session and blocks until the form
+//! is submitted, cancelled, or terminal I/O fails. Field controls and the
+//! themed inline renderer are added separately; this crate currently exposes
+//! the runtime's stable construction and result boundaries.
 
 pub use urushi;
+
+pub(crate) mod runtime;
+
+#[cfg(test)]
+mod runtime_extension_test;
+
+pub use runtime::{
+    Field, FieldConfigError, FieldKey, Form, FormBuildError, FormBuilder, FormOutcome, FormValues,
+    Group, GroupBuildError, GroupBuilder, IoOperation, RunError,
+};
