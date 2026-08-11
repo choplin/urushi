@@ -210,7 +210,7 @@ impl Form {
         self.run_with(&mut events, &mut renderer, &mut terminal)
     }
 
-    fn run_with<S, R, T>(
+    pub(crate) fn run_with<S, R, T>(
         mut self,
         events: &mut S,
         renderer: &mut R,
@@ -349,15 +349,7 @@ impl Form {
                 cursor: None,
             };
         };
-        PromptView {
-            lines: vec![ViewLine {
-                spans: vec![ViewSpan {
-                    text: self.groups[group].fields[field].name().to_owned(),
-                    role: ComponentRole::Body,
-                }],
-            }],
-            cursor: None,
-        }
+        self.groups[group].fields[field].view()
     }
 
     fn into_values(mut self) -> FormValues {
@@ -477,10 +469,6 @@ enum FormState {
     Cancelled,
 }
 
-#[allow(
-    dead_code,
-    reason = "Concrete fields add validation state in the next milestone."
-)]
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum FieldState {
     Active,
@@ -488,10 +476,6 @@ enum FieldState {
     Accepted,
 }
 
-#[allow(
-    dead_code,
-    reason = "Concrete field controls construct these actions in the next milestone."
-)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum FieldAction {
     Stay,
@@ -514,10 +498,6 @@ pub(crate) struct FieldEntry {
 }
 
 impl FieldEntry {
-    #[allow(
-        dead_code,
-        reason = "Future crate-root field modules construct entries through this sealed runtime boundary."
-    )]
     pub(crate) fn new(name: String, field: Box<dyn RuntimeField>) -> Self {
         Self {
             name,
@@ -531,7 +511,14 @@ impl FieldEntry {
     }
 
     fn event(&mut self, event: Event) -> FieldAction {
-        self.field.event(event)
+        let action = self.field.event(event);
+        self.state = match self.field.validation_error() {
+            Some(message) => FieldState::Invalid {
+                message: message.to_owned(),
+            },
+            None => FieldState::Active,
+        };
+        action
     }
 
     fn activate(&mut self) {
@@ -545,11 +532,20 @@ impl FieldEntry {
     fn take_value(&mut self) -> Box<dyn Any> {
         self.field.take_value()
     }
+
+    fn view(&self) -> PromptView {
+        self.field.view()
+    }
 }
 
 pub(crate) trait RuntimeField {
     fn event(&mut self, event: Event) -> FieldAction;
     fn take_value(&mut self) -> Box<dyn Any>;
+    fn view(&self) -> PromptView;
+
+    fn validation_error(&self) -> Option<&str> {
+        None
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -812,6 +808,18 @@ mod tests {
 
         fn take_value(&mut self) -> Box<dyn Any> {
             Box::new(self.value.clone())
+        }
+
+        fn view(&self) -> PromptView {
+            PromptView {
+                lines: vec![ViewLine {
+                    spans: vec![ViewSpan {
+                        text: self.key.name().to_owned(),
+                        role: ComponentRole::Body,
+                    }],
+                }],
+                cursor: None,
+            }
         }
     }
 

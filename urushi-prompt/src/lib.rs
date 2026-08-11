@@ -7,11 +7,13 @@
 
 pub use urushi;
 
+mod input;
 pub(crate) mod runtime;
 
 #[cfg(test)]
 mod runtime_extension_test;
 
+pub use input::{Input, ValidationError, Validator};
 pub use runtime::{
     Field, FieldConfigError, FieldKey, Form, FormBuildError, FormBuilder, FormOutcome, FormValues,
     Group, GroupBuildError, GroupBuilder, IoOperation, RunError,

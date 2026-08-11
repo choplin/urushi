@@ -2,8 +2,9 @@ use std::any::Any;
 
 use crate::{
     FieldKey, Form, Group,
-    runtime::{self, FieldAction, FieldEntry, RuntimeField},
+    runtime::{self, FieldAction, FieldEntry, PromptView, RuntimeField, ViewLine, ViewSpan},
 };
+use urushi::ComponentRole;
 
 struct SiblingField {
     key: FieldKey<String>,
@@ -30,6 +31,18 @@ impl RuntimeField for SiblingField {
 
     fn take_value(&mut self) -> Box<dyn Any> {
         Box::new(String::new())
+    }
+
+    fn view(&self) -> PromptView {
+        PromptView {
+            lines: vec![ViewLine {
+                spans: vec![ViewSpan {
+                    text: self.key.name().to_owned(),
+                    role: ComponentRole::Body,
+                }],
+            }],
+            cursor: None,
+        }
     }
 }
 
