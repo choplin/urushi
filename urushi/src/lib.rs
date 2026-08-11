@@ -65,6 +65,14 @@
 //! pipe) disables ANSI entirely; a non-empty `NO_COLOR` removes colors but
 //! keeps text modifiers. Use [`TerminalProfile::new`] when an application
 //! needs a deterministic explicit override instead of detection.
+//!
+//! # Ratatui adapter
+//!
+//! Enable the `ratatui` feature to convert the stylable subset with
+//! [`RatatuiStyle`] or render the full box model with [`Style::widget`]. The
+//! default build does not depend on ratatui. The widget writes only to the
+//! buffer provided by ratatui and leaves terminal lifecycle and event handling
+//! to the application.
 
 mod border;
 mod color;

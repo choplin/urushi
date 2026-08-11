@@ -14,3 +14,7 @@ unicode-width.workspace = true
 [features]
 default = []
 ratatui = ["dep:ratatui"]
+
+[[example]]
+name = "themed_ratatui"
+required-features = ["ratatui"]

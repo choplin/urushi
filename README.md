@@ -16,8 +16,8 @@ output, interactive prompts, and full TUIs. `urushi` aims to fill that gap:
 
 - **Standalone first.** A `Style` renders to a plain ANSI `String`, so it
   works with `println!` — no terminal setup, raw mode, or event loop.
-- **Ride the ratatui ecosystem via an adapter.** A planned `ratatui` cargo
-  feature will let the same styles be used as ratatui widgets, mapping the
+- **Ride the ratatui ecosystem via an adapter.** An optional `ratatui` cargo
+  feature lets the same styles be used as ratatui widgets, mapping the
   fg/bg/modifier subset onto `ratatui::style::Style` and carrying the box
   model in the widget implementation.
 - **CJK correctness as a first-class goal.** Width measurement, wrapping,
@@ -58,6 +58,36 @@ alignment, and visible text. A non-empty `NO_COLOR` similarly removes colors
 while retaining modifiers; use `TerminalProfile::new` for a deterministic
 application override.
 
+### The same Theme in ratatui
+
+Enable the optional adapter when the application also uses ratatui:
+
+```toml
+[dependencies]
+urushi = { version = "0.1.0", features = ["ratatui"] }
+```
+
+Resolve a component from the same `Theme` used by plain output, then pass its
+widget adapter to a ratatui frame. Colors and modifiers stay in the Theme; the
+TUI layer does not define a second palette.
+
+```rust
+let panel = theme.style(ComponentRole::PanelFocused);
+frame.render_widget(panel.widget("保存しました"), frame.area());
+```
+
+`Style::widget` carries margin, border, padding, fixed width, and alignment
+into the ratatui `Buffer`, including CJK-aware clipping. It is stateless and
+does not initialize or restore the terminal. `RatatuiStyle::from(&style)` is
+available when only foreground, background, and text modifiers are needed;
+that conversion deliberately omits the box model and border colors.
+
+Run the complete Theme → plain CLI / ratatui example with:
+
+```sh
+cargo run -p urushi --example themed_ratatui --features ratatui
+```
+
 ## Roadmap
 
 - [x] `Style` builder: colors, modifiers, padding, margin, border, width, align
@@ -67,7 +97,7 @@ application override.
 - [ ] Adaptive colors (light/dark terminal backgrounds)
 - [x] Correct re-styling of content that already contains ANSI sequences (nested styles)
 - [x] Theme layer: per-component style sets derived from a small set of semantic tokens
-- [ ] `ratatui` feature: `impl Widget`, `From<Style>` for the stylable subset
+- [x] `ratatui` feature: box-model Widget and loss-aware stylable-subset conversion
 - [ ] `urushi-prompt`: huh-style `Form` / `Group` / fields with validation and theming
 
 ## Acknowledgments
