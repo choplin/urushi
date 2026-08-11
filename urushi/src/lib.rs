@@ -69,11 +69,15 @@
 mod border;
 mod color;
 mod join;
+#[cfg(feature = "ratatui")]
+mod ratatui;
 mod style;
 mod terminal;
 mod text;
 mod theme;
 
+#[cfg(feature = "ratatui")]
+pub use self::ratatui::RatatuiStyle;
 pub use border::Border;
 pub use color::Color;
 pub use join::{VerticalAlign, join_horizontal, join_vertical};

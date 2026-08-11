@@ -72,6 +72,20 @@ struct Modifiers {
     strikethrough: bool,
 }
 
+#[cfg(feature = "ratatui")]
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct StylableParts {
+    pub foreground: Option<Color>,
+    pub background: Option<Color>,
+    pub bold: bool,
+    pub dim: bool,
+    pub italic: bool,
+    pub underline: bool,
+    pub blink: bool,
+    pub reverse: bool,
+    pub strikethrough: bool,
+}
+
 /// A reusable set of styling rules that renders text into an ANSI string.
 ///
 /// A `Style` is an immutable value: builder methods consume and return it, so
@@ -192,6 +206,22 @@ impl Style {
     pub fn align(mut self, align: Align) -> Self {
         self.align = align;
         self
+    }
+
+    #[cfg(feature = "ratatui")]
+    pub(crate) fn stylable_parts(&self) -> StylableParts {
+        let modifiers = self.modifiers;
+        StylableParts {
+            foreground: self.fg,
+            background: self.bg,
+            bold: modifiers.bold,
+            dim: modifiers.dim,
+            italic: modifiers.italic,
+            underline: modifiers.underline,
+            blink: modifiers.blink,
+            reverse: modifiers.reverse,
+            strikethrough: modifiers.strikethrough,
+        }
     }
 
     /// Replaces every color property while preserving the rest of the style.
