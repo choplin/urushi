@@ -97,7 +97,14 @@ cargo run -p urushi --example themed_ratatui --features ratatui
 
 ### The same Theme in interactive prompts
 
-Run the CJK prompt wizard from the repository root:
+Run the English prompt wizard from the repository root:
+
+```sh
+nix develop --command cargo run -p urushi-prompt --example wizard
+```
+
+Then run the CJK variant to exercise East Asian text input, width handling,
+and localized field help:
 
 ```sh
 nix develop --command cargo run -p urushi-prompt --example cjk_wizard
@@ -115,8 +122,9 @@ Use this sequence for a terminal smoke test:
    change the language.
 3. Press Enter to reach confirmation, then press Shift-Tab. The form returns
    to the language field without losing the selection. Press Enter again.
-4. Press `y` or `n`, then Enter. A submitted form prints the selected name and
-   language below the prompt.
+4. Press `y` or `n` to choose and submit directly, or use Left/Right and Enter.
+   Tab does not submit the final field.
+   A submitted form prints the selected name and language below the prompt.
 5. Run the example again and press Escape or Ctrl-C. The form cancels, removes
    its inline prompt region, and restores raw mode and cursor visibility.
 

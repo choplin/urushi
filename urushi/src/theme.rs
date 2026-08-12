@@ -28,7 +28,7 @@
 
 use crate::{Border, Color, Style};
 
-const COMPONENT_ROLE_COUNT: usize = 16;
+const COMPONENT_ROLE_COUNT: usize = 18;
 
 /// An explicit choice between a light and dark theme.
 ///
@@ -94,6 +94,10 @@ pub enum ComponentRole {
     PromptOption,
     /// A selected prompt option.
     PromptOptionSelected,
+    /// A prompt button that is not focused.
+    PromptButton,
+    /// The focused prompt button.
+    PromptButtonFocused,
     /// Prompt help text.
     PromptHelp,
     /// A prompt validation error.
@@ -119,10 +123,12 @@ impl ComponentRole {
             Self::PromptCursor => 9,
             Self::PromptOption => 10,
             Self::PromptOptionSelected => 11,
-            Self::PromptHelp => 12,
-            Self::PromptError => 13,
-            Self::Panel => 14,
-            Self::PanelFocused => 15,
+            Self::PromptButton => 12,
+            Self::PromptButtonFocused => 13,
+            Self::PromptHelp => 14,
+            Self::PromptError => 15,
+            Self::Panel => 16,
+            Self::PanelFocused => 17,
         }
     }
 }
@@ -156,6 +162,13 @@ impl ComponentStyles {
                 Style::new().foreground(tokens.text_muted).italic(),
                 Style::new().foreground(tokens.accent).bold(),
                 Style::new().foreground(tokens.text),
+                Style::new()
+                    .foreground(tokens.accent_text)
+                    .background(tokens.accent)
+                    .bold(),
+                Style::new()
+                    .foreground(tokens.text)
+                    .background(tokens.surface),
                 Style::new()
                     .foreground(tokens.accent_text)
                     .background(tokens.accent)
@@ -365,6 +378,16 @@ mod tests {
         assert_eq!(
             components
                 .style(ComponentRole::PromptOptionSelected)
+                .render("x"),
+            "\x1b[1;36;45mx\x1b[0m"
+        );
+        assert_eq!(
+            components.style(ComponentRole::PromptButton).render("x"),
+            "\x1b[31;44mx\x1b[0m"
+        );
+        assert_eq!(
+            components
+                .style(ComponentRole::PromptButtonFocused)
                 .render("x"),
             "\x1b[1;36;45mx\x1b[0m"
         );

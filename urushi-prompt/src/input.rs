@@ -1,5 +1,6 @@
 use std::any::Any;
 
+use unicode_segmentation::UnicodeSegmentation;
 use urushi::{ComponentRole, visible_width};
 
 use crate::{
@@ -33,6 +34,7 @@ pub type Validator<T> = Box<dyn Fn(&T) -> Result<(), ValidationError> + Send + S
 pub struct Input {
     key: FieldKey<String>,
     question: String,
+    description: Option<String>,
     value: String,
     placeholder: Option<String>,
     help: String,
@@ -55,10 +57,11 @@ impl Input {
         }
 
         let value = initial_value.into();
-        let cursor = value.chars().count();
+        let cursor = value.graphemes(true).count();
         Ok(Self {
             key,
             question: question.into(),
+            description: None,
             value,
             placeholder: None,
             help: "enter continue • shift+tab back • esc cancel".to_owned(),
@@ -74,6 +77,13 @@ impl Input {
     #[must_use]
     pub fn placeholder(mut self, placeholder: impl Into<String>) -> Self {
         self.placeholder = Some(placeholder.into());
+        self
+    }
+
+    /// Sets supporting text shown below the question.
+    #[must_use]
+    pub fn description(mut self, description: impl Into<String>) -> Self {
+        self.description = Some(description.into());
         self
     }
 
@@ -119,19 +129,35 @@ impl Input {
         self.validation_error = None;
     }
 
-    fn byte_index(&self, scalar_index: usize) -> usize {
+    fn byte_index(&self, grapheme_index: usize) -> usize {
         self.value
-            .char_indices()
-            .nth(scalar_index)
+            .grapheme_indices(true)
+            .nth(grapheme_index)
             .map_or(self.value.len(), |(byte_index, _)| byte_index)
     }
 
-    fn delete_scalar_at(&mut self, scalar_index: usize) {
-        let start = self.byte_index(scalar_index);
-        let end = self.byte_index(scalar_index + 1);
+    fn delete_grapheme_at(&mut self, grapheme_index: usize) {
+        let start = self.byte_index(grapheme_index);
+        let end = self.byte_index(grapheme_index + 1);
         if start != end {
             self.value.replace_range(start..end, "");
         }
+    }
+
+    fn insert_text(&mut self, text: &str) {
+        let text = text
+            .replace("\r\n", "\n")
+            .chars()
+            .filter_map(|character| match character {
+                '\r' | '\n' | '\t' => Some(' '),
+                character if character.is_control() => None,
+                character => Some(character),
+            })
+            .collect::<String>();
+        let byte_index = self.byte_index(self.cursor);
+        self.value.insert_str(byte_index, &text);
+        self.cursor += text.graphemes(true).count();
+        self.edit();
     }
 
     fn submit(&mut self) -> FieldAction {
@@ -174,12 +200,12 @@ impl Input {
                 role: ComponentRole::PromptAnswer,
             });
         }
-        if let Some(character) = self.value[cursor_byte..].chars().next() {
+        if let Some(grapheme) = self.value[cursor_byte..].graphemes(true).next() {
             spans.push(ViewSpan {
-                text: character.to_string(),
+                text: grapheme.to_owned(),
                 role: ComponentRole::PromptCursor,
             });
-            let after_cursor = cursor_byte + character.len_utf8();
+            let after_cursor = cursor_byte + grapheme.len();
             if after_cursor < self.value.len() {
                 spans.push(ViewSpan {
                     text: self.value[after_cursor..].to_owned(),
@@ -204,46 +230,61 @@ impl runtime::private::Sealed for Input {
 
 impl RuntimeField for Input {
     fn event(&mut self, event: Event) -> FieldAction {
+        if let Event::Paste(text) = event {
+            self.insert_text(&text);
+            return FieldAction::Stay;
+        }
         let Event::Key(key) = event else {
             return FieldAction::Stay;
         };
 
-        match key.code {
-            KeyCode::Char(character) => {
-                let byte_index = self.byte_index(self.cursor);
-                self.value.insert(byte_index, character);
-                self.cursor += 1;
-                self.edit();
-                FieldAction::Stay
-            }
-            KeyCode::Left => {
-                self.cursor = self.cursor.saturating_sub(1);
-                FieldAction::Stay
-            }
-            KeyCode::Right => {
-                self.cursor = (self.cursor + 1).min(self.value.chars().count());
-                FieldAction::Stay
-            }
-            KeyCode::Home => {
+        match (key.code, key.modifiers.control, key.modifiers.alt) {
+            (KeyCode::Escape, _, _) => FieldAction::Cancel,
+            (KeyCode::Char('a'), true, _) | (KeyCode::Home, _, _) => {
                 self.cursor = 0;
                 FieldAction::Stay
             }
-            KeyCode::End => {
-                self.cursor = self.value.chars().count();
+            (KeyCode::Char('e'), true, _) | (KeyCode::End, _, _) => {
+                self.cursor = self.value.graphemes(true).count();
                 FieldAction::Stay
             }
-            KeyCode::Backspace if self.cursor > 0 => {
-                self.delete_scalar_at(self.cursor - 1);
+            (KeyCode::Char('b'), true, _) | (KeyCode::Left, _, _) => {
+                self.cursor = self.cursor.saturating_sub(1);
+                FieldAction::Stay
+            }
+            (KeyCode::Char('f'), true, _) | (KeyCode::Right, _, _) => {
+                self.cursor = (self.cursor + 1).min(self.value.graphemes(true).count());
+                FieldAction::Stay
+            }
+            (KeyCode::Char('u'), true, _) => {
+                let end = self.byte_index(self.cursor);
+                self.value.replace_range(..end, "");
+                self.cursor = 0;
+                self.edit();
+                FieldAction::Stay
+            }
+            (KeyCode::Char('k'), true, _) => {
+                let start = self.byte_index(self.cursor);
+                self.value.truncate(start);
+                self.edit();
+                FieldAction::Stay
+            }
+            (KeyCode::Backspace, _, _) if self.cursor > 0 => {
+                self.delete_grapheme_at(self.cursor - 1);
                 self.cursor -= 1;
                 self.edit();
                 FieldAction::Stay
             }
-            KeyCode::Delete if self.cursor < self.value.chars().count() => {
-                self.delete_scalar_at(self.cursor);
+            (KeyCode::Delete, _, _) if self.cursor < self.value.graphemes(true).count() => {
+                self.delete_grapheme_at(self.cursor);
                 self.edit();
                 FieldAction::Stay
             }
-            KeyCode::Enter | KeyCode::Tab => self.submit(),
+            (KeyCode::Enter | KeyCode::Tab, _, _) => self.submit(),
+            (KeyCode::Char(character), false, false) => {
+                self.insert_text(&character.to_string());
+                FieldAction::Stay
+            }
             _ => FieldAction::Stay,
         }
     }
@@ -263,15 +304,22 @@ impl RuntimeField for Input {
             }],
         };
         answer.spans.extend(self.answer_spans());
-        let mut lines = vec![
-            ViewLine {
+        let mut lines = vec![ViewLine {
+            spans: vec![ViewSpan {
+                text: self.question.clone(),
+                role: ComponentRole::PromptQuestion,
+            }],
+        }];
+        if let Some(description) = &self.description {
+            lines.push(ViewLine {
                 spans: vec![ViewSpan {
-                    text: self.question.clone(),
-                    role: ComponentRole::PromptQuestion,
+                    text: description.clone(),
+                    role: ComponentRole::Muted,
                 }],
-            },
-            answer,
-        ];
+            });
+        }
+        let answer_row = lines.len();
+        lines.push(answer);
         if let Some(message) = &self.validation_error {
             lines.push(ViewLine {
                 spans: vec![
@@ -296,7 +344,7 @@ impl RuntimeField for Input {
         PromptView {
             lines,
             cursor: Some(ViewCursor {
-                row: 1,
+                row: answer_row.min(usize::from(u16::MAX)) as u16,
                 column: cursor_column.min(usize::from(u16::MAX)) as u16,
             }),
         }
@@ -340,7 +388,7 @@ mod tests {
     }
 
     #[test]
-    fn edits_follow_unicode_scalar_boundaries() {
+    fn edits_follow_unicode_grapheme_boundaries() {
         let mut input = Input::new(FieldKey::new("name"), "Name", "aあb").expect("input is valid");
 
         assert_eq!(input.event(key(KeyCode::Left)), FieldAction::Stay);
@@ -350,6 +398,23 @@ mod tests {
         assert_eq!(input.value(), "aあb");
         assert_eq!(input.event(key(KeyCode::Delete)), FieldAction::Stay);
         assert_eq!(input.value(), "aあ");
+
+        let mut combined =
+            Input::new(FieldKey::new("combined"), "Name", "e\u{301}x").expect("input is valid");
+        assert_eq!(combined.event(key(KeyCode::Left)), FieldAction::Stay);
+        assert_eq!(combined.event(key(KeyCode::Backspace)), FieldAction::Stay);
+        assert_eq!(combined.value(), "x");
+    }
+
+    #[test]
+    fn paste_inserts_at_the_cursor_and_flattens_line_breaks() {
+        let mut input = Input::new(FieldKey::new("name"), "Name", "ab").expect("input is valid");
+        assert_eq!(input.event(key(KeyCode::Left)), FieldAction::Stay);
+        assert_eq!(
+            input.event(Event::Paste("あ\r\nい\tう".to_owned())),
+            FieldAction::Stay
+        );
+        assert_eq!(input.value(), "aあ い うb");
     }
 
     #[test]

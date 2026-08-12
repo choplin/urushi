@@ -8,7 +8,10 @@ use std::{
 
 use crossterm::{
     cursor,
-    event::{self, Event as CrosstermEvent, KeyCode as CrosstermKeyCode, KeyEventKind},
+    event::{
+        self, DisableBracketedPaste, EnableBracketedPaste, Event as CrosstermEvent,
+        KeyCode as CrosstermKeyCode, KeyEventKind,
+    },
     execute, queue,
     terminal::{self, Clear, ClearType},
 };
@@ -248,6 +251,7 @@ impl Form {
 
         let mut session = TerminalSession::enter(renderer, terminal)?;
         let mut state = FormState::Running { group: 0, field: 0 };
+        self.groups[0].fields[0].activate();
 
         loop {
             if let Err(source) = session.renderer.draw(&self.view(&state)) {
@@ -297,10 +301,6 @@ impl Form {
 
         let action = match event {
             Event::Key(KeyEvent {
-                code: KeyCode::Escape,
-                ..
-            })
-            | Event::Key(KeyEvent {
                 code: KeyCode::Char('c'),
                 modifiers: KeyModifiers { control: true, .. },
             }) => FieldAction::Cancel,
@@ -308,11 +308,25 @@ impl Form {
                 code: KeyCode::BackTab,
                 ..
             }) => FieldAction::Back,
+            Event::Key(KeyEvent {
+                code: KeyCode::Tab, ..
+            }) if self.next_position(group, field).is_none()
+                && !self.groups[group].fields[field].captures_tab() =>
+            {
+                FieldAction::Stay
+            }
+            event @ Event::Key(KeyEvent {
+                code: KeyCode::Escape,
+                ..
+            }) => match self.groups[group].fields[field].event(event) {
+                FieldAction::Stay => FieldAction::Cancel,
+                action => action,
+            },
             event => self.groups[group].fields[field].event(event),
         };
 
         match action {
-            FieldAction::Stay => ReducerResult::Running,
+            FieldAction::Stay | FieldAction::Handled => ReducerResult::Running,
             FieldAction::Cancel => {
                 *state = FormState::Cancelled;
                 ReducerResult::Cancelled
@@ -320,6 +334,7 @@ impl Form {
             FieldAction::Back => {
                 if let Some((previous_group, previous_field)) = self.previous_position(group, field)
                 {
+                    self.groups[group].fields[field].deactivate();
                     self.groups[previous_group].fields[previous_field].activate();
                     *state = FormState::Running {
                         group: previous_group,
@@ -377,6 +392,25 @@ impl Form {
         let mut lines = Vec::new();
         let mut cursor = None;
         let mut footer = None;
+        if let Some(title) = &self.groups[group].title {
+            lines.push(ViewLine {
+                spans: vec![ViewSpan {
+                    text: title.clone(),
+                    role: ComponentRole::PromptQuestion,
+                }],
+            });
+        }
+        if let Some(description) = &self.groups[group].description {
+            lines.push(ViewLine {
+                spans: vec![ViewSpan {
+                    text: description.clone(),
+                    role: ComponentRole::Muted,
+                }],
+            });
+        }
+        if !lines.is_empty() {
+            lines.push(ViewLine { spans: Vec::new() });
+        }
         for (index, entry) in self.groups[group].fields.iter().enumerate() {
             let focused = index == field;
             let mut field_view = entry.view();
@@ -474,21 +508,43 @@ impl Form {
 /// A group of fields executed in builder insertion order.
 pub struct Group {
     fields: Vec<FieldEntry>,
+    title: Option<String>,
+    description: Option<String>,
 }
 
 impl Group {
     /// Starts building a group.
     pub fn builder() -> GroupBuilder {
-        GroupBuilder { fields: Vec::new() }
+        GroupBuilder {
+            fields: Vec::new(),
+            title: None,
+            description: None,
+        }
     }
 }
 
 /// A builder for a non-empty prompt group.
 pub struct GroupBuilder {
     fields: Vec<FieldEntry>,
+    title: Option<String>,
+    description: Option<String>,
 }
 
 impl GroupBuilder {
+    /// Sets a heading rendered above this group.
+    #[must_use]
+    pub fn title(mut self, title: impl Into<String>) -> Self {
+        self.title = Some(title.into());
+        self
+    }
+
+    /// Sets supporting text rendered below the group heading.
+    #[must_use]
+    pub fn description(mut self, description: impl Into<String>) -> Self {
+        self.description = Some(description.into());
+        self
+    }
+
     /// Appends a crate-provided field in execution order.
     #[must_use]
     pub fn field<F>(mut self, field: F) -> Self
@@ -507,6 +563,8 @@ impl GroupBuilder {
         }
         Ok(Group {
             fields: self.fields,
+            title: self.title,
+            description: self.description,
         })
     }
 }
@@ -520,6 +578,7 @@ pub(crate) mod private {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum Event {
     Key(KeyEvent),
+    Paste(String),
     Resize { columns: u16, rows: u16 },
 }
 
@@ -567,7 +626,13 @@ pub(crate) trait Renderer {
 pub(crate) trait TerminalControl {
     fn is_interactive(&self) -> bool;
     fn enable_raw_mode(&mut self) -> io::Result<()>;
+    fn enable_bracketed_paste(&mut self) -> io::Result<()> {
+        Ok(())
+    }
     fn show_cursor(&mut self) -> io::Result<()>;
+    fn disable_bracketed_paste(&mut self) -> io::Result<()> {
+        Ok(())
+    }
     fn disable_raw_mode(&mut self) -> io::Result<()>;
     fn flush(&mut self) -> io::Result<()>;
 }
@@ -589,6 +654,7 @@ enum FieldState {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum FieldAction {
     Stay,
+    Handled,
     Accept,
     Back,
     Cancel,
@@ -632,10 +698,16 @@ impl FieldEntry {
     }
 
     fn activate(&mut self) {
+        self.field.focus();
         self.state = FieldState::Active;
     }
 
+    fn deactivate(&mut self) {
+        self.field.blur();
+    }
+
     fn accept(&mut self) {
+        self.field.blur();
         self.state = FieldState::Accepted;
     }
 
@@ -646,6 +718,10 @@ impl FieldEntry {
     fn view(&self) -> PromptView {
         self.field.view()
     }
+
+    fn captures_tab(&self) -> bool {
+        self.field.captures_tab()
+    }
 }
 
 pub(crate) trait RuntimeField {
@@ -655,6 +731,14 @@ pub(crate) trait RuntimeField {
 
     fn validation_error(&self) -> Option<&str> {
         None
+    }
+
+    fn focus(&mut self) {}
+
+    fn blur(&mut self) {}
+
+    fn captures_tab(&self) -> bool {
+        false
     }
 }
 
@@ -713,6 +797,7 @@ struct TerminalSession<'a, R: Renderer, T: TerminalControl> {
     renderer: &'a mut R,
     terminal: &'a mut T,
     raw_mode: bool,
+    bracketed_paste: bool,
     cleaned: bool,
 }
 
@@ -727,10 +812,19 @@ where
             source,
             cleanup: None,
         })?;
+        if let Err(source) = terminal.enable_bracketed_paste() {
+            let cleanup = terminal.disable_raw_mode().err();
+            return Err(RunError::Io {
+                operation: IoOperation::EnterTerminal,
+                source,
+                cleanup,
+            });
+        }
         Ok(Self {
             renderer,
             terminal,
             raw_mode: true,
+            bracketed_paste: true,
             cleaned: false,
         })
     }
@@ -753,6 +847,12 @@ where
         let mut first_error = self.renderer.finish(finish).err();
         if let Err(error) = self.terminal.show_cursor() {
             record_first_error(&mut first_error, error);
+        }
+        if self.bracketed_paste {
+            self.bracketed_paste = false;
+            if let Err(error) = self.terminal.disable_bracketed_paste() {
+                record_first_error(&mut first_error, error);
+            }
         }
         if self.raw_mode {
             self.raw_mode = false;
@@ -797,6 +897,7 @@ impl EventSource for CrosstermEventSource {
                 CrosstermEvent::Resize(columns, rows) => {
                     return Ok(Event::Resize { columns, rows });
                 }
+                CrosstermEvent::Paste(text) => return Ok(Event::Paste(text)),
                 _ => {}
             }
         }
@@ -839,6 +940,7 @@ struct CrosstermRenderer<W> {
     origin_saved: bool,
     reserved_rows: u16,
     previous_rows: u16,
+    previous_lines: Vec<RenderedLine>,
     columns: u16,
     rows: u16,
 }
@@ -857,6 +959,7 @@ impl<W: Write> CrosstermRenderer<W> {
             origin_saved: false,
             reserved_rows: 0,
             previous_rows: 0,
+            previous_lines: Vec::new(),
             columns: size.0.max(1),
             rows: size.1.max(1),
         }
@@ -882,6 +985,12 @@ impl<W: Write> CrosstermRenderer<W> {
                         .min(width - 1) as u16,
                 });
                 lines.push(line);
+            } else if line
+                .spans
+                .iter()
+                .any(|span| span.role == ComponentRole::PromptHelp)
+            {
+                lines.push(clip_line(line, 0, width).0);
             } else {
                 lines.extend(wrap_line(line, width));
             }
@@ -893,32 +1002,36 @@ impl<W: Write> CrosstermRenderer<W> {
 
         let max_rows = usize::from(self.rows.max(1));
         if lines.len() > max_rows {
+            let active_start = lines
+                .iter()
+                .position(|line| line.has_role(ComponentRole::Accent))
+                .unwrap_or(0);
             let focus_row = cursor.map_or_else(
                 || {
                     lines
                         .iter()
                         .position(|line| {
                             line.has_role(ComponentRole::Accent)
-                                && line.has_role(ComponentRole::PromptOptionSelected)
+                                && (line.has_role(ComponentRole::PromptOptionSelected)
+                                    || line.has_role(ComponentRole::PromptButtonFocused))
                         })
                         .or_else(|| {
                             lines.iter().position(|line| {
                                 line.has_role(ComponentRole::Accent)
-                                    && line.has_role(ComponentRole::PromptOption)
+                                    && (line.has_role(ComponentRole::PromptOption)
+                                        || line.has_role(ComponentRole::PromptButton))
                             })
                         })
-                        .or_else(|| {
-                            lines
-                                .iter()
-                                .position(|line| line.has_role(ComponentRole::Accent))
-                        })
-                        .unwrap_or(0)
+                        .unwrap_or(active_start)
                 },
                 |value| usize::from(value.row),
             );
-            let start = focus_row
-                .saturating_sub(max_rows / 2)
-                .min(lines.len() - max_rows);
+            let mut start = active_start.saturating_sub(1).min(lines.len() - max_rows);
+            if focus_row < start {
+                start = focus_row;
+            } else if focus_row >= start + max_rows {
+                start = focus_row + 1 - max_rows;
+            }
             lines = lines.drain(start..start + max_rows).collect();
             cursor = cursor.and_then(|value| {
                 let row = usize::from(value.row);
@@ -939,6 +1052,8 @@ impl<W: Write> CrosstermRenderer<W> {
                         && !line.has_role(ComponentRole::PromptCursor)
                         && !line.has_role(ComponentRole::PromptOptionSelected)
                         && !line.has_role(ComponentRole::PromptOption)
+                        && !line.has_role(ComponentRole::PromptButtonFocused)
+                        && !line.has_role(ComponentRole::PromptButton)
                 })
             {
                 lines[slot] = error;
@@ -952,6 +1067,8 @@ impl<W: Write> CrosstermRenderer<W> {
                         && !line.has_role(ComponentRole::PromptCursor)
                         && !line.has_role(ComponentRole::PromptOptionSelected)
                         && !line.has_role(ComponentRole::PromptOption)
+                        && !line.has_role(ComponentRole::PromptButtonFocused)
+                        && !line.has_role(ComponentRole::PromptButton)
                         && !line.has_role(ComponentRole::PromptError)
                 })
             {
@@ -1024,29 +1141,47 @@ impl<W: Write> CrosstermRenderer<W> {
 impl<W: Write> Renderer for CrosstermRenderer<W> {
     fn draw(&mut self, view: &PromptView) -> io::Result<()> {
         let layout = self.layout(view);
-        let rows_to_clear = self
-            .previous_rows
-            .max(layout.lines.len().min(usize::from(self.rows)) as u16);
+        let rows_to_touch = self
+            .previous_lines
+            .len()
+            .max(layout.lines.len())
+            .min(usize::from(self.rows)) as u16;
         // Claim every row this redraw can touch before issuing a fallible
         // terminal write. Error cleanup can then erase a partially drawn view.
-        self.previous_rows = rows_to_clear;
+        self.previous_rows = rows_to_touch;
 
         queue!(self.writer, cursor::Hide)?;
         self.reserve_owned_rows(layout.lines.len() as u16)?;
 
-        self.clear_owned_rows(rows_to_clear)?;
-
-        queue!(self.writer, cursor::RestorePosition)?;
-        for (index, line) in layout.lines.iter().enumerate() {
-            if index > 0 {
-                queue!(self.writer, cursor::MoveToColumn(0))?;
+        for row in 0..usize::from(rows_to_touch) {
+            let previous = self.previous_lines.get(row);
+            let current = layout.lines.get(row);
+            if previous == current {
+                continue;
             }
-            self.draw_line(line)?;
-            if index + 1 < layout.lines.len() {
-                queue!(self.writer, cursor::MoveToNextLine(1))?;
+
+            queue!(self.writer, cursor::RestorePosition)?;
+            if row > 0 {
+                queue!(
+                    self.writer,
+                    cursor::MoveDown(row.min(usize::from(u16::MAX)) as u16),
+                    cursor::MoveToColumn(0)
+                )?;
+            }
+            queue!(
+                self.writer,
+                Clear(if row == 0 {
+                    ClearType::UntilNewLine
+                } else {
+                    ClearType::CurrentLine
+                })
+            )?;
+            if let Some(line) = current {
+                self.draw_line(line)?;
             }
         }
-        self.previous_rows = layout.lines.len() as u16;
+        self.previous_lines = layout.lines;
+        self.previous_rows = self.previous_lines.len() as u16;
 
         queue!(self.writer, cursor::RestorePosition)?;
         if let Some(cursor) = layout.cursor {
@@ -1068,16 +1203,20 @@ impl<W: Write> Renderer for CrosstermRenderer<W> {
         match outcome {
             RenderFinish::Submitted => {
                 if self.origin_saved {
-                    queue!(
-                        self.writer,
-                        cursor::RestorePosition,
-                        cursor::MoveToNextLine(self.previous_rows.max(1)),
-                        cursor::Show
-                    )?;
+                    queue!(self.writer, cursor::RestorePosition)?;
+                    if self.previous_rows > 1 {
+                        queue!(self.writer, cursor::MoveDown(self.previous_rows - 1))?;
+                    }
+                    // Relative cursor movement stops at the terminal boundary.
+                    // A real line feed scrolls there, preserving the final prompt
+                    // row and placing subsequent output below the inline region.
+                    self.writer.write_all(b"\r\n")?;
+                    queue!(self.writer, cursor::Show)?;
                 }
             }
             RenderFinish::Cancelled | RenderFinish::Error | RenderFinish::Panicking => {
                 self.clear_owned_rows(self.previous_rows)?;
+                self.previous_lines.clear();
                 if self.origin_saved {
                     queue!(self.writer, cursor::RestorePosition)?;
                 }
@@ -1102,6 +1241,8 @@ struct PromptStyles {
     cursor: Style,
     option: Style,
     option_selected: Style,
+    button: Style,
+    button_focused: Style,
     help: Style,
     error: Style,
 }
@@ -1119,6 +1260,8 @@ impl PromptStyles {
             option: profile.resolve_style(theme.style(ComponentRole::PromptOption)),
             option_selected: profile
                 .resolve_style(theme.style(ComponentRole::PromptOptionSelected)),
+            button: profile.resolve_style(theme.style(ComponentRole::PromptButton)),
+            button_focused: profile.resolve_style(theme.style(ComponentRole::PromptButtonFocused)),
             help: profile.resolve_style(theme.style(ComponentRole::PromptHelp)),
             error: profile.resolve_style(theme.style(ComponentRole::PromptError)),
         }
@@ -1135,6 +1278,8 @@ impl PromptStyles {
             ComponentRole::PromptCursor => &self.cursor,
             ComponentRole::PromptOption => &self.option,
             ComponentRole::PromptOptionSelected => &self.option_selected,
+            ComponentRole::PromptButton => &self.button,
+            ComponentRole::PromptButtonFocused => &self.button_focused,
             ComponentRole::PromptHelp => &self.help,
             ComponentRole::PromptError => &self.error,
             ComponentRole::Success
@@ -1146,7 +1291,7 @@ impl PromptStyles {
     }
 }
 
-#[derive(Default)]
+#[derive(Clone, Default, PartialEq, Eq)]
 struct RenderedLine {
     spans: Vec<RenderedSpan>,
 }
@@ -1168,6 +1313,7 @@ impl RenderedLine {
     }
 }
 
+#[derive(Clone, PartialEq, Eq)]
 struct RenderedSpan {
     text: String,
     role: ComponentRole,
@@ -1254,7 +1400,7 @@ fn first_help_line(view: &PromptView, width: usize) -> Option<RenderedLine> {
                 .iter()
                 .any(|span| span.role == ComponentRole::PromptHelp)
         })
-        .flat_map(|line| wrap_line(line, width))
+        .map(|line| clip_line(line, 0, width).0)
         .next()
 }
 
@@ -1269,8 +1415,16 @@ impl TerminalControl for CrosstermTerminalControl {
         terminal::enable_raw_mode()
     }
 
+    fn enable_bracketed_paste(&mut self) -> io::Result<()> {
+        execute!(io::stderr(), EnableBracketedPaste)
+    }
+
     fn show_cursor(&mut self) -> io::Result<()> {
         execute!(io::stderr(), cursor::Show)
+    }
+
+    fn disable_bracketed_paste(&mut self) -> io::Result<()> {
+        execute!(io::stderr(), DisableBracketedPaste)
     }
 
     fn disable_raw_mode(&mut self) -> io::Result<()> {
@@ -1631,6 +1785,50 @@ mod tests {
     }
 
     #[test]
+    fn tab_does_not_submit_the_last_field() {
+        let confirmation_key = FieldKey::<ConfirmAnswer>::new("confirmation");
+        let form = Form::builder()
+            .group(
+                Group::builder()
+                    .field(
+                        Confirm::new(confirmation_key.clone(), "Continue?", Some(true))
+                            .expect("confirm is valid"),
+                    )
+                    .build()
+                    .expect("group is valid"),
+            )
+            .build()
+            .expect("form is valid");
+        let mut events = ScriptedEvents::new([
+            Ok(Event::Key(KeyEvent {
+                code: KeyCode::Tab,
+                modifiers: KeyModifiers::default(),
+            })),
+            Ok(Event::Key(KeyEvent {
+                code: KeyCode::Char('n'),
+                modifiers: KeyModifiers::default(),
+            })),
+        ]);
+        let mut renderer = RecordingRenderer::default();
+        let mut terminal = RecordingTerminal::interactive();
+
+        let outcome = form
+            .run_with(&mut events, &mut renderer, &mut terminal)
+            .expect("form submits after an explicit answer");
+        let FormOutcome::Submitted(values) = outcome else {
+            panic!("expected submitted form");
+        };
+        assert_eq!(
+            values.get(&confirmation_key),
+            Some(&ConfirmAnswer {
+                value: false,
+                source: ConfirmSource::Explicit,
+            })
+        );
+        assert_eq!(renderer.views.len(), 2);
+    }
+
+    #[test]
     fn validated_input_select_and_confirm_submit_typed_values() {
         let name_key = FieldKey::new("name");
         let language_key = FieldKey::new("language");
@@ -1959,6 +2157,106 @@ mod tests {
     }
 
     #[test]
+    fn unchanged_frames_only_reposition_the_cursor() {
+        let theme = test_theme();
+        let profile = TerminalProfile::new(ColorProfile::Monochrome, AnsiPolicy::Disabled);
+        let mut renderer = CrosstermRenderer::new(&theme, &profile, Vec::new(), (20, 4));
+        let view = renderer_view(
+            vec![view_line("stable", ComponentRole::PromptAnswer)],
+            Some(ViewCursor { row: 0, column: 2 }),
+        );
+        renderer.draw(&view).expect("first frame renders");
+        let first_frame_bytes = renderer.writer.len();
+        renderer.draw(&view).expect("unchanged frame renders");
+
+        let update = String::from_utf8(renderer.writer[first_frame_bytes..].to_vec())
+            .expect("renderer writes UTF-8 commands");
+        assert!(!update.contains("stable"), "{update:?}");
+        assert!(!update.contains("\x1b[K"), "{update:?}");
+        assert!(!update.contains("\x1b[2K"), "{update:?}");
+        assert!(update.contains("\x1b8\x1b[2C"), "{update:?}");
+    }
+
+    #[test]
+    fn submitted_prompt_finishes_with_a_scrolling_line_feed() {
+        let theme = test_theme();
+        let profile = TerminalProfile::new(ColorProfile::Monochrome, AnsiPolicy::Disabled);
+        let mut renderer = CrosstermRenderer::new(&theme, &profile, Vec::new(), (20, 2));
+        renderer
+            .draw(&renderer_view(
+                vec![
+                    view_line("answer", ComponentRole::PromptAnswer),
+                    view_line("help", ComponentRole::PromptHelp),
+                ],
+                None,
+            ))
+            .expect("prompt renders");
+        let before_finish = renderer.writer.len();
+        renderer
+            .finish(RenderFinish::Submitted)
+            .expect("submitted prompt finishes");
+
+        let finish = String::from_utf8(renderer.writer[before_finish..].to_vec())
+            .expect("renderer writes UTF-8 commands");
+        assert!(finish.contains("\x1b8\x1b[1B\r\n"), "{finish:?}");
+        assert!(!finish.contains("\x1b[2E"), "{finish:?}");
+    }
+
+    #[test]
+    fn changing_a_selection_preserves_unrelated_rendered_rows() {
+        let mut form = Form::builder()
+            .group(
+                Group::builder()
+                    .title("Settings")
+                    .description("Review the values.")
+                    .field(Input::new(FieldKey::new("name"), "Name", "value").expect("input"))
+                    .field(
+                        Select::new(
+                            FieldKey::new("choice"),
+                            "Choice",
+                            vec![SelectOption::new("One", 1), SelectOption::new("Two", 2)],
+                        )
+                        .expect("select"),
+                    )
+                    .field(
+                        Confirm::new(FieldKey::new("confirm"), "Continue?", Some(true))
+                            .expect("confirm"),
+                    )
+                    .build()
+                    .expect("group"),
+            )
+            .build()
+            .expect("form");
+        let mut state = FormState::Running { group: 0, field: 0 };
+        assert_eq!(form.reduce(&mut state, enter()), ReducerResult::Running);
+        let theme = test_theme();
+        let profile = TerminalProfile::new(ColorProfile::Monochrome, AnsiPolicy::Disabled);
+        let renderer = CrosstermRenderer::new(&theme, &profile, Vec::new(), (80, 10));
+        let before = renderer.layout(&form.view(&state));
+        assert_eq!(
+            form.reduce(
+                &mut state,
+                Event::Key(KeyEvent {
+                    code: KeyCode::Down,
+                    modifiers: KeyModifiers::default(),
+                })
+            ),
+            ReducerResult::Running
+        );
+        let after = renderer.layout(&form.view(&state));
+        let unchanged = before
+            .lines
+            .iter()
+            .zip(&after.lines)
+            .filter(|(before, after)| before == after)
+            .count();
+        assert!(
+            unchanged >= 8,
+            "only selection rows should change: {unchanged}"
+        );
+    }
+
+    #[test]
     fn error_cleanup_clears_rows_claimed_before_a_partial_first_draw() {
         let theme = test_theme();
         let profile = TerminalProfile::new(ColorProfile::Monochrome, AnsiPolicy::Disabled);
@@ -1982,7 +2280,8 @@ mod tests {
         let output =
             String::from_utf8(renderer.writer.bytes).expect("renderer writes UTF-8 commands");
         assert!(output.contains('f'));
-        assert!(output.matches("\x1b[2K").count() >= 4, "{output:?}");
+        assert!(output.matches("\x1b[2K").count() >= 2, "{output:?}");
+        assert!(output.contains("\x1b[K"), "{output:?}");
         assert!(output.ends_with("\x1b8"), "{output:?}");
     }
 
@@ -2020,7 +2319,8 @@ mod tests {
 
         let output =
             String::from_utf8(renderer.writer.bytes).expect("renderer writes UTF-8 commands");
-        assert!(output.matches("\x1b[2K").count() >= 4, "{output:?}");
+        assert!(output.matches("\x1b[2K").count() >= 2, "{output:?}");
+        assert!(output.contains("\x1b[K"), "{output:?}");
         assert!(output.ends_with("\x1b8"), "{output:?}");
     }
 
@@ -2069,7 +2369,7 @@ mod tests {
             .expect("cancel cleanup succeeds");
 
         let output = String::from_utf8(renderer.writer).expect("renderer writes UTF-8 commands");
-        assert!(output.matches("\x1b[2K").count() >= 2);
+        assert!(output.matches("\x1b[2K").count() >= 1);
         assert!(output.contains("\x1b[K"), "{output:?}");
         assert!(!output.contains("\x1b[2J"));
     }
@@ -2184,6 +2484,37 @@ mod tests {
         assert_eq!(layout.lines.len(), 1);
         assert!(layout.lines[0].has_role(ComponentRole::PromptOptionSelected));
         assert!(!layout.lines[0].has_role(ComponentRole::PromptHelp));
+
+        let confirm_view = renderer_view(
+            vec![
+                view_line("┃ continue?", ComponentRole::Accent),
+                view_line("┃", ComponentRole::Accent),
+                ViewLine {
+                    spans: vec![
+                        ViewSpan {
+                            text: "┃ ".to_owned(),
+                            role: ComponentRole::Accent,
+                        },
+                        ViewSpan {
+                            text: "  Yes  ".to_owned(),
+                            role: ComponentRole::PromptButtonFocused,
+                        },
+                        ViewSpan {
+                            text: "   No  ".to_owned(),
+                            role: ComponentRole::PromptButton,
+                        },
+                    ],
+                },
+                view_line("y/n answer", ComponentRole::PromptHelp),
+            ],
+            None,
+        );
+
+        let confirm_layout = renderer.layout(&confirm_view);
+
+        assert_eq!(confirm_layout.lines.len(), 1);
+        assert!(confirm_layout.lines[0].has_role(ComponentRole::PromptButtonFocused));
+        assert!(!confirm_layout.lines[0].has_role(ComponentRole::PromptHelp));
     }
 
     #[test]

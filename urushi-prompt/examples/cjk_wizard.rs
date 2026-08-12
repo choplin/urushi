@@ -27,9 +27,12 @@ fn main() {
     let form = Form::builder()
         .group(
             Group::builder()
+                .title("プロジェクト設定")
+                .description("3つの項目を確認してから開始します。")
                 .field(
                     Input::new(name_key.clone(), "お名前を入力してください", "")
                         .expect("example key is non-empty")
+                        .description("結果メッセージの呼びかけに使います。")
                         .placeholder("例: 花子")
                         .help("enter 次へ • shift+tab 戻る • esc 中止")
                         .required()
@@ -45,15 +48,20 @@ fn main() {
                         ],
                     )
                     .expect("example options are non-empty")
-                    .help("↑/↓ 選択 • enter 次へ • shift+tab 戻る • esc 中止"),
+                    .description("完了後のメッセージ言語を選びます。")
+                    .help("↑/↓ 選択 • enter 次へ • shift+tab 戻る • esc 中止")
+                    .filter_help(
+                        "文字入力 絞り込み • ↑/↓ 選択 • enter 適用 • esc 閉じる",
+                        "↑/↓ 選択 • enter 次へ • / 再編集 • esc 解除",
+                    )
+                    .no_matches_message("一致する選択肢がありません。"),
                 )
                 .field(
                     Confirm::new(proceed_key.clone(), "この内容で開始しますか？", Some(true))
                         .expect("example key is non-empty")
+                        .description("y / n なら選択と決定を一度に行えます。")
                         .labels("はい", "いいえ")
-                        .help(
-                            "←/→ 選択 • y はい • n いいえ • enter 決定 • shift+tab 戻る • esc 中止",
-                        )
+                        .help("←/→ 選択 • y/n で決定 • enter 決定 • shift+tab 戻る • esc 中止")
                         .unanswered_message("はい、またはいいえを選んでください。"),
                 )
                 .build()

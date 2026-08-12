@@ -1,6 +1,6 @@
 use std::any::Any;
 
-use urushi::ComponentRole;
+use urushi::{ComponentRole, visible_width};
 
 use crate::{
     FieldConfigError, FieldKey,
@@ -31,6 +31,7 @@ pub struct ConfirmAnswer {
 pub struct Confirm {
     key: FieldKey<ConfirmAnswer>,
     question: String,
+    description: Option<String>,
     default: Option<bool>,
     selected: Option<bool>,
     source: Option<ConfirmSource>,
@@ -55,6 +56,7 @@ impl Confirm {
         Ok(Self {
             key,
             question: question.into(),
+            description: None,
             default,
             selected: default,
             source: None,
@@ -72,6 +74,13 @@ impl Confirm {
     pub fn labels(mut self, yes: impl Into<String>, no: impl Into<String>) -> Self {
         self.yes_label = yes.into();
         self.no_label = no.into();
+        self
+    }
+
+    /// Sets supporting text shown below the question.
+    #[must_use]
+    pub fn description(mut self, description: impl Into<String>) -> Self {
+        self.description = Some(description.into());
         self
     }
 
@@ -123,16 +132,25 @@ impl RuntimeField for Confirm {
             return FieldAction::Stay;
         };
 
-        match key.code {
-            KeyCode::Up | KeyCode::Left | KeyCode::Char('y') => {
+        match (key.code, key.modifiers.control, key.modifiers.alt) {
+            (KeyCode::Escape, _, _) => FieldAction::Cancel,
+            (KeyCode::Up | KeyCode::Left, _, _) | (KeyCode::Char('h'), false, false) => {
                 self.select_explicit(true);
                 FieldAction::Stay
             }
-            KeyCode::Down | KeyCode::Right | KeyCode::Char('n') => {
+            (KeyCode::Down | KeyCode::Right, _, _) | (KeyCode::Char('l'), false, false) => {
                 self.select_explicit(false);
                 FieldAction::Stay
             }
-            KeyCode::Enter | KeyCode::Tab => self.submit(),
+            (KeyCode::Char('y' | 'Y'), false, false) => {
+                self.select_explicit(true);
+                FieldAction::Accept
+            }
+            (KeyCode::Char('n' | 'N'), false, false) => {
+                self.select_explicit(false);
+                FieldAction::Accept
+            }
+            (KeyCode::Enter | KeyCode::Tab, _, _) => self.submit(),
             _ => FieldAction::Stay,
         }
     }
@@ -158,28 +176,49 @@ impl RuntimeField for Confirm {
                 role: ComponentRole::PromptQuestion,
             }],
         }];
+        if let Some(description) = &self.description {
+            lines.push(ViewLine {
+                spans: vec![ViewSpan {
+                    text: description.clone(),
+                    role: ComponentRole::Muted,
+                }],
+            });
+        }
+        let button_width = visible_width(&self.yes_label)
+            .saturating_add(4)
+            .saturating_add(1)
+            .saturating_add(visible_width(&self.no_label))
+            .saturating_add(4);
+        let header_width = self.description.as_deref().map_or_else(
+            || visible_width(&self.question),
+            |description| visible_width(&self.question).max(visible_width(description)),
+        );
+        let left_padding = header_width.saturating_sub(button_width) / 2;
+        lines.push(ViewLine { spans: Vec::new() });
         let mut buttons = ViewLine { spans: Vec::new() };
+        if left_padding > 0 {
+            buttons.spans.push(ViewSpan {
+                text: " ".repeat(left_padding),
+                role: ComponentRole::Body,
+            });
+        }
         for (index, (value, label)) in [(true, &self.yes_label), (false, &self.no_label)]
             .into_iter()
             .enumerate()
         {
             let role = if self.selected == Some(value) {
-                ComponentRole::PromptOptionSelected
+                ComponentRole::PromptButtonFocused
             } else {
-                ComponentRole::PromptOption
+                ComponentRole::PromptButton
             };
             if index > 0 {
                 buttons.spans.push(ViewSpan {
-                    text: "  ".to_owned(),
+                    text: " ".to_owned(),
                     role: ComponentRole::Body,
                 });
             }
             buttons.spans.push(ViewSpan {
-                text: if self.selected == Some(value) {
-                    format!("[ {label} ]")
-                } else {
-                    format!("  {label}  ")
-                },
+                text: format!("  {label}  "),
                 role,
             });
         }
@@ -242,11 +281,9 @@ mod tests {
             ComponentRole::PromptQuestion
         );
         assert!(
-            initial.lines[1]
-                .spans
-                .iter()
-                .any(|span| span.role == ComponentRole::PromptOptionSelected
-                    && span.text == "[ No ]")
+            initial.lines[2].spans.iter().any(|span| span.role
+                == ComponentRole::PromptButtonFocused
+                && span.text == "  No  ")
         );
         assert_eq!(confirm.source, None);
 
@@ -266,9 +303,8 @@ mod tests {
     fn explicit_choice_is_explicit_even_when_it_matches_the_default() {
         let mut confirm = Confirm::new(FieldKey::new("confirm"), "Continue?", Some(true))
             .expect("confirm is valid");
-        assert_eq!(confirm.event(key(KeyCode::Char('y'))), FieldAction::Stay);
+        assert_eq!(confirm.event(key(KeyCode::Char('y'))), FieldAction::Accept);
         assert_eq!(confirm.source, Some(ConfirmSource::Explicit));
-        assert_eq!(confirm.event(key(KeyCode::Tab)), FieldAction::Accept);
         let answer = confirm.take_value();
         assert_eq!(
             answer.downcast_ref::<ConfirmAnswer>(),
@@ -287,26 +323,46 @@ mod tests {
             .help("Choose, then press Enter.")
             .unanswered_message("Choose an answer.");
         let initial = confirm.view();
-        assert_eq!(initial.lines[1].spans[0].role, ComponentRole::PromptOption);
-        assert_eq!(initial.lines[1].spans[2].role, ComponentRole::PromptOption);
-        assert_eq!(initial.lines[1].spans[0].text, "  Proceed  ");
-        assert_eq!(initial.lines[1].spans[2].text, "  Stop  ");
+        assert_eq!(initial.lines[2].spans[0].role, ComponentRole::PromptButton);
+        assert_eq!(initial.lines[2].spans[2].role, ComponentRole::PromptButton);
+        assert_eq!(initial.lines[2].spans[0].text, "  Proceed  ");
+        assert_eq!(initial.lines[2].spans[2].text, "  Stop  ");
         assert_eq!(confirm.event(key(KeyCode::Enter)), FieldAction::Stay);
         assert_eq!(
-            confirm.view().lines[2].spans[0].role,
+            confirm.view().lines[3].spans[0].role,
             ComponentRole::PromptError
         );
         assert_eq!(
-            confirm.view().lines[3].spans[0].role,
+            confirm.view().lines[4].spans[0].role,
             ComponentRole::PromptHelp
         );
-        assert_eq!(confirm.view().lines[2].spans[1].text, "Choose an answer.");
+        assert_eq!(confirm.view().lines[3].spans[1].text, "Choose an answer.");
         assert_eq!(
-            confirm.view().lines[3].spans[0].text,
+            confirm.view().lines[4].spans[0].text,
             "Choose, then press Enter."
         );
         assert_eq!(confirm.event(key(KeyCode::Right)), FieldAction::Stay);
-        assert_eq!(confirm.view().lines.len(), 3);
+        assert_eq!(confirm.view().lines.len(), 4);
         assert_eq!(confirm.event(key(KeyCode::Enter)), FieldAction::Accept);
+    }
+
+    #[test]
+    fn buttons_are_centered_within_the_natural_header_width() {
+        let confirm = Confirm::new(
+            FieldKey::new("confirm"),
+            "Generate the personalized greeting?",
+            Some(true),
+        )
+        .expect("confirm is valid");
+
+        let view = confirm.view();
+        assert!(view.lines[1].spans.is_empty());
+        assert_eq!(view.lines[2].spans[0].role, ComponentRole::Body);
+        assert_eq!(view.lines[2].spans[0].text, "          ");
+        assert_eq!(
+            view.lines[2].spans[1].role,
+            ComponentRole::PromptButtonFocused
+        );
+        assert_eq!(view.lines[2].spans[1].text, "  Yes  ");
     }
 }
