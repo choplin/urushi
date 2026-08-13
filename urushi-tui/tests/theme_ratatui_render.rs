@@ -1,14 +1,13 @@
-#![cfg(feature = "ratatui")]
-
 use ratatui::{
     Terminal,
     backend::TestBackend,
     style::{Color as RatatuiColor, Modifier},
 };
 use urushi::{
-    AnsiPolicy, Color, ColorProfile, ComponentRole, SemanticTokens, TerminalProfile, Theme,
-    visible_width,
+    AnsiPolicy, Color, ColorProfile, ComponentRole, Modifier as UrushiModifier, SemanticTokens,
+    Style, TerminalProfile, Theme, visible_width,
 };
+use urushi_tui::{RatatuiStyle, RatatuiStyleExt as _};
 
 #[test]
 fn one_theme_component_renders_to_plain_cli_and_ratatui() {
@@ -90,6 +89,19 @@ fn ratatui_uses_the_same_terminal_profile_degradation_as_plain_output() {
         assert_eq!(content.bg, RatatuiColor::Reset);
         assert!(!panel.render("保存しました").contains('\x1b'));
     }
+}
+
+#[test]
+fn ratatui_converts_the_active_modifier_set() {
+    let converted = RatatuiStyle::from(
+        &Style::new()
+            .add(UrushiModifier::BOLD | UrushiModifier::ITALIC)
+            .remove(UrushiModifier::ITALIC),
+    )
+    .into_inner();
+
+    assert_eq!(converted.add_modifier, Modifier::BOLD);
+    assert!(converted.sub_modifier.is_empty());
 }
 
 fn render_panel(style: &urushi::Style) -> ratatui::buffer::Buffer {

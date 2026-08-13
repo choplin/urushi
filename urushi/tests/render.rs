@@ -1,4 +1,4 @@
-use urushi::{Align, Border, Color, Style, visible_width};
+use urushi::{Align, Border, Color, Modifier, Style, visible_width};
 
 #[test]
 fn plain_text_passes_through() {
@@ -59,6 +59,13 @@ fn colors_and_modifiers_emit_sgr() {
         .bold()
         .render("hi");
     assert_eq!(out, "\x1b[1;38;5;212mhi\x1b[0m");
+}
+
+#[test]
+fn modifiers_can_be_removed_from_a_style_value() {
+    let out = Style::new().bold().remove(Modifier::all()).render("plain");
+
+    assert_eq!(out, "plain");
 }
 
 #[test]

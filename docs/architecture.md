@@ -11,7 +11,8 @@ surfaces share a foundation without forcing them into one rendering model or
 terminal lifecycle.
 
 Urushi supports styled static output, renderer-neutral line components,
-line-oriented prompts, optional live progress, and optional Ratatui adaptation.
+line-oriented prompts, optional live progress, and Ratatui adaptation through
+`urushi-tui`.
 It does not provide a general full-screen TUI runtime. Ratatui application
 state, event loops, layout orchestration, and frame scheduling remain owned by
 the consuming application. [`tui-architecture.md`](tui-architecture.md)
@@ -51,7 +52,7 @@ This path owns wrapping, alignment, padding, margins, and borders for one
 styled block. It is separate from `View`, whose current model represents lines
 that a component has already composed.
 
-Optional terminal and Ratatui integrations sit outside these semantic types:
+Terminal and Ratatui integrations sit outside these semantic types:
 
 ```text
 Progress state --> Urushi progress lifecycle --> private indicatif adapter
@@ -98,7 +99,7 @@ runtime or to adopt its application model.
 | --- | --- | --- | --- |
 | Plain CLI output | Direct box-model `Style::render`; reusable components producing `View`; `AnsiRenderer`; `StderrTerminal`; optional spinner and progress-bar lifecycles | The application owns its command workflow and stdout policy. `StderrTerminal` and progress handles own the stderr resources they acquire. | Implemented and dogfooded. Static output, themed line components, terminal degradation, and live/plain progress are covered by repository tests and runnable examples; public progress is also exercised by Agentlog dogfood. |
 | Interactive prompt | `Form` / `Group`; typed `Input`, `Select`, and `Confirm`; synchronous validation; a prompt-specific view; inline redraw; terminal session setup and cleanup | `urushi-prompt` owns the blocking prompt session and resources it acquires. The application owns when the form runs and what submitted values mean. | Implemented and dogfooded. The core prompt flow, viewport behavior, validation, cancellation, and cleanup are covered by tests and runnable terminal examples. |
-| Full-screen TUI | Logical-style conversion and box-model widgets that draw into a caller-provided Ratatui `Buffer` | Today, the consuming Ratatui application owns state, events, layout orchestration, frame scheduling, and terminal lifecycle. | Adapter implemented. A general Urushi TUI runtime is not implemented; [`tui-architecture.md`](tui-architecture.md) defines its target architecture. |
+| Full-screen TUI | `urushi-tui` logical-style conversion and box-model widgets that draw into a caller-provided Ratatui `Buffer` | Today, the consuming Ratatui application owns state, events, layout orchestration, frame scheduling, and terminal lifecycle. | Adapter implemented in a provisional crate boundary. A general Urushi TUI runtime is not implemented; [`tui-architecture.md`](tui-architecture.md) defines its target architecture. |
 
 The resulting flows are deliberately related but not identical:
 
@@ -138,6 +139,7 @@ moving application state into a surface adapter.
 | --- | --- | --- |
 | [`urushi`](../urushi/) | Logical styles, themes, renderer-neutral views and components, output adapters, terminal capability resolution, and optional progress lifecycle. | None |
 | [`urushi-prompt`](../urushi-prompt/) | Typed input, select, and confirm forms; prompt state transitions; inline drawing; terminal session setup and cleanup. | `urushi` |
+| [`urushi-tui`](../urushi-tui/) | Ratatui style conversion and box-model widgets; provisional owner of future full-screen TUI concerns. | `urushi` |
 
 `urushi-prompt` owns interactive prompt behavior. The core crate must not gain
 prompt-specific navigation, validation, cursor, or form-submission policy merely
@@ -152,7 +154,7 @@ to share styling.
 | [`theme`](../urushi/src/theme/) | Semantic color tokens, reusable component roles and styles, typed application extensions, and explicit light/dark selection. | `style` |
 | [`view`](../urushi/src/view/) | Renderer-neutral `Span`, `Line`, and `View` values, plus composition of already-rendered string blocks. | `style`, `text` |
 | [`component`](../urushi/src/component/) | Reusable semantic components that return `View`; currently summaries and warnings. | `theme`, `view`, `text` |
-| [`render`](../urushi/src/render/) | Translation to output technologies: ANSI text and optional Ratatui styles/widgets. | `style`, `view`, `terminal/profile`, `text` |
+| [`render`](../urushi/src/render/) | Translation of renderer-neutral views to ANSI text. | `style`, `view`, `terminal/profile` |
 | [`terminal`](../urushi/src/terminal/) | Terminal capability detection, color degradation, stderr ownership, output-mode selection, and optional progress lifecycle. | `style`, `theme`, `view`, `render` |
 
 The intended dependency direction is from I/O and adapters toward semantic
@@ -184,6 +186,8 @@ crate boundaries.
   SGR encoding.
 - [`style/border.rs`](../urushi/src/style/border.rs) owns border character sets.
 - [`style/layout.rs`](../urushi/src/style/layout.rs) owns `Align` and `Sides`.
+- [`style/property.rs`](../urushi/src/style/property.rs) owns the closed generic
+  property vocabulary used by `Style::add` and `Style::remove`.
 - [`style/logical.rs`](../urushi/src/style/logical.rs) owns the `Style` builder,
   box-model rules, and direct string rendering.
 - [`text/width.rs`](../urushi/src/text/width.rs) owns visible cell measurement.
@@ -221,12 +225,12 @@ they do not resolve terminal capabilities or emit output.
 
 - [`render/ansi.rs`](../urushi/src/render/ansi.rs) resolves each logical span for
   a `TerminalProfile` and serializes the `View`.
-- [`render/ratatui/style.rs`](../urushi/src/render/ratatui/style.rs) converts the
+- [`urushi-tui/src/style.rs`](../urushi-tui/src/style.rs) converts the
   stylable subset and border colors to Ratatui types.
-- [`render/ratatui/widget.rs`](../urushi/src/render/ratatui/widget.rs) draws the
+- [`urushi-tui/src/widget.rs`](../urushi-tui/src/widget.rs) draws the
   Urushi box model into a caller-provided Ratatui buffer.
 
-The Ratatui integration is an adapter, not a TUI framework. It does not own
+`urushi-tui` is provisionally an adapter, not yet a TUI framework. It does not own
 application state, input handling, navigation, an event loop, terminal entry or
 restoration, or frame scheduling. Those concerns are intentionally left for the
 separate TUI design work and consuming applications.
@@ -263,6 +267,10 @@ writer-specific ANSI policy and color fidelity at an output boundary. Detect a
 profile for the writer that will receive the result; do not reuse stdout's
 profile for stderr or a Ratatui surface.
 
+The immutable value model, closed property vocabulary, and generic
+`add`/`remove` operations are specified in
+[`style-model.md`](style-model.md).
+
 `Style::render` is also an output boundary. It renders one box-model block
 directly and does not inspect terminal capabilities by itself. Callers that
 need capability degradation resolve the style first.
@@ -289,9 +297,10 @@ stdout remains separate from human-facing progress on stderr.
 
 ### External backends stay behind adapters
 
-Ratatui and Indicatif types stay in their adapter modules. Public Urushi
-surfaces use Urushi-owned concepts. This keeps backend replacement local and
-prevents backend lifecycle rules from becoming application contracts.
+Ratatui types stay in `urushi-tui`; Indicatif types stay in the private core
+adapter. Public `urushi` surfaces use Urushi-owned concepts. This keeps backend
+replacement local and prevents backend lifecycle rules from becoming core
+application contracts.
 
 ## Architectural invariants
 
@@ -308,7 +317,7 @@ changed deliberately and this document is updated in the same change:
    `StderrTerminal`.
 7. Public progress APIs do not expose Indicatif representations or controls.
 8. Live and stable progress use the same semantic theme roles.
-9. Ratatui adapters write only to the buffer supplied by the caller and do not
+9. `urushi-tui` adapters write only to the buffer supplied by the caller and do not
    own a TUI runtime.
 10. Prompt-specific state, cursor behavior, and terminal cleanup remain in
     `urushi-prompt`, not the core component model.
@@ -327,8 +336,8 @@ changed deliberately and this document is updated in the same change:
 
 ### Add or replace an output adapter
 
-1. Put backend-specific types in a private module under `render/` or
-   `terminal/`.
+1. Put backend-specific types in the crate that owns that output technology;
+   core ANSI and terminal adapters remain under `render/` or `terminal/`.
 2. Accept Urushi-owned styles, views, profiles, or semantic state at the
    boundary.
 3. Keep backend templates, errors, and lifecycle handles out of public types.
@@ -356,8 +365,8 @@ changed deliberately and this document is updated in the same change:
 
 ### Change Ratatui support
 
-1. Keep style/color conversion in `render/ratatui/style.rs`.
-2. Keep box-model buffer drawing in `render/ratatui/widget.rs`.
+1. Keep style/color conversion in `urushi-tui/src/style.rs`.
+2. Keep box-model buffer drawing in `urushi-tui/src/widget.rs`.
 3. Preserve the caller's ownership of terminal setup, event processing, state,
    layout orchestration, and frame rendering.
 4. Test narrow areas, CJK clipping, border colors, and terminal-profile
@@ -369,7 +378,7 @@ changed deliberately and this document is updated in the same change:
 | --- | --- |
 | Box model, ANSI scopes, wrapping, alignment, and CJK width | [`urushi/tests/render.rs`](../urushi/tests/render.rs), [`urushi/tests/join.rs`](../urushi/tests/join.rs) |
 | Terminal detection and style degradation | [`urushi/tests/terminal_profile.rs`](../urushi/tests/terminal_profile.rs), tests beside `terminal/profile.rs` |
-| Theme roles resolve consistently for terminal and Ratatui output | [`urushi/tests/theme_terminal_render.rs`](../urushi/tests/theme_terminal_render.rs), [`urushi/tests/theme_ratatui_render.rs`](../urushi/tests/theme_ratatui_render.rs) |
+| Theme roles resolve consistently for terminal and Ratatui output | [`urushi/tests/theme_terminal_render.rs`](../urushi/tests/theme_terminal_render.rs), [`urushi-tui/tests/theme_ratatui_render.rs`](../urushi-tui/tests/theme_ratatui_render.rs) |
 | Progress messages share theme behavior across live and stable output | tests beside [`terminal/progress/mod.rs`](../urushi/src/terminal/progress/mod.rs) |
 | Prompt submission, viewport behavior, and cleanup | tests beside [`urushi-prompt/src/runtime.rs`](../urushi-prompt/src/runtime.rs) |
 | Public progress behavior remains usable by a real consumer | Agentlog dogfood unit and CLI integration tests using the global Cargo patch configuration |
@@ -395,7 +404,7 @@ future roadmap:
 - component-specific width handling occurs while constructing a `View`;
 - `Style::render` and `View` rendering are separate composition paths;
 - live progress currently uses a private Indicatif backend;
-- the Ratatui integration is limited to style conversion and box-model widget
+- `urushi-tui` is currently limited to style conversion and box-model widget
   drawing;
 - full-screen TUI architecture and runtime policy are intentionally outside the
   scope of this document;

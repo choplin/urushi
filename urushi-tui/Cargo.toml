@@ -1,0 +1,15 @@
+[package]
+name = "urushi-tui"
+description = "Ratatui integration and future full-screen TUI runtime for urushi"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+keywords = ["terminal", "tui", "ratatui"]
+categories = ["command-line-interface"]
+
+[dependencies]
+ratatui = { version = "0.29", default-features = false }
+urushi = { path = "../urushi", version = "=0.1.0" }
+
+[[example]]
+name = "themed_ratatui"

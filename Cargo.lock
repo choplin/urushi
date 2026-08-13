@@ -650,7 +650,6 @@ version = "0.1.0"
 dependencies = [
  "console",
  "indicatif",
- "ratatui",
  "unicode-width 0.2.0",
 ]
 
@@ -660,6 +659,14 @@ version = "0.1.0"
 dependencies = [
  "crossterm",
  "unicode-segmentation",
+ "urushi",
+]
+
+[[package]]
+name = "urushi-tui"
+version = "0.1.0"
+dependencies = [
+ "ratatui",
  "urushi",
 ]
 

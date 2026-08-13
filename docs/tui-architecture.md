@@ -10,7 +10,7 @@ repository as it exists today.
 The runtime adds a TEA-style application framework above Ratatui while leaving
 Ratatui responsible for widgets, layout, buffers, backends, and cell-level
 diffing.
-It must not turn Urushi's existing Ratatui adapter into an event loop or make
+It extends the existing `urushi-tui` Ratatui adapter without making
 the existing renderer-neutral line model depend on Ratatui.
 
 ## Goals
@@ -43,8 +43,7 @@ components remain semantic modules without terminal lifecycle ownership.
 The TUI runtime may consume their values but they must not depend on the
 runtime.
 
-Second, the existing modules under [`render/ratatui`](../urushi/src/render/ratatui/)
-remain output adapters.
+Second, the existing modules in [`urushi-tui`](../urushi-tui/) remain output adapters.
 They convert Urushi styles and box-model values into Ratatui representations
 and draw into a supplied buffer.
 The runtime orchestrates those adapters; the adapters do not acquire
@@ -56,9 +55,9 @@ not become the default policy for full-screen applications.
 Sharing lower-level terminal facilities in the future must not merge the two
 interaction models.
 
-The TUI subsystem's eventual crate and module placement is not fixed here.
-When it is implemented, the workspace and module tables in
-[`architecture.md`](architecture.md) must be updated in the same change.
+`urushi-tui` is the provisional crate boundary for this subsystem. Runtime
+implementation may refine its internal modules without moving Ratatui concerns
+back into the core `urushi` crate.
 
 ## Architecture at a glance
 
@@ -437,7 +436,7 @@ Implementation of the TUI subsystem must preserve these invariants:
 10. `Frame` is borrowed and draw-scoped; terminal presentation history and
     output remain terminal-owned.
 11. Session setup and restoration have one explicit owner.
-12. Existing semantic modules and Ratatui adapters keep the dependency
+12. Existing semantic modules and `urushi-tui` adapters keep the dependency
     direction documented in [`architecture.md`](architecture.md).
 
 ## Verification strategy

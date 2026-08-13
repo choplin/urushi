@@ -1,46 +1,9 @@
 //! The [`Style`] builder and its string renderer.
 
 use crate::text::{visible_width, wrap_text};
-use crate::{Align, Border, Color, Sides};
+use crate::{Align, Border, Color, Modifier, Sides, StyleProperty, StylePropertyKey};
 
 const RESET: &str = "\x1b[0m";
-
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-struct Modifiers {
-    bold: bool,
-    dim: bool,
-    italic: bool,
-    underline: bool,
-    blink: bool,
-    reverse: bool,
-    strikethrough: bool,
-}
-
-#[cfg(feature = "ratatui")]
-#[derive(Debug, Clone, Copy)]
-pub(crate) struct StylableParts {
-    pub foreground: Option<Color>,
-    pub background: Option<Color>,
-    pub bold: bool,
-    pub dim: bool,
-    pub italic: bool,
-    pub underline: bool,
-    pub blink: bool,
-    pub reverse: bool,
-    pub strikethrough: bool,
-}
-
-#[cfg(feature = "ratatui")]
-#[derive(Debug, Clone, Copy)]
-pub(crate) struct BoxParts {
-    pub padding: Sides,
-    pub margin: Sides,
-    pub border: Option<Border>,
-    pub border_foreground: Option<Color>,
-    pub border_background: Option<Color>,
-    pub width: Option<u16>,
-    pub align: Align,
-}
 
 /// A reusable set of styling rules that renders text into an ANSI string.
 ///
@@ -59,7 +22,7 @@ pub(crate) struct BoxParts {
 pub struct Style {
     fg: Option<Color>,
     bg: Option<Color>,
-    modifiers: Modifiers,
+    modifiers: Modifier,
     padding: Sides,
     margin: Sides,
     border: Option<Border>,
@@ -74,123 +37,168 @@ impl Style {
         Self::default()
     }
 
-    /// Sets the text (and padding) foreground color.
-    pub fn foreground(mut self, color: impl Into<Color>) -> Self {
-        self.fg = Some(color.into());
+    /// Adds or replaces a property in this style.
+    // This is the collection operation paired with `remove`, not arithmetic.
+    #[allow(clippy::should_implement_trait)]
+    pub fn add(mut self, property: impl Into<StyleProperty>) -> Self {
+        match property.into() {
+            StyleProperty::Foreground(color) => self.fg = Some(color),
+            StyleProperty::Background(color) => self.bg = Some(color),
+            StyleProperty::Modifier(modifier) => {
+                self.modifiers = self.modifiers.union(modifier);
+            }
+            StyleProperty::Padding(sides) => self.padding = sides,
+            StyleProperty::Margin(sides) => self.margin = sides,
+            StyleProperty::Border(border) => self.border = Some(border),
+            StyleProperty::BorderForeground(color) => self.border_fg = Some(color),
+            StyleProperty::BorderBackground(color) => self.border_bg = Some(color),
+            StyleProperty::Width(width) => self.width = Some(width),
+            StyleProperty::Align(align) => self.align = align,
+        }
         self
+    }
+
+    /// Removes a property from this style, restoring its default value.
+    pub fn remove(mut self, property: impl Into<StylePropertyKey>) -> Self {
+        match property.into() {
+            StylePropertyKey::Foreground => self.fg = None,
+            StylePropertyKey::Background => self.bg = None,
+            StylePropertyKey::Modifier(modifier) => {
+                self.modifiers = self.modifiers.difference(modifier);
+            }
+            StylePropertyKey::Padding => self.padding = Sides::default(),
+            StylePropertyKey::Margin => self.margin = Sides::default(),
+            StylePropertyKey::Border => self.border = None,
+            StylePropertyKey::BorderForeground => self.border_fg = None,
+            StylePropertyKey::BorderBackground => self.border_bg = None,
+            StylePropertyKey::Width => self.width = None,
+            StylePropertyKey::Align => self.align = Align::default(),
+        }
+        self
+    }
+
+    /// Sets the text (and padding) foreground color.
+    pub fn foreground(self, color: impl Into<Color>) -> Self {
+        self.add(StyleProperty::Foreground(color.into()))
     }
 
     /// Sets the text (and padding) background color.
-    pub fn background(mut self, color: impl Into<Color>) -> Self {
-        self.bg = Some(color.into());
-        self
+    pub fn background(self, color: impl Into<Color>) -> Self {
+        self.add(StyleProperty::Background(color.into()))
     }
 
-    pub fn bold(mut self) -> Self {
-        self.modifiers.bold = true;
-        self
+    pub fn bold(self) -> Self {
+        self.add(Modifier::BOLD)
     }
 
-    pub fn dim(mut self) -> Self {
-        self.modifiers.dim = true;
-        self
+    pub fn dim(self) -> Self {
+        self.add(Modifier::DIM)
     }
 
-    pub fn italic(mut self) -> Self {
-        self.modifiers.italic = true;
-        self
+    pub fn italic(self) -> Self {
+        self.add(Modifier::ITALIC)
     }
 
-    pub fn underline(mut self) -> Self {
-        self.modifiers.underline = true;
-        self
+    pub fn underline(self) -> Self {
+        self.add(Modifier::UNDERLINED)
     }
 
-    pub fn blink(mut self) -> Self {
-        self.modifiers.blink = true;
-        self
+    pub fn blink(self) -> Self {
+        self.add(Modifier::SLOW_BLINK)
     }
 
-    pub fn reverse(mut self) -> Self {
-        self.modifiers.reverse = true;
-        self
+    pub fn reverse(self) -> Self {
+        self.add(Modifier::REVERSED)
     }
 
-    pub fn strikethrough(mut self) -> Self {
-        self.modifiers.strikethrough = true;
-        self
+    pub fn strikethrough(self) -> Self {
+        self.add(Modifier::CROSSED_OUT)
     }
 
     /// Sets padding between the content and the border.
-    pub fn padding(mut self, sides: impl Into<Sides>) -> Self {
-        self.padding = sides.into();
-        self
+    pub fn padding(self, sides: impl Into<Sides>) -> Self {
+        self.add(StyleProperty::Padding(sides.into()))
     }
 
     /// Sets unstyled spacing outside the border.
-    pub fn margin(mut self, sides: impl Into<Sides>) -> Self {
-        self.margin = sides.into();
-        self
+    pub fn margin(self, sides: impl Into<Sides>) -> Self {
+        self.add(StyleProperty::Margin(sides.into()))
     }
 
     /// Draws a border around the padded content.
-    pub fn border(mut self, border: Border) -> Self {
-        self.border = Some(border);
-        self
+    pub fn border(self, border: Border) -> Self {
+        self.add(StyleProperty::Border(border))
     }
 
     /// Sets the border foreground color.
-    pub fn border_foreground(mut self, color: impl Into<Color>) -> Self {
-        self.border_fg = Some(color.into());
-        self
+    pub fn border_foreground(self, color: impl Into<Color>) -> Self {
+        self.add(StyleProperty::BorderForeground(color.into()))
     }
 
     /// Sets the border background color.
-    pub fn border_background(mut self, color: impl Into<Color>) -> Self {
-        self.border_bg = Some(color.into());
-        self
+    pub fn border_background(self, color: impl Into<Color>) -> Self {
+        self.add(StyleProperty::BorderBackground(color.into()))
     }
 
     /// Fixes the width of the padded content box (excluding border and
     /// margin). Content is word-wrapped to fit.
-    pub fn width(mut self, width: u16) -> Self {
-        self.width = Some(width);
-        self
+    pub fn width(self, width: u16) -> Self {
+        self.add(StyleProperty::Width(width))
     }
 
     /// Sets the horizontal alignment of content within the box.
-    pub fn align(mut self, align: Align) -> Self {
-        self.align = align;
-        self
+    pub fn align(self, align: Align) -> Self {
+        self.add(StyleProperty::Align(align))
     }
 
-    #[cfg(feature = "ratatui")]
-    pub(crate) fn stylable_parts(&self) -> StylableParts {
-        let modifiers = self.modifiers;
-        StylableParts {
-            foreground: self.fg,
-            background: self.bg,
-            bold: modifiers.bold,
-            dim: modifiers.dim,
-            italic: modifiers.italic,
-            underline: modifiers.underline,
-            blink: modifiers.blink,
-            reverse: modifiers.reverse,
-            strikethrough: modifiers.strikethrough,
-        }
+    /// Returns the foreground color instruction, if this style sets one.
+    pub const fn foreground_color(&self) -> Option<Color> {
+        self.fg
     }
 
-    #[cfg(feature = "ratatui")]
-    pub(crate) fn box_parts(&self) -> BoxParts {
-        BoxParts {
-            padding: self.padding,
-            margin: self.margin,
-            border: self.border,
-            border_foreground: self.border_fg,
-            border_background: self.border_bg,
-            width: self.width,
-            align: self.align,
-        }
+    /// Returns the background color instruction, if this style sets one.
+    pub const fn background_color(&self) -> Option<Color> {
+        self.bg
+    }
+
+    /// Returns the active text modifiers.
+    pub const fn modifiers(&self) -> Modifier {
+        self.modifiers
+    }
+
+    /// Returns the padding applied inside the border.
+    pub const fn padding_sides(&self) -> Sides {
+        self.padding
+    }
+
+    /// Returns the unstyled margin applied outside the border.
+    pub const fn margin_sides(&self) -> Sides {
+        self.margin
+    }
+
+    /// Returns the border glyph set, if a border is enabled.
+    pub const fn border_kind(&self) -> Option<Border> {
+        self.border
+    }
+
+    /// Returns the border foreground color instruction.
+    pub const fn border_foreground_color(&self) -> Option<Color> {
+        self.border_fg
+    }
+
+    /// Returns the border background color instruction.
+    pub const fn border_background_color(&self) -> Option<Color> {
+        self.border_bg
+    }
+
+    /// Returns the fixed content-box width, if one is set.
+    pub const fn fixed_width(&self) -> Option<u16> {
+        self.width
+    }
+
+    /// Returns the horizontal alignment within the content box.
+    pub const fn horizontal_alignment(&self) -> Align {
+        self.align
     }
 
     /// Replaces every color property while preserving the rest of the style.
@@ -216,7 +224,7 @@ impl Style {
     /// sequence while preserving its layout properties.
     pub(crate) fn without_ansi(mut self) -> Self {
         self = self.without_colors();
-        self.modifiers = Modifiers::default();
+        self.modifiers = Modifier::empty();
         self
     }
 
@@ -323,18 +331,17 @@ impl Style {
     /// The SGR sequence enabling this style's modifiers and colors, or an
     /// empty string when the style sets none of them.
     fn sgr_prefix(&self) -> String {
-        let m = self.modifiers;
         let mut params: Vec<String> = Vec::new();
-        for (on, code) in [
-            (m.bold, "1"),
-            (m.dim, "2"),
-            (m.italic, "3"),
-            (m.underline, "4"),
-            (m.blink, "5"),
-            (m.reverse, "7"),
-            (m.strikethrough, "9"),
+        for (added, code) in [
+            (self.modifiers.contains(Modifier::BOLD), "1"),
+            (self.modifiers.contains(Modifier::DIM), "2"),
+            (self.modifiers.contains(Modifier::ITALIC), "3"),
+            (self.modifiers.contains(Modifier::UNDERLINED), "4"),
+            (self.modifiers.contains(Modifier::SLOW_BLINK), "5"),
+            (self.modifiers.contains(Modifier::REVERSED), "7"),
+            (self.modifiers.contains(Modifier::CROSSED_OUT), "9"),
         ] {
-            if on {
+            if added {
                 params.push(code.to_string());
             }
         }
@@ -373,4 +380,63 @@ fn reapply_after_reset(content: &str, sgr: &str) -> String {
     }
 
     content.replace(RESET, &format!("{RESET}{sgr}"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn generic_and_named_operations_share_value_semantics() {
+        let style = Style::new()
+            .bold()
+            .add(Modifier::ITALIC)
+            .add(StyleProperty::Foreground(Color::CYAN))
+            .remove(Modifier::ITALIC)
+            .remove(StylePropertyKey::Foreground);
+
+        assert_eq!(style.modifiers(), Modifier::BOLD);
+        assert_eq!(style.foreground_color(), None);
+    }
+
+    #[test]
+    fn removing_a_modifier_removes_it_from_rendered_value() {
+        let style = Style::new().bold().dim().remove(Modifier::BOLD);
+
+        assert_eq!(style.render("text"), "\x1b[2mtext\x1b[0m");
+        assert_eq!(Style::new().remove(Modifier::all()).render("text"), "text");
+    }
+
+    #[test]
+    fn singleton_properties_replace_and_remove_to_defaults() {
+        let style = Style::new()
+            .add(StyleProperty::Foreground(Color::RED))
+            .add(StyleProperty::Foreground(Color::BLUE))
+            .background(Color::GREEN)
+            .padding(1)
+            .margin(2)
+            .border(Border::ROUNDED)
+            .border_foreground(Color::CYAN)
+            .border_background(Color::BLACK)
+            .width(20)
+            .align(Align::Right)
+            .remove(StylePropertyKey::Background)
+            .remove(StylePropertyKey::Padding)
+            .remove(StylePropertyKey::Margin)
+            .remove(StylePropertyKey::Border)
+            .remove(StylePropertyKey::BorderForeground)
+            .remove(StylePropertyKey::BorderBackground)
+            .remove(StylePropertyKey::Width)
+            .remove(StylePropertyKey::Align);
+
+        assert_eq!(style.foreground_color(), Some(Color::BLUE));
+        assert_eq!(style.background_color(), None);
+        assert_eq!(style.padding_sides(), Sides::default());
+        assert_eq!(style.margin_sides(), Sides::default());
+        assert_eq!(style.border_kind(), None);
+        assert_eq!(style.border_foreground_color(), None);
+        assert_eq!(style.border_background_color(), None);
+        assert_eq!(style.fixed_width(), None);
+        assert_eq!(style.horizontal_alignment(), Align::Left);
+    }
 }

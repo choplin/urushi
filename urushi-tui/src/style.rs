@@ -1,8 +1,8 @@
 //! Conversion of logical text styles to ratatui styles.
 
-use ratatui::style::{Color as RatatuiColor, Modifier, Style as InnerStyle};
+use ratatui::style::{Color as RatatuiColor, Modifier as RatatuiModifier, Style as InnerStyle};
 
-use crate::{Color, Style};
+use urushi::{Color, Modifier, Style};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct RatatuiStyle {
@@ -21,41 +21,52 @@ impl RatatuiStyle {
 
 impl From<&Style> for RatatuiStyle {
     fn from(value: &Style) -> Self {
-        let parts = value.stylable_parts();
         let mut style = InnerStyle::new();
-        if let Some(color) = parts.foreground {
+        if let Some(color) = value.foreground_color() {
             style = style.fg(convert_color(color));
         }
-        if let Some(color) = parts.background {
+        if let Some(color) = value.background_color() {
             style = style.bg(convert_color(color));
         }
-        let mut modifiers = Modifier::empty();
-        for (enabled, modifier) in [
-            (parts.bold, Modifier::BOLD),
-            (parts.dim, Modifier::DIM),
-            (parts.italic, Modifier::ITALIC),
-            (parts.underline, Modifier::UNDERLINED),
-            (parts.blink, Modifier::SLOW_BLINK),
-            (parts.reverse, Modifier::REVERSED),
-            (parts.strikethrough, Modifier::CROSSED_OUT),
-        ] {
-            if enabled {
-                modifiers.insert(modifier);
-            }
-        }
-        let parts = value.box_parts();
+        let modifier = convert_modifier(value.modifiers());
         let mut border = InnerStyle::new();
-        if let Some(color) = parts.border_foreground {
+        if let Some(color) = value.border_foreground_color() {
             border = border.fg(convert_color(color));
         }
-        if let Some(color) = parts.border_background {
+        if let Some(color) = value.border_background_color() {
             border = border.bg(convert_color(color));
         }
         Self {
-            content: style.add_modifier(modifiers),
+            content: style.add_modifier(modifier),
             border,
         }
     }
+}
+
+const fn convert_modifier(modifier: Modifier) -> RatatuiModifier {
+    let mut converted = RatatuiModifier::empty();
+    if modifier.contains(Modifier::BOLD) {
+        converted = converted.union(RatatuiModifier::BOLD);
+    }
+    if modifier.contains(Modifier::DIM) {
+        converted = converted.union(RatatuiModifier::DIM);
+    }
+    if modifier.contains(Modifier::ITALIC) {
+        converted = converted.union(RatatuiModifier::ITALIC);
+    }
+    if modifier.contains(Modifier::UNDERLINED) {
+        converted = converted.union(RatatuiModifier::UNDERLINED);
+    }
+    if modifier.contains(Modifier::SLOW_BLINK) {
+        converted = converted.union(RatatuiModifier::SLOW_BLINK);
+    }
+    if modifier.contains(Modifier::REVERSED) {
+        converted = converted.union(RatatuiModifier::REVERSED);
+    }
+    if modifier.contains(Modifier::CROSSED_OUT) {
+        converted = converted.union(RatatuiModifier::CROSSED_OUT);
+    }
+    converted
 }
 
 impl From<RatatuiStyle> for InnerStyle {
@@ -84,5 +95,23 @@ pub(super) const fn convert_color(color: Color) -> RatatuiColor {
         Color::Ansi(15) => RatatuiColor::White,
         Color::Ansi(index) | Color::Ansi256(index) => RatatuiColor::Indexed(index),
         Color::Rgb(red, green, blue) => RatatuiColor::Rgb(red, green, blue),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn converts_active_modifiers() {
+        let converted = RatatuiStyle::from(
+            &Style::new()
+                .add(Modifier::BOLD | Modifier::ITALIC)
+                .remove(Modifier::ITALIC),
+        )
+        .into_inner();
+
+        assert_eq!(converted.add_modifier, RatatuiModifier::BOLD);
+        assert!(converted.sub_modifier.is_empty());
     }
 }

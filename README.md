@@ -16,8 +16,8 @@ output, interactive prompts, and full TUIs. `urushi` aims to fill that gap:
 
 - **Standalone first.** A `Style` renders to a plain ANSI `String`, so it
   works with `println!` — no terminal setup, raw mode, or event loop.
-- **Ride the ratatui ecosystem via an adapter.** An optional `ratatui` cargo
-  feature lets the same styles be used as ratatui widgets, mapping the
+- **Ride the ratatui ecosystem via an adapter.** The `urushi-tui` crate lets
+  the same styles be used as ratatui widgets, mapping the
   fg/bg/modifier subset onto `ratatui::style::Style` and carrying the box
   model in the widget implementation.
 - **CJK correctness as a first-class goal.** Width measurement, wrapping,
@@ -33,6 +33,7 @@ surface layers, including which parts are implemented today.
 |---|---|---|
 | [`urushi`](urushi/) | Style definitions: colors, modifiers, padding, margin, borders, alignment, wrapping | Core rendering works |
 | [`urushi-prompt`](urushi-prompt/) | Theme-aware `Input`, `Select`, and `Confirm` fields with synchronous validation | Core prompt flow works |
+| [`urushi-tui`](urushi-tui/) | Ratatui style conversion and box-model widgets; provisional home for the future full-screen runtime | Adapter works; runtime is not implemented |
 
 ## Example
 
@@ -64,11 +65,12 @@ application override.
 
 ### The same Theme in ratatui
 
-Enable the optional adapter when the application also uses ratatui:
+Depend on the TUI adapter when the application also uses ratatui:
 
 ```toml
 [dependencies]
-urushi = { version = "0.1.0", features = ["ratatui"] }
+urushi = "0.1.0"
+urushi-tui = "0.1.0"
 ```
 
 Resolve a component from the same `Theme` used by plain output, apply the
@@ -77,6 +79,8 @@ Colors and modifiers stay in the Theme; the TUI layer does not define a second
 palette.
 
 ```rust
+use urushi_tui::RatatuiStyleExt as _;
+
 let panel = profile.resolve_style(theme.style(ComponentRole::PanelFocused));
 frame.render_widget(panel.widget("保存しました"), frame.area());
 ```
@@ -87,7 +91,7 @@ ANSI strings and ratatui. Detect the profile for the writer owned by your
 terminal setup, or construct an explicit profile when the application already
 knows the backend capability.
 
-`Style::widget` carries margin, border, padding, fixed width, and alignment
+`urushi_tui::RatatuiStyleExt::widget` carries margin, border, padding, fixed width, and alignment
 into the ratatui `Buffer`, including CJK-aware clipping. It is stateless and
 does not initialize or restore the terminal. `RatatuiStyle::from(&style)` is
 available when only foreground, background, and text modifiers are needed;
@@ -96,7 +100,7 @@ that conversion deliberately omits the box model and border colors.
 Run the complete Theme → plain CLI / ratatui example with:
 
 ```sh
-cargo run -p urushi --example themed_ratatui --features ratatui
+cargo run -p urushi-tui --example themed_ratatui
 ```
 
 ### The same Theme in interactive prompts
@@ -145,7 +149,7 @@ the left of the prompt's starting position.
 - [ ] Adaptive colors (light/dark terminal backgrounds)
 - [x] Correct re-styling of content that already contains ANSI sequences (nested styles)
 - [x] Theme layer: per-component style sets derived from a small set of semantic tokens
-- [x] `ratatui` feature: box-model Widget and loss-aware stylable-subset conversion
+- [x] `urushi-tui`: box-model Widget and loss-aware Ratatui style conversion
 - [x] `urushi-prompt`: themed `Form` / `Group` with `Input`, `Select`, `Confirm`, and synchronous validation
 
 ## Acknowledgments

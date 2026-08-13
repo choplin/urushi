@@ -3,8 +3,7 @@
 use ratatui::{buffer::Buffer, layout::Rect, style::Style as InnerStyle, widgets::Widget};
 
 use super::{RatatuiStyle, style::convert_color};
-use crate::{Align, Border, Style, visible_width};
-use crate::{style::BoxParts, text::wrap_text};
+use urushi::{Align, Border, Color, Sides, Style, visible_width, wrap_text};
 
 /// A stateless ratatui widget backed by an urushi [`Style`].
 ///
@@ -24,10 +23,40 @@ impl<'a> RatatuiWidget<'a> {
     }
 }
 
-impl Style {
-    /// Adapts this style and `content` into a stateless ratatui widget.
-    pub const fn widget<'a>(&'a self, content: &'a str) -> RatatuiWidget<'a> {
+/// Extension methods for adapting an Urushi style to Ratatui.
+pub trait RatatuiStyleExt {
+    /// Adapts this style and `content` into a stateless Ratatui widget.
+    fn widget<'a>(&'a self, content: &'a str) -> RatatuiWidget<'a>;
+}
+
+impl RatatuiStyleExt for Style {
+    fn widget<'a>(&'a self, content: &'a str) -> RatatuiWidget<'a> {
         RatatuiWidget::new(content, self)
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+struct BoxParts {
+    padding: Sides,
+    margin: Sides,
+    border: Option<Border>,
+    border_foreground: Option<Color>,
+    border_background: Option<Color>,
+    width: Option<u16>,
+    align: Align,
+}
+
+impl BoxParts {
+    const fn from_style(style: &Style) -> Self {
+        Self {
+            padding: style.padding_sides(),
+            margin: style.margin_sides(),
+            border: style.border_kind(),
+            border_foreground: style.border_foreground_color(),
+            border_background: style.border_background_color(),
+            width: style.fixed_width(),
+            align: style.horizontal_alignment(),
+        }
     }
 }
 
@@ -49,7 +78,7 @@ fn render_widget(widget: RatatuiWidget<'_>, area: Rect, buffer: &mut Buffer) {
         return;
     }
 
-    let parts = widget.style.box_parts();
+    let parts = BoxParts::from_style(widget.style);
     let Some(available) = inset(area, parts.margin) else {
         return;
     };
@@ -148,7 +177,7 @@ fn render_widget(widget: RatatuiWidget<'_>, area: Rect, buffer: &mut Buffer) {
     }
 }
 
-fn inset(area: Rect, sides: crate::Sides) -> Option<Rect> {
+fn inset(area: Rect, sides: Sides) -> Option<Rect> {
     let width = area
         .width
         .saturating_sub(sides.left)
@@ -244,8 +273,6 @@ fn set_char(buffer: &mut Buffer, x: u16, y: u16, value: char, style: InnerStyle)
 mod tests {
     use ratatui::style::{Color as RatatuiColor, Modifier};
 
-    use crate::Color;
-
     use super::*;
 
     #[test]
@@ -330,10 +357,10 @@ mod tests {
             &Style::new()
                 .padding(1)
                 .margin(1)
-                .border(crate::Border::ROUNDED)
+                .border(Border::ROUNDED)
                 .border_foreground(Color::RED)
                 .width(20)
-                .align(crate::Align::Center),
+                .align(Align::Center),
         )
         .into_inner();
 
@@ -347,10 +374,10 @@ mod tests {
             .background(Color::BLUE)
             .padding((0, 1))
             .margin((1, 2))
-            .border(crate::Border::ROUNDED)
+            .border(Border::ROUNDED)
             .border_foreground(Color::RED)
             .width(8)
-            .align(crate::Align::Center);
+            .align(Align::Center);
         let area = Rect::new(0, 0, 14, 6);
         let mut buffer = Buffer::empty(area);
 
@@ -373,7 +400,7 @@ mod tests {
         let mut buffer = Buffer::empty(area);
 
         Style::new()
-            .border(crate::Border::NORMAL)
+            .border(Border::NORMAL)
             .widget("日本語")
             .render(area, &mut buffer);
 
@@ -384,7 +411,7 @@ mod tests {
 
     #[test]
     fn widget_is_safe_for_zero_and_narrow_areas() {
-        let style = Style::new().border(crate::Border::NORMAL).padding(2);
+        let style = Style::new().border(Border::NORMAL).padding(2);
         let mut empty = Buffer::empty(Rect::new(0, 0, 0, 0));
         style
             .widget("content")

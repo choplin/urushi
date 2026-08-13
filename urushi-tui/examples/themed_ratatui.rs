@@ -4,6 +4,7 @@ use ratatui::{Terminal, backend::TestBackend};
 use urushi::{
     AnsiPolicy, Color, ColorProfile, ComponentRole, SemanticTokens, TerminalProfile, Theme,
 };
+use urushi_tui::RatatuiStyleExt as _;
 
 fn main() -> Result<(), Box<dyn Error>> {
     let theme = Theme::from_tokens(tokens());

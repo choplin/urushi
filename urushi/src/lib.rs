@@ -3,8 +3,7 @@
 //! `urushi` separates logical styles, renderer-neutral component views, output
 //! rendering, and terminal lifecycle. Basic [`Style`] rendering returns a
 //! `String`, so it composes with `println!`, logging, or any other place text
-//! goes. The optional `terminal` feature adds stderr output and live progress;
-//! the optional `ratatui` feature adapts styles to a terminal buffer.
+//! goes. The optional `terminal` feature adds stderr output and live progress.
 //!
 //! The API is modeled after Go's [lipgloss](https://github.com/charmbracelet/lipgloss).
 //!
@@ -71,15 +70,8 @@
 //! keeps text modifiers. Use [`TerminalProfile::new`] when an application
 //! needs a deterministic explicit override instead of detection.
 //!
-//! # Ratatui adapter
-//!
-//! Enable the `ratatui` feature to convert the stylable subset with
-//! [`RatatuiStyle`] or render the full box model with [`Style::widget`]. The
-//! default build does not depend on ratatui. The widget writes only to the
-//! buffer provided by ratatui and leaves terminal lifecycle and event handling
-//! to the application. Resolve the Theme style through [`TerminalProfile`]
-//! before adapting it so ratatui follows the same color degradation and ANSI
-//! policy as plain output.
+//! Ratatui conversion and widgets live in the separate `urushi-tui` crate so
+//! this core crate remains independent from full-screen TUI backends.
 
 mod component;
 mod render;
@@ -91,9 +83,7 @@ mod view;
 
 pub use component::{Summary, SummaryField, Warning};
 pub use render::AnsiRenderer;
-#[cfg(feature = "ratatui")]
-pub use render::{RatatuiStyle, RatatuiWidget};
-pub use style::{Align, Border, Color, Sides, Style};
+pub use style::{Align, Border, Color, Modifier, Sides, Style, StyleProperty, StylePropertyKey};
 pub use terminal::{AnsiPolicy, ColorProfile, TerminalProfile};
 #[cfg(feature = "terminal")]
 pub use terminal::{OutputMode, ProgressBar, Spinner, StderrTerminal};
