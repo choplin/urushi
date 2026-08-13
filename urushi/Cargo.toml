@@ -1,6 +1,6 @@
 [package]
 name = "urushi"
-description = "Box-model styling for terminal output that renders to plain ANSI strings"
+description = "Composable styling, components, and terminal rendering for Rust CLIs"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -8,12 +8,15 @@ keywords = ["cli", "terminal", "style", "ansi", "tui"]
 categories = ["command-line-interface"]
 
 [dependencies]
-ratatui = { version = "0.30.2", default-features = false, optional = true }
+console = { version = "0.16", optional = true }
+indicatif = { version = "0.18", optional = true }
+ratatui = { version = "0.29", default-features = false, optional = true }
 unicode-width.workspace = true
 
 [features]
 default = []
 ratatui = ["dep:ratatui"]
+terminal = ["dep:console", "dep:indicatif"]
 
 [[example]]
 name = "themed_ratatui"

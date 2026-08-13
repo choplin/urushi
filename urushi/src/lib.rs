@@ -1,10 +1,10 @@
-//! Box-model styling for terminal output.
+//! Composable styling and rendering for terminal applications.
 //!
-//! `urushi` provides reusable style definitions — colors, text modifiers,
-//! padding, margins, borders, and alignment — that render text into plain
-//! ANSI strings. The output is a `String`, so it composes with `println!`,
-//! logging, or any other place terminal text goes. No terminal setup, raw
-//! mode, or event loop is involved.
+//! `urushi` separates logical styles, renderer-neutral component views, output
+//! rendering, and terminal lifecycle. Basic [`Style`] rendering returns a
+//! `String`, so it composes with `println!`, logging, or any other place text
+//! goes. The optional `terminal` feature adds stderr output and live progress;
+//! the optional `ratatui` feature adapts styles to a terminal buffer.
 //!
 //! The API is modeled after Go's [lipgloss](https://github.com/charmbracelet/lipgloss).
 //!
@@ -25,6 +25,11 @@
 //!
 //! Width calculations are aware of East Asian wide characters, so padding,
 //! borders, and alignment stay correct for CJK text.
+//!
+//! Reusable components return [`View`] values containing logical [`Style`]
+//! values. [`AnsiRenderer`] resolves those styles for a [`TerminalProfile`] at
+//! the output boundary. Applications retain ownership of workflow-specific
+//! composition such as command headers and final outcomes.
 //!
 //! # Theme-aware CLI output
 //!
@@ -76,24 +81,24 @@
 //! before adapting it so ratatui follows the same color degradation and ANSI
 //! policy as plain output.
 
-mod border;
-mod color;
-mod join;
-#[cfg(feature = "ratatui")]
-mod ratatui;
+mod component;
+mod render;
 mod style;
 mod terminal;
 mod text;
 mod theme;
+mod view;
 
+pub use component::{Summary, SummaryField, Warning};
+pub use render::AnsiRenderer;
 #[cfg(feature = "ratatui")]
-pub use self::ratatui::{RatatuiStyle, RatatuiWidget};
-pub use border::Border;
-pub use color::Color;
-pub use join::{VerticalAlign, join_horizontal, join_vertical};
-pub use style::{Align, Sides, Style};
+pub use render::{RatatuiStyle, RatatuiWidget};
+pub use style::{Align, Border, Color, Sides, Style};
 pub use terminal::{AnsiPolicy, ColorProfile, TerminalProfile};
-pub use text::visible_width;
+#[cfg(feature = "terminal")]
+pub use terminal::{OutputMode, ProgressBar, Spinner, StderrTerminal};
+pub use text::{visible_width, wrap_text};
 pub use theme::{
     ColorScheme, ComponentRole, ComponentStyles, SemanticTokens, Theme, ThemeRole, ThemeSet,
 };
+pub use view::{Line, Span, VerticalAlign, View, join_horizontal, join_vertical};

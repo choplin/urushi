@@ -1,65 +1,9 @@
 //! The [`Style`] builder and its string renderer.
 
-use crate::border::Border;
-use crate::color::Color;
-use crate::text::{visible_width, wrap};
+use crate::text::{visible_width, wrap_text};
+use crate::{Align, Border, Color, Sides};
 
 const RESET: &str = "\x1b[0m";
-
-/// Horizontal alignment of content within a styled block.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub enum Align {
-    #[default]
-    Left,
-    Center,
-    Right,
-}
-
-/// Spacing values for the four sides of a box.
-///
-/// Builder methods taking `impl Into<Sides>` accept CSS-like shorthands:
-/// a single `u16` (all sides), `(vertical, horizontal)`, or
-/// `(top, right, bottom, left)`.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub struct Sides {
-    pub top: u16,
-    pub right: u16,
-    pub bottom: u16,
-    pub left: u16,
-}
-
-impl From<u16> for Sides {
-    fn from(v: u16) -> Self {
-        Self {
-            top: v,
-            right: v,
-            bottom: v,
-            left: v,
-        }
-    }
-}
-
-impl From<(u16, u16)> for Sides {
-    fn from((v, h): (u16, u16)) -> Self {
-        Self {
-            top: v,
-            right: h,
-            bottom: v,
-            left: h,
-        }
-    }
-}
-
-impl From<(u16, u16, u16, u16)> for Sides {
-    fn from((top, right, bottom, left): (u16, u16, u16, u16)) -> Self {
-        Self {
-            top,
-            right,
-            bottom,
-            left,
-        }
-    }
-}
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 struct Modifiers {
@@ -294,7 +238,7 @@ impl Style {
             .width
             .map(|w| (w as usize).saturating_sub(pl + pr).max(1));
         let mut lines: Vec<String> = match inner_target {
-            Some(w) => wrap(content, w),
+            Some(w) => wrap_text(content, w),
             None => content.lines().map(str::to_string).collect(),
         };
         if lines.is_empty() {

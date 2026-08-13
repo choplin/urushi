@@ -1,70 +1,10 @@
-//! Optional interoperability with `ratatui`.
+//! Ratatui widget rendering for urushi's box model.
 
-use ratatui::{
-    buffer::Buffer,
-    layout::Rect,
-    style::{Color as RatatuiColor, Modifier, Style as InnerStyle},
-    widgets::Widget,
-};
+use ratatui::{buffer::Buffer, layout::Rect, style::Style as InnerStyle, widgets::Widget};
 
-use crate::{Align, Border, Color, Style, visible_width};
-use crate::{style::BoxParts, text::wrap};
-
-/// The stylable subset of an urushi [`Style`] converted for ratatui.
-///
-/// Foreground, background, and text modifiers are preserved. Box-model
-/// properties (margin, border, padding, width, and alignment) and border
-/// colors are intentionally omitted; use urushi's ratatui widget adapter when
-/// those properties need to be rendered.
-///
-/// This urushi-owned wrapper provides an explicit, loss-aware conversion API
-/// without requiring an orphan-rule-invalid foreign trait implementation.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct RatatuiStyle(InnerStyle);
-
-impl RatatuiStyle {
-    /// Returns the underlying ratatui style.
-    pub const fn into_inner(self) -> InnerStyle {
-        self.0
-    }
-}
-
-impl From<&Style> for RatatuiStyle {
-    fn from(value: &Style) -> Self {
-        let parts = value.stylable_parts();
-        let mut style = InnerStyle::new();
-
-        if let Some(color) = parts.foreground {
-            style = style.fg(convert_color(color));
-        }
-        if let Some(color) = parts.background {
-            style = style.bg(convert_color(color));
-        }
-
-        let mut modifiers = Modifier::empty();
-        for (enabled, modifier) in [
-            (parts.bold, Modifier::BOLD),
-            (parts.dim, Modifier::DIM),
-            (parts.italic, Modifier::ITALIC),
-            (parts.underline, Modifier::UNDERLINED),
-            (parts.blink, Modifier::SLOW_BLINK),
-            (parts.reverse, Modifier::REVERSED),
-            (parts.strikethrough, Modifier::CROSSED_OUT),
-        ] {
-            if enabled {
-                modifiers.insert(modifier);
-            }
-        }
-
-        Self(style.add_modifier(modifiers))
-    }
-}
-
-impl From<RatatuiStyle> for InnerStyle {
-    fn from(value: RatatuiStyle) -> Self {
-        value.into_inner()
-    }
-}
+use super::{RatatuiStyle, style::convert_color};
+use crate::{Align, Border, Style, visible_width};
+use crate::{style::BoxParts, text::wrap_text};
 
 /// A stateless ratatui widget backed by an urushi [`Style`].
 ///
@@ -137,7 +77,7 @@ fn render_widget(widget: RatatuiWidget<'_>, area: Rect, buffer: &mut Buffer) {
     let inner_width = box_width.saturating_sub(horizontal_padding);
 
     let lines = if parts.width.is_some() && inner_width > 0 {
-        wrap(widget.content, usize::from(inner_width))
+        wrap_text(widget.content, usize::from(inner_width))
     } else {
         let mut lines: Vec<String> = widget.content.lines().map(str::to_owned).collect();
         if lines.is_empty() {
@@ -300,31 +240,12 @@ fn set_char(buffer: &mut Buffer, x: u16, y: u16, value: char, style: InnerStyle)
     }
 }
 
-const fn convert_color(color: Color) -> RatatuiColor {
-    match color {
-        Color::Ansi(0) => RatatuiColor::Black,
-        Color::Ansi(1) => RatatuiColor::Red,
-        Color::Ansi(2) => RatatuiColor::Green,
-        Color::Ansi(3) => RatatuiColor::Yellow,
-        Color::Ansi(4) => RatatuiColor::Blue,
-        Color::Ansi(5) => RatatuiColor::Magenta,
-        Color::Ansi(6) => RatatuiColor::Cyan,
-        Color::Ansi(7) => RatatuiColor::Gray,
-        Color::Ansi(8) => RatatuiColor::DarkGray,
-        Color::Ansi(9) => RatatuiColor::LightRed,
-        Color::Ansi(10) => RatatuiColor::LightGreen,
-        Color::Ansi(11) => RatatuiColor::LightYellow,
-        Color::Ansi(12) => RatatuiColor::LightBlue,
-        Color::Ansi(13) => RatatuiColor::LightMagenta,
-        Color::Ansi(14) => RatatuiColor::LightCyan,
-        Color::Ansi(15) => RatatuiColor::White,
-        Color::Ansi(index) | Color::Ansi256(index) => RatatuiColor::Indexed(index),
-        Color::Rgb(red, green, blue) => RatatuiColor::Rgb(red, green, blue),
-    }
-}
-
 #[cfg(test)]
 mod tests {
+    use ratatui::style::{Color as RatatuiColor, Modifier};
+
+    use crate::Color;
+
     use super::*;
 
     #[test]
@@ -354,6 +275,23 @@ mod tests {
                 | Modifier::SLOW_BLINK
                 | Modifier::REVERSED
                 | Modifier::CROSSED_OUT
+        );
+    }
+
+    #[test]
+    fn preserves_border_colors_for_composed_ratatui_widgets() {
+        let converted = RatatuiStyle::from(
+            &Style::new()
+                .border_foreground(Color::Rgb(10, 20, 30))
+                .border_background(Color::Ansi256(236)),
+        );
+
+        assert_eq!(converted.into_inner(), InnerStyle::new());
+        assert_eq!(
+            converted.border_style(),
+            InnerStyle::new()
+                .fg(RatatuiColor::Rgb(10, 20, 30))
+                .bg(RatatuiColor::Indexed(236))
         );
     }
 
