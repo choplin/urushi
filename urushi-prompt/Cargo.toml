@@ -8,4 +8,4 @@ license.workspace = true
 [dependencies]
 crossterm = "0.29"
 unicode-segmentation.workspace = true
-urushi = { path = "../urushi" }
+urushi = { path = "../urushi", version = "=0.1.0" }
