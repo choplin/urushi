@@ -38,10 +38,10 @@ fn border_side_grid() -> String {
         style
             .border(Border::NORMAL)
             .border_foreground(Color::BRIGHT_MAGENTA)
-            .render("content")
+            .render("内容")
     };
     let top = side_card(
-        "BORDER TOP ONLY",
+        "上辺のみ",
         border(
             Style::new()
                 .border_right(false)
@@ -52,7 +52,7 @@ fn border_side_grid() -> String {
         true,
     );
     let right = side_card(
-        "BORDER RIGHT ONLY",
+        "右辺のみ",
         border(
             Style::new()
                 .border_top(false)
@@ -63,7 +63,7 @@ fn border_side_grid() -> String {
         true,
     );
     let bottom = side_card(
-        "BORDER BOTTOM ONLY",
+        "下辺のみ",
         border(
             Style::new()
                 .border_top(false)
@@ -74,7 +74,7 @@ fn border_side_grid() -> String {
         false,
     );
     let left = side_card(
-        "BORDER LEFT ONLY",
+        "左辺のみ",
         border(
             Style::new()
                 .border_top(false)
@@ -92,7 +92,7 @@ fn border_side_grid() -> String {
         .bold()
         .width(43)
         .align(Align::Center)
-        .render("PER-SIDE BORDER");
+        .render("辺ごとの罫線");
 
     join_vertical(
         Align::Left,
@@ -119,81 +119,78 @@ fn panel(title: &str, rows: &[String]) -> String {
         .render(&catalog)
 }
 
-/// Renders a readable catalog with one primary feature per row.
-pub fn render_showcase() -> String {
-    let inner = Style::new().foreground(Color::BRIGHT_RED).render("inner");
+/// Renders a readable Japanese catalog that exercises CJK display widths.
+pub fn render_cjk_showcase() -> String {
+    let inner = Style::new().foreground(Color::BRIGHT_RED).render("内側");
     let rows = [
         row(
-            "FOREGROUND COLOR",
+            "前景色",
             Style::new()
                 .foreground(Color::BRIGHT_CYAN)
-                .render("cyan text"),
+                .render("水色の文字"),
         ),
         row(
-            "BACKGROUND COLOR",
-            Style::new().background(Color::BLUE).render("blue field"),
+            "背景色",
+            Style::new().background(Color::BLUE).render("青い領域"),
         ),
-        row("BOLD", Style::new().bold().render("bold text")),
+        row("太字", Style::new().bold().render("太い文字")),
+        row("下線", Style::new().underline().render("下線付き文字")),
         row(
-            "UNDERLINE",
-            Style::new().underline().render("underlined text"),
-        ),
-        row(
-            "NESTED ANSI",
+            "入れ子 ANSI",
             Style::new()
                 .foreground(Color::BRIGHT_GREEN)
-                .render(&format!("outer {inner} outer")),
+                .render(&format!("外側 {inner} 外側")),
         ),
         " ".repeat(43),
         row(
-            "PADDING",
+            "パディング",
             Style::new()
                 .background(Color::BRIGHT_BLACK)
                 .padding((1, 2))
-                .render("content"),
+                .render("内容"),
         ),
         row(
-            "FULL BORDER",
+            "四辺の罫線",
             Style::new()
                 .padding((0, 1))
                 .border(Border::ROUNDED)
-                .render("content"),
+                .render("内容"),
         ),
         " ".repeat(43),
         row(
-            "FIXED WIDTH",
+            "固定幅",
             Style::new()
                 .background(Color::BRIGHT_BLACK)
                 .width(20)
-                .render("20 cells"),
+                .render("20セル"),
         ),
         row(
-            "ALIGN LEFT",
+            "左揃え",
             Style::new()
                 .background(Color::BRIGHT_BLACK)
                 .width(20)
                 .align(Align::Left)
-                .render("left"),
+                .render("左"),
         ),
         row(
-            "ALIGN CENTER",
+            "中央揃え",
             Style::new()
                 .background(Color::BRIGHT_BLACK)
                 .width(20)
                 .align(Align::Center)
-                .render("center"),
+                .render("中央"),
         ),
         row(
-            "ALIGN RIGHT",
+            "右揃え",
             Style::new()
                 .background(Color::BRIGHT_BLACK)
                 .width(20)
                 .align(Align::Right)
-                .render("right"),
+                .render("右"),
         ),
         " ".repeat(43),
         row(
-            "JOIN HORIZONTAL",
+            "横結合",
             join_horizontal(
                 VerticalAlign::Top,
                 &[
@@ -201,17 +198,17 @@ pub fn render_showcase() -> String {
                         .padding((0, 1))
                         .border(Border::ROUNDED)
                         .border_foreground(Color::BRIGHT_GREEN)
-                        .render("A"),
+                        .render("甲"),
                     Style::new()
                         .padding((0, 1))
                         .border(Border::ROUNDED)
                         .border_foreground(Color::BRIGHT_GREEN)
-                        .render("B"),
+                        .render("乙"),
                 ],
             ),
         ),
         row(
-            "JOIN VERTICAL",
+            "縦結合",
             join_vertical(
                 Align::Left,
                 &[
@@ -219,22 +216,22 @@ pub fn render_showcase() -> String {
                         .padding((0, 1))
                         .border(Border::ROUNDED)
                         .border_foreground(Color::BRIGHT_GREEN)
-                        .render("A"),
+                        .render("甲"),
                     Style::new()
                         .padding((0, 1))
                         .border(Border::ROUNDED)
                         .border_foreground(Color::BRIGHT_GREEN)
-                        .render("B"),
+                        .render("乙"),
                 ],
             ),
         ),
         border_side_grid(),
     ];
 
-    panel("URUSHI STYLE SHOWCASE", &rows)
+    panel("URUSHI スタイル・ショーケース", &rows)
 }
 
 #[cfg_attr(test, allow(dead_code))]
 fn main() {
-    println!("{}", render_showcase());
+    println!("{}", render_cjk_showcase());
 }

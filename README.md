@@ -37,11 +37,19 @@ surface layers, including which parts are implemented today.
 
 ## Example
 
-Run the end-to-end showcase to see colored boxes, nested styles, CJK-aware
-alignment, and horizontal and vertical composition:
+Run the English showcase to see one labeled example per styling feature. Each
+entry changes one subject at a time, including colors, modifiers, spacing,
+alignment, joins, and individual border sides:
 
 ```sh
 cargo run --example showcase
+```
+
+Run the Japanese variant for the same one-feature-at-a-time catalog with
+CJK-aware width and alignment:
+
+```sh
+cargo run --example cjk_showcase
 ```
 
 ### Theme-aware plain CLI output
