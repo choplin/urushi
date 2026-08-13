@@ -116,6 +116,17 @@ pub enum IoOperation {
     Cleanup,
 }
 
+impl fmt::Display for IoOperation {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(match self {
+            Self::EnterTerminal => "enter terminal session",
+            Self::ReadEvent => "read terminal event",
+            Self::Render => "render prompt",
+            Self::Cleanup => "clean up terminal session",
+        })
+    }
+}
+
 /// An error that prevents a form from completing normally.
 #[derive(Debug)]
 #[non_exhaustive]
@@ -133,6 +144,37 @@ pub enum RunError {
     },
 }
 
+impl fmt::Display for RunError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::NotInteractive => formatter
+                .write_str("standard input and standard error must be interactive terminals"),
+            Self::Io {
+                operation,
+                source,
+                cleanup: Some(cleanup),
+            } => write!(
+                formatter,
+                "failed to {operation}: {source}; terminal cleanup also failed: {cleanup}"
+            ),
+            Self::Io {
+                operation,
+                source,
+                cleanup: None,
+            } => write!(formatter, "failed to {operation}: {source}"),
+        }
+    }
+}
+
+impl std::error::Error for RunError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::NotInteractive => None,
+            Self::Io { source, .. } => Some(source),
+        }
+    }
+}
+
 /// An invalid top-level form configuration.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
@@ -143,6 +185,19 @@ pub enum FormBuildError {
     DuplicateFieldName(String),
 }
 
+impl fmt::Display for FormBuildError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::EmptyForm => formatter.write_str("a form must contain at least one group"),
+            Self::DuplicateFieldName(name) => {
+                write!(formatter, "field name `{name}` is duplicated in the form")
+            }
+        }
+    }
+}
+
+impl std::error::Error for FormBuildError {}
+
 /// An invalid group configuration.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
@@ -150,6 +205,14 @@ pub enum GroupBuildError {
     /// A group must contain at least one field.
     EmptyGroup,
 }
+
+impl fmt::Display for GroupBuildError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str("a prompt group must contain at least one field")
+    }
+}
+
+impl std::error::Error for GroupBuildError {}
 
 /// A field-specific configuration error reserved for concrete field controls.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -160,6 +223,17 @@ pub enum FieldConfigError {
     /// A select-like field must contain an option.
     EmptyOptions,
 }
+
+impl fmt::Display for FieldConfigError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(match self {
+            Self::EmptyName => "a prompt field name cannot be empty",
+            Self::EmptyOptions => "a select field must contain at least one option",
+        })
+    }
+}
+
+impl std::error::Error for FieldConfigError {}
 
 /// A crate-provided prompt field.
 ///
@@ -1684,6 +1758,33 @@ mod tests {
             Form::builder().group(first).group(second).build(),
             Err(FormBuildError::DuplicateFieldName(name)) if name == "same"
         ));
+    }
+
+    #[test]
+    fn public_errors_are_contextual_standard_errors() {
+        assert_eq!(
+            FormBuildError::DuplicateFieldName("name".to_owned()).to_string(),
+            "field name `name` is duplicated in the form"
+        );
+        assert_eq!(
+            GroupBuildError::EmptyGroup.to_string(),
+            "a prompt group must contain at least one field"
+        );
+        assert_eq!(
+            FieldConfigError::EmptyOptions.to_string(),
+            "a select field must contain at least one option"
+        );
+
+        let error = RunError::Io {
+            operation: IoOperation::Render,
+            source: io::Error::other("draw failed"),
+            cleanup: Some(io::Error::other("restore failed")),
+        };
+        assert_eq!(
+            error.to_string(),
+            "failed to render prompt: draw failed; terminal cleanup also failed: restore failed"
+        );
+        assert!(std::error::Error::source(&error).is_some());
     }
 
     #[test]
