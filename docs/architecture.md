@@ -5,6 +5,11 @@ describes the architecture implemented in this repository today: workspace and
 module responsibilities, dependency direction, rendering flows, terminal
 ownership, and the tests that protect those boundaries.
 
+The [`README`](../README.md#concept) explains why Urushi spans plain CLI output,
+interactive prompts, and full-screen TUIs. This document explains how those
+surfaces share a foundation without forcing them into one rendering model or
+terminal lifecycle.
+
 Urushi supports styled static output, renderer-neutral line components,
 line-oriented prompts, optional live progress, and optional Ratatui adaptation.
 It does not provide a general full-screen TUI runtime. Ratatui application
@@ -54,6 +59,78 @@ Progress state --> Urushi progress lifecycle --> private indicatif adapter
 Resolved Style --> RatatuiStyle
 Style + text  --> RatatuiWidget --> caller-owned Ratatui Buffer
 ```
+
+## Shared foundation and surface layers
+
+Urushi's shared foundation is a set of presentation contracts, not a universal
+widget tree or event loop. An application can define visual meaning once and
+carry it across terminal surfaces while each surface retains the interaction
+and lifecycle rules appropriate to it.
+
+The contracts shared across surfaces are:
+
+- [`Style`](../urushi/src/style/logical.rs), which describes logical color,
+  modifiers, and box-model presentation without owning terminal state;
+- [`Theme`](../urushi/src/theme/definition.rs),
+  [`SemanticTokens`](../urushi/src/theme/tokens.rs), and
+  [`ComponentRole`](../urushi/src/theme/role.rs), which give presentation a
+  reusable semantic vocabulary;
+- the [`text`](../urushi/src/text/) implementation, which supplies one
+  ANSI-aware, cell-aware definition of visible width and wrapping; and
+- [`TerminalProfile`](../urushi/src/terminal/profile.rs), which resolves the
+  same logical styles for the capabilities of the actual output surface.
+
+`View` is not in this lowest common set. It is the renderer-neutral line model
+used by reusable line components and ANSI output. The prompt needs cursor,
+viewport, help/error priority, and final cleanup information that `View` does
+not model, while Ratatui applications render into a cell buffer. Those surfaces
+therefore share the contracts above but use surface-specific view and runtime
+types.
+
+The implemented layers above the foundation are:
+
+The plain CLI and interactive prompt rows describe working, dogfooded paths,
+not placeholders for a future unified UI. They are intentionally partial:
+sharing the foundation does not require either surface to wait for the TUI
+runtime or to adopt its application model.
+
+| Surface | Urushi-provided layer | Lifecycle owner | Current status |
+| --- | --- | --- | --- |
+| Plain CLI output | Direct box-model `Style::render`; reusable components producing `View`; `AnsiRenderer`; `StderrTerminal`; optional spinner and progress-bar lifecycles | The application owns its command workflow and stdout policy. `StderrTerminal` and progress handles own the stderr resources they acquire. | Implemented and dogfooded. Static output, themed line components, terminal degradation, and live/plain progress are covered by repository tests and runnable examples; public progress is also exercised by Agentlog dogfood. |
+| Interactive prompt | `Form` / `Group`; typed `Input`, `Select`, and `Confirm`; synchronous validation; a prompt-specific view; inline redraw; terminal session setup and cleanup | `urushi-prompt` owns the blocking prompt session and resources it acquires. The application owns when the form runs and what submitted values mean. | Implemented and dogfooded. The core prompt flow, viewport behavior, validation, cancellation, and cleanup are covered by tests and runnable terminal examples. |
+| Full-screen TUI | Logical-style conversion and box-model widgets that draw into a caller-provided Ratatui `Buffer` | Today, the consuming Ratatui application owns state, events, layout orchestration, frame scheduling, and terminal lifecycle. | Adapter implemented. A general Urushi TUI runtime is not implemented; [`tui-architecture.md`](tui-architecture.md) defines its target architecture. |
+
+The resulting flows are deliberately related but not identical:
+
+```text
+application semantics
+        |
+        v
+SemanticTokens --> Theme --> ComponentRole --> logical Style
+                                              |
+             +--------------------------------+-----------------------------+
+             |                                |                             |
+             v                                v                             v
+     plain CLI layer                  prompt layer                 Ratatui adapter
+ Component props / text          Form / Group / Field             application view
+             |                                |                             |
+     View or Style::render              PromptView                  Style / widget
+             |                                |                             |
+ AnsiRenderer / terminal        inline renderer + session        caller-owned Buffer
+```
+
+This split prevents visual consistency from turning into lifecycle coupling.
+For example, a prompt and a Ratatui screen may resolve the same
+`PromptOptionSelected` role and use the same CJK width rules, but the prompt
+still owns validation and inline cursor restoration, while the Ratatui
+application owns full-screen event processing and frame rendering. Likewise,
+plain CLI output can use the same theme without entering raw mode or starting
+an event loop.
+
+Applications may extend a `Theme` with domain-specific roles. They should keep
+workflow meaning, such as command phases or product-specific selection states,
+in that application extension rather than expanding Urushi's common roles or
+moving application state into a surface adapter.
 
 ## Workspace responsibilities
 

@@ -23,6 +23,10 @@ output, interactive prompts, and full TUIs. `urushi` aims to fill that gap:
 - **CJK correctness as a first-class goal.** Width measurement, wrapping,
   borders, and alignment are East Asian width aware.
 
+See [`docs/architecture.md`](docs/architecture.md) for how the shared
+foundation is divided into plain CLI, interactive prompt, and Ratatui-facing
+surface layers, including which parts are implemented today.
+
 ## Crates
 
 | Crate | Description | Status |
