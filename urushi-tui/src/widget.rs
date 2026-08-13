@@ -40,6 +40,10 @@ struct BoxParts {
     padding: Sides,
     margin: Sides,
     border: Option<Border>,
+    border_top: bool,
+    border_right: bool,
+    border_bottom: bool,
+    border_left: bool,
     border_foreground: Option<Color>,
     border_background: Option<Color>,
     width: Option<u16>,
@@ -52,6 +56,10 @@ impl BoxParts {
             padding: style.padding_sides(),
             margin: style.margin_sides(),
             border: style.border_kind(),
+            border_top: style.is_border_top_enabled(),
+            border_right: style.is_border_right_enabled(),
+            border_bottom: style.is_border_bottom_enabled(),
+            border_left: style.is_border_left_enabled(),
             border_foreground: style.border_foreground_color(),
             border_background: style.border_background_color(),
             width: style.fixed_width(),
@@ -83,13 +91,13 @@ fn render_widget(widget: RatatuiWidget<'_>, area: Rect, buffer: &mut Buffer) {
         return;
     };
 
-    let border_cells = u16::from(parts.border.is_some()) * 2;
-    let max_box_width = available.width.saturating_sub(border_cells);
-    let max_box_height = available.height.saturating_sub(border_cells);
-    if max_box_width == 0 || max_box_height == 0 {
-        render_degenerate_border(available, parts, buffer);
-        return;
-    }
+    let has_border = parts.border.is_some();
+    let border_columns = u16::from(has_border && parts.border_left)
+        .saturating_add(u16::from(has_border && parts.border_right));
+    let border_rows = u16::from(has_border && parts.border_top)
+        .saturating_add(u16::from(has_border && parts.border_bottom));
+    let max_box_width = available.width.saturating_sub(border_columns);
+    let max_box_height = available.height.saturating_sub(border_rows);
 
     let horizontal_padding = parts.padding.left.saturating_add(parts.padding.right);
     let natural_inner_width = widget
@@ -122,25 +130,32 @@ fn render_widget(widget: RatatuiWidget<'_>, area: Rect, buffer: &mut Buffer) {
         .saturating_add(content_height)
         .saturating_add(parts.padding.bottom);
     let box_height = requested_box_height.min(max_box_height);
-    let total_width = box_width.saturating_add(border_cells);
-    let total_height = box_height.saturating_add(border_cells);
+    let total_width = box_width.saturating_add(border_columns);
+    let total_height = box_height.saturating_add(border_rows);
     let widget_area = Rect::new(available.x, available.y, total_width, total_height);
 
     let text_style = RatatuiStyle::from(widget.style).into_inner();
-    let box_area = if parts.border.is_some() {
-        Rect::new(
-            widget_area.x.saturating_add(1),
-            widget_area.y.saturating_add(1),
-            box_width,
-            box_height,
-        )
-    } else {
+    let box_area = Rect::new(
         widget_area
-    };
+            .x
+            .saturating_add(u16::from(has_border && parts.border_left)),
+        widget_area
+            .y
+            .saturating_add(u16::from(has_border && parts.border_top)),
+        box_width,
+        box_height,
+    );
     fill(box_area, text_style, buffer);
 
     if let Some(border) = parts.border {
-        draw_border(widget_area, border, border_style(parts), buffer);
+        draw_border(
+            widget_area,
+            available,
+            border,
+            parts,
+            border_style(parts),
+            buffer,
+        );
     }
 
     let content_x = box_area
@@ -217,49 +232,77 @@ fn border_style(parts: BoxParts) -> InnerStyle {
     style
 }
 
-fn draw_border(area: Rect, border: Border, style: InnerStyle, buffer: &mut Buffer) {
+fn draw_border(
+    area: Rect,
+    clip: Rect,
+    border: Border,
+    parts: BoxParts,
+    style: InnerStyle,
+    buffer: &mut Buffer,
+) {
     if area.is_empty() {
         return;
     }
 
     let left = area.left();
-    let right = area.right().saturating_sub(1);
+    let content_left = left.saturating_add(u16::from(parts.border_left));
+    let content_width = area
+        .width
+        .saturating_sub(u16::from(parts.border_left))
+        .saturating_sub(u16::from(parts.border_right));
+    let right = content_left.saturating_add(content_width);
     let top = area.top();
-    let bottom = area.bottom().saturating_sub(1);
+    let content_top = top.saturating_add(u16::from(parts.border_top));
+    let content_height = area
+        .height
+        .saturating_sub(u16::from(parts.border_top))
+        .saturating_sub(u16::from(parts.border_bottom));
+    let bottom = content_top.saturating_add(content_height);
 
-    for x in left..=right {
-        let top_char = if x == left {
-            border.top_left
-        } else if x == right {
-            border.top_right
-        } else {
-            border.top
-        };
-        set_char(buffer, x, top, top_char, style);
-
-        if bottom != top {
-            let bottom_char = if x == left {
-                border.bottom_left
-            } else if x == right {
-                border.bottom_right
-            } else {
-                border.bottom
-            };
-            set_char(buffer, x, bottom, bottom_char, style);
+    if parts.border_top {
+        if parts.border_left {
+            set_char_clipped(buffer, clip, left, top, border.top_left, style);
+        }
+        for x in content_left..content_left.saturating_add(content_width) {
+            set_char_clipped(buffer, clip, x, top, border.top, style);
+        }
+        if parts.border_right {
+            set_char_clipped(buffer, clip, right, top, border.top_right, style);
         }
     }
 
-    for y in top.saturating_add(1)..bottom {
-        set_char(buffer, left, y, border.left, style);
-        if right != left {
-            set_char(buffer, right, y, border.right, style);
+    for y in content_top..content_top.saturating_add(content_height) {
+        if parts.border_left {
+            set_char_clipped(buffer, clip, left, y, border.left, style);
+        }
+        if parts.border_right {
+            set_char_clipped(buffer, clip, right, y, border.right, style);
+        }
+    }
+
+    if parts.border_bottom {
+        if parts.border_left {
+            set_char_clipped(buffer, clip, left, bottom, border.bottom_left, style);
+        }
+        for x in content_left..content_left.saturating_add(content_width) {
+            set_char_clipped(buffer, clip, x, bottom, border.bottom, style);
+        }
+        if parts.border_right {
+            set_char_clipped(buffer, clip, right, bottom, border.bottom_right, style);
         }
     }
 }
 
-fn render_degenerate_border(area: Rect, parts: BoxParts, buffer: &mut Buffer) {
-    if let Some(border) = parts.border {
-        draw_border(area, border, border_style(parts), buffer);
+fn set_char_clipped(
+    buffer: &mut Buffer,
+    clip: Rect,
+    x: u16,
+    y: u16,
+    value: char,
+    style: InnerStyle,
+) {
+    if x >= clip.left() && x < clip.right() && y >= clip.top() && y < clip.bottom() {
+        set_char(buffer, x, y, value, style);
     }
 }
 
@@ -421,6 +464,129 @@ mod tests {
         let mut narrow = Buffer::empty(area);
         style.widget("content").render(area, &mut narrow);
         assert_eq!(buffer_line(&narrow, 0), "┌");
+    }
+
+    #[test]
+    fn widget_matches_direct_rendering_for_border_side_combinations() {
+        let styles = [
+            Style::new().border(Border::ASCII),
+            Style::new()
+                .border(Border::ASCII)
+                .border_top(false)
+                .border_right(false)
+                .border_bottom(false)
+                .border_left(false),
+            Style::new()
+                .border(Border::ASCII)
+                .border_right(false)
+                .border_bottom(false)
+                .border_left(false),
+            Style::new()
+                .border(Border::ASCII)
+                .border_top(false)
+                .border_right(false)
+                .border_bottom(false),
+            Style::new()
+                .border(Border::ASCII)
+                .border_right(false)
+                .border_bottom(false),
+            Style::new()
+                .border(Border::ASCII)
+                .border_right(false)
+                .border_left(false),
+            Style::new()
+                .border(Border::ASCII)
+                .border_top(false)
+                .border_bottom(false),
+        ];
+
+        for style in styles {
+            let direct = style.render("x");
+            let expected: Vec<_> = direct.lines().collect();
+            let width = expected
+                .iter()
+                .map(|line| visible_width(line))
+                .max()
+                .unwrap() as u16;
+            let area = Rect::new(0, 0, width, expected.len() as u16);
+            let mut buffer = Buffer::empty(area);
+
+            style.widget("x").render(area, &mut buffer);
+
+            for (y, expected_line) in expected.into_iter().enumerate() {
+                assert_eq!(buffer_line(&buffer, y as u16), expected_line);
+            }
+        }
+    }
+
+    #[test]
+    fn widget_styles_only_enabled_border_edges() {
+        let style = Style::new()
+            .foreground(Color::GREEN)
+            .border(Border::NORMAL)
+            .border_top(false)
+            .border_right(false)
+            .border_bottom(false)
+            .border_foreground(Color::RED);
+        let area = Rect::new(0, 0, 2, 1);
+        let mut buffer = Buffer::empty(area);
+
+        style.widget("x").render(area, &mut buffer);
+
+        assert_eq!(buffer_line(&buffer, 0), "│x");
+        assert_eq!(
+            buffer.cell((0, 0)).expect("border cell").fg,
+            RatatuiColor::Red
+        );
+        assert_eq!(
+            buffer.cell((1, 0)).expect("content cell").fg,
+            RatatuiColor::Green
+        );
+    }
+
+    #[test]
+    fn widget_draws_the_configured_edge_in_degenerate_areas() {
+        let cases = [
+            (
+                Style::new()
+                    .border(Border::ASCII)
+                    .border_right(false)
+                    .border_bottom(false)
+                    .border_left(false),
+                "-",
+            ),
+            (
+                Style::new()
+                    .border(Border::ASCII)
+                    .border_top(false)
+                    .border_right(false)
+                    .border_bottom(false),
+                "|",
+            ),
+            (
+                Style::new()
+                    .border(Border::ASCII)
+                    .border_top(false)
+                    .border_right(false)
+                    .border_left(false),
+                "-",
+            ),
+            (
+                Style::new()
+                    .border(Border::ASCII)
+                    .border_top(false)
+                    .border_bottom(false)
+                    .border_left(false),
+                "|",
+            ),
+        ];
+
+        for (style, expected) in cases {
+            let area = Rect::new(0, 0, 1, 1);
+            let mut buffer = Buffer::empty(area);
+            style.widget("x").render(area, &mut buffer);
+            assert_eq!(buffer_line(&buffer, 0), expected);
+        }
     }
 
     fn buffer_line(buffer: &Buffer, y: u16) -> String {

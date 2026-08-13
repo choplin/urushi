@@ -42,6 +42,10 @@ enum StyleProperty {
     Padding(Sides),
     Margin(Sides),
     Border(Border),
+    BorderTop(bool),
+    BorderRight(bool),
+    BorderBottom(bool),
+    BorderLeft(bool),
     BorderForeground(Color),
     BorderBackground(Color),
     Width(u16),
@@ -55,6 +59,10 @@ enum StylePropertyKey {
     Padding,
     Margin,
     Border,
+    BorderTop,
+    BorderRight,
+    BorderBottom,
+    BorderLeft,
     BorderForeground,
     BorderBackground,
     Width,
@@ -91,6 +99,26 @@ let style = Style::new()
     .width(20)
     .align(Align::Center);
 ```
+
+Border edge visibility has named builders and getters as well as generic
+properties:
+
+```rust
+let separator = Style::new()
+    .border(Border::NORMAL)
+    .border_top(false)
+    .border_right(false)
+    .border_bottom(true)
+    .border_left(false);
+
+assert!(separator.is_border_bottom_enabled());
+```
+
+`border(Border)` enables the familiar four-sided rendering by default. Each
+side setting is an independent effective value. Removing a side property, such
+as `StylePropertyKey::BorderLeft`, restores its default value of `true`.
+Removing `Border` removes only the glyph set; it does not rewrite the four side
+values, which remain inactive until a border is added again.
 
 These builders are thin wrappers over `add`; they do not define a second
 behavior. There are no `unset_*` methods. Generic `remove` is the single way to
@@ -149,6 +177,22 @@ Renderers consume the values present in one `Style`.
 
 Direct `Style::render` surrounds emitted styling with a final ANSI reset, so it
 does not require a stored removal instruction.
+
+## Border edge geometry
+
+An enabled top or bottom edge contributes one row. An enabled left or right
+edge contributes one column. A corner glyph represents the intersection of
+two enabled incident edges, so it is drawn only when both those edges are
+enabled. For example, a top edge without a left edge starts with the top
+horizontal glyph rather than the top-left corner. The horizontal glyph repeats
+across the padded content width, and every emitted row has the same outer width:
+the padded content width plus the enabled vertical-edge columns.
+
+A border with all four sides disabled contributes no rows or columns and is
+layout-equivalent to no border. Border foreground and background colors apply
+uniformly to every enabled edge. The direct ANSI renderer and the Ratatui
+widget use this same geometry; constrained Ratatui areas clip at the area's
+right and bottom boundaries after reserving enabled edge cells.
 
 ## Alignment with Lip Gloss and noctui
 

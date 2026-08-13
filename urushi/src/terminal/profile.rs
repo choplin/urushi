@@ -92,7 +92,7 @@ fn detect(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{Align, Border, Color};
+    use crate::{Align, Border, Color, Sides};
 
     #[test]
     fn detection_obeys_precedence_and_empty_no_color() {
@@ -195,5 +195,37 @@ mod tests {
             .resolve_style(&style)
             .render("日本");
         assert_eq!(disabled, "╭────────╮\n│  日本  │\n╰────────╯");
+    }
+
+    #[test]
+    fn color_resolution_preserves_border_side_layout_values() {
+        let style = Style::new()
+            .foreground(Color::Rgb(1, 2, 3))
+            .border(Border::ROUNDED)
+            .border_top(false)
+            .border_right(true)
+            .border_bottom(true)
+            .border_left(false)
+            .padding((1, 2, 3, 4))
+            .margin((4, 3, 2, 1))
+            .width(12)
+            .align(Align::Right);
+
+        for profile in [
+            TerminalProfile::new(ColorProfile::Ansi256, AnsiPolicy::Enabled),
+            TerminalProfile::new(ColorProfile::Monochrome, AnsiPolicy::Enabled),
+            TerminalProfile::new(ColorProfile::TrueColor, AnsiPolicy::Disabled),
+        ] {
+            let resolved = profile.resolve_style(&style);
+            assert_eq!(resolved.border_kind(), Some(Border::ROUNDED));
+            assert!(!resolved.is_border_top_enabled());
+            assert!(resolved.is_border_right_enabled());
+            assert!(resolved.is_border_bottom_enabled());
+            assert!(!resolved.is_border_left_enabled());
+            assert_eq!(resolved.padding_sides(), Sides::from((1, 2, 3, 4)));
+            assert_eq!(resolved.margin_sides(), Sides::from((4, 3, 2, 1)));
+            assert_eq!(resolved.fixed_width(), Some(12));
+            assert_eq!(resolved.horizontal_alignment(), Align::Right);
+        }
     }
 }

@@ -90,6 +90,109 @@ fn border_color_is_scoped_to_border() {
 }
 
 #[test]
+fn border_sides_render_independently_with_geometric_corners() {
+    let cases = [
+        (
+            Style::new().border(Border::ASCII),
+            "+-+\n|x|\n+-+",
+            "all sides",
+        ),
+        (
+            Style::new()
+                .border(Border::ASCII)
+                .border_top(false)
+                .border_right(false)
+                .border_bottom(false)
+                .border_left(false),
+            "x",
+            "no sides",
+        ),
+        (
+            Style::new()
+                .border(Border::ASCII)
+                .border_right(false)
+                .border_bottom(false)
+                .border_left(false),
+            "-\nx",
+            "top only",
+        ),
+        (
+            Style::new()
+                .border(Border::ASCII)
+                .border_top(false)
+                .border_right(false)
+                .border_bottom(false),
+            "|x",
+            "left only",
+        ),
+        (
+            Style::new()
+                .border(Border::ASCII)
+                .border_right(false)
+                .border_bottom(false),
+            "+-\n|x",
+            "adjacent sides",
+        ),
+        (
+            Style::new()
+                .border(Border::ASCII)
+                .border_right(false)
+                .border_left(false),
+            "-\nx\n-",
+            "opposite horizontal sides",
+        ),
+        (
+            Style::new()
+                .border(Border::ASCII)
+                .border_top(false)
+                .border_bottom(false),
+            "|x|",
+            "opposite vertical sides",
+        ),
+    ];
+
+    for (style, expected, case) in cases {
+        let actual = style.render("x");
+        assert_eq!(actual, expected, "{case}");
+        let widths: Vec<_> = actual.lines().map(visible_width).collect();
+        assert!(
+            widths.iter().all(|width| *width == widths[0]),
+            "inconsistent widths for {case}: {widths:?}"
+        );
+    }
+}
+
+#[test]
+fn enabled_edges_are_the_only_border_cells_styled() {
+    let style = Style::new()
+        .border(Border::NORMAL)
+        .border_top(false)
+        .border_right(false)
+        .border_bottom(false)
+        .border_foreground(Color::RED);
+
+    assert_eq!(style.render("x"), "\x1b[31m│\x1b[0mx");
+
+    let no_edges = style.border_left(false);
+    assert_eq!(no_edges.render("x"), "x");
+}
+
+#[test]
+fn empty_content_keeps_degenerate_border_geometry_consistent() {
+    let all_sides = Style::new().border(Border::ASCII).render("");
+    assert_eq!(all_sides, "++\n||\n++");
+    assert!(all_sides.lines().all(|line| visible_width(line) == 2));
+
+    let adjacent = Style::new()
+        .border(Border::ASCII)
+        .border_right(false)
+        .border_bottom(false)
+        .render("");
+    assert_eq!(adjacent, "+\n|");
+    assert!(adjacent.lines().all(|line| visible_width(line) == 1));
+}
+
+#[test]
 fn width_wraps_cjk_text() {
     let out = Style::new().width(4).render("こんにちは");
     assert_eq!(out, "こん\nにち\nは  ");

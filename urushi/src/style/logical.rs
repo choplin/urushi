@@ -18,7 +18,7 @@ const RESET: &str = "\x1b[0m";
 ///
 /// println!("{}", boxed.render("hello"));
 /// ```
-#[derive(Debug, Clone, Default, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Style {
     fg: Option<Color>,
     bg: Option<Color>,
@@ -26,10 +26,35 @@ pub struct Style {
     padding: Sides,
     margin: Sides,
     border: Option<Border>,
+    border_top: bool,
+    border_right: bool,
+    border_bottom: bool,
+    border_left: bool,
     border_fg: Option<Color>,
     border_bg: Option<Color>,
     width: Option<u16>,
     align: Align,
+}
+
+impl Default for Style {
+    fn default() -> Self {
+        Self {
+            fg: None,
+            bg: None,
+            modifiers: Modifier::empty(),
+            padding: Sides::default(),
+            margin: Sides::default(),
+            border: None,
+            border_top: true,
+            border_right: true,
+            border_bottom: true,
+            border_left: true,
+            border_fg: None,
+            border_bg: None,
+            width: None,
+            align: Align::default(),
+        }
+    }
 }
 
 impl Style {
@@ -50,6 +75,10 @@ impl Style {
             StyleProperty::Padding(sides) => self.padding = sides,
             StyleProperty::Margin(sides) => self.margin = sides,
             StyleProperty::Border(border) => self.border = Some(border),
+            StyleProperty::BorderTop(enabled) => self.border_top = enabled,
+            StyleProperty::BorderRight(enabled) => self.border_right = enabled,
+            StyleProperty::BorderBottom(enabled) => self.border_bottom = enabled,
+            StyleProperty::BorderLeft(enabled) => self.border_left = enabled,
             StyleProperty::BorderForeground(color) => self.border_fg = Some(color),
             StyleProperty::BorderBackground(color) => self.border_bg = Some(color),
             StyleProperty::Width(width) => self.width = Some(width),
@@ -69,6 +98,10 @@ impl Style {
             StylePropertyKey::Padding => self.padding = Sides::default(),
             StylePropertyKey::Margin => self.margin = Sides::default(),
             StylePropertyKey::Border => self.border = None,
+            StylePropertyKey::BorderTop => self.border_top = true,
+            StylePropertyKey::BorderRight => self.border_right = true,
+            StylePropertyKey::BorderBottom => self.border_bottom = true,
+            StylePropertyKey::BorderLeft => self.border_left = true,
             StylePropertyKey::BorderForeground => self.border_fg = None,
             StylePropertyKey::BorderBackground => self.border_bg = None,
             StylePropertyKey::Width => self.width = None,
@@ -125,9 +158,32 @@ impl Style {
         self.add(StyleProperty::Margin(sides.into()))
     }
 
-    /// Draws a border around the padded content.
+    /// Sets the border glyphs around the padded content.
+    ///
+    /// A new style enables all four edges. Use the `border_*` builders to
+    /// configure edge visibility independently.
     pub fn border(self, border: Border) -> Self {
         self.add(StyleProperty::Border(border))
+    }
+
+    /// Enables or disables the top border edge.
+    pub fn border_top(self, enabled: bool) -> Self {
+        self.add(StyleProperty::BorderTop(enabled))
+    }
+
+    /// Enables or disables the right border edge.
+    pub fn border_right(self, enabled: bool) -> Self {
+        self.add(StyleProperty::BorderRight(enabled))
+    }
+
+    /// Enables or disables the bottom border edge.
+    pub fn border_bottom(self, enabled: bool) -> Self {
+        self.add(StyleProperty::BorderBottom(enabled))
+    }
+
+    /// Enables or disables the left border edge.
+    pub fn border_left(self, enabled: bool) -> Self {
+        self.add(StyleProperty::BorderLeft(enabled))
     }
 
     /// Sets the border foreground color.
@@ -179,6 +235,26 @@ impl Style {
     /// Returns the border glyph set, if a border is enabled.
     pub const fn border_kind(&self) -> Option<Border> {
         self.border
+    }
+
+    /// Returns whether the top border edge is enabled.
+    pub const fn is_border_top_enabled(&self) -> bool {
+        self.border_top
+    }
+
+    /// Returns whether the right border edge is enabled.
+    pub const fn is_border_right_enabled(&self) -> bool {
+        self.border_right
+    }
+
+    /// Returns whether the bottom border edge is enabled.
+    pub const fn is_border_bottom_enabled(&self) -> bool {
+        self.border_bottom
+    }
+
+    /// Returns whether the left border edge is enabled.
+    pub const fn is_border_left_enabled(&self) -> bool {
+        self.border_left
     }
 
     /// Returns the border foreground color instruction.
@@ -292,18 +368,34 @@ impl Style {
             let breset = if bsgr.is_empty() { "" } else { RESET };
             let top: String = std::iter::repeat_n(b.top, total).collect();
             let bottom: String = std::iter::repeat_n(b.bottom, total).collect();
-            let mut bordered = Vec::with_capacity(rows.len() + 2);
-            bordered.push(format!("{bsgr}{}{top}{}{breset}", b.top_left, b.top_right));
-            for row in rows {
-                bordered.push(format!(
-                    "{bsgr}{}{breset}{row}{bsgr}{}{breset}",
-                    b.left, b.right
-                ));
+            let mut bordered = Vec::with_capacity(
+                rows.len() + usize::from(self.border_top) + usize::from(self.border_bottom),
+            );
+            if self.border_top {
+                let top_left = optional_border_char(self.border_left, b.top_left);
+                let top_right = optional_border_char(self.border_right, b.top_right);
+                let edge = format!("{top_left}{top}{top_right}");
+                bordered.push(if edge.is_empty() {
+                    edge
+                } else {
+                    format!("{bsgr}{edge}{breset}")
+                });
             }
-            bordered.push(format!(
-                "{bsgr}{}{bottom}{}{breset}",
-                b.bottom_left, b.bottom_right
-            ));
+            for row in rows {
+                let left = styled_border_char(self.border_left, b.left, &bsgr, breset);
+                let right = styled_border_char(self.border_right, b.right, &bsgr, breset);
+                bordered.push(format!("{left}{row}{right}"));
+            }
+            if self.border_bottom {
+                let bottom_left = optional_border_char(self.border_left, b.bottom_left);
+                let bottom_right = optional_border_char(self.border_right, b.bottom_right);
+                let edge = format!("{bottom_left}{bottom}{bottom_right}");
+                bordered.push(if edge.is_empty() {
+                    edge
+                } else {
+                    format!("{bsgr}{edge}{breset}")
+                });
+            }
             rows = bordered;
         }
 
@@ -312,7 +404,9 @@ impl Style {
         if m == Sides::default() {
             return rows.join("\n");
         }
-        let outer = total + if self.border.is_some() { 2 } else { 0 };
+        let outer = total
+            + usize::from(self.border.is_some() && self.border_left)
+            + usize::from(self.border.is_some() && self.border_right);
         let (ml, mr) = (m.left as usize, m.right as usize);
         let blank_margin = " ".repeat(ml + outer + mr);
         let mut out: Vec<String> = Vec::with_capacity(rows.len() + (m.top + m.bottom) as usize);
@@ -374,6 +468,22 @@ impl Style {
     }
 }
 
+fn optional_border_char(enabled: bool, value: char) -> String {
+    if enabled {
+        value.to_string()
+    } else {
+        String::new()
+    }
+}
+
+fn styled_border_char(enabled: bool, value: char, sgr: &str, reset: &str) -> String {
+    if enabled {
+        format!("{sgr}{value}{reset}")
+    } else {
+        String::new()
+    }
+}
+
 fn reapply_after_reset(content: &str, sgr: &str) -> String {
     if sgr.is_empty() || !content.contains(RESET) {
         return content.to_string();
@@ -416,6 +526,10 @@ mod tests {
             .padding(1)
             .margin(2)
             .border(Border::ROUNDED)
+            .border_top(false)
+            .border_right(false)
+            .border_bottom(false)
+            .border_left(false)
             .border_foreground(Color::CYAN)
             .border_background(Color::BLACK)
             .width(20)
@@ -424,6 +538,10 @@ mod tests {
             .remove(StylePropertyKey::Padding)
             .remove(StylePropertyKey::Margin)
             .remove(StylePropertyKey::Border)
+            .remove(StylePropertyKey::BorderTop)
+            .remove(StylePropertyKey::BorderRight)
+            .remove(StylePropertyKey::BorderBottom)
+            .remove(StylePropertyKey::BorderLeft)
             .remove(StylePropertyKey::BorderForeground)
             .remove(StylePropertyKey::BorderBackground)
             .remove(StylePropertyKey::Width)
@@ -434,9 +552,38 @@ mod tests {
         assert_eq!(style.padding_sides(), Sides::default());
         assert_eq!(style.margin_sides(), Sides::default());
         assert_eq!(style.border_kind(), None);
+        assert!(style.is_border_top_enabled());
+        assert!(style.is_border_right_enabled());
+        assert!(style.is_border_bottom_enabled());
+        assert!(style.is_border_left_enabled());
         assert_eq!(style.border_foreground_color(), None);
         assert_eq!(style.border_background_color(), None);
         assert_eq!(style.fixed_width(), None);
         assert_eq!(style.horizontal_alignment(), Align::Left);
+    }
+
+    #[test]
+    fn border_side_builders_and_generic_properties_share_value_semantics() {
+        let named = Style::new()
+            .border_top(false)
+            .border_right(false)
+            .border_bottom(false)
+            .border_left(false);
+        let generic = Style::new()
+            .add(StyleProperty::BorderTop(false))
+            .add(StyleProperty::BorderRight(false))
+            .add(StyleProperty::BorderBottom(false))
+            .add(StyleProperty::BorderLeft(false));
+
+        assert_eq!(named, generic);
+        assert!(!named.is_border_top_enabled());
+        assert!(!named.is_border_right_enabled());
+        assert!(!named.is_border_bottom_enabled());
+        assert!(!named.is_border_left_enabled());
+
+        let restored_top = generic
+            .border(Border::ASCII)
+            .remove(StylePropertyKey::BorderTop);
+        assert_eq!(restored_top.render("x"), "-\nx");
     }
 }
