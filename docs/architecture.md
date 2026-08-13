@@ -9,7 +9,9 @@ Urushi supports styled static output, renderer-neutral line components,
 line-oriented prompts, optional live progress, and optional Ratatui adaptation.
 It does not provide a general full-screen TUI runtime. Ratatui application
 state, event loops, layout orchestration, and frame scheduling remain owned by
-the consuming application.
+the consuming application. [`tui-architecture.md`](tui-architecture.md)
+describes the target architecture for adding that runtime without changing the
+boundaries documented here prematurely.
 
 ## Architecture at a glance
 
