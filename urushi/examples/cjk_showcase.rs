@@ -47,6 +47,81 @@ fn horizontal_alignment_sample(left: &str, center: &str, right: &str) -> String 
     join_vertical(Align::Left, &[left, gap.clone(), center, gap, right])
 }
 
+fn junction_grid(border: Border) -> String {
+    let top = border.top.to_string().repeat(3);
+    let middle = border.middle_horizontal.to_string().repeat(3);
+    let bottom = border.bottom.to_string().repeat(3);
+
+    format!(
+        "{}{}{}{}{}\n{}甲 {}乙 {}\n{}{}{}{}{}\n{}丙 {}丁 {}\n{}{}{}{}{}",
+        border.top_left,
+        top,
+        border.middle_top,
+        top,
+        border.top_right,
+        border.left,
+        border.left,
+        border.right,
+        border.middle_left,
+        middle,
+        border.middle,
+        middle,
+        border.middle_right,
+        border.left,
+        border.left,
+        border.right,
+        border.bottom_left,
+        bottom,
+        border.middle_bottom,
+        bottom,
+        border.bottom_right,
+    )
+}
+
+fn border_card(label: &str, border: Border, color: Color) -> String {
+    let label = Style::new()
+        .foreground(color)
+        .bold()
+        .width(9)
+        .align(Align::Center)
+        .render(label);
+    let mut grid_style = Style::new().foreground(color);
+    if border == Border::HIDDEN {
+        grid_style = grid_style.background(Color::BRIGHT_BLACK);
+    }
+    let grid = grid_style.render(&junction_grid(border));
+
+    join_vertical(Align::Left, &[label, grid])
+}
+
+fn border_preset_sample() -> String {
+    let pair = |left, right| join_horizontal(VerticalAlign::Top, &[left, " ".to_string(), right]);
+    join_vertical(
+        Align::Left,
+        &[
+            pair(
+                border_card("標準", Border::NORMAL, Color::BRIGHT_GREEN),
+                border_card("角丸", Border::ROUNDED, Color::BRIGHT_CYAN),
+            ),
+            " ".repeat(19),
+            pair(
+                border_card("太線", Border::THICK, Color::BRIGHT_MAGENTA),
+                border_card("二重線", Border::DOUBLE, Color::BRIGHT_BLUE),
+            ),
+            " ".repeat(19),
+            pair(
+                border_card("ASCII", Border::ASCII, Color::BRIGHT_YELLOW),
+                border_card("Markdown", Border::MARKDOWN, Color::BRIGHT_RED),
+            ),
+            " ".repeat(19),
+            pair(
+                border_card("三線表", Border::BOOKTABS, Color::BRIGHT_CYAN),
+                border_card("非表示", Border::HIDDEN, Color::BRIGHT_BLACK),
+            ),
+        ],
+    )
+}
+
 fn side_card(label: &str, sample: String, blank_above: bool, blank_below: bool) -> String {
     let label = Style::new()
         .foreground(Color::BRIGHT_CYAN)
@@ -248,6 +323,8 @@ pub fn render_cjk_showcase() -> String {
                 ],
             ),
         ),
+        " ".repeat(43),
+        row("罫線の種類", border_preset_sample()),
         border_side_grid(),
     ];
 

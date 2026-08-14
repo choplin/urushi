@@ -26,6 +26,7 @@ fn cjk_showcase_preserves_width_and_japanese_content() {
         "水平揃え",
         "横結合",
         "縦結合",
+        "罫線の種類",
         "上辺のみ",
         "右辺のみ",
         "下辺のみ",
@@ -35,6 +36,25 @@ fn cjk_showcase_preserves_width_and_japanese_content() {
     }
     assert!(output.contains("20列分を確保"));
     assert!(output.contains("3行分を確保"));
+    assert!(output.contains("┌───┬───┐"));
+    assert!(output.contains("├───┼───┤"));
+    assert!(output.contains("└───┴───┘"));
+    assert!(output.contains("+---+---+"));
+    assert!(output.contains("|---|---|"));
+    assert!(output.contains("━━━━━━━━━"));
+    assert!(output.contains("─────────"));
+    for preset in [
+        "標準",
+        "角丸",
+        "太線",
+        "二重線",
+        "ASCII",
+        "Markdown",
+        "三線表",
+        "非表示",
+    ] {
+        assert!(output.contains(preset), "罫線presetがありません: {preset}");
+    }
     for position in ["上", "中央", "下", "左", "右"] {
         assert!(
             output.contains(position),

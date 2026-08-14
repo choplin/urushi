@@ -57,6 +57,7 @@ fn showcase_has_a_consistent_visible_width() {
         "HORIZONTAL ALIGNMENT",
         "JOIN HORIZONTAL",
         "JOIN VERTICAL",
+        "BORDER PRESETS",
         "BORDER TOP ONLY",
         "BORDER RIGHT ONLY",
         "BORDER BOTTOM ONLY",
@@ -81,6 +82,18 @@ fn showcase_has_a_consistent_visible_width() {
     }
     assert!(output.contains("reserves 20 cols"));
     assert!(output.contains("reserves 3 rows"));
+    assert!(output.contains("┌───┬───┐"));
+    assert!(output.contains("├───┼───┤"));
+    assert!(output.contains("└───┴───┘"));
+    assert!(output.contains("+---+---+"));
+    assert!(output.contains("|---|---|"));
+    assert!(output.contains("━━━━━━━━━"));
+    assert!(output.contains("─────────"));
+    for preset in [
+        "NORMAL", "ROUNDED", "THICK", "DOUBLE", "ASCII", "MARKDOWN", "BOOKTABS", "HIDDEN",
+    ] {
+        assert!(output.contains(preset), "missing border preset: {preset}");
+    }
     for position in ["TOP", "CENTER", "BOTTOM", "LEFT", "RIGHT"] {
         assert!(
             output.contains(position),

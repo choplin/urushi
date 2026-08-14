@@ -91,6 +91,81 @@ fn maximum_height_sample() -> String {
     join_horizontal(VerticalAlign::Top, &[before, "  ".to_string(), after])
 }
 
+fn junction_grid(border: Border) -> String {
+    let top = border.top.to_string().repeat(3);
+    let middle = border.middle_horizontal.to_string().repeat(3);
+    let bottom = border.bottom.to_string().repeat(3);
+
+    format!(
+        "{}{}{}{}{}\n{} A {} B {}\n{}{}{}{}{}\n{} C {} D {}\n{}{}{}{}{}",
+        border.top_left,
+        top,
+        border.middle_top,
+        top,
+        border.top_right,
+        border.left,
+        border.left,
+        border.right,
+        border.middle_left,
+        middle,
+        border.middle,
+        middle,
+        border.middle_right,
+        border.left,
+        border.left,
+        border.right,
+        border.bottom_left,
+        bottom,
+        border.middle_bottom,
+        bottom,
+        border.bottom_right,
+    )
+}
+
+fn border_card(label: &str, border: Border, color: Color) -> String {
+    let label = Style::new()
+        .foreground(color)
+        .bold()
+        .width(9)
+        .align(Align::Center)
+        .render(label);
+    let mut grid_style = Style::new().foreground(color);
+    if border == Border::HIDDEN {
+        grid_style = grid_style.background(Color::BRIGHT_BLACK);
+    }
+    let grid = grid_style.render(&junction_grid(border));
+
+    join_vertical(Align::Left, &[label, grid])
+}
+
+fn border_preset_sample() -> String {
+    let pair = |left, right| join_horizontal(VerticalAlign::Top, &[left, " ".to_string(), right]);
+    join_vertical(
+        Align::Left,
+        &[
+            pair(
+                border_card("NORMAL", Border::NORMAL, Color::BRIGHT_GREEN),
+                border_card("ROUNDED", Border::ROUNDED, Color::BRIGHT_CYAN),
+            ),
+            " ".repeat(19),
+            pair(
+                border_card("THICK", Border::THICK, Color::BRIGHT_MAGENTA),
+                border_card("DOUBLE", Border::DOUBLE, Color::BRIGHT_BLUE),
+            ),
+            " ".repeat(19),
+            pair(
+                border_card("ASCII", Border::ASCII, Color::BRIGHT_YELLOW),
+                border_card("MARKDOWN", Border::MARKDOWN, Color::BRIGHT_RED),
+            ),
+            " ".repeat(19),
+            pair(
+                border_card("BOOKTABS", Border::BOOKTABS, Color::BRIGHT_CYAN),
+                border_card("HIDDEN", Border::HIDDEN, Color::BRIGHT_BLACK),
+            ),
+        ],
+    )
+}
+
 fn side_card(label: &str, sample: String, blank_above: bool, blank_below: bool) -> String {
     let label = Style::new()
         .foreground(Color::BRIGHT_CYAN)
@@ -300,6 +375,8 @@ pub fn render_showcase() -> String {
                 row_with_alignment("MAX WIDTH", maximum_width_sample(), VerticalAlign::Top),
                 " ".repeat(43),
                 row_with_alignment("MAX HEIGHT", maximum_height_sample(), VerticalAlign::Top),
+                " ".repeat(43),
+                row_with_alignment("BORDER PRESETS", border_preset_sample(), VerticalAlign::Top),
                 " ".repeat(43),
                 border_side_grid(),
             ],
