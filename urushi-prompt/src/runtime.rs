@@ -15,7 +15,13 @@ use crossterm::{
     execute, queue,
     terminal::{self, Clear, ClearType},
 };
-use urushi::{ComponentRole, Style, TerminalProfile, Theme, visible_width};
+use urushi::{ComponentRole, Style, TerminalProfile, Theme};
+
+mod layout;
+mod presentation;
+
+use layout::{LaidOutView, RenderedLine};
+use presentation::InlinePresentation;
 
 /// A typed name used to retrieve a submitted field value.
 pub struct FieldKey<T> {
@@ -1011,10 +1017,7 @@ fn translate_key(
 struct CrosstermRenderer<W> {
     writer: W,
     styles: PromptStyles,
-    origin_saved: bool,
-    reserved_rows: u16,
-    previous_rows: u16,
-    previous_lines: Vec<RenderedLine>,
+    presentation: InlinePresentation,
     columns: u16,
     rows: u16,
 }
@@ -1030,131 +1033,18 @@ impl<W: Write> CrosstermRenderer<W> {
         Self {
             writer,
             styles: PromptStyles::resolve(theme, profile),
-            origin_saved: false,
-            reserved_rows: 0,
-            previous_rows: 0,
-            previous_lines: Vec::new(),
+            presentation: InlinePresentation::default(),
             columns: size.0.max(1),
             rows: size.1.max(1),
         }
     }
 
     fn layout(&self, view: &PromptView) -> LaidOutView {
-        let width = usize::from(self.columns.max(1));
-        let mut lines = Vec::new();
-        let mut cursor = None;
-
-        for (logical_row, line) in view.lines.iter().enumerate() {
-            if view
-                .cursor
-                .is_some_and(|value| usize::from(value.row) == logical_row)
-            {
-                let view_cursor = view.cursor.expect("the cursor row was matched");
-                let desired_offset = usize::from(view_cursor.column).saturating_sub(width - 1);
-                let (line, offset) = clip_line(line, desired_offset, width);
-                cursor = Some(ViewCursor {
-                    row: lines.len().min(usize::from(u16::MAX)) as u16,
-                    column: usize::from(view_cursor.column)
-                        .saturating_sub(offset)
-                        .min(width - 1) as u16,
-                });
-                lines.push(line);
-            } else if line
-                .spans
-                .iter()
-                .any(|span| span.role == ComponentRole::PromptHelp)
-            {
-                lines.push(clip_line(line, 0, width).0);
-            } else {
-                lines.extend(wrap_line(line, width));
-            }
-        }
-
-        if lines.is_empty() {
-            lines.push(RenderedLine::default());
-        }
-
-        let max_rows = usize::from(self.rows.max(1));
-        if lines.len() > max_rows {
-            let active_start = lines
-                .iter()
-                .position(|line| line.has_role(ComponentRole::Accent))
-                .unwrap_or(0);
-            let focus_row = cursor.map_or_else(
-                || {
-                    lines
-                        .iter()
-                        .position(|line| {
-                            line.has_role(ComponentRole::Accent)
-                                && (line.has_role(ComponentRole::PromptOptionSelected)
-                                    || line.has_role(ComponentRole::PromptButtonFocused))
-                        })
-                        .or_else(|| {
-                            lines.iter().position(|line| {
-                                line.has_role(ComponentRole::Accent)
-                                    && (line.has_role(ComponentRole::PromptOption)
-                                        || line.has_role(ComponentRole::PromptButton))
-                            })
-                        })
-                        .unwrap_or(active_start)
-                },
-                |value| usize::from(value.row),
-            );
-            let mut start = active_start.saturating_sub(1).min(lines.len() - max_rows);
-            if focus_row < start {
-                start = focus_row;
-            } else if focus_row >= start + max_rows {
-                start = focus_row + 1 - max_rows;
-            }
-            lines = lines.drain(start..start + max_rows).collect();
-            cursor = cursor.and_then(|value| {
-                let row = usize::from(value.row);
-                (start..start + max_rows)
-                    .contains(&row)
-                    .then_some(ViewCursor {
-                        row: (row - start) as u16,
-                        column: value.column,
-                    })
-            });
-
-            if let Some(error) = first_error_line(view, width)
-                && !lines
-                    .iter()
-                    .any(|line| line.has_role(ComponentRole::PromptError))
-                && let Some(slot) = lines.iter().rposition(|line| {
-                    !line.has_role(ComponentRole::Accent)
-                        && !line.has_role(ComponentRole::PromptCursor)
-                        && !line.has_role(ComponentRole::PromptOptionSelected)
-                        && !line.has_role(ComponentRole::PromptOption)
-                        && !line.has_role(ComponentRole::PromptButtonFocused)
-                        && !line.has_role(ComponentRole::PromptButton)
-                })
-            {
-                lines[slot] = error;
-            }
-            if let Some(help) = first_help_line(view, width)
-                && !lines
-                    .iter()
-                    .any(|line| line.has_role(ComponentRole::PromptHelp))
-                && let Some(slot) = lines.iter().rposition(|line| {
-                    !line.has_role(ComponentRole::Accent)
-                        && !line.has_role(ComponentRole::PromptCursor)
-                        && !line.has_role(ComponentRole::PromptOptionSelected)
-                        && !line.has_role(ComponentRole::PromptOption)
-                        && !line.has_role(ComponentRole::PromptButtonFocused)
-                        && !line.has_role(ComponentRole::PromptButton)
-                        && !line.has_role(ComponentRole::PromptError)
-                })
-            {
-                lines[slot] = help;
-            }
-        }
-
-        LaidOutView { lines, cursor }
+        layout::lay_out(self.columns, self.rows, view)
     }
 
     fn clear_owned_rows(&mut self, rows: u16) -> io::Result<()> {
-        if !self.origin_saved || rows == 0 {
+        if !self.presentation.origin_saved || rows == 0 {
             return Ok(());
         }
 
@@ -1179,27 +1069,30 @@ impl<W: Write> CrosstermRenderer<W> {
 
     fn reserve_owned_rows(&mut self, rows: u16) -> io::Result<()> {
         let rows = rows.max(1);
-        if !self.origin_saved {
+        if !self.presentation.origin_saved {
             queue!(self.writer, cursor::SavePosition)?;
-            self.origin_saved = true;
-            self.reserved_rows = 1;
+            self.presentation.origin_saved = true;
+            self.presentation.reserved_rows = 1;
         }
-        if rows <= self.reserved_rows {
+        if rows <= self.presentation.reserved_rows {
             return Ok(());
         }
 
         queue!(self.writer, cursor::RestorePosition)?;
-        if self.reserved_rows > 1 {
-            queue!(self.writer, cursor::MoveDown(self.reserved_rows - 1))?;
+        if self.presentation.reserved_rows > 1 {
+            queue!(
+                self.writer,
+                cursor::MoveDown(self.presentation.reserved_rows - 1)
+            )?;
         }
-        for _ in self.reserved_rows..rows {
+        for _ in self.presentation.reserved_rows..rows {
             self.writer.write_all(b"\n")?;
         }
         if rows > 1 {
             queue!(self.writer, cursor::MoveUp(rows - 1))?;
         }
         queue!(self.writer, cursor::SavePosition)?;
-        self.reserved_rows = rows;
+        self.presentation.reserved_rows = rows;
         Ok(())
     }
 
@@ -1216,19 +1109,20 @@ impl<W: Write> Renderer for CrosstermRenderer<W> {
     fn draw(&mut self, view: &PromptView) -> io::Result<()> {
         let layout = self.layout(view);
         let rows_to_touch = self
+            .presentation
             .previous_lines
             .len()
             .max(layout.lines.len())
             .min(usize::from(self.rows)) as u16;
         // Claim every row this redraw can touch before issuing a fallible
         // terminal write. Error cleanup can then erase a partially drawn view.
-        self.previous_rows = rows_to_touch;
+        self.presentation.previous_rows = rows_to_touch;
 
         queue!(self.writer, cursor::Hide)?;
         self.reserve_owned_rows(layout.lines.len() as u16)?;
 
         for row in 0..usize::from(rows_to_touch) {
-            let previous = self.previous_lines.get(row);
+            let previous = self.presentation.previous_lines.get(row);
             let current = layout.lines.get(row);
             if previous == current {
                 continue;
@@ -1254,8 +1148,8 @@ impl<W: Write> Renderer for CrosstermRenderer<W> {
                 self.draw_line(line)?;
             }
         }
-        self.previous_lines = layout.lines;
-        self.previous_rows = self.previous_lines.len() as u16;
+        self.presentation.previous_lines = layout.lines;
+        self.presentation.previous_rows = self.presentation.previous_lines.len() as u16;
 
         queue!(self.writer, cursor::RestorePosition)?;
         if let Some(cursor) = layout.cursor {
@@ -1276,10 +1170,13 @@ impl<W: Write> Renderer for CrosstermRenderer<W> {
     fn finish(&mut self, outcome: RenderFinish) -> io::Result<()> {
         match outcome {
             RenderFinish::Submitted => {
-                if self.origin_saved {
+                if self.presentation.origin_saved {
                     queue!(self.writer, cursor::RestorePosition)?;
-                    if self.previous_rows > 1 {
-                        queue!(self.writer, cursor::MoveDown(self.previous_rows - 1))?;
+                    if self.presentation.previous_rows > 1 {
+                        queue!(
+                            self.writer,
+                            cursor::MoveDown(self.presentation.previous_rows - 1)
+                        )?;
                     }
                     // Relative cursor movement stops at the terminal boundary.
                     // A real line feed scrolls there, preserving the final prompt
@@ -1289,9 +1186,9 @@ impl<W: Write> Renderer for CrosstermRenderer<W> {
                 }
             }
             RenderFinish::Cancelled | RenderFinish::Error | RenderFinish::Panicking => {
-                self.clear_owned_rows(self.previous_rows)?;
-                self.previous_lines.clear();
-                if self.origin_saved {
+                self.clear_owned_rows(self.presentation.previous_rows)?;
+                self.presentation.previous_lines.clear();
+                if self.presentation.origin_saved {
                     queue!(self.writer, cursor::RestorePosition)?;
                 }
             }
@@ -1365,119 +1262,6 @@ impl PromptStyles {
     }
 }
 
-#[derive(Clone, Default, PartialEq, Eq)]
-struct RenderedLine {
-    spans: Vec<RenderedSpan>,
-}
-
-impl RenderedLine {
-    fn push(&mut self, role: ComponentRole, character: char) {
-        if let Some(span) = self.spans.last_mut().filter(|span| span.role == role) {
-            span.text.push(character);
-        } else {
-            self.spans.push(RenderedSpan {
-                text: character.to_string(),
-                role,
-            });
-        }
-    }
-
-    fn has_role(&self, role: ComponentRole) -> bool {
-        self.spans.iter().any(|span| span.role == role)
-    }
-}
-
-#[derive(Clone, PartialEq, Eq)]
-struct RenderedSpan {
-    text: String,
-    role: ComponentRole,
-}
-
-struct LaidOutView {
-    lines: Vec<RenderedLine>,
-    cursor: Option<ViewCursor>,
-}
-
-fn wrap_line(line: &ViewLine, width: usize) -> Vec<RenderedLine> {
-    let mut lines = vec![RenderedLine::default()];
-    let mut used = 0;
-    for span in &line.spans {
-        for character in span.text.chars() {
-            if character == '\n' {
-                lines.push(RenderedLine::default());
-                used = 0;
-                continue;
-            }
-            let character_width = visible_width(&character.to_string());
-            if character_width > width {
-                continue;
-            }
-            if used > 0 && used + character_width > width {
-                lines.push(RenderedLine::default());
-                used = 0;
-            }
-            lines
-                .last_mut()
-                .expect("a wrapped line always has a current row")
-                .push(span.role, character);
-            used += character_width;
-        }
-    }
-    lines
-}
-
-fn clip_line(line: &ViewLine, offset: usize, width: usize) -> (RenderedLine, usize) {
-    let mut clipped = RenderedLine::default();
-    let mut seen = 0;
-    let mut actual_offset = None;
-    let mut used = 0;
-    for span in &line.spans {
-        for character in span.text.chars() {
-            let character_width = visible_width(&character.to_string());
-            if seen + character_width <= offset {
-                seen += character_width;
-                continue;
-            }
-            if character_width > width {
-                seen += character_width;
-                continue;
-            }
-            let start = *actual_offset.get_or_insert(seen);
-            if used > 0 && used + character_width > width {
-                return (clipped, start);
-            }
-            clipped.push(span.role, character);
-            used += character_width;
-            seen += character_width;
-        }
-    }
-    (clipped, actual_offset.unwrap_or(seen))
-}
-
-fn first_error_line(view: &PromptView, width: usize) -> Option<RenderedLine> {
-    view.lines
-        .iter()
-        .filter(|line| {
-            line.spans
-                .iter()
-                .any(|span| span.role == ComponentRole::PromptError)
-        })
-        .flat_map(|line| wrap_line(line, width))
-        .next()
-}
-
-fn first_help_line(view: &PromptView, width: usize) -> Option<RenderedLine> {
-    view.lines
-        .iter()
-        .filter(|line| {
-            line.spans
-                .iter()
-                .any(|span| span.role == ComponentRole::PromptHelp)
-        })
-        .map(|line| clip_line(line, 0, width).0)
-        .next()
-}
-
 struct CrosstermTerminalControl;
 
 impl TerminalControl for CrosstermTerminalControl {
@@ -1518,6 +1302,7 @@ mod tests {
     };
 
     use super::*;
+    use crate::runtime::layout::{clip_line, wrap_line};
     use crate::{Confirm, ConfirmAnswer, ConfirmSource, Input, Select, SelectOption};
     use urushi::{AnsiPolicy, Color, ColorProfile, ComponentStyles, SemanticTokens};
 
@@ -2254,7 +2039,7 @@ mod tests {
             output.contains("\x1b[?25l\x1b7\x1b8\n\n\x1b[2A\x1b7"),
             "{output:?}"
         );
-        assert_eq!(renderer.reserved_rows, 3);
+        assert_eq!(renderer.presentation.reserved_rows, 3);
     }
 
     #[test]
@@ -2373,7 +2158,7 @@ mod tests {
         );
 
         assert!(renderer.draw(&view).is_err());
-        assert_eq!(renderer.previous_rows, 3);
+        assert_eq!(renderer.presentation.previous_rows, 3);
         renderer
             .finish(RenderFinish::Error)
             .expect("error cleanup succeeds after one draw failure");
@@ -2402,7 +2187,7 @@ mod tests {
                 None,
             ))
             .expect("initial draw succeeds");
-        assert_eq!(renderer.previous_rows, 1);
+        assert_eq!(renderer.presentation.previous_rows, 1);
 
         let growth = renderer_view(
             vec![
@@ -2413,7 +2198,7 @@ mod tests {
             None,
         );
         assert!(renderer.draw(&growth).is_err());
-        assert_eq!(renderer.previous_rows, 3);
+        assert_eq!(renderer.presentation.previous_rows, 3);
         renderer
             .finish(RenderFinish::Error)
             .expect("growth cleanup succeeds after one draw failure");
@@ -2464,7 +2249,7 @@ mod tests {
                 None,
             ))
             .expect("redraw succeeds");
-        assert_eq!(renderer.previous_rows, 1);
+        assert_eq!(renderer.presentation.previous_rows, 1);
         renderer
             .finish(RenderFinish::Cancelled)
             .expect("cancel cleanup succeeds");
