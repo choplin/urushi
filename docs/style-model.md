@@ -2,6 +2,14 @@
 
 This document defines Urushi's logical `Style` contract.
 
+It describes the single `Style` type as implemented, holding both the SGR
+properties and the box model.
+[`design/view-block-model.md`](design/view-block-model.md) defines two style
+types — `Style` for text and `BlockStyle` for geometry — and this document is
+rewritten when that lands. The value model below governs both: the same
+properties, the same immutable builders, the same closed vocabulary and generic
+`add` / `remove`.
+
 ## Decision
 
 `Style` is an immutable collection of effective presentation values. It is not
@@ -214,6 +222,11 @@ Box properties do not implicitly flow from a parent view to a child. If a
 future hierarchical view needs CSS-like inheritance, that resolver will need
 an explicit contract for which effective values flow. It must not silently
 turn the general `Style` value into a patch.
+
+[`design/view-block-model.md`](design/view-block-model.md) settles this for the
+hierarchical `View`: no inheritance, and no patch operation. A block's style
+applies to the geometry that block creates, and each child carries its own
+complete value.
 
 ## Output-boundary contract
 

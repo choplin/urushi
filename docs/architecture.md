@@ -52,6 +52,12 @@ This path owns wrapping, alignment, padding, margins, and borders for one
 styled block. It is separate from `View`, whose current model represents lines
 that a component has already composed.
 
+That separation is a known defect, not a boundary to preserve: a `Span` style may
+carry box-model properties that the line-oriented renderer cannot express, so a
+bordered span emits newlines inside one line.
+[`design/view-block-model.md`](design/view-block-model.md) defines the model
+this is being changed to.
+
 Terminal and Ratatui integrations sit outside these semantic types:
 
 ```text
@@ -81,12 +87,17 @@ The contracts shared across surfaces are:
 - [`TerminalProfile`](../urushi/src/terminal/profile.rs), which resolves the
   same logical styles for the capabilities of the actual output surface.
 
-`View` is not in this lowest common set. It is the renderer-neutral line model
-used by reusable line components and ANSI output. The prompt needs cursor,
+`View` is not in this lowest common set today. It is the renderer-neutral line
+model used by reusable line components and ANSI output. The prompt needs cursor,
 viewport, help/error priority, and final cleanup information that `View` does
 not model, while Ratatui applications render into a cell buffer. Those surfaces
 therefore share the contracts above but use surface-specific view and runtime
 types.
+
+The `View` half of that statement holds for the line-oriented model only.
+Under [`design/view-block-model.md`](design/view-block-model.md) the ANSI and
+Ratatui boundaries share one resolved view, so `View` belongs to the foundation
+for those two surfaces. The prompt's surface-specific view is unaffected.
 
 The implemented layers above the foundation are:
 
@@ -318,6 +329,10 @@ The immutable value model, closed property vocabulary, and generic
 directly and does not inspect terminal capabilities by itself. Callers that
 need capability degradation resolve the style first.
 
+[`design/view-block-model.md`](design/view-block-model.md) defines a separate
+`BlockStyle` as the owner of the box model and of the direct render entry point.
+The boundary rule above applies to it unchanged.
+
 ### Components stop at View
 
 A reusable component owns semantic props, normalization, and component-local
@@ -477,12 +492,15 @@ Clippy with `config-urushi-dev.toml`.
 ## Current limitations
 
 These are descriptions of the current implementation, not commitments to a
-future roadmap:
+future roadmap. The first three are addressed by
+[`design/view-block-model.md`](design/view-block-model.md):
 
 - `View` is an ordered line/span representation, not a general layout tree or
-  canonical resolved cell grid;
+  canonical resolved cell grid, so a span style carrying a border or vertical
+  padding produces broken ANSI output;
 - component-specific width handling occurs while constructing a `View`;
-- `Style::render` and `View` rendering are separate composition paths;
+- `Style::render`, `View` rendering, and the `urushi-tui` widget implement the
+  box model separately;
 - live progress currently uses a private Indicatif backend;
 - `urushi-tui` is currently limited to style conversion and box-model widget
   drawing;
