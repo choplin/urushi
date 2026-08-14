@@ -83,7 +83,9 @@ mod view;
 
 pub use component::{Summary, SummaryField, Warning};
 pub use render::AnsiRenderer;
-pub use style::{Align, Border, Color, Modifier, Sides, Style, StyleProperty, StylePropertyKey};
+pub use style::{
+    Align, Border, Color, Modifier, Sides, Style, StyleProperty, StylePropertyKey, VerticalAlign,
+};
 pub use terminal::{AnsiPolicy, ColorProfile, TerminalProfile};
 #[cfg(feature = "terminal")]
 pub use terminal::{OutputMode, ProgressBar, Spinner, StderrTerminal};
@@ -91,4 +93,4 @@ pub use text::{visible_width, wrap_text};
 pub use theme::{
     ColorScheme, ComponentRole, ComponentStyles, SemanticTokens, Theme, ThemeRole, ThemeSet,
 };
-pub use view::{Line, Span, VerticalAlign, View, join_horizontal, join_vertical};
+pub use view::{Line, Span, View, join_horizontal, join_vertical};

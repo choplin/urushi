@@ -22,9 +22,8 @@ fn cjk_showcase_preserves_width_and_japanese_content() {
         "四辺の罫線",
         "固定幅",
         "固定高さ",
-        "左揃え",
-        "中央揃え",
-        "右揃え",
+        "垂直揃え",
+        "水平揃え",
         "横結合",
         "縦結合",
         "上辺のみ",
@@ -36,6 +35,12 @@ fn cjk_showcase_preserves_width_and_japanese_content() {
     }
     assert!(output.contains("20列分を確保"));
     assert!(output.contains("3行分を確保"));
+    for position in ["上", "中央", "下", "左", "右"] {
+        assert!(
+            output.contains(position),
+            "揃え位置がありません: {position}"
+        );
+    }
 
     let lines: Vec<_> = output.lines().collect();
     let fixed_width = lines
@@ -46,10 +51,15 @@ fn cjk_showcase_preserves_width_and_japanese_content() {
         .iter()
         .position(|line| line.contains("固定高さ"))
         .expect("固定高さの行");
-    let align_left = lines
+    let horizontal_alignment = lines
         .iter()
-        .position(|line| line.contains("左揃え"))
-        .expect("揃え方のグループ");
+        .position(|line| line.contains("水平揃え"))
+        .expect("水平揃えの見本");
+    let vertical_alignment = lines
+        .iter()
+        .position(|line| line.contains("垂直揃え"))
+        .expect("垂直揃えの見本");
     assert_eq!(fixed_height - fixed_width, 2);
-    assert_eq!(align_left - fixed_height, 4);
+    assert_eq!(vertical_alignment - fixed_height, 6);
+    assert_eq!(horizontal_alignment - vertical_alignment, 6);
 }

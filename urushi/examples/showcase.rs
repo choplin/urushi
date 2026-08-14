@@ -17,6 +17,36 @@ fn row_with_alignment(label: &str, sample: String, alignment: VerticalAlign) -> 
     join_horizontal(alignment, &[label, divider, sample])
 }
 
+fn vertical_alignment_sample(top: &str, center: &str, bottom: &str) -> String {
+    let cell = Style::new()
+        .background(Color::BRIGHT_BLACK)
+        .width(6)
+        .height(5)
+        .align(Align::Center);
+    let top = cell.clone().align_vertical(VerticalAlign::Top).render(top);
+    let center = cell
+        .clone()
+        .align_vertical(VerticalAlign::Center)
+        .render(center);
+    let bottom = cell.align_vertical(VerticalAlign::Bottom).render(bottom);
+
+    join_horizontal(
+        VerticalAlign::Top,
+        &[top, " ".to_string(), center, " ".to_string(), bottom],
+    )
+}
+
+fn horizontal_alignment_sample(left: &str, center: &str, right: &str) -> String {
+    let cell = Style::new().background(Color::BRIGHT_BLACK).width(20);
+    let left = cell.clone().align(Align::Left).render(left);
+    let center = cell.clone().align(Align::Center).render(center);
+    let right = cell.align(Align::Right).render(right);
+
+    let gap = " ".repeat(20);
+
+    join_vertical(Align::Left, &[left, gap.clone(), center, gap, right])
+}
+
 fn side_card(label: &str, sample: String, blank_above: bool, blank_below: bool) -> String {
     let label = Style::new()
         .foreground(Color::BRIGHT_CYAN)
@@ -182,28 +212,13 @@ pub fn render_showcase() -> String {
         ),
         " ".repeat(43),
         row(
-            "ALIGN LEFT",
-            Style::new()
-                .background(Color::BRIGHT_BLACK)
-                .width(20)
-                .align(Align::Left)
-                .render("left"),
+            "VERTICAL ALIGNMENT",
+            vertical_alignment_sample("TOP", "CENTER", "BOTTOM"),
         ),
+        " ".repeat(43),
         row(
-            "ALIGN CENTER",
-            Style::new()
-                .background(Color::BRIGHT_BLACK)
-                .width(20)
-                .align(Align::Center)
-                .render("center"),
-        ),
-        row(
-            "ALIGN RIGHT",
-            Style::new()
-                .background(Color::BRIGHT_BLACK)
-                .width(20)
-                .align(Align::Right)
-                .render("right"),
+            "HORIZONTAL ALIGNMENT",
+            horizontal_alignment_sample("LEFT", "CENTER", "RIGHT"),
         ),
         " ".repeat(43),
         row(

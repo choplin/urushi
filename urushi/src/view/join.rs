@@ -1,18 +1,6 @@
 //! ANSI- and CJK-aware helpers for composing rendered text blocks.
 
-use crate::{Align, visible_width};
-
-/// Vertical alignment of blocks joined side by side.
-///
-/// This is separate from [`Align`] because horizontal joins align block
-/// heights, whereas [`Align`] aligns widths.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub enum VerticalAlign {
-    #[default]
-    Top,
-    Center,
-    Bottom,
-}
+use crate::{Align, VerticalAlign, visible_width};
 
 /// Joins rendered blocks side by side.
 ///

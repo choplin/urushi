@@ -1,7 +1,9 @@
 //! The [`Style`] builder and its string renderer.
 
 use crate::text::{visible_width, wrap_text};
-use crate::{Align, Border, Color, Modifier, Sides, StyleProperty, StylePropertyKey};
+use crate::{
+    Align, Border, Color, Modifier, Sides, StyleProperty, StylePropertyKey, VerticalAlign,
+};
 
 const RESET: &str = "\x1b[0m";
 
@@ -35,6 +37,7 @@ pub struct Style {
     width: Option<u16>,
     height: Option<u16>,
     align: Align,
+    vertical_align: VerticalAlign,
 }
 
 impl Default for Style {
@@ -55,6 +58,7 @@ impl Default for Style {
             width: None,
             height: None,
             align: Align::default(),
+            vertical_align: VerticalAlign::default(),
         }
     }
 }
@@ -86,6 +90,7 @@ impl Style {
             StyleProperty::Width(width) => self.width = Some(width),
             StyleProperty::Height(height) => self.height = Some(height),
             StyleProperty::Align(align) => self.align = align,
+            StyleProperty::VerticalAlign(align) => self.vertical_align = align,
         }
         self
     }
@@ -110,6 +115,7 @@ impl Style {
             StylePropertyKey::Width => self.width = None,
             StylePropertyKey::Height => self.height = None,
             StylePropertyKey::Align => self.align = Align::default(),
+            StylePropertyKey::VerticalAlign => self.vertical_align = VerticalAlign::default(),
         }
         self
     }
@@ -217,6 +223,11 @@ impl Style {
         self.add(StyleProperty::Align(align))
     }
 
+    /// Sets the vertical alignment of content within a fixed-height box.
+    pub fn align_vertical(self, align: VerticalAlign) -> Self {
+        self.add(StyleProperty::VerticalAlign(align))
+    }
+
     /// Returns the foreground color instruction, if this style sets one.
     pub const fn foreground_color(&self) -> Option<Color> {
         self.fg
@@ -292,6 +303,11 @@ impl Style {
         self.align
     }
 
+    /// Returns the vertical alignment within the content box.
+    pub const fn vertical_alignment(&self) -> VerticalAlign {
+        self.vertical_align
+    }
+
     /// Replaces every color property while preserving the rest of the style.
     pub(crate) fn map_colors(mut self, map: impl Fn(Color) -> Color) -> Self {
         self.fg = self.fg.map(&map);
@@ -359,7 +375,16 @@ impl Style {
         let target_height = self.height.map_or(natural_height, |height| {
             usize::from(height).max(natural_height)
         });
+        let vertical_gap = target_height - natural_height;
+        let (above, below) = match self.vertical_align {
+            VerticalAlign::Top => (0, vertical_gap),
+            VerticalAlign::Center => (vertical_gap / 2, vertical_gap - vertical_gap / 2),
+            VerticalAlign::Bottom => (vertical_gap, 0),
+        };
         let mut rows: Vec<String> = Vec::with_capacity(target_height);
+        for _ in 0..above {
+            rows.push(blank_row.clone());
+        }
         for _ in 0..pt {
             rows.push(blank_row.clone());
         }
@@ -380,7 +405,7 @@ impl Style {
         for _ in 0..pb {
             rows.push(blank_row.clone());
         }
-        for _ in natural_height..target_height {
+        for _ in 0..below {
             rows.push(blank_row.clone());
         }
 
@@ -557,6 +582,7 @@ mod tests {
             .width(20)
             .height(10)
             .align(Align::Right)
+            .align_vertical(VerticalAlign::Bottom)
             .remove(StylePropertyKey::Background)
             .remove(StylePropertyKey::Padding)
             .remove(StylePropertyKey::Margin)
@@ -569,7 +595,8 @@ mod tests {
             .remove(StylePropertyKey::BorderBackground)
             .remove(StylePropertyKey::Width)
             .remove(StylePropertyKey::Height)
-            .remove(StylePropertyKey::Align);
+            .remove(StylePropertyKey::Align)
+            .remove(StylePropertyKey::VerticalAlign);
 
         assert_eq!(style.foreground_color(), Some(Color::BLUE));
         assert_eq!(style.background_color(), None);
@@ -585,6 +612,7 @@ mod tests {
         assert_eq!(style.fixed_width(), None);
         assert_eq!(style.fixed_height(), None);
         assert_eq!(style.horizontal_alignment(), Align::Left);
+        assert_eq!(style.vertical_alignment(), VerticalAlign::Top);
     }
 
     #[test]
@@ -597,6 +625,21 @@ mod tests {
         assert_eq!(
             generic.remove(StylePropertyKey::Height).fixed_height(),
             None
+        );
+    }
+
+    #[test]
+    fn vertical_alignment_builder_and_generic_property_share_value_semantics() {
+        let named = Style::new().align_vertical(VerticalAlign::Center);
+        let generic = Style::new().add(StyleProperty::VerticalAlign(VerticalAlign::Center));
+
+        assert_eq!(named, generic);
+        assert_eq!(named.vertical_alignment(), VerticalAlign::Center);
+        assert_eq!(
+            generic
+                .remove(StylePropertyKey::VerticalAlign)
+                .vertical_alignment(),
+            VerticalAlign::Top
         );
     }
 

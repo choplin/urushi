@@ -28,7 +28,8 @@ let style = Style::new()
 
 `Style::new()` and `Style::default()` are empty styles. Removing a property
 restores its ordinary default in the resulting value: no color, no border,
-zero spacing, automatic width and height, or left alignment.
+zero spacing, automatic width and height, left horizontal alignment, or top
+vertical alignment.
 
 ## Closed property vocabulary
 
@@ -51,6 +52,7 @@ enum StyleProperty {
     Width(u16),
     Height(u16),
     Align(Align),
+    VerticalAlign(VerticalAlign),
 }
 
 enum StylePropertyKey {
@@ -69,6 +71,7 @@ enum StylePropertyKey {
     Width,
     Height,
     Align,
+    VerticalAlign,
 }
 ```
 
@@ -100,7 +103,8 @@ let style = Style::new()
     .border(Border::ROUNDED)
     .width(20)
     .height(5)
-    .align(Align::Center);
+    .align(Align::Center)
+    .align_vertical(VerticalAlign::Center);
 ```
 
 Border edge visibility has named builders and getters as well as generic
@@ -168,9 +172,11 @@ fixed-width resolution policy. When fixed width and height are combined,
 Ratatui may expand a too-narrow content box within the available `Rect` to
 preserve a displayed wide character and match direct rendering.
 
-Until vertical alignment is set explicitly, shorter content is top-aligned and
-the extra styled rows follow the content and its bottom padding. Background
-color therefore covers the entire fixed content box.
+Shorter content is top-aligned by default. `align_vertical` places the padded
+content block at the top, center, or bottom of the fixed content box. Like Lip
+Gloss, centered content puts an odd extra row below the padded block: a
+three-row gap is split as one row above and two below. Background color covers
+both padding and every alignment row in the fixed content box.
 
 ## Theme contract
 

@@ -185,7 +185,8 @@ crate boundaries.
 - [`style/color.rs`](../urushi/src/style/color.rs) owns color representation and
   SGR encoding.
 - [`style/border.rs`](../urushi/src/style/border.rs) owns border character sets.
-- [`style/layout.rs`](../urushi/src/style/layout.rs) owns `Align` and `Sides`.
+- [`style/layout.rs`](../urushi/src/style/layout.rs) owns `Align`,
+  `VerticalAlign`, and `Sides`.
 - [`style/property.rs`](../urushi/src/style/property.rs) owns the closed generic
   property vocabulary used by `Style::add` and `Style::remove`.
 - [`style/logical.rs`](../urushi/src/style/logical.rs) owns the `Style` builder,

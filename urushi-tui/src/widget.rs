@@ -3,7 +3,7 @@
 use ratatui::{buffer::Buffer, layout::Rect, style::Style as InnerStyle, widgets::Widget};
 
 use super::{RatatuiStyle, style::convert_color};
-use urushi::{Align, Border, Color, Sides, Style, visible_width, wrap_text};
+use urushi::{Align, Border, Color, Sides, Style, VerticalAlign, visible_width, wrap_text};
 
 /// A stateless ratatui widget backed by an urushi [`Style`].
 ///
@@ -49,6 +49,7 @@ struct BoxParts {
     width: Option<u16>,
     height: Option<u16>,
     align: Align,
+    vertical_align: VerticalAlign,
 }
 
 impl BoxParts {
@@ -66,6 +67,7 @@ impl BoxParts {
             width: style.fixed_width(),
             height: style.fixed_height(),
             align: style.horizontal_alignment(),
+            vertical_align: style.vertical_alignment(),
         }
     }
 }
@@ -192,6 +194,13 @@ fn render_widget(widget: RatatuiWidget<'_>, area: Rect, buffer: &mut Buffer) {
         .height
         .saturating_sub(parts.padding.top)
         .saturating_sub(parts.padding.bottom);
+    let rendered_content_height = content_height.min(content_rows);
+    let vertical_gap = content_rows.saturating_sub(rendered_content_height);
+    let vertical_offset = match parts.vertical_align {
+        VerticalAlign::Top => 0,
+        VerticalAlign::Center => vertical_gap / 2,
+        VerticalAlign::Bottom => vertical_gap,
+    };
 
     for (offset, line) in lines.iter().take(usize::from(content_rows)).enumerate() {
         let line_width = visible_width(line).min(usize::from(u16::MAX)) as u16;
@@ -201,7 +210,9 @@ fn render_widget(widget: RatatuiWidget<'_>, area: Rect, buffer: &mut Buffer) {
             Align::Center => gap / 2,
             Align::Right => gap,
         };
-        let y = content_y.saturating_add(offset as u16);
+        let y = content_y
+            .saturating_add(vertical_offset)
+            .saturating_add(offset as u16);
         buffer.set_stringn(
             content_x.saturating_add(alignment_offset),
             y,
@@ -424,7 +435,8 @@ mod tests {
                 .border_foreground(Color::RED)
                 .width(20)
                 .height(10)
-                .align(Align::Center),
+                .align(Align::Center)
+                .align_vertical(VerticalAlign::Center),
         )
         .into_inner();
 
@@ -571,6 +583,56 @@ mod tests {
 
             for (y, expected_line) in expected.into_iter().enumerate() {
                 assert_eq!(buffer_line(&buffer, y as u16), expected_line, "{case}");
+            }
+        }
+    }
+
+    #[test]
+    fn widget_matches_direct_vertical_alignment_with_horizontal_alignment_and_cjk() {
+        for horizontal in [Align::Left, Align::Center, Align::Right] {
+            for vertical in [
+                VerticalAlign::Top,
+                VerticalAlign::Center,
+                VerticalAlign::Bottom,
+            ] {
+                let content = "日\nx";
+                let style = Style::new()
+                    .width(6)
+                    .height(7)
+                    .padding((1, 1))
+                    .align(horizontal)
+                    .align_vertical(vertical);
+                let direct = style.render(content);
+                let expected: Vec<_> = direct.lines().collect();
+                let area = Rect::new(0, 0, 6, 7);
+                let mut buffer = Buffer::empty(area);
+
+                style.widget(content).render(area, &mut buffer);
+
+                for (y, expected_line) in expected.into_iter().enumerate() {
+                    assert_eq!(
+                        buffer_line(&buffer, y as u16),
+                        expected_line,
+                        "{horizontal:?} {vertical:?}"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn constrained_widget_realigns_center_and_bottom_within_the_available_height() {
+        let area = Rect::new(0, 0, 4, 4);
+
+        for (align, expected_y) in [(VerticalAlign::Center, 1), (VerticalAlign::Bottom, 3)] {
+            let style = Style::new().width(4).height(6).align_vertical(align);
+            let mut buffer = Buffer::empty(area);
+
+            style.widget("x").render(area, &mut buffer);
+
+            for y in 0..area.height {
+                let expected = if y == expected_y { "x   " } else { "    " };
+                assert_eq!(buffer_line(&buffer, y), expected, "{align:?} row {y}");
             }
         }
     }

@@ -1,6 +1,6 @@
 //! Closed property types used by [`Style`](crate::Style).
 
-use crate::{Align, Border, Color, Modifier, Sides};
+use crate::{Align, Border, Color, Modifier, Sides, VerticalAlign};
 
 /// A value that can be added to a [`Style`](crate::Style).
 ///
@@ -24,6 +24,7 @@ pub enum StyleProperty {
     Width(u16),
     Height(u16),
     Align(Align),
+    VerticalAlign(VerticalAlign),
 }
 
 /// A property that can be removed from a [`Style`](crate::Style).
@@ -44,6 +45,7 @@ pub enum StylePropertyKey {
     Width,
     Height,
     Align,
+    VerticalAlign,
 }
 
 impl From<Modifier> for StyleProperty {

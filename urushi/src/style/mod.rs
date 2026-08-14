@@ -9,7 +9,7 @@ mod property;
 
 pub use border::Border;
 pub use color::Color;
-pub use layout::{Align, Sides};
+pub use layout::{Align, Sides, VerticalAlign};
 pub use logical::Style;
 pub use modifier::Modifier;
 pub use property::{StyleProperty, StylePropertyKey};

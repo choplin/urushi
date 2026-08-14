@@ -9,6 +9,16 @@ pub enum Align {
     Right,
 }
 
+/// Vertical alignment of content within a styled block or of blocks joined
+/// side by side.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum VerticalAlign {
+    #[default]
+    Top,
+    Center,
+    Bottom,
+}
+
 /// Spacing values for the four sides of a box.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct Sides {

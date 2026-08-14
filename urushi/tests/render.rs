@@ -1,4 +1,4 @@
-use urushi::{Align, Border, Color, Modifier, Style, visible_width};
+use urushi::{Align, Border, Color, Modifier, Style, VerticalAlign, visible_width};
 
 #[test]
 fn plain_text_passes_through() {
@@ -79,6 +79,58 @@ fn fixed_height_preserves_empty_multiline_and_cjk_content() {
     assert_eq!(style.render(""), "    \n    \n    ");
     assert_eq!(style.render("a\nb"), "a   \nb   \n    ");
     assert_eq!(style.render("日本"), "日本\n    \n    ");
+}
+
+#[test]
+fn fixed_height_aligns_content_vertically_inside_padding() {
+    let base = Style::new().width(4).height(6).padding((1, 0));
+
+    assert_eq!(
+        base.clone().align_vertical(VerticalAlign::Top).render("x"),
+        "    \nx   \n    \n    \n    \n    "
+    );
+    assert_eq!(
+        base.clone()
+            .align_vertical(VerticalAlign::Center)
+            .render("x"),
+        "    \n    \nx   \n    \n    \n    "
+    );
+    assert_eq!(
+        base.align_vertical(VerticalAlign::Bottom).render("x"),
+        "    \n    \n    \n    \nx   \n    "
+    );
+}
+
+#[test]
+fn centered_vertical_alignment_puts_an_odd_extra_row_below_like_lip_gloss() {
+    let out = Style::new()
+        .width(6)
+        .height(7)
+        .padding((1, 1))
+        .align(Align::Center)
+        .align_vertical(VerticalAlign::Center)
+        .render("日\nx");
+
+    assert_eq!(
+        out,
+        "      \n      \n  日  \n  x   \n      \n      \n      "
+    );
+}
+
+#[test]
+fn right_and_center_alignment_combine_for_cjk_content() {
+    let out = Style::new()
+        .width(6)
+        .height(7)
+        .padding((1, 1))
+        .align(Align::Right)
+        .align_vertical(VerticalAlign::Center)
+        .render("日\nx");
+
+    assert_eq!(
+        out,
+        "      \n      \n   日 \n    x \n      \n      \n      "
+    );
 }
 
 #[test]

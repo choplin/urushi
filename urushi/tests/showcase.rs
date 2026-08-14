@@ -24,9 +24,8 @@ fn showcase_has_a_consistent_visible_width() {
         "FULL BORDER",
         "FIXED WIDTH",
         "FIXED HEIGHT",
-        "ALIGN LEFT",
-        "ALIGN CENTER",
-        "ALIGN RIGHT",
+        "VERTICAL ALIGNMENT",
+        "HORIZONTAL ALIGNMENT",
         "JOIN HORIZONTAL",
         "JOIN VERTICAL",
         "BORDER TOP ONLY",
@@ -38,6 +37,12 @@ fn showcase_has_a_consistent_visible_width() {
     }
     assert!(output.contains("reserves 20 cols"));
     assert!(output.contains("reserves 3 rows"));
+    for position in ["TOP", "CENTER", "BOTTOM", "LEFT", "RIGHT"] {
+        assert!(
+            output.contains(position),
+            "missing alignment name: {position}"
+        );
+    }
 
     let lines: Vec<_> = output.lines().collect();
     let fixed_width = lines
@@ -48,10 +53,15 @@ fn showcase_has_a_consistent_visible_width() {
         .iter()
         .position(|line| line.contains("FIXED HEIGHT"))
         .expect("fixed height row");
-    let align_left = lines
+    let horizontal_alignment = lines
         .iter()
-        .position(|line| line.contains("ALIGN LEFT"))
-        .expect("alignment group");
+        .position(|line| line.contains("HORIZONTAL ALIGNMENT"))
+        .expect("horizontal alignment showcase");
+    let vertical_alignment = lines
+        .iter()
+        .position(|line| line.contains("VERTICAL ALIGNMENT"))
+        .expect("vertical alignment showcase");
     assert_eq!(fixed_height - fixed_width, 2);
-    assert_eq!(align_left - fixed_height, 4);
+    assert_eq!(vertical_alignment - fixed_height, 6);
+    assert_eq!(horizontal_alignment - vertical_alignment, 6);
 }

@@ -92,7 +92,7 @@ fn detect(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{Align, Border, Color, Sides};
+    use crate::{Align, Border, Color, Sides, VerticalAlign};
 
     #[test]
     fn detection_obeys_precedence_and_empty_no_color() {
@@ -184,7 +184,8 @@ mod tests {
             .padding((0, 1))
             .width(8)
             .height(1)
-            .align(Align::Center);
+            .align(Align::Center)
+            .align_vertical(VerticalAlign::Bottom);
         let monochrome = TerminalProfile::new(ColorProfile::Monochrome, AnsiPolicy::Enabled)
             .resolve_style(&style)
             .render("日本");
@@ -197,6 +198,12 @@ mod tests {
                 .resolve_style(&style)
                 .fixed_height(),
             Some(1)
+        );
+        assert_eq!(
+            TerminalProfile::new(ColorProfile::Monochrome, AnsiPolicy::Enabled)
+                .resolve_style(&style)
+                .vertical_alignment(),
+            VerticalAlign::Bottom
         );
         let disabled = TerminalProfile::new(ColorProfile::TrueColor, AnsiPolicy::Disabled)
             .resolve_style(&style)
@@ -223,7 +230,8 @@ mod tests {
             .margin((4, 3, 2, 1))
             .width(12)
             .height(9)
-            .align(Align::Right);
+            .align(Align::Right)
+            .align_vertical(VerticalAlign::Center);
 
         for profile in [
             TerminalProfile::new(ColorProfile::Ansi256, AnsiPolicy::Enabled),
@@ -241,6 +249,7 @@ mod tests {
             assert_eq!(resolved.fixed_width(), Some(12));
             assert_eq!(resolved.fixed_height(), Some(9));
             assert_eq!(resolved.horizontal_alignment(), Align::Right);
+            assert_eq!(resolved.vertical_alignment(), VerticalAlign::Center);
         }
     }
 }
