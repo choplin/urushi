@@ -2,6 +2,7 @@
 
 mod list;
 mod summary;
+mod table;
 mod traversable;
 mod tree;
 mod warning;
@@ -12,6 +13,7 @@ pub use list::{
     default_list_indenter, roman_enumerator,
 };
 pub use summary::{Summary, SummaryField};
+pub use table::{Table, TableCell, TableStyle, TableStyleFunc, default_table_style_func};
 pub use tree::{
     SiblingPosition, Tree, TreeEnumerator, TreeIndenter, TreeNode, TreeStyle,
     default_tree_enumerator, default_tree_indenter,

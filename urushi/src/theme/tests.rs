@@ -1,4 +1,4 @@
-use crate::{Color, Style};
+use crate::{Color, Style, TableStyle};
 
 use super::*;
 
@@ -75,6 +75,18 @@ fn component_styles_follow_the_token_mapping() {
         components.tree_style(TreeRole::Indenter).render("x"),
         "\x1b[32mx\x1b[0m"
     );
+    assert_eq!(
+        components.table_style(TableRole::Header).render("x"),
+        "\x1b[1;31mx\x1b[0m"
+    );
+    assert_eq!(
+        components.table_style(TableRole::Cell).render("x"),
+        "\x1b[31mx\x1b[0m"
+    );
+    assert_eq!(
+        components.table_style(TableRole::Border).render("x"),
+        "\x1b[92mx\x1b[0m"
+    );
 }
 
 #[test]
@@ -129,6 +141,49 @@ fn tree_roles_resolve_through_the_theme_contract() {
     assert_eq!(
         theme.style(TreeRole::Root),
         theme.components().tree_style(TreeRole::Root)
+    );
+}
+
+#[test]
+fn custom_table_style_replaces_the_default() {
+    let components = ComponentStyles::from_tokens(&TOKENS)
+        .with_table_style(TableRole::Border, Style::new().underline());
+
+    assert_eq!(
+        components.table_style(TableRole::Border).render("│"),
+        "\x1b[4m│\x1b[0m"
+    );
+    assert_eq!(
+        components.table_style(TableRole::Cell).render("cell"),
+        "\x1b[31mcell\x1b[0m"
+    );
+}
+
+#[test]
+fn table_roles_resolve_through_the_theme_contract() {
+    let theme = Theme::from_tokens(TOKENS);
+
+    assert_eq!(
+        theme.style(TableRole::Header),
+        theme.components().table_style(TableRole::Header)
+    );
+}
+
+#[test]
+fn replacing_the_table_policy_keeps_the_other_component_defaults() {
+    let replaced = ComponentStyles::from_tokens(&TOKENS).with_table(TableStyle::new(
+        Style::new().underline(),
+        Style::new(),
+        Style::new(),
+    ));
+
+    assert_eq!(
+        replaced.table_style(TableRole::Header).render("head"),
+        "\x1b[4mhead\x1b[0m"
+    );
+    assert_eq!(
+        replaced.list_style(ListRole::Item).render("item"),
+        "\x1b[31mitem\x1b[0m"
     );
 }
 

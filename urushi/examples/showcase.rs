@@ -1,7 +1,7 @@
 use urushi::{
     Align, AnsiPolicy, AnsiRenderer, Border, Color, ColorProfile, List, ListItem, SemanticTokens,
-    Style, TerminalProfile, Theme, Tree, TreeNode, VerticalAlign, arabic_enumerator,
-    join_horizontal, join_vertical, visible_width,
+    Style, Table, TableCell, TerminalProfile, Theme, Tree, TreeNode, VerticalAlign,
+    arabic_enumerator, join_horizontal, join_vertical, visible_width,
 };
 
 fn row(label: &str, sample: String) -> String {
@@ -313,6 +313,107 @@ fn list_sample() -> String {
     renderer.render(&list_style.view(&list))
 }
 
+fn table_sample() -> String {
+    let theme = Theme::from_tokens(SemanticTokens {
+        text: Color::WHITE,
+        text_muted: Color::BRIGHT_BLACK,
+        background: Color::BLACK,
+        surface: Color::BLACK,
+        accent: Color::CYAN,
+        accent_text: Color::BLACK,
+        success: Color::GREEN,
+        warning: Color::YELLOW,
+        error: Color::RED,
+        border: Color::BRIGHT_BLACK,
+    });
+    let table = Table::new()
+        .headers(["Key", "Value"])
+        .row(["mode", "plain"])
+        .row(["theme", "dark"]);
+    let renderer = AnsiRenderer::new(TerminalProfile::new(
+        ColorProfile::Ansi16,
+        AnsiPolicy::Enabled,
+    ));
+
+    renderer.render(&theme.components().table().view(&table))
+}
+
+/// Styles every cell from its own coordinates: one checkerboard covering the
+/// header and the body, with right-aligned numeric columns.
+///
+/// A style the hook returns replaces the role default rather than layering over
+/// it, so it restates the foreground it wants.
+fn checkerboard(cell: TableCell<'_>) -> Option<Style> {
+    // The header sits one row above the first body row, so it continues the
+    // same board instead of starting a new one.
+    let parity = match cell.row() {
+        Some(row) => row + cell.column(),
+        None => cell.column() + 1,
+    };
+    // Both shades must differ from the surrounding backdrop, or the board reads
+    // as detached blocks instead of alternating squares.
+    let shade = if parity % 2 == 0 {
+        Color::BRIGHT_BLACK
+    } else {
+        Color::BLUE
+    };
+    let align = if cell.column() == 0 {
+        Align::Left
+    } else {
+        Align::Right
+    };
+
+    let square = Style::new()
+        .foreground(Color::WHITE)
+        .background(shade)
+        .align(align);
+    Some(if cell.is_header() {
+        square.bold()
+    } else {
+        square
+    })
+}
+
+/// Shows the presentation policy a caller can vary: every border edge off, a
+/// total width, and a per-cell style hook driven by row and column.
+fn table_style_sample() -> String {
+    let theme = Theme::from_tokens(SemanticTokens {
+        text: Color::WHITE,
+        text_muted: Color::BRIGHT_BLACK,
+        background: Color::BLACK,
+        surface: Color::BLACK,
+        accent: Color::CYAN,
+        accent_text: Color::BLACK,
+        success: Color::GREEN,
+        warning: Color::YELLOW,
+        error: Color::RED,
+        border: Color::BRIGHT_BLACK,
+    });
+    let table = Table::new()
+        .headers(["Cmd", "Ok", "Err"])
+        .row(["build", "12", "0"])
+        .row(["test", "340", "2"])
+        .row(["lint", "97", "1"]);
+    let table_style = theme
+        .components()
+        .table()
+        .clone()
+        .border_top(false)
+        .border_bottom(false)
+        .border_left(false)
+        .border_right(false)
+        .border_header(false)
+        .border_column(false)
+        .width(20)
+        .style_func(checkerboard);
+    let renderer = AnsiRenderer::new(TerminalProfile::new(
+        ColorProfile::Ansi16,
+        AnsiPolicy::Enabled,
+    ));
+
+    renderer.render(&table_style.view(&table))
+}
+
 fn section(title: &str, rows: &[String]) -> String {
     let body = join_vertical(Align::Left, rows);
     let width = body.lines().map(visible_width).max().unwrap_or_default();
@@ -471,6 +572,9 @@ pub fn render_showcase() -> String {
             &[
                 row_with_alignment("TREE", tree_sample(), VerticalAlign::Top),
                 row_with_alignment("LIST", list_sample(), VerticalAlign::Top),
+                row_with_alignment("TABLE", table_sample(), VerticalAlign::Top),
+                " ".repeat(43),
+                row_with_alignment("TABLE STYLE", table_style_sample(), VerticalAlign::Top),
             ],
         ),
     ];

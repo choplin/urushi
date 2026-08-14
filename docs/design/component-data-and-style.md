@@ -74,7 +74,8 @@ Do not introduce a dedicated style merely for symmetry. When uncertain, ask
 whether callers may reasonably build the data before choosing a theme or show
 the same data in two different ways.
 
-`List` / `ListStyle` and `Tree` / `TreeStyle` are the current reference cases.
+`List` / `ListStyle`, `Tree` / `TreeStyle`, and `Table` / `TableStyle` are the
+current reference cases.
 `Summary` and `Warning` remain direct consumers of `ComponentStyles`.
 
 ## Public API and internal reuse

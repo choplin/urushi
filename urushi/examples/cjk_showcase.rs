@@ -1,5 +1,6 @@
 use urushi::{
-    Align, Border, Color, Style, VerticalAlign, join_horizontal, join_vertical, visible_width,
+    Align, AnsiPolicy, AnsiRenderer, Border, Color, ColorProfile, SemanticTokens, Style, Table,
+    TerminalProfile, Theme, VerticalAlign, join_horizontal, join_vertical, visible_width,
 };
 
 fn row(label: &str, sample: String) -> String {
@@ -209,6 +210,31 @@ fn border_side_grid() -> String {
     )
 }
 
+fn table_sample() -> String {
+    let theme = Theme::from_tokens(SemanticTokens {
+        text: Color::WHITE,
+        text_muted: Color::BRIGHT_BLACK,
+        background: Color::BLACK,
+        surface: Color::BLACK,
+        accent: Color::CYAN,
+        accent_text: Color::BLACK,
+        success: Color::GREEN,
+        warning: Color::YELLOW,
+        error: Color::RED,
+        border: Color::BRIGHT_BLACK,
+    });
+    let table = Table::new()
+        .headers(["項目", "値"])
+        .row(["表示", "有効"])
+        .row(["色数", "16"]);
+    let renderer = AnsiRenderer::new(TerminalProfile::new(
+        ColorProfile::Ansi16,
+        AnsiPolicy::Enabled,
+    ));
+
+    renderer.render(&theme.components().table().view(&table))
+}
+
 fn panel(title: &str, rows: &[String]) -> String {
     let body = join_vertical(Align::Left, rows);
     let width = body.lines().map(visible_width).max().unwrap_or_default();
@@ -323,6 +349,8 @@ pub fn render_cjk_showcase() -> String {
                 ],
             ),
         ),
+        " ".repeat(43),
+        row_with_alignment("表", table_sample(), VerticalAlign::Top),
         " ".repeat(43),
         row("罫線の種類", border_preset_sample()),
         border_side_grid(),

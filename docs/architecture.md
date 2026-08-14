@@ -153,7 +153,7 @@ to share styling.
 | [`text`](../urushi/src/text/) | ANSI-aware visible-width measurement and cell-aware word/CJK wrapping. | None |
 | [`theme`](../urushi/src/theme/) | Semantic color tokens, reusable component roles and styles, typed application extensions, and explicit light/dark selection. | `style` |
 | [`view`](../urushi/src/view/) | Renderer-neutral `Span`, `Line`, and `View` values, plus composition of already-rendered string blocks. | `style`, `text` |
-| [`component`](../urushi/src/component/) | Reusable semantic components that return `View`; currently summaries, warnings, owned lists, and owned trees. | `theme`, `view`, `text` |
+| [`component`](../urushi/src/component/) | Reusable semantic components that return `View`; currently summaries, warnings, owned lists, owned trees, and owned tables. | `theme`, `view`, `text` |
 | [`render`](../urushi/src/render/) | Translation of renderer-neutral views to ANSI text. | `style`, `view`, `terminal/profile` |
 | [`terminal`](../urushi/src/terminal/) | Terminal capability detection, color degradation, stderr ownership, output-mode selection, and optional progress lifecycle. | `style`, `theme`, `view`, `render` |
 
@@ -235,6 +235,10 @@ while a private `Traversable` contract shares recursive layout, multiline
 continuation, marker alignment, and display-width handling. The reusable
 criteria for this separation are defined in
 [`design/component-data-and-style.md`](design/component-data-and-style.md).
+
+`Table` and `TableStyle` follow the same separation. A table draws its borders
+as logical `Line` and `Span` values rather than through `Style::render`, so the
+box model it composes stays on the renderer-neutral side of the boundary above.
 
 ### Renderers
 

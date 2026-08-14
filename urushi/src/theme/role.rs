@@ -89,6 +89,24 @@ impl<E> ThemeRole<E> for TreeRole {
     }
 }
 
+/// A semantic style role used by the Table component.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TableRole {
+    Header,
+    Cell,
+    Border,
+}
+
+impl<E> ThemeRole<E> for TableRole {
+    #[allow(
+        clippy::needless_lifetimes,
+        reason = "Matches the public ThemeRole contract signature."
+    )]
+    fn resolve<'a>(self, theme: &'a Theme<E>) -> &'a Style {
+        theme.components().table_style(self)
+    }
+}
+
 /// A typed role that resolves a style from a [`Theme`].
 pub trait ThemeRole<E = ()>: Copy {
     #[allow(

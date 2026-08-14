@@ -36,6 +36,9 @@ fn cjk_showcase_preserves_width_and_japanese_content() {
     }
     assert!(output.contains("20列分を確保"));
     assert!(output.contains("3行分を確保"));
+    for cell in ["項目", "有効", "色数"] {
+        assert!(output.contains(cell), "表のセルがありません: {cell}");
+    }
     assert!(output.contains("┌───┬───┐"));
     assert!(output.contains("├───┼───┤"));
     assert!(output.contains("└───┴───┘"));

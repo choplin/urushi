@@ -7,7 +7,7 @@ mod tokens;
 
 pub use component_styles::ComponentStyles;
 pub use definition::{ColorScheme, Theme, ThemeSet};
-pub use role::{ComponentRole, ListRole, ThemeRole, TreeRole};
+pub use role::{ComponentRole, ListRole, TableRole, ThemeRole, TreeRole};
 pub use tokens::SemanticTokens;
 
 #[cfg(test)]

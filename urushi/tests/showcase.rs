@@ -65,6 +65,8 @@ fn showcase_has_a_consistent_visible_width() {
         "BORDER LEFT ONLY",
         "TREE",
         "LIST",
+        "TABLE",
+        "TABLE STYLE",
     ] {
         assert!(output.contains(label), "missing feature label: {label}");
     }
@@ -146,6 +148,8 @@ fn showcase_has_a_consistent_visible_width() {
     assert_eq!(divider_column("JOIN HORIZONTAL"), center_divider);
     assert_eq!(divider_column("TREE"), center_divider);
     assert_eq!(divider_column("LIST"), center_divider);
+    assert_eq!(divider_column("TABLE"), center_divider);
+    assert_eq!(divider_column("TABLE STYLE"), center_divider);
 
     let vertical_alignment = plain_lines
         .iter()

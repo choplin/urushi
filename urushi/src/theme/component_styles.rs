@@ -1,8 +1,8 @@
 //! Standard style mapping for reusable component roles.
 
-use crate::{Border, ListStyle, Style, TreeStyle};
+use crate::{Border, ListStyle, Style, TableStyle, TreeStyle};
 
-use super::{ComponentRole, ListRole, SemanticTokens, TreeRole};
+use super::{ComponentRole, ListRole, SemanticTokens, TableRole, TreeRole};
 
 const COMPONENT_ROLE_COUNT: usize = 18;
 
@@ -12,6 +12,7 @@ pub struct ComponentStyles {
     styles: [Style; COMPONENT_ROLE_COUNT],
     list: ListStyle,
     tree: TreeStyle,
+    table: TableStyle,
 }
 
 impl ComponentStyles {
@@ -64,6 +65,11 @@ impl ComponentStyles {
                 Style::new().foreground(tokens.text_muted),
                 Style::new().foreground(tokens.text_muted),
             ),
+            table: TableStyle::new(
+                Style::new().foreground(tokens.text).bold(),
+                Style::new().foreground(tokens.text),
+                Style::new().foreground(tokens.border),
+            ),
         }
     }
 
@@ -81,6 +87,11 @@ impl ComponentStyles {
         self.tree.style(role)
     }
 
+    /// Returns the style assigned to one Table-specific role.
+    pub fn table_style(&self, role: TableRole) -> &Style {
+        self.table.style(role)
+    }
+
     /// Returns the default presentation policy for lists.
     pub fn list(&self) -> &ListStyle {
         &self.list
@@ -89,6 +100,11 @@ impl ComponentStyles {
     /// Returns the default presentation policy for trees.
     pub fn tree(&self) -> &TreeStyle {
         &self.tree
+    }
+
+    /// Returns the default presentation policy for tables.
+    pub fn table(&self) -> &TableStyle {
+        &self.table
     }
 
     #[must_use]
@@ -111,6 +127,13 @@ impl ComponentStyles {
         self
     }
 
+    /// Replaces the style assigned to one Table-specific role.
+    #[must_use]
+    pub fn with_table_style(mut self, role: TableRole, style: Style) -> Self {
+        self.table = self.table.with_style(role, style);
+        self
+    }
+
     /// Replaces the complete default list presentation policy.
     #[must_use]
     pub fn with_list(mut self, list: ListStyle) -> Self {
@@ -122,6 +145,13 @@ impl ComponentStyles {
     #[must_use]
     pub fn with_tree(mut self, tree: TreeStyle) -> Self {
         self.tree = tree;
+        self
+    }
+
+    /// Replaces the complete default table presentation policy.
+    #[must_use]
+    pub fn with_table(mut self, table: TableStyle) -> Self {
+        self.table = table;
         self
     }
 }

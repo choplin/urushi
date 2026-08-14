@@ -9,6 +9,7 @@
 pub struct Border {
     pub top: char,
     pub bottom: char,
+    /// The left edge, also used as the vertical rule between table columns.
     pub left: char,
     pub right: char,
     pub top_left: char,
