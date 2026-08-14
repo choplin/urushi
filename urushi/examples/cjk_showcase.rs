@@ -1,6 +1,7 @@
 use urushi::{
-    Align, AnsiPolicy, AnsiRenderer, Border, Color, ColorProfile, SemanticTokens, Style, Table,
-    TerminalProfile, Theme, VerticalAlign, join_horizontal, join_vertical, visible_width,
+    Align, AnsiPolicy, AnsiRenderer, Border, Color, ColorProfile, List, ListItem, SemanticTokens,
+    Style, Table, TerminalProfile, Theme, Tree, TreeNode, VerticalAlign, arabic_enumerator,
+    join_horizontal, join_vertical, visible_width,
 };
 
 fn row(label: &str, sample: String) -> String {
@@ -210,6 +211,51 @@ fn border_side_grid() -> String {
     )
 }
 
+fn component_theme() -> Theme {
+    Theme::from_tokens(SemanticTokens {
+        text: Color::WHITE,
+        text_muted: Color::BRIGHT_BLACK,
+        background: Color::BLACK,
+        surface: Color::BLACK,
+        accent: Color::CYAN,
+        accent_text: Color::BLACK,
+        success: Color::GREEN,
+        warning: Color::YELLOW,
+        error: Color::RED,
+        border: Color::BRIGHT_BLACK,
+    })
+}
+
+fn component_renderer() -> AnsiRenderer {
+    AnsiRenderer::new(TerminalProfile::new(
+        ColorProfile::Ansi16,
+        AnsiPolicy::Enabled,
+    ))
+}
+
+fn tree_sample() -> String {
+    let tree = Tree::new()
+        .root("うるし")
+        .child(TreeNode::new("ソース").child("部品").child("描画"))
+        .child("設定");
+
+    component_renderer().render(&component_theme().components().tree().view(&tree))
+}
+
+fn list_sample() -> String {
+    let list = List::new()
+        .item("設計する")
+        .item(ListItem::new("実装する").items(["モデル", "ビュー"]))
+        .item("検証する");
+    let list_style = component_theme()
+        .components()
+        .list()
+        .clone()
+        .enumerator(arabic_enumerator);
+
+    component_renderer().render(&list_style.view(&list))
+}
+
 fn table_sample() -> String {
     let theme = Theme::from_tokens(SemanticTokens {
         text: Color::WHITE,
@@ -349,6 +395,10 @@ pub fn render_cjk_showcase() -> String {
                 ],
             ),
         ),
+        " ".repeat(43),
+        row_with_alignment("木構造", tree_sample(), VerticalAlign::Top),
+        " ".repeat(43),
+        row_with_alignment("箇条書き", list_sample(), VerticalAlign::Top),
         " ".repeat(43),
         row_with_alignment("表", table_sample(), VerticalAlign::Top),
         " ".repeat(43),

@@ -26,6 +26,8 @@ fn cjk_showcase_preserves_width_and_japanese_content() {
         "水平揃え",
         "横結合",
         "縦結合",
+        "木構造",
+        "箇条書き",
         "罫線の種類",
         "上辺のみ",
         "右辺のみ",
@@ -38,6 +40,12 @@ fn cjk_showcase_preserves_width_and_japanese_content() {
     assert!(output.contains("3行分を確保"));
     for cell in ["項目", "有効", "色数"] {
         assert!(output.contains(cell), "表のセルがありません: {cell}");
+    }
+    for node in ["うるし", "ソース", "部品", "描画", "設定"] {
+        assert!(output.contains(node), "木構造のノードがありません: {node}");
+    }
+    for item in ["設計する", "実装する", "モデル", "ビュー", "検証する"] {
+        assert!(output.contains(item), "箇条書きの項目がありません: {item}");
     }
     assert!(output.contains("┌───┬───┐"));
     assert!(output.contains("├───┼───┤"));
