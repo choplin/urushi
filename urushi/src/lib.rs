@@ -60,7 +60,7 @@
 //! let theme = themes.select(ColorScheme::Dark);
 //! let output = stdout();
 //! let profile = TerminalProfile::detect_for(&output);
-//! let panel = profile.resolve_style(theme.style(ComponentRole::PanelFocused));
+//! let panel = profile.resolve_style(&theme.style(ComponentRole::PanelFocused));
 //! assert!(!panel.render("保存しました").is_empty());
 //! ```
 //!

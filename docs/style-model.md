@@ -205,9 +205,10 @@ the smaller of the explicit maximum and the available area is visible.
 ## Theme contract
 
 Themes store complete logical `Style` values. `Theme::style` and
-`ThemeRole::resolve` return `&Style`. `ComponentStyles::with_style` replaces a
-role's style. Applications derive a value by cloning it and applying builders
-or a normal transform function.
+`ThemeRole::resolve` return an owned `Style`, so an application role can build
+its value with the ordinary consuming builders. `ComponentStyles::with_style`
+replaces a role's style, and `Theme::components` exposes the stored built-in
+styles as borrows for consumers that want to avoid the copy.
 
 Box properties do not implicitly flow from a parent view to a child. If a
 future hierarchical view needs CSS-like inheritance, that resolver will need

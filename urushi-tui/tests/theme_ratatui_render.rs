@@ -13,7 +13,7 @@ use urushi_tui::{RatatuiStyle, RatatuiStyleExt as _};
 fn one_theme_component_renders_to_plain_cli_and_ratatui() {
     let theme = Theme::from_tokens(tokens());
     let profile = TerminalProfile::new(ColorProfile::TrueColor, AnsiPolicy::Enabled);
-    let panel = profile.resolve_style(theme.style(ComponentRole::PanelFocused));
+    let panel = profile.resolve_style(&theme.style(ComponentRole::PanelFocused));
 
     let plain = panel.render("保存しました");
     assert!(plain.contains("保存しました"));
@@ -43,7 +43,7 @@ fn one_theme_component_renders_to_plain_cli_and_ratatui() {
 fn theme_widget_clips_safely_at_a_boundary_size() {
     let theme = Theme::from_tokens(tokens());
     let profile = TerminalProfile::new(ColorProfile::TrueColor, AnsiPolicy::Enabled);
-    let panel = profile.resolve_style(theme.style(ComponentRole::PanelFocused));
+    let panel = profile.resolve_style(&theme.style(ComponentRole::PanelFocused));
     let backend = TestBackend::new(6, 3);
     let mut terminal = Terminal::new(backend).expect("test terminal");
 
@@ -67,7 +67,7 @@ fn ratatui_uses_the_same_terminal_profile_degradation_as_plain_output() {
         (ColorProfile::Ansi16, RatatuiColor::LightCyan),
     ] {
         let profile = TerminalProfile::new(color_profile, AnsiPolicy::Enabled);
-        let panel = profile.resolve_style(theme.style(ComponentRole::PanelFocused));
+        let panel = profile.resolve_style(&theme.style(ComponentRole::PanelFocused));
         let buffer = render_panel(&panel);
         assert_eq!(
             buffer.cell((0, 0)).expect("border cell").fg,
@@ -80,7 +80,7 @@ fn ratatui_uses_the_same_terminal_profile_degradation_as_plain_output() {
         TerminalProfile::new(ColorProfile::Monochrome, AnsiPolicy::Enabled),
         TerminalProfile::new(ColorProfile::TrueColor, AnsiPolicy::Disabled),
     ] {
-        let panel = profile.resolve_style(theme.style(ComponentRole::PanelFocused));
+        let panel = profile.resolve_style(&theme.style(ComponentRole::PanelFocused));
         let buffer = render_panel(&panel);
         let border = buffer.cell((0, 0)).expect("border cell");
         let content = buffer.cell((2, 1)).expect("content cell");

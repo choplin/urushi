@@ -5,7 +5,7 @@ use urushi_prompt::{
     urushi::{Color, SemanticTokens, TerminalProfile, Theme},
 };
 
-fn theme() -> Theme<()> {
+fn theme() -> Theme {
     Theme::from_tokens(SemanticTokens {
         text: Color::Rgb(230, 230, 230),
         text_muted: Color::Rgb(150, 150, 150),

@@ -304,11 +304,7 @@ impl Form {
     ///
     /// The supplied theme and terminal profile are resolved once for the
     /// inline renderer; fields only emit semantic component roles.
-    pub fn run<E>(
-        self,
-        theme: &Theme<E>,
-        profile: &TerminalProfile,
-    ) -> Result<FormOutcome, RunError> {
+    pub fn run(self, theme: &Theme, profile: &TerminalProfile) -> Result<FormOutcome, RunError> {
         let mut events = CrosstermEventSource;
         let mut renderer =
             CrosstermRenderer::stderr(theme, profile, terminal::size().unwrap_or((80, 24)));
@@ -1025,13 +1021,13 @@ struct CrosstermRenderer<W> {
 }
 
 impl CrosstermRenderer<io::Stderr> {
-    fn stderr<E>(theme: &Theme<E>, profile: &TerminalProfile, size: (u16, u16)) -> Self {
+    fn stderr(theme: &Theme, profile: &TerminalProfile, size: (u16, u16)) -> Self {
         Self::new(theme, profile, io::stderr(), size)
     }
 }
 
 impl<W: Write> CrosstermRenderer<W> {
-    fn new<E>(theme: &Theme<E>, profile: &TerminalProfile, writer: W, size: (u16, u16)) -> Self {
+    fn new(theme: &Theme, profile: &TerminalProfile, writer: W, size: (u16, u16)) -> Self {
         Self {
             writer,
             styles: PromptStyles::resolve(theme, profile),
@@ -1081,22 +1077,22 @@ struct PromptStyles {
 }
 
 impl PromptStyles {
-    fn resolve<E>(theme: &Theme<E>, profile: &TerminalProfile) -> Self {
+    fn resolve(theme: &Theme, profile: &TerminalProfile) -> Self {
         Self {
-            body: profile.resolve_style(theme.style(ComponentRole::Body)),
-            muted: profile.resolve_style(theme.style(ComponentRole::Muted)),
-            accent: profile.resolve_style(theme.style(ComponentRole::Accent)),
-            question: profile.resolve_style(theme.style(ComponentRole::PromptQuestion)),
-            answer: profile.resolve_style(theme.style(ComponentRole::PromptAnswer)),
-            placeholder: profile.resolve_style(theme.style(ComponentRole::PromptPlaceholder)),
-            cursor: profile.resolve_style(theme.style(ComponentRole::PromptCursor)),
-            option: profile.resolve_style(theme.style(ComponentRole::PromptOption)),
+            body: profile.resolve_style(&theme.style(ComponentRole::Body)),
+            muted: profile.resolve_style(&theme.style(ComponentRole::Muted)),
+            accent: profile.resolve_style(&theme.style(ComponentRole::Accent)),
+            question: profile.resolve_style(&theme.style(ComponentRole::PromptQuestion)),
+            answer: profile.resolve_style(&theme.style(ComponentRole::PromptAnswer)),
+            placeholder: profile.resolve_style(&theme.style(ComponentRole::PromptPlaceholder)),
+            cursor: profile.resolve_style(&theme.style(ComponentRole::PromptCursor)),
+            option: profile.resolve_style(&theme.style(ComponentRole::PromptOption)),
             option_selected: profile
-                .resolve_style(theme.style(ComponentRole::PromptOptionSelected)),
-            button: profile.resolve_style(theme.style(ComponentRole::PromptButton)),
-            button_focused: profile.resolve_style(theme.style(ComponentRole::PromptButtonFocused)),
-            help: profile.resolve_style(theme.style(ComponentRole::PromptHelp)),
-            error: profile.resolve_style(theme.style(ComponentRole::PromptError)),
+                .resolve_style(&theme.style(ComponentRole::PromptOptionSelected)),
+            button: profile.resolve_style(&theme.style(ComponentRole::PromptButton)),
+            button_focused: profile.resolve_style(&theme.style(ComponentRole::PromptButtonFocused)),
+            help: profile.resolve_style(&theme.style(ComponentRole::PromptHelp)),
+            error: profile.resolve_style(&theme.style(ComponentRole::PromptError)),
         }
     }
 
@@ -1784,7 +1780,7 @@ mod tests {
         );
     }
 
-    fn test_theme() -> Theme<()> {
+    fn test_theme() -> Theme {
         let tokens = SemanticTokens {
             text: Color::Rgb(1, 2, 3),
             text_muted: Color::Rgb(4, 5, 6),
@@ -1800,7 +1796,7 @@ mod tests {
         let components = ComponentStyles::from_tokens(&tokens)
             .with_style(ComponentRole::PromptQuestion, Style::new().bold())
             .with_style(ComponentRole::PromptCursor, Style::new().underline());
-        Theme::new(tokens, components, ())
+        Theme::new(tokens, components)
     }
 
     fn renderer_view(lines: Vec<ViewLine>, cursor: Option<ViewCursor>) -> PromptView {

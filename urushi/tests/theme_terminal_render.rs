@@ -49,7 +49,7 @@ fn theme(tokens: SemanticTokens) -> Theme {
             .align(Align::Center),
     );
 
-    Theme::new(tokens, components, ())
+    Theme::new(tokens, components)
 }
 
 fn themes() -> ThemeSet {
@@ -106,7 +106,7 @@ fn theme_set_resolves_roles_for_each_terminal_profile() {
     for (profile, expected_selection, expected_panel_border) in profiles {
         let selection = profile
             .resolve_style(
-                themes
+                &themes
                     .select(ColorScheme::Light)
                     .style(ComponentRole::PromptOptionSelected),
             )
@@ -115,7 +115,7 @@ fn theme_set_resolves_roles_for_each_terminal_profile() {
 
         let panel = profile
             .resolve_style(
-                themes
+                &themes
                     .select(ColorScheme::Dark)
                     .style(ComponentRole::PanelFocused),
             )
@@ -135,7 +135,7 @@ fn explicit_profile_is_a_deterministic_consumer_override() {
     assert_eq!(
         forced
             .resolve_style(
-                themes()
+                &themes()
                     .select(ColorScheme::Light)
                     .style(ComponentRole::PromptOptionSelected),
             )
@@ -155,7 +155,7 @@ fn non_tty_file_disables_ansi_without_changing_theme_layout() {
 
     let rendered = profile
         .resolve_style(
-            themes()
+            &themes()
                 .select(ColorScheme::Dark)
                 .style(ComponentRole::PanelFocused),
         )

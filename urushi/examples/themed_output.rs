@@ -41,7 +41,7 @@ fn main() {
 
     let output = stdout();
     let profile = TerminalProfile::detect_for(&output);
-    let panel = profile.resolve_style(theme.style(ComponentRole::PanelFocused));
+    let panel = profile.resolve_style(&theme.style(ComponentRole::PanelFocused));
 
     println!("{}", panel.render("保存しました"));
 }

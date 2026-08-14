@@ -60,13 +60,9 @@ pub enum ListRole {
     Indenter,
 }
 
-impl<E> ThemeRole<E> for ListRole {
-    #[allow(
-        clippy::needless_lifetimes,
-        reason = "Matches the public ThemeRole contract signature."
-    )]
-    fn resolve<'a>(self, theme: &'a Theme<E>) -> &'a Style {
-        theme.components().list_style(self)
+impl ThemeRole for ListRole {
+    fn resolve(self, theme: &Theme) -> Style {
+        theme.components().list_style(self).clone()
     }
 }
 
@@ -79,13 +75,9 @@ pub enum TreeRole {
     Indenter,
 }
 
-impl<E> ThemeRole<E> for TreeRole {
-    #[allow(
-        clippy::needless_lifetimes,
-        reason = "Matches the public ThemeRole contract signature."
-    )]
-    fn resolve<'a>(self, theme: &'a Theme<E>) -> &'a Style {
-        theme.components().tree_style(self)
+impl ThemeRole for TreeRole {
+    fn resolve(self, theme: &Theme) -> Style {
+        theme.components().tree_style(self).clone()
     }
 }
 
@@ -97,31 +89,25 @@ pub enum TableRole {
     Border,
 }
 
-impl<E> ThemeRole<E> for TableRole {
-    #[allow(
-        clippy::needless_lifetimes,
-        reason = "Matches the public ThemeRole contract signature."
-    )]
-    fn resolve<'a>(self, theme: &'a Theme<E>) -> &'a Style {
-        theme.components().table_style(self)
+impl ThemeRole for TableRole {
+    fn resolve(self, theme: &Theme) -> Style {
+        theme.components().table_style(self).clone()
     }
 }
 
 /// A typed role that resolves a style from a [`Theme`].
-pub trait ThemeRole<E = ()>: Copy {
-    #[allow(
-        clippy::needless_lifetimes,
-        reason = "The public contract spells out the returned Style borrow explicitly."
-    )]
-    fn resolve<'a>(self, theme: &'a Theme<E>) -> &'a Style;
+///
+/// This is the extension point of the theme system: an application defines its
+/// own role type and derives the style here, so the result keeps following
+/// theme overrides and light/dark selection. A role that needs a parameter
+/// carries it in the role value, and a role that needs data the theme cannot
+/// provide carries a reference to it.
+pub trait ThemeRole: Copy {
+    fn resolve(self, theme: &Theme) -> Style;
 }
 
-impl<E> ThemeRole<E> for ComponentRole {
-    #[allow(
-        clippy::needless_lifetimes,
-        reason = "Matches the public ThemeRole contract signature."
-    )]
-    fn resolve<'a>(self, theme: &'a Theme<E>) -> &'a Style {
-        theme.components().style(self)
+impl ThemeRole for ComponentRole {
+    fn resolve(self, theme: &Theme) -> Style {
+        theme.components().style(self).clone()
     }
 }

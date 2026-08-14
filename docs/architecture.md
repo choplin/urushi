@@ -130,8 +130,32 @@ an event loop.
 
 Applications may extend a `Theme` with domain-specific roles. They should keep
 workflow meaning, such as command phases or product-specific selection states,
-in that application extension rather than expanding Urushi's common roles or
+in those application roles rather than expanding Urushi's common roles or
 moving application state into a surface adapter.
+
+`Theme` is a concrete type and carries no application-owned data slot. The
+extension point is `ThemeRole::resolve`, which derives the style from the theme
+each time it is asked, so an application style keeps following theme overrides
+and light/dark selection instead of freezing at construction time. The
+convention is:
+
+1. A role that derives purely from semantic tokens or an existing built-in role
+   stays parameterless.
+2. A role that needs a parameter carries it in the role value, so
+   `Heading(level)`, `SeriesColor(index)`, and `Gauge(ratio)` resolve like any
+   other role. No stored table could precompute these.
+3. A role that needs data the theme cannot provide — a brand palette, colors
+   read from a config file — carries a reference to that data in the role value,
+   or the application owns a composite type that wraps `Theme` alongside it.
+4. Terminal-capability downgrading is not part of resolution. It stays in
+   `TerminalProfile::resolve_style`.
+
+`ThemeRole::resolve` returns an owned `Style` because a role that must be
+re-resolved is one whose style is derived rather than stored. A consumer that
+resolves many roles per frame should resolve once into its own struct of styles
+and borrow from that struct while drawing; `urushi-prompt`'s inline renderer
+builds `PromptStyles` this way at construction. `Theme::components` also exposes
+the built-in styles as borrows.
 
 ## Workspace responsibilities
 
@@ -151,7 +175,7 @@ to share styling.
 | --- | --- | --- |
 | [`style`](../urushi/src/style/) | Colors, border glyphs, box spacing and alignment, logical style values, and direct box-model string rendering. | `text` |
 | [`text`](../urushi/src/text/) | ANSI-aware visible-width measurement and cell-aware word/CJK wrapping. | None |
-| [`theme`](../urushi/src/theme/) | Semantic color tokens, reusable component roles and styles, typed application extensions, and explicit light/dark selection. | `style` |
+| [`theme`](../urushi/src/theme/) | Semantic color tokens, reusable component roles and styles, application role resolution, and explicit light/dark selection. | `style` |
 | [`view`](../urushi/src/view/) | Renderer-neutral `Span`, `Line`, and `View` values, plus composition of already-rendered string blocks. | `style`, `text` |
 | [`component`](../urushi/src/component/) | Reusable semantic components that return `View`; currently summaries, warnings, owned lists, owned trees, and owned tables. | `theme`, `view`, `text` |
 | [`render`](../urushi/src/render/) | Translation of renderer-neutral views to ANSI text. | `style`, `view`, `terminal/profile` |
@@ -205,8 +229,8 @@ not introduce a private definition of CJK display width.
   and typed role resolution.
 - [`theme/component_styles.rs`](../urushi/src/theme/component_styles.rs) maps
   common roles to logical styles.
-- [`theme/definition.rs`](../urushi/src/theme/definition.rs) owns `Theme`, typed
-  extensions, `ThemeSet`, and explicit scheme selection.
+- [`theme/definition.rs`](../urushi/src/theme/definition.rs) owns `Theme`,
+  `ThemeSet`, and explicit scheme selection.
 
 Themes describe meaning. They do not detect `NO_COLOR`, inspect TTY state, emit
 ANSI, or retain an output writer.
