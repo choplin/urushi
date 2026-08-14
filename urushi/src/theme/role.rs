@@ -52,6 +52,24 @@ impl ComponentRole {
     }
 }
 
+/// A semantic style role used by the List component.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ListRole {
+    Item,
+    Enumerator,
+    Indenter,
+}
+
+impl<E> ThemeRole<E> for ListRole {
+    #[allow(
+        clippy::needless_lifetimes,
+        reason = "Matches the public ThemeRole contract signature."
+    )]
+    fn resolve<'a>(self, theme: &'a Theme<E>) -> &'a Style {
+        theme.components().list_style(self)
+    }
+}
+
 /// A semantic style role used by the Tree component.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TreeRole {
@@ -59,17 +77,6 @@ pub enum TreeRole {
     Item,
     Enumerator,
     Indenter,
-}
-
-impl TreeRole {
-    pub(super) const fn index(self) -> usize {
-        match self {
-            Self::Root => 0,
-            Self::Item => 1,
-            Self::Enumerator => 2,
-            Self::Indenter => 3,
-        }
-    }
 }
 
 impl<E> ThemeRole<E> for TreeRole {

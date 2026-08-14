@@ -24,6 +24,7 @@ fn strip_csi(input: &str) -> String {
 #[test]
 fn showcase_has_a_consistent_visible_width() {
     let output = showcase::render_showcase();
+    let plain_output = strip_csi(&output);
     let widths: Vec<usize> = output.lines().map(visible_width).collect();
 
     assert!(
@@ -63,6 +64,7 @@ fn showcase_has_a_consistent_visible_width() {
         "BORDER BOTTOM ONLY",
         "BORDER LEFT ONLY",
         "TREE",
+        "LIST",
     ] {
         assert!(output.contains(label), "missing feature label: {label}");
     }
@@ -78,6 +80,18 @@ fn showcase_has_a_consistent_visible_width() {
         assert!(
             output.contains(tree_content),
             "missing Tree showcase content: {tree_content}"
+        );
+    }
+    for list_content in [
+        "1. Define the API",
+        "2. Implement",
+        "model",
+        "view",
+        "3. Verify behavior",
+    ] {
+        assert!(
+            plain_output.contains(list_content),
+            "missing List showcase content: {list_content}"
         );
     }
     assert!(output.contains("reserves 20 cols"));
@@ -131,6 +145,7 @@ fn showcase_has_a_consistent_visible_width() {
     let center_divider = divider_column("FOREGROUND COLOR");
     assert_eq!(divider_column("JOIN HORIZONTAL"), center_divider);
     assert_eq!(divider_column("TREE"), center_divider);
+    assert_eq!(divider_column("LIST"), center_divider);
 
     let vertical_alignment = plain_lines
         .iter()

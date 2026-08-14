@@ -219,12 +219,20 @@ ANSI, or retain an output writer.
 - each file under [`component`](../urushi/src/component/) owns one reusable
   component and its conversion to `View`.
 
-Current components receive `ComponentStyles` and, when their layout requires
-it, a display width explicitly. They may perform component-specific layout such
-as summary label alignment or Tree branch composition, but they do not resolve
-terminal capabilities or emit output. Tree nodes are presentation-neutral owned
-data; the outer Tree renderer's styles and marker policies apply to all nested
-nodes.
+Components either receive `ComponentStyles` directly or use a dedicated style
+value supplied by it. When layout requires a display width, the caller supplies
+that constraint explicitly. Components may perform component-specific layout
+such as summary label alignment or branch composition, but they do not resolve
+terminal capabilities or emit output.
+
+`List` and `Tree`, including their recursive item and node types, are owned
+presentation-neutral data. `ListStyle` and `TreeStyle` own the corresponding
+semantic styles and marker policies, receive the data model, and compose a
+renderer-neutral `View`. `ComponentStyles::list` and `ComponentStyles::tree`
+provide global defaults; a caller can clone either value for local presentation
+changes. List and Tree keep independent public models and callback positions,
+while a private `Traversable` contract shares recursive layout, multiline
+continuation, marker alignment, and display-width handling.
 
 ### Renderers
 
@@ -332,11 +340,14 @@ changed deliberately and this document is updated in the same change:
 ### Add a reusable component
 
 1. Add one concept-focused file under `urushi/src/component/`.
-2. Accept semantic props, `ComponentStyles`, and explicit layout constraints as
-   needed.
+2. Keep reusable data models presentation-neutral. Accept `ComponentStyles`
+   directly for simple components, or add a dedicated component style value
+   when data and presentation need independent reuse.
 3. Return `View` without choosing an output writer or backend.
-4. Test semantic edge cases and CJK width behavior at the component boundary.
-5. Re-export the component from `component/mod.rs` and the crate root when it
+4. Put shared recursive layout behind a private contract unless multiple public
+   component models genuinely need the same public abstraction.
+5. Test semantic edge cases and CJK width behavior at the component boundary.
+6. Re-export the component from `component/mod.rs` and the crate root when it
    is part of the public API.
 
 ### Add or replace an output adapter

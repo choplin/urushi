@@ -1,7 +1,7 @@
 use urushi::{
-    Align, AnsiPolicy, AnsiRenderer, Border, Color, ColorProfile, SemanticTokens, Style,
-    TerminalProfile, Theme, Tree, TreeNode, VerticalAlign, join_horizontal, join_vertical,
-    visible_width,
+    Align, AnsiPolicy, AnsiRenderer, Border, Color, ColorProfile, List, ListItem, SemanticTokens,
+    Style, TerminalProfile, Theme, Tree, TreeNode, VerticalAlign, arabic_enumerator,
+    join_horizontal, join_vertical, visible_width,
 };
 
 fn row(label: &str, sample: String) -> String {
@@ -280,7 +280,37 @@ fn tree_sample() -> String {
         AnsiPolicy::Enabled,
     ));
 
-    renderer.render(&tree.view(theme.components()))
+    renderer.render(&theme.components().tree().view(&tree))
+}
+
+fn list_sample() -> String {
+    let theme = Theme::from_tokens(SemanticTokens {
+        text: Color::WHITE,
+        text_muted: Color::BRIGHT_BLACK,
+        background: Color::BLACK,
+        surface: Color::BLACK,
+        accent: Color::CYAN,
+        accent_text: Color::BLACK,
+        success: Color::GREEN,
+        warning: Color::YELLOW,
+        error: Color::RED,
+        border: Color::BRIGHT_BLACK,
+    });
+    let list = List::new()
+        .item("Define the API")
+        .item(ListItem::new("Implement").items(["model", "view"]))
+        .item("Verify behavior");
+    let renderer = AnsiRenderer::new(TerminalProfile::new(
+        ColorProfile::Ansi16,
+        AnsiPolicy::Enabled,
+    ));
+
+    let list_style = theme
+        .components()
+        .list()
+        .clone()
+        .enumerator(arabic_enumerator);
+    renderer.render(&list_style.view(&list))
 }
 
 fn section(title: &str, rows: &[String]) -> String {
@@ -438,11 +468,10 @@ pub fn render_showcase() -> String {
         ),
         section(
             "COMPONENTS",
-            &[row_with_alignment(
-                "TREE",
-                tree_sample(),
-                VerticalAlign::Top,
-            )],
+            &[
+                row_with_alignment("TREE", tree_sample(), VerticalAlign::Top),
+                row_with_alignment("LIST", list_sample(), VerticalAlign::Top),
+            ],
         ),
     ];
     let gap = " ".repeat(49);

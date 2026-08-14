@@ -82,8 +82,11 @@ mod theme;
 mod view;
 
 pub use component::{
-    SiblingPosition, Summary, SummaryField, Tree, TreeEnumerator, TreeIndenter, TreeNode, Warning,
-    default_tree_enumerator, default_tree_indenter,
+    List, ListEnumerator, ListIndenter, ListItem, ListPosition, ListStyle, SiblingPosition,
+    Summary, SummaryField, Tree, TreeEnumerator, TreeIndenter, TreeNode, TreeStyle, Warning,
+    alphabet_enumerator, arabic_enumerator, asterisk_enumerator, bullet_enumerator,
+    dash_enumerator, default_list_indenter, default_tree_enumerator, default_tree_indenter,
+    roman_enumerator,
 };
 pub use render::AnsiRenderer;
 pub use style::{
@@ -94,7 +97,7 @@ pub use terminal::{AnsiPolicy, ColorProfile, TerminalProfile};
 pub use terminal::{OutputMode, ProgressBar, Spinner, StderrTerminal};
 pub use text::{visible_width, wrap_text};
 pub use theme::{
-    ColorScheme, ComponentRole, ComponentStyles, SemanticTokens, Theme, ThemeRole, ThemeSet,
-    TreeRole,
+    ColorScheme, ComponentRole, ComponentStyles, ListRole, SemanticTokens, Theme, ThemeRole,
+    ThemeSet, TreeRole,
 };
 pub use view::{Line, Span, View, join_horizontal, join_vertical};

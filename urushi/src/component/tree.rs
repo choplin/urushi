@@ -1,8 +1,10 @@
 //! Renderer-neutral trees with reusable owned nodes.
 
-use crate::{ComponentStyles, Line, Style, TreeRole, View, visible_width};
+use crate::{Line, Style, TreeRole, View};
 
-/// An item's position among its visible siblings.
+use super::traversable::{Traversable, TraversalStyles, render as render_traversable};
+
+/// A tree node's position among its visible siblings.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct SiblingPosition {
     index: usize,
@@ -10,7 +12,7 @@ pub struct SiblingPosition {
 }
 
 impl SiblingPosition {
-    /// Creates a position that component renderers can share.
+    /// Creates a tree sibling position.
     pub const fn new(index: usize, len: usize) -> Self {
         Self { index, len }
     }
@@ -144,6 +146,16 @@ impl TreeNode {
     }
 }
 
+impl Traversable for TreeNode {
+    fn value(&self) -> &str {
+        &self.value
+    }
+
+    fn visible_children(&self) -> Vec<&Self> {
+        self.visible_children()
+    }
+}
+
 impl From<String> for TreeNode {
     fn from(value: String) -> Self {
         Self::new(value)
@@ -156,42 +168,141 @@ impl From<&str> for TreeNode {
     }
 }
 
-#[derive(Debug, Clone, Default)]
-struct TreeStyleOverrides {
-    root: Option<Style>,
-    item: Option<Style>,
-    enumerator: Option<Style>,
-    indenter: Option<Style>,
+/// Presentation policy used to compose a [`Tree`] into a [`View`].
+#[derive(Debug, Clone)]
+pub struct TreeStyle {
+    root: Style,
+    item: Style,
+    enumerator_style: Style,
+    indenter_style: Style,
+    enumerator: TreeEnumerator,
+    indenter: TreeIndenter,
 }
 
-/// An owned tree that composes into a renderer-neutral [`View`].
+impl PartialEq for TreeStyle {
+    fn eq(&self, other: &Self) -> bool {
+        self.root == other.root
+            && self.item == other.item
+            && self.enumerator_style == other.enumerator_style
+            && self.indenter_style == other.indenter_style
+            && std::ptr::fn_addr_eq(self.enumerator, other.enumerator)
+            && std::ptr::fn_addr_eq(self.indenter, other.indenter)
+    }
+}
+
+impl TreeStyle {
+    /// Creates a tree style with the default branch and continuation policies.
+    pub fn new(root: Style, item: Style, enumerator: Style, indenter: Style) -> Self {
+        Self {
+            root,
+            item,
+            enumerator_style: enumerator,
+            indenter_style: indenter,
+            enumerator: default_tree_enumerator,
+            indenter: default_tree_indenter,
+        }
+    }
+
+    /// Returns the style assigned to one logical tree role.
+    pub fn style(&self, role: TreeRole) -> &Style {
+        match role {
+            TreeRole::Root => &self.root,
+            TreeRole::Item => &self.item,
+            TreeRole::Enumerator => &self.enumerator_style,
+            TreeRole::Indenter => &self.indenter_style,
+        }
+    }
+
+    /// Replaces the style assigned to one logical tree role.
+    #[must_use]
+    pub fn with_style(mut self, role: TreeRole, style: Style) -> Self {
+        match role {
+            TreeRole::Root => self.root = style,
+            TreeRole::Item => self.item = style,
+            TreeRole::Enumerator => self.enumerator_style = style,
+            TreeRole::Indenter => self.indenter_style = style,
+        }
+        self
+    }
+
+    /// Replaces the root style.
+    #[must_use]
+    pub fn root_style(self, style: Style) -> Self {
+        self.with_style(TreeRole::Root, style)
+    }
+
+    /// Replaces the item style.
+    #[must_use]
+    pub fn item_style(self, style: Style) -> Self {
+        self.with_style(TreeRole::Item, style)
+    }
+
+    /// Replaces the branch-marker style.
+    #[must_use]
+    pub fn enumerator_style(self, style: Style) -> Self {
+        self.with_style(TreeRole::Enumerator, style)
+    }
+
+    /// Replaces the continuation style.
+    #[must_use]
+    pub fn indenter_style(self, style: Style) -> Self {
+        self.with_style(TreeRole::Indenter, style)
+    }
+
+    /// Replaces the branch-marker policy.
+    #[must_use]
+    pub const fn enumerator(mut self, enumerator: TreeEnumerator) -> Self {
+        self.enumerator = enumerator;
+        self
+    }
+
+    /// Replaces the nested-continuation policy.
+    #[must_use]
+    pub const fn indenter(mut self, indenter: TreeIndenter) -> Self {
+        self.indenter = indenter;
+        self
+    }
+
+    /// Composes tree data into a renderer-neutral view.
+    pub fn view(&self, tree: &Tree) -> View {
+        if tree.hidden {
+            return View::new();
+        }
+
+        let traversal_styles = TraversalStyles {
+            item: self.item.clone(),
+            enumerator: self.enumerator_style.clone(),
+            indenter: self.indenter_style.clone(),
+        };
+        let mut view = View::new();
+        if let Some(root) = &tree.root {
+            for line in root.split('\n') {
+                view = view.push(Line::styled(line, self.root.clone()));
+            }
+        }
+
+        let children = visible_children(&tree.children, tree.child_offset);
+        render_traversable(
+            view,
+            &children,
+            &traversal_styles,
+            SiblingPosition::new,
+            self.enumerator,
+            self.indenter,
+        )
+    }
+}
+
+/// Owned tree data independent of presentation policy.
 ///
-/// Styles and marker policies belong to this outer renderer and are inherited
-/// by every nested [`TreeNode`]. Nodes intentionally remain data-only so the
-/// model can be reused independently of one component's presentation policy.
-#[derive(Debug, Clone)]
+/// Nodes remain data-only so the model can be reused independently of one
+/// component's presentation policy.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Tree {
     root: Option<String>,
     children: Vec<TreeNode>,
     hidden: bool,
     child_offset: ChildOffset,
-    styles: TreeStyleOverrides,
-    enumerator: TreeEnumerator,
-    indenter: TreeIndenter,
-}
-
-impl Default for Tree {
-    fn default() -> Self {
-        Self {
-            root: None,
-            children: Vec::new(),
-            hidden: false,
-            child_offset: ChildOffset::default(),
-            styles: TreeStyleOverrides::default(),
-            enumerator: default_tree_enumerator,
-            indenter: default_tree_indenter,
-        }
-    }
 }
 
 impl Tree {
@@ -239,48 +350,6 @@ impl Tree {
         self
     }
 
-    /// Replaces the root style supplied by the component theme.
-    #[must_use]
-    pub fn root_style(mut self, style: Style) -> Self {
-        self.styles.root = Some(style);
-        self
-    }
-
-    /// Replaces the item style supplied by the component theme.
-    #[must_use]
-    pub fn item_style(mut self, style: Style) -> Self {
-        self.styles.item = Some(style);
-        self
-    }
-
-    /// Replaces the branch-marker style supplied by the component theme.
-    #[must_use]
-    pub fn enumerator_style(mut self, style: Style) -> Self {
-        self.styles.enumerator = Some(style);
-        self
-    }
-
-    /// Replaces the continuation style supplied by the component theme.
-    #[must_use]
-    pub fn indenter_style(mut self, style: Style) -> Self {
-        self.styles.indenter = Some(style);
-        self
-    }
-
-    /// Replaces the branch-marker policy.
-    #[must_use]
-    pub const fn enumerator(mut self, enumerator: TreeEnumerator) -> Self {
-        self.enumerator = enumerator;
-        self
-    }
-
-    /// Replaces the nested-continuation policy.
-    #[must_use]
-    pub const fn indenter(mut self, indenter: TreeIndenter) -> Self {
-        self.indenter = indenter;
-        self
-    }
-
     /// Returns the optional root text.
     pub fn root_value(&self) -> Option<&str> {
         self.root.as_deref()
@@ -290,66 +359,6 @@ impl Tree {
     pub fn child_nodes(&self) -> &[TreeNode] {
         &self.children
     }
-
-    /// Composes this tree with logical component styles.
-    pub fn view(&self, styles: &ComponentStyles) -> View {
-        if self.hidden {
-            return View::new();
-        }
-
-        let resolved = ResolvedTreeStyles {
-            root: self
-                .styles
-                .root
-                .clone()
-                .unwrap_or_else(|| styles.tree_style(TreeRole::Root).clone()),
-            item: self
-                .styles
-                .item
-                .clone()
-                .unwrap_or_else(|| styles.tree_style(TreeRole::Item).clone()),
-            enumerator: self
-                .styles
-                .enumerator
-                .clone()
-                .unwrap_or_else(|| styles.tree_style(TreeRole::Enumerator).clone()),
-            indenter: self
-                .styles
-                .indenter
-                .clone()
-                .unwrap_or_else(|| styles.tree_style(TreeRole::Indenter).clone()),
-        };
-        let mut view = View::new();
-        if let Some(root) = &self.root {
-            for line in root.split('\n') {
-                view = view.push(Line::styled(line, resolved.root.clone()));
-            }
-        }
-
-        let children = visible_children(&self.children, self.child_offset);
-        render_children(
-            view,
-            &children,
-            &[],
-            &resolved,
-            self.enumerator,
-            self.indenter,
-        )
-    }
-}
-
-#[derive(Debug, Clone)]
-struct ResolvedTreeStyles {
-    root: Style,
-    item: Style,
-    enumerator: Style,
-    indenter: Style,
-}
-
-#[derive(Debug, Clone)]
-struct PrefixPart {
-    text: String,
-    style: Style,
 }
 
 fn visible_children(children: &[TreeNode], offset: ChildOffset) -> Vec<&TreeNode> {
@@ -363,99 +372,10 @@ fn visible_children(children: &[TreeNode], offset: ChildOffset) -> Vec<&TreeNode
         .collect()
 }
 
-fn render_children(
-    mut view: View,
-    children: &[&TreeNode],
-    prefix: &[PrefixPart],
-    styles: &ResolvedTreeStyles,
-    enumerator: TreeEnumerator,
-    indenter: TreeIndenter,
-) -> View {
-    let markers = (0..children.len())
-        .map(|index| {
-            let position = SiblingPosition::new(index, children.len());
-            (
-                normalize_marker(enumerator(position)),
-                normalize_marker(indenter(position)),
-            )
-        })
-        .collect::<Vec<_>>();
-    let segment_width = markers
-        .iter()
-        .flat_map(|(enumerator, indenter)| [visible_width(enumerator), visible_width(indenter)])
-        .max()
-        .unwrap_or(0);
-
-    for (index, child) in children.iter().enumerate() {
-        let (enum_marker, indent_marker) = &markers[index];
-        let enum_text = align_right(enum_marker.clone(), segment_width);
-        let indent_text = align_left(indent_marker.clone(), segment_width);
-        let mut value_lines = child.value.split('\n');
-        let first = value_lines.next().unwrap_or_default();
-        let mut line = append_prefix(Line::new(), prefix)
-            .span(enum_text, styles.enumerator.clone())
-            .span(first, styles.item.clone());
-        view = view.push(line);
-
-        for continuation in value_lines {
-            line = append_prefix(Line::new(), prefix)
-                .span(indent_text.clone(), styles.indenter.clone())
-                .span(continuation, styles.item.clone());
-            view = view.push(line);
-        }
-
-        let nested = child.visible_children();
-        if !nested.is_empty() {
-            let mut nested_prefix = prefix.to_vec();
-            nested_prefix.push(PrefixPart {
-                text: indent_text,
-                style: styles.indenter.clone(),
-            });
-            view = render_children(view, &nested, &nested_prefix, styles, enumerator, indenter);
-        }
-    }
-    view
-}
-
-fn append_prefix(mut line: Line, prefix: &[PrefixPart]) -> Line {
-    for part in prefix {
-        line = line.span(part.text.clone(), part.style.clone());
-    }
-    line
-}
-
-fn align_right(text: String, width: usize) -> String {
-    let padding = width.saturating_sub(visible_width(&text));
-    format!("{}{text}", " ".repeat(padding))
-}
-
-fn align_left(mut text: String, width: usize) -> String {
-    text.push_str(&" ".repeat(width.saturating_sub(visible_width(&text))));
-    text
-}
-
-fn normalize_marker(marker: String) -> String {
-    let mut output = String::with_capacity(marker.len());
-    let mut characters = marker.chars().peekable();
-    while let Some(character) = characters.next() {
-        match character {
-            '\r' => {
-                if characters.peek() == Some(&'\n') {
-                    characters.next();
-                }
-                output.push(' ');
-            }
-            '\n' | '\u{2028}' | '\u{2029}' => output.push(' '),
-            other => output.push(other),
-        }
-    }
-    output
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{Color, SemanticTokens};
+    use crate::{Color, ComponentStyles, SemanticTokens, visible_width};
 
     fn styles() -> ComponentStyles {
         ComponentStyles::from_tokens(&SemanticTokens {
@@ -487,8 +407,11 @@ mod tests {
 
     #[test]
     fn renders_empty_and_root_only_trees() {
-        assert!(Tree::new().view(&styles()).is_empty());
-        assert_eq!(plain(&Tree::new().root("root").view(&styles())), "root");
+        assert!(styles().tree().view(&Tree::new()).is_empty());
+        assert_eq!(
+            plain(&styles().tree().view(&Tree::new().root("root"))),
+            "root"
+        );
     }
 
     #[test]
@@ -499,7 +422,7 @@ mod tests {
             .child("omega");
 
         assert_eq!(
-            plain(&tree.view(&styles())),
+            plain(&styles().tree().view(&tree)),
             "├── alpha\n├── beta\n│   └── nested\n└── omega"
         );
     }
@@ -511,7 +434,7 @@ mod tests {
             .child(TreeNode::new("last").children(["one", "two"]));
 
         assert_eq!(
-            plain(&tree.view(&styles())),
+            plain(&styles().tree().view(&tree)),
             "├── first\n└── last\n    ├── one\n    └── two"
         );
     }
@@ -522,8 +445,8 @@ mod tests {
             .child("visible")
             .child(TreeNode::new("hidden").hidden(true));
 
-        assert_eq!(plain(&tree.view(&styles())), "└── visible");
-        assert!(tree.hidden(true).view(&styles()).is_empty());
+        assert_eq!(plain(&styles().tree().view(&tree)), "└── visible");
+        assert!(styles().tree().view(&tree.hidden(true)).is_empty());
     }
 
     #[test]
@@ -537,8 +460,11 @@ mod tests {
                 .child_offset(1, 1),
         );
 
-        assert_eq!(plain(&tree.view(&styles())), "├── one\n└── two");
-        assert_eq!(plain(&nested.view(&styles())), "└── parent\n    └── kept");
+        assert_eq!(plain(&styles().tree().view(&tree)), "├── one\n└── two");
+        assert_eq!(
+            plain(&styles().tree().view(&nested)),
+            "└── parent\n    └── kept"
+        );
     }
 
     #[test]
@@ -550,10 +476,10 @@ mod tests {
         );
 
         assert_eq!(
-            plain(&tree.view(&styles())),
+            plain(&styles().tree().view(&tree)),
             "└── 親\n    ├── 日本語\n    │   second\n    └── 終端\n        続き"
         );
-        let view = tree.view(&styles());
+        let view = styles().tree().view(&tree);
         assert_eq!(
             visible_width(view.lines()[1].spans()[0].text())
                 + visible_width(view.lines()[1].spans()[1].text()),
@@ -572,12 +498,14 @@ mod tests {
 
     #[test]
     fn supports_custom_enumerator_and_indenter() {
-        let tree = Tree::new()
+        let tree = Tree::new().child(TreeNode::new("parent").child("child"));
+        let tree_style = styles()
+            .tree()
+            .clone()
             .enumerator(custom_enumerator)
-            .indenter(custom_indenter)
-            .child(TreeNode::new("parent").child("child"));
+            .indenter(custom_indenter);
 
-        assert_eq!(plain(&tree.view(&styles())), "1: parent\n→  1: child");
+        assert_eq!(plain(&tree_style.view(&tree)), "1: parent\n→  1: child");
     }
 
     #[test]
@@ -586,14 +514,17 @@ mod tests {
         let item = Style::new().foreground(Color::GREEN);
         let enumerator = Style::new().foreground(Color::BLUE);
         let indenter = Style::new().foreground(Color::YELLOW);
-        let view = Tree::new()
+        let tree = Tree::new()
             .root("root")
-            .child(TreeNode::new("parent").child("child"))
+            .child(TreeNode::new("parent").child("child"));
+        let tree_style = styles()
+            .tree()
+            .clone()
             .root_style(root.clone())
             .item_style(item.clone())
             .enumerator_style(enumerator.clone())
-            .indenter_style(indenter.clone())
-            .view(&styles());
+            .indenter_style(indenter.clone());
+        let view = tree_style.view(&tree);
 
         assert_eq!(view.lines()[0].spans()[0].style(), &root);
         assert_eq!(view.lines()[1].spans()[0].style(), &enumerator);
@@ -613,10 +544,9 @@ mod tests {
 
     #[test]
     fn aligns_mixed_enumerator_lengths_by_terminal_cell_width() {
-        let view = Tree::new()
-            .children(["one", "two"])
-            .enumerator(mixed_width_enumerator)
-            .view(&styles());
+        let tree = Tree::new().children(["one", "two"]);
+        let tree_style = styles().tree().clone().enumerator(mixed_width_enumerator);
+        let view = tree_style.view(&tree);
 
         assert_eq!(plain(&view), "  界one\n   .two");
         assert_eq!(
@@ -631,11 +561,13 @@ mod tests {
 
     #[test]
     fn normalizes_custom_markers_to_semantic_lines() {
-        let view = Tree::new()
-            .child("item")
+        let tree = Tree::new().child("item");
+        let tree_style = styles()
+            .tree()
+            .clone()
             .enumerator(multiline_marker)
-            .indenter(multiline_marker)
-            .view(&styles());
+            .indenter(multiline_marker);
+        let view = tree_style.view(&tree);
 
         assert_eq!(view.lines().len(), 1);
         assert_eq!(plain(&view), "a b c ditem");
@@ -643,11 +575,13 @@ mod tests {
 
     #[test]
     fn nested_nodes_inherit_the_outer_render_policy() {
-        let view = Tree::new()
-            .child(TreeNode::new("parent").child("child"))
+        let tree = Tree::new().child(TreeNode::new("parent").child("child"));
+        let tree_style = styles()
+            .tree()
+            .clone()
             .enumerator(custom_enumerator)
-            .indenter(custom_indenter)
-            .view(&styles());
+            .indenter(custom_indenter);
+        let view = tree_style.view(&tree);
 
         assert_eq!(plain(&view), "1: parent\n→  1: child");
     }

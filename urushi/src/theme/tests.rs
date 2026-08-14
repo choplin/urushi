@@ -48,6 +48,18 @@ fn component_styles_follow_the_token_mapping() {
         "\x1b[35m╭───╮\x1b[0m\n\x1b[35m│\x1b[0m\x1b[31;44m x \x1b[0m\x1b[35m│\x1b[0m\n\x1b[35m╰───╯\x1b[0m"
     );
     assert_eq!(
+        components.list_style(ListRole::Item).render("x"),
+        "\x1b[31mx\x1b[0m"
+    );
+    assert_eq!(
+        components.list_style(ListRole::Enumerator).render("x"),
+        "\x1b[32mx\x1b[0m"
+    );
+    assert_eq!(
+        components.list_style(ListRole::Indenter).render("x"),
+        "\x1b[32mx\x1b[0m"
+    );
+    assert_eq!(
         components.tree_style(TreeRole::Root).render("x"),
         "\x1b[1;31mx\x1b[0m"
     );
@@ -82,6 +94,31 @@ fn custom_tree_style_replaces_the_default() {
     assert_eq!(
         components.tree_style(TreeRole::Enumerator).render("branch"),
         "\x1b[4mbranch\x1b[0m"
+    );
+}
+
+#[test]
+fn list_roles_are_independent_from_tree_roles() {
+    let components = ComponentStyles::from_tokens(&TOKENS)
+        .with_list_style(ListRole::Enumerator, Style::new().underline());
+
+    assert_eq!(
+        components.list_style(ListRole::Enumerator).render("marker"),
+        "\x1b[4mmarker\x1b[0m"
+    );
+    assert_eq!(
+        components.tree_style(TreeRole::Enumerator).render("branch"),
+        "\x1b[32mbranch\x1b[0m"
+    );
+}
+
+#[test]
+fn list_roles_resolve_through_the_theme_contract() {
+    let theme = Theme::from_tokens(TOKENS);
+
+    assert_eq!(
+        theme.style(ListRole::Item),
+        theme.components().list_style(ListRole::Item)
     );
 }
 

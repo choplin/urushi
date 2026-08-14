@@ -1,17 +1,17 @@
 //! Standard style mapping for reusable component roles.
 
-use crate::{Border, Style};
+use crate::{Border, ListStyle, Style, TreeStyle};
 
-use super::{ComponentRole, SemanticTokens, TreeRole};
+use super::{ComponentRole, ListRole, SemanticTokens, TreeRole};
 
 const COMPONENT_ROLE_COUNT: usize = 18;
-const TREE_ROLE_COUNT: usize = 4;
 
 /// Styles for common components, indexed by [`ComponentRole`].
 #[derive(Debug, Clone, PartialEq)]
 pub struct ComponentStyles {
     styles: [Style; COMPONENT_ROLE_COUNT],
-    tree_styles: [Style; TREE_ROLE_COUNT],
+    list: ListStyle,
+    tree: TreeStyle,
 }
 
 impl ComponentStyles {
@@ -53,12 +53,17 @@ impl ComponentStyles {
                 panel.clone(),
                 panel.border_foreground(tokens.accent),
             ],
-            tree_styles: [
+            list: ListStyle::new(
+                Style::new().foreground(tokens.text),
+                Style::new().foreground(tokens.text_muted),
+                Style::new().foreground(tokens.text_muted),
+            ),
+            tree: TreeStyle::new(
                 Style::new().foreground(tokens.text).bold(),
                 Style::new().foreground(tokens.text),
                 Style::new().foreground(tokens.text_muted),
                 Style::new().foreground(tokens.text_muted),
-            ],
+            ),
         }
     }
 
@@ -66,9 +71,24 @@ impl ComponentStyles {
         &self.styles[role.index()]
     }
 
+    /// Returns the style assigned to one List-specific role.
+    pub fn list_style(&self, role: ListRole) -> &Style {
+        self.list.style(role)
+    }
+
     /// Returns the style assigned to one Tree-specific role.
     pub fn tree_style(&self, role: TreeRole) -> &Style {
-        &self.tree_styles[role.index()]
+        self.tree.style(role)
+    }
+
+    /// Returns the default presentation policy for lists.
+    pub fn list(&self) -> &ListStyle {
+        &self.list
+    }
+
+    /// Returns the default presentation policy for trees.
+    pub fn tree(&self) -> &TreeStyle {
+        &self.tree
     }
 
     #[must_use]
@@ -77,10 +97,31 @@ impl ComponentStyles {
         self
     }
 
+    /// Replaces the style assigned to one List-specific role.
+    #[must_use]
+    pub fn with_list_style(mut self, role: ListRole, style: Style) -> Self {
+        self.list = self.list.with_style(role, style);
+        self
+    }
+
     /// Replaces the style assigned to one Tree-specific role.
     #[must_use]
     pub fn with_tree_style(mut self, role: TreeRole, style: Style) -> Self {
-        self.tree_styles[role.index()] = style;
+        self.tree = self.tree.with_style(role, style);
+        self
+    }
+
+    /// Replaces the complete default list presentation policy.
+    #[must_use]
+    pub fn with_list(mut self, list: ListStyle) -> Self {
+        self.list = list;
+        self
+    }
+
+    /// Replaces the complete default tree presentation policy.
+    #[must_use]
+    pub fn with_tree(mut self, tree: TreeStyle) -> Self {
+        self.tree = tree;
         self
     }
 }
