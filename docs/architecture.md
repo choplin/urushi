@@ -153,7 +153,7 @@ to share styling.
 | [`text`](../urushi/src/text/) | ANSI-aware visible-width measurement and cell-aware word/CJK wrapping. | None |
 | [`theme`](../urushi/src/theme/) | Semantic color tokens, reusable component roles and styles, typed application extensions, and explicit light/dark selection. | `style` |
 | [`view`](../urushi/src/view/) | Renderer-neutral `Span`, `Line`, and `View` values, plus composition of already-rendered string blocks. | `style`, `text` |
-| [`component`](../urushi/src/component/) | Reusable semantic components that return `View`; currently summaries, warnings, and owned trees. | `theme`, `view`, `text` |
+| [`component`](../urushi/src/component/) | Reusable semantic components that return `View`; currently summaries, warnings, owned lists, and owned trees. | `theme`, `view`, `text` |
 | [`render`](../urushi/src/render/) | Translation of renderer-neutral views to ANSI text. | `style`, `view`, `terminal/profile` |
 | [`terminal`](../urushi/src/terminal/) | Terminal capability detection, color degradation, stderr ownership, output-mode selection, and optional progress lifecycle. | `style`, `theme`, `view`, `render` |
 
@@ -232,7 +232,9 @@ renderer-neutral `View`. `ComponentStyles::list` and `ComponentStyles::tree`
 provide global defaults; a caller can clone either value for local presentation
 changes. List and Tree keep independent public models and callback positions,
 while a private `Traversable` contract shares recursive layout, multiline
-continuation, marker alignment, and display-width handling.
+continuation, marker alignment, and display-width handling. The reusable
+criteria for this separation are defined in
+[`design/component-data-and-style.md`](design/component-data-and-style.md).
 
 ### Renderers
 
