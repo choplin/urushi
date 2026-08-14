@@ -89,7 +89,7 @@ palette.
 ```rust
 use urushi_tui::RatatuiStyleExt as _;
 
-let panel = profile.resolve_style(theme.style(ComponentRole::PanelFocused));
+let panel = profile.resolve_style(&theme.style(ComponentRole::PanelFocused));
 frame.render_widget(panel.widget("保存しました"), frame.area());
 ```
 
