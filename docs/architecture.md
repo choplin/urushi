@@ -310,6 +310,39 @@ line when work finishes or is interrupted.
 Non-TTY output and `TERM=dumb` use append-only plain output. Machine-readable
 stdout remains separate from human-facing progress on stderr.
 
+### A prompt owns a region of rows, never the screen
+
+An interactive prompt draws inline. It never enters the alternate screen and
+never clears the terminal. Instead it owns a *region*: a run of rows anchored at
+the cursor position it saves on its first draw. Only rows inside that region may
+be erased or rewritten. Terminal content above the origin, and below the last
+reserved row, belongs to whatever produced it.
+
+The region is governed by three rules:
+
+- **Claiming.** The region grows only downward, and only by scrolling new rows
+  into existence with bare line feeds before re-anchoring the origin. It never
+  shrinks during a session, because rows already scrolled into existence cannot
+  be given back.
+- **Releasing.** A submitted prompt keeps its final rows and moves the terminal
+  below them, so the answered prompt stays in the scrollback. Every other
+  outcome — cancellation, error, panic — erases the region and returns to the
+  origin, leaving no trace.
+- **Recovery.** Terminal writes can fail midway. The renderer therefore claims
+  pessimistically and commits optimistically: before the first write of a redraw
+  it records every row that redraw *could* touch, and it records anchoring and
+  reservation only once the corresponding command has been written. Cleanup
+  after a failure then erases the whole partially drawn view rather than the
+  part that happened to succeed.
+
+`urushi-prompt` splits this across three crate-private stages so each can be
+reasoned about separately: `runtime::layout` resolves a view against the
+terminal box, `runtime::inline_plan` turns that plus the previous presentation
+into a list of terminal commands and their recovery checkpoints, and
+`runtime::crossterm_executor` is the only stage that touches a writer. The
+command vocabulary is Urushi's own, not crossterm's, so the same region
+semantics can back a different execution environment.
+
 ### External backends stay behind adapters
 
 Ratatui types stay in `urushi-tui`; Indicatif types stay in the private core
@@ -399,6 +432,7 @@ changed deliberately and this document is updated in the same change:
 | Theme roles resolve consistently for terminal and Ratatui output | [`urushi/tests/theme_terminal_render.rs`](../urushi/tests/theme_terminal_render.rs), [`urushi-tui/tests/theme_ratatui_render.rs`](../urushi-tui/tests/theme_ratatui_render.rs) |
 | Progress messages share theme behavior across live and stable output | tests beside [`terminal/progress/mod.rs`](../urushi/src/terminal/progress/mod.rs) |
 | Prompt submission, viewport behavior, and cleanup | tests beside [`urushi-prompt/src/runtime.rs`](../urushi-prompt/src/runtime.rs) |
+| Prompt owned-region command order and recovery checkpoints | plan assertions beside [`urushi-prompt/src/runtime.rs`](../urushi-prompt/src/runtime.rs), against [`runtime/inline_plan.rs`](../urushi-prompt/src/runtime/inline_plan.rs) |
 | Public progress behavior remains usable by a real consumer | Agentlog dogfood unit and CLI integration tests using the global Cargo patch configuration |
 
 Use the Nix development environment for repository checks:

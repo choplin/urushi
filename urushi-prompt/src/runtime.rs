@@ -12,15 +12,17 @@ use crossterm::{
         self, DisableBracketedPaste, EnableBracketedPaste, Event as CrosstermEvent,
         KeyCode as CrosstermKeyCode, KeyEventKind,
     },
-    execute, queue,
-    terminal::{self, Clear, ClearType},
+    execute,
+    terminal::{self},
 };
 use urushi::{ComponentRole, Style, TerminalProfile, Theme};
 
+mod crossterm_executor;
+mod inline_plan;
 mod layout;
 mod presentation;
 
-use layout::{LaidOutView, RenderedLine};
+use inline_plan::InlineRenderPlan;
 use presentation::InlinePresentation;
 
 /// A typed name used to retrieve a submitted field value.
@@ -1039,161 +1041,21 @@ impl<W: Write> CrosstermRenderer<W> {
         }
     }
 
-    fn layout(&self, view: &PromptView) -> LaidOutView {
-        layout::lay_out(self.columns, self.rows, view)
-    }
-
-    fn clear_owned_rows(&mut self, rows: u16) -> io::Result<()> {
-        if !self.presentation.origin_saved || rows == 0 {
-            return Ok(());
-        }
-
-        queue!(self.writer, cursor::RestorePosition)?;
-        for row in 0..rows {
-            if row == 0 {
-                queue!(self.writer, Clear(ClearType::UntilNewLine))?;
-            } else {
-                queue!(
-                    self.writer,
-                    cursor::MoveToColumn(0),
-                    Clear(ClearType::CurrentLine)
-                )?;
-            }
-            if row + 1 < rows {
-                queue!(self.writer, cursor::MoveDown(1))?;
-            }
-        }
-        queue!(self.writer, cursor::RestorePosition)?;
-        Ok(())
-    }
-
-    fn reserve_owned_rows(&mut self, rows: u16) -> io::Result<()> {
-        let rows = rows.max(1);
-        if !self.presentation.origin_saved {
-            queue!(self.writer, cursor::SavePosition)?;
-            self.presentation.origin_saved = true;
-            self.presentation.reserved_rows = 1;
-        }
-        if rows <= self.presentation.reserved_rows {
-            return Ok(());
-        }
-
-        queue!(self.writer, cursor::RestorePosition)?;
-        if self.presentation.reserved_rows > 1 {
-            queue!(
-                self.writer,
-                cursor::MoveDown(self.presentation.reserved_rows - 1)
-            )?;
-        }
-        for _ in self.presentation.reserved_rows..rows {
-            self.writer.write_all(b"\n")?;
-        }
-        if rows > 1 {
-            queue!(self.writer, cursor::MoveUp(rows - 1))?;
-        }
-        queue!(self.writer, cursor::SavePosition)?;
-        self.presentation.reserved_rows = rows;
-        Ok(())
-    }
-
-    fn draw_line(&mut self, line: &RenderedLine) -> io::Result<()> {
-        for span in &line.spans {
-            self.writer
-                .write_all(self.styles.style(span.role).render(&span.text).as_bytes())?;
-        }
-        Ok(())
+    fn present(&mut self, plan: InlineRenderPlan) -> io::Result<()> {
+        crossterm_executor::execute(&mut self.writer, &self.styles, &mut self.presentation, plan)
     }
 }
 
 impl<W: Write> Renderer for CrosstermRenderer<W> {
     fn draw(&mut self, view: &PromptView) -> io::Result<()> {
-        let layout = self.layout(view);
-        let rows_to_touch = self
-            .presentation
-            .previous_lines
-            .len()
-            .max(layout.lines.len())
-            .min(usize::from(self.rows)) as u16;
-        // Claim every row this redraw can touch before issuing a fallible
-        // terminal write. Error cleanup can then erase a partially drawn view.
-        self.presentation.previous_rows = rows_to_touch;
-
-        queue!(self.writer, cursor::Hide)?;
-        self.reserve_owned_rows(layout.lines.len() as u16)?;
-
-        for row in 0..usize::from(rows_to_touch) {
-            let previous = self.presentation.previous_lines.get(row);
-            let current = layout.lines.get(row);
-            if previous == current {
-                continue;
-            }
-
-            queue!(self.writer, cursor::RestorePosition)?;
-            if row > 0 {
-                queue!(
-                    self.writer,
-                    cursor::MoveDown(row.min(usize::from(u16::MAX)) as u16),
-                    cursor::MoveToColumn(0)
-                )?;
-            }
-            queue!(
-                self.writer,
-                Clear(if row == 0 {
-                    ClearType::UntilNewLine
-                } else {
-                    ClearType::CurrentLine
-                })
-            )?;
-            if let Some(line) = current {
-                self.draw_line(line)?;
-            }
-        }
-        self.presentation.previous_lines = layout.lines;
-        self.presentation.previous_rows = self.presentation.previous_lines.len() as u16;
-
-        queue!(self.writer, cursor::RestorePosition)?;
-        if let Some(cursor) = layout.cursor {
-            if cursor.row == 0 {
-                queue!(self.writer, cursor::MoveRight(cursor.column))?;
-            } else {
-                queue!(
-                    self.writer,
-                    cursor::MoveDown(cursor.row),
-                    cursor::MoveToColumn(cursor.column)
-                )?;
-            }
-            queue!(self.writer, cursor::Show)?;
-        }
-        self.writer.flush()
+        let view = layout::lay_out(self.columns, self.rows, view);
+        let plan = inline_plan::plan_draw(view, &self.presentation, self.rows);
+        self.present(plan)
     }
 
     fn finish(&mut self, outcome: RenderFinish) -> io::Result<()> {
-        match outcome {
-            RenderFinish::Submitted => {
-                if self.presentation.origin_saved {
-                    queue!(self.writer, cursor::RestorePosition)?;
-                    if self.presentation.previous_rows > 1 {
-                        queue!(
-                            self.writer,
-                            cursor::MoveDown(self.presentation.previous_rows - 1)
-                        )?;
-                    }
-                    // Relative cursor movement stops at the terminal boundary.
-                    // A real line feed scrolls there, preserving the final prompt
-                    // row and placing subsequent output below the inline region.
-                    self.writer.write_all(b"\r\n")?;
-                    queue!(self.writer, cursor::Show)?;
-                }
-            }
-            RenderFinish::Cancelled | RenderFinish::Error | RenderFinish::Panicking => {
-                self.clear_owned_rows(self.presentation.previous_rows)?;
-                self.presentation.previous_lines.clear();
-                if self.presentation.origin_saved {
-                    queue!(self.writer, cursor::RestorePosition)?;
-                }
-            }
-        }
-        self.writer.flush()
+        let plan = inline_plan::plan_finish(outcome, &self.presentation);
+        self.present(plan)
     }
 
     fn resize(&mut self, columns: u16, rows: u16) {
@@ -1302,8 +1164,15 @@ mod tests {
     };
 
     use super::*;
+    use crate::runtime::inline_plan::{Checkpoint, InlineCommand};
     use crate::runtime::layout::{clip_line, wrap_line};
     use crate::{Confirm, ConfirmAnswer, ConfirmSource, Input, Select, SelectOption};
+
+    /// The plan the renderer would execute for `view`, without writing it.
+    fn draw_plan<W>(renderer: &CrosstermRenderer<W>, view: &PromptView) -> InlineRenderPlan {
+        let laid_out = layout::lay_out(renderer.columns, renderer.rows, view);
+        inline_plan::plan_draw(laid_out, &renderer.presentation, renderer.rows)
+    }
     use urushi::{AnsiPolicy, Color, ColorProfile, ComponentStyles, SemanticTokens};
 
     #[derive(Clone)]
@@ -1991,31 +1860,44 @@ mod tests {
         let theme = test_theme();
         let profile = TerminalProfile::new(ColorProfile::TrueColor, AnsiPolicy::Enabled);
         let mut renderer = CrosstermRenderer::new(&theme, &profile, Vec::new(), (20, 4));
-        renderer
-            .draw(&renderer_view(
-                vec![ViewLine {
-                    spans: vec![
-                        ViewSpan {
-                            text: "質問".to_owned(),
-                            role: ComponentRole::PromptQuestion,
-                        },
-                        ViewSpan {
-                            text: "＊".to_owned(),
-                            role: ComponentRole::PromptCursor,
-                        },
-                    ],
-                }],
-                Some(ViewCursor { row: 0, column: 2 }),
-            ))
-            .expect("renderer writes to a buffer");
+        let view = renderer_view(
+            vec![ViewLine {
+                spans: vec![
+                    ViewSpan {
+                        text: "質問".to_owned(),
+                        role: ComponentRole::PromptQuestion,
+                    },
+                    ViewSpan {
+                        text: "＊".to_owned(),
+                        role: ComponentRole::PromptCursor,
+                    },
+                ],
+            }],
+            Some(ViewCursor { row: 0, column: 2 }),
+        );
+
+        // The first draw anchors the origin where the cursor already is, erases
+        // only to the end of that row, and leaves the cursor inside the row.
+        let plan = draw_plan(&renderer, &view);
+        assert_eq!(
+            plan.commands(),
+            [
+                InlineCommand::HideCursor,
+                InlineCommand::SaveOrigin,
+                InlineCommand::RestoreOrigin,
+                InlineCommand::ClearToEndOfLine,
+                InlineCommand::WriteLine(plan.next.previous_lines[0].clone()),
+                InlineCommand::RestoreOrigin,
+                InlineCommand::MoveRight(2),
+                InlineCommand::ShowCursor,
+            ]
+        );
+
+        renderer.draw(&view).expect("renderer writes to a buffer");
 
         let output = String::from_utf8(renderer.writer).expect("renderer writes UTF-8 commands");
         assert!(output.contains("\x1b[1m質問\x1b[0m"));
         assert!(output.contains("\x1b[4m＊\x1b[0m"));
-        assert!(output.contains("\x1b[?25l\x1b7\x1b8\x1b[K"), "{output:?}");
-        assert!(output.contains("\x1b8\x1b[2C"), "{output:?}");
-        assert!(!output.contains("\x1b[2J"));
-        assert!(!output.contains("?1049"));
     }
 
     #[test]
@@ -2023,22 +1905,38 @@ mod tests {
         let theme = test_theme();
         let profile = TerminalProfile::new(ColorProfile::Monochrome, AnsiPolicy::Disabled);
         let mut renderer = CrosstermRenderer::new(&theme, &profile, Vec::new(), (20, 4));
-        renderer
-            .draw(&renderer_view(
-                vec![
-                    view_line("first", ComponentRole::PromptQuestion),
-                    view_line("second", ComponentRole::PromptAnswer),
-                    view_line("third", ComponentRole::PromptHelp),
-                ],
-                None,
-            ))
-            .expect("renderer reserves and draws three rows");
-
-        let output = String::from_utf8(renderer.writer).expect("renderer writes UTF-8 commands");
-        assert!(
-            output.contains("\x1b[?25l\x1b7\x1b8\n\n\x1b[2A\x1b7"),
-            "{output:?}"
+        let view = renderer_view(
+            vec![
+                view_line("first", ComponentRole::PromptQuestion),
+                view_line("second", ComponentRole::PromptAnswer),
+                view_line("third", ComponentRole::PromptHelp),
+            ],
+            None,
         );
+
+        // Two bare line feeds scroll the extra rows into existence, the cursor
+        // returns to the top of them, and only then is the origin re-anchored.
+        let plan = draw_plan(&renderer, &view);
+        assert_eq!(
+            plan.commands()[..6],
+            [
+                InlineCommand::HideCursor,
+                InlineCommand::SaveOrigin,
+                InlineCommand::RestoreOrigin,
+                InlineCommand::Newline,
+                InlineCommand::Newline,
+                InlineCommand::MoveUp(2),
+            ]
+        );
+        assert_eq!(plan.commands()[6], InlineCommand::SaveOrigin);
+        assert_eq!(
+            plan.checkpoints(),
+            [Checkpoint::OriginAnchored, Checkpoint::ReservedRows(3)]
+        );
+
+        renderer
+            .draw(&view)
+            .expect("renderer reserves and draws three rows");
         assert_eq!(renderer.presentation.reserved_rows, 3);
     }
 
@@ -2052,15 +1950,26 @@ mod tests {
             Some(ViewCursor { row: 0, column: 2 }),
         );
         renderer.draw(&view).expect("first frame renders");
+
+        // Nothing is cleared and nothing is rewritten; the frame only puts the
+        // cursor back.
+        let plan = draw_plan(&renderer, &view);
+        assert_eq!(
+            plan.commands(),
+            [
+                InlineCommand::HideCursor,
+                InlineCommand::RestoreOrigin,
+                InlineCommand::MoveRight(2),
+                InlineCommand::ShowCursor,
+            ]
+        );
+        assert_eq!(plan.checkpoints(), []);
+
         let first_frame_bytes = renderer.writer.len();
         renderer.draw(&view).expect("unchanged frame renders");
-
         let update = String::from_utf8(renderer.writer[first_frame_bytes..].to_vec())
             .expect("renderer writes UTF-8 commands");
         assert!(!update.contains("stable"), "{update:?}");
-        assert!(!update.contains("\x1b[K"), "{update:?}");
-        assert!(!update.contains("\x1b[2K"), "{update:?}");
-        assert!(update.contains("\x1b8\x1b[2C"), "{update:?}");
     }
 
     #[test]
@@ -2077,15 +1986,25 @@ mod tests {
                 None,
             ))
             .expect("prompt renders");
-        let before_finish = renderer.writer.len();
+
+        // Step down to the last owned row, then release the region with a real
+        // line feed. Relative movement would stop at the terminal boundary
+        // instead of scrolling, so the final row must not be re-entered with a
+        // MoveDown-style command.
+        let plan = inline_plan::plan_finish(RenderFinish::Submitted, &renderer.presentation);
+        assert_eq!(
+            plan.commands(),
+            [
+                InlineCommand::RestoreOrigin,
+                InlineCommand::MoveDown(1),
+                InlineCommand::CarriageReturnNewline,
+                InlineCommand::ShowCursor,
+            ]
+        );
+
         renderer
             .finish(RenderFinish::Submitted)
             .expect("submitted prompt finishes");
-
-        let finish = String::from_utf8(renderer.writer[before_finish..].to_vec())
-            .expect("renderer writes UTF-8 commands");
-        assert!(finish.contains("\x1b8\x1b[1B\r\n"), "{finish:?}");
-        assert!(!finish.contains("\x1b[2E"), "{finish:?}");
     }
 
     #[test]
@@ -2118,7 +2037,7 @@ mod tests {
         let theme = test_theme();
         let profile = TerminalProfile::new(ColorProfile::Monochrome, AnsiPolicy::Disabled);
         let renderer = CrosstermRenderer::new(&theme, &profile, Vec::new(), (80, 10));
-        let before = renderer.layout(&form.view(&state));
+        let before = layout::lay_out(renderer.columns, renderer.rows, &form.view(&state));
         assert_eq!(
             form.reduce(
                 &mut state,
@@ -2129,7 +2048,7 @@ mod tests {
             ),
             ReducerResult::Running
         );
-        let after = renderer.layout(&form.view(&state));
+        let after = layout::lay_out(renderer.columns, renderer.rows, &form.view(&state));
         let unchanged = before
             .lines
             .iter()
@@ -2158,7 +2077,26 @@ mod tests {
         );
 
         assert!(renderer.draw(&view).is_err());
+        // All three rows were claimed before the first fallible write, so
+        // cleanup erases the whole partially drawn view rather than the one row
+        // that happened to be written.
         assert_eq!(renderer.presentation.previous_rows, 3);
+        assert_eq!(
+            inline_plan::plan_finish(RenderFinish::Error, &renderer.presentation).commands(),
+            [
+                InlineCommand::RestoreOrigin,
+                InlineCommand::ClearToEndOfLine,
+                InlineCommand::MoveDown(1),
+                InlineCommand::MoveToColumn(0),
+                InlineCommand::ClearLine,
+                InlineCommand::MoveDown(1),
+                InlineCommand::MoveToColumn(0),
+                InlineCommand::ClearLine,
+                InlineCommand::RestoreOrigin,
+                InlineCommand::RestoreOrigin,
+            ]
+        );
+
         renderer
             .finish(RenderFinish::Error)
             .expect("error cleanup succeeds after one draw failure");
@@ -2166,9 +2104,6 @@ mod tests {
         let output =
             String::from_utf8(renderer.writer.bytes).expect("renderer writes UTF-8 commands");
         assert!(output.contains('f'));
-        assert!(output.matches("\x1b[2K").count() >= 2, "{output:?}");
-        assert!(output.contains("\x1b[K"), "{output:?}");
-        assert!(output.ends_with("\x1b8"), "{output:?}");
     }
 
     #[test]
@@ -2198,16 +2133,28 @@ mod tests {
             None,
         );
         assert!(renderer.draw(&growth).is_err());
+        // The claim grew from one row to three before the failing write, so
+        // cleanup covers the rows the failed draw scrolled into existence.
         assert_eq!(renderer.presentation.previous_rows, 3);
+        assert_eq!(
+            inline_plan::plan_finish(RenderFinish::Error, &renderer.presentation).commands(),
+            [
+                InlineCommand::RestoreOrigin,
+                InlineCommand::ClearToEndOfLine,
+                InlineCommand::MoveDown(1),
+                InlineCommand::MoveToColumn(0),
+                InlineCommand::ClearLine,
+                InlineCommand::MoveDown(1),
+                InlineCommand::MoveToColumn(0),
+                InlineCommand::ClearLine,
+                InlineCommand::RestoreOrigin,
+                InlineCommand::RestoreOrigin,
+            ]
+        );
+
         renderer
             .finish(RenderFinish::Error)
             .expect("growth cleanup succeeds after one draw failure");
-
-        let output =
-            String::from_utf8(renderer.writer.bytes).expect("renderer writes UTF-8 commands");
-        assert!(output.matches("\x1b[2K").count() >= 2, "{output:?}");
-        assert!(output.contains("\x1b[K"), "{output:?}");
-        assert!(output.ends_with("\x1b8"), "{output:?}");
     }
 
     #[test]
@@ -2235,10 +2182,14 @@ mod tests {
                 Some(ViewCursor { row: 0, column: 11 }),
             ))
             .expect("narrow draw succeeds");
-        let layout = renderer.layout(&renderer_view(
-            vec![view_line("名前 あいうえ", ComponentRole::PromptAnswer)],
-            Some(ViewCursor { row: 0, column: 11 }),
-        ));
+        let layout = layout::lay_out(
+            renderer.columns,
+            renderer.rows,
+            &renderer_view(
+                vec![view_line("名前 あいうえ", ComponentRole::PromptAnswer)],
+                Some(ViewCursor { row: 0, column: 11 }),
+            ),
+        );
         assert!(layout.lines.len() <= 2);
         assert!(layout.cursor.is_some_and(|cursor| cursor.column < 4));
 
@@ -2250,14 +2201,21 @@ mod tests {
             ))
             .expect("redraw succeeds");
         assert_eq!(renderer.presentation.previous_rows, 1);
+        // A shrunk viewport leaves the region one row tall, so cancelling
+        // erases exactly that row — never the screen.
+        assert_eq!(
+            inline_plan::plan_finish(RenderFinish::Cancelled, &renderer.presentation).commands(),
+            [
+                InlineCommand::RestoreOrigin,
+                InlineCommand::ClearToEndOfLine,
+                InlineCommand::RestoreOrigin,
+                InlineCommand::RestoreOrigin,
+            ]
+        );
+
         renderer
             .finish(RenderFinish::Cancelled)
             .expect("cancel cleanup succeeds");
-
-        let output = String::from_utf8(renderer.writer).expect("renderer writes UTF-8 commands");
-        assert!(output.matches("\x1b[2K").count() >= 1);
-        assert!(output.contains("\x1b[K"), "{output:?}");
-        assert!(!output.contains("\x1b[2J"));
     }
 
     #[test]
@@ -2274,7 +2232,7 @@ mod tests {
                 vec![cjk_line.clone()],
                 Some(ViewCursor { row: 0, column: 0 }),
             );
-            let layout = renderer.layout(&view);
+            let layout = layout::lay_out(renderer.columns, renderer.rows, &view);
             assert_eq!(layout.lines.len(), 1);
             assert!(layout.lines[0].spans.is_empty());
             assert_eq!(layout.cursor, Some(ViewCursor { row: 0, column: 0 }));
@@ -2316,7 +2274,7 @@ mod tests {
                 Some(ViewCursor { row: 4, column: 18 }),
             );
 
-            let layout = renderer.layout(&view);
+            let layout = layout::lay_out(renderer.columns, renderer.rows, &view);
 
             assert_eq!(layout.lines.len(), usize::from(rows));
             assert!(layout.cursor.is_some_and(|cursor| cursor.row < rows));
@@ -2365,7 +2323,7 @@ mod tests {
             None,
         );
 
-        let layout = renderer.layout(&view);
+        let layout = layout::lay_out(renderer.columns, renderer.rows, &view);
 
         assert_eq!(layout.lines.len(), 1);
         assert!(layout.lines[0].has_role(ComponentRole::PromptOptionSelected));
@@ -2396,7 +2354,7 @@ mod tests {
             None,
         );
 
-        let confirm_layout = renderer.layout(&confirm_view);
+        let confirm_layout = layout::lay_out(renderer.columns, renderer.rows, &confirm_view);
 
         assert_eq!(confirm_layout.lines.len(), 1);
         assert!(confirm_layout.lines[0].has_role(ComponentRole::PromptButtonFocused));

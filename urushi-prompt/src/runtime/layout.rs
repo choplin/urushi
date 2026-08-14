@@ -14,7 +14,7 @@ pub(crate) struct LaidOutView {
     pub cursor: Option<ViewCursor>,
 }
 
-#[derive(Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub(crate) struct RenderedLine {
     pub spans: Vec<RenderedSpan>,
 }
@@ -36,7 +36,7 @@ impl RenderedLine {
     }
 }
 
-#[derive(Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct RenderedSpan {
     pub text: String,
     pub role: ComponentRole,
