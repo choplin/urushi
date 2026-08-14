@@ -162,8 +162,8 @@ the left of the prompt's starting position.
 
 ## Acknowledgments
 
-The API design follows [lipgloss](https://github.com/charmbracelet/lipgloss)
-closely; `urushi-prompt` will do the same for
+The API design takes [lipgloss](https://github.com/charmbracelet/lipgloss) as
+its primary reference; `urushi-prompt` does the same with
 [huh](https://github.com/charmbracelet/huh). Thanks to the
 [Charm](https://charm.sh) team for showing what a coherent terminal UI stack
 looks like.
