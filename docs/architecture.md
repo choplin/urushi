@@ -191,7 +191,8 @@ crate boundaries.
   property vocabulary used by `Style::add` and `Style::remove`.
 - [`style/logical.rs`](../urushi/src/style/logical.rs) owns the `Style` builder,
   box-model rules, and direct string rendering.
-- [`text/width.rs`](../urushi/src/text/width.rs) owns visible cell measurement.
+- [`text/width.rs`](../urushi/src/text/width.rs) owns visible cell measurement
+  and ANSI/grapheme-safe row truncation.
 - [`text/wrap.rs`](../urushi/src/text/wrap.rs) owns word and hard wrapping.
 
 Width and wrapping policy must remain shared. A component or renderer should

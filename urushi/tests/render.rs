@@ -154,6 +154,130 @@ fn enabled_border_rows_and_margin_are_outside_fixed_height() {
 }
 
 #[test]
+fn maximum_dimensions_crop_the_final_outer_block() {
+    let out = Style::new()
+        .width(4)
+        .height(3)
+        .padding((1, 1))
+        .border(Border::ASCII)
+        .margin(1)
+        .max_width(6)
+        .max_height(4)
+        .render("ab");
+
+    assert_eq!(out, "      \n +----\n |    \n | ab ");
+    assert_eq!(out.lines().count(), 4);
+    assert!(out.lines().all(|line| visible_width(line) <= 6));
+}
+
+#[test]
+fn maximum_width_truncates_after_fixed_width_without_rewrapping() {
+    let out = Style::new().width(6).max_width(4).render("ab");
+    assert_eq!(out, "ab  ");
+
+    let max_only = Style::new().max_width(5).render("hello world");
+    assert_eq!(max_only, "hello");
+}
+
+#[test]
+fn maximum_height_truncates_after_fixed_height_and_vertical_alignment() {
+    let out = Style::new()
+        .width(3)
+        .height(5)
+        .align_vertical(VerticalAlign::Bottom)
+        .max_height(3)
+        .render("x");
+
+    assert_eq!(out, "   \n   \n   ");
+}
+
+#[test]
+fn maximum_width_preserves_ansi_scopes_graphemes_and_cjk_cells() {
+    let styled = Style::new()
+        .foreground(Color::RED)
+        .max_width(3)
+        .render("日本語");
+    assert_eq!(styled, "\x1b[31m日\x1b[0m");
+    assert_eq!(visible_width(&styled), 2);
+
+    assert_eq!(Style::new().max_width(1).render("e\u{301}x"), "e\u{301}");
+}
+
+#[test]
+fn zero_maximum_dimensions_are_disabled_like_lip_gloss() {
+    assert_eq!(Style::new().max_width(0).render("x"), "x");
+    assert_eq!(Style::new().max_height(0).render("x"), "x");
+}
+
+#[test]
+fn maximum_height_preserves_ansi_closures_from_removed_rows() {
+    let out = Style::new()
+        .max_height(1)
+        .render("\x1b[31mred\nhidden\x1b[0m");
+
+    assert_eq!(out, "\x1b[31mred   \x1b[0m");
+}
+
+#[test]
+fn maximum_dimensions_discard_controls_that_start_in_cropped_content() {
+    assert_eq!(Style::new().max_width(2).render("abcdef\x1b[2J"), "ab");
+    assert_eq!(
+        Style::new().max_height(1).render("safe\n\x1b[31mhidden"),
+        "safe  "
+    );
+}
+
+#[test]
+fn fixed_and_maximum_width_preserve_ansi_during_wrap_and_truncate() {
+    let out = Style::new()
+        .width(4)
+        .max_width(3)
+        .render("\x1b[31mabcdef\x1b[0m");
+
+    assert_eq!(out, "\x1b[31mabc\x1b[0m\n\x1b[31mef\x1b[0m ");
+    assert!(out.lines().all(|line| visible_width(line) <= 3));
+}
+
+#[test]
+fn fixed_and_maximum_width_keep_control_strings_with_spaces_atomic() {
+    let rendered = Style::new()
+        .width(2)
+        .max_width(1)
+        .render("\x1b]8;;https://exa mple.com\x1b\\link\x1b]8;;\x1b\\");
+
+    assert_eq!(
+        rendered,
+        "\x1b]8;;https://exa mple.com\x1b\\l\x1b]8;;\x1b\\\n\
+         \x1b]8;;https://exa mple.com\x1b\\n\x1b]8;;\x1b\\"
+    );
+}
+
+#[test]
+fn maximum_width_uses_grapheme_width_for_zwj_emoji() {
+    let out = Style::new().width(3).max_width(2).render("👩‍💻x");
+
+    assert_eq!(out, "👩‍💻");
+    assert_eq!(visible_width(&out), 2);
+}
+
+#[test]
+fn maximum_width_keeps_ansi_embedded_inside_a_grapheme() {
+    let out = Style::new().max_width(1).render("e\x1b[31m\u{301}x");
+
+    assert_eq!(out, "e\x1b[31m\u{301}\x1b[0m");
+    assert_eq!(visible_width(&out), 1);
+}
+
+#[test]
+fn non_binding_maximum_preserves_ansi_bytes() {
+    let text = "\x1b[31mred\ntext\x1b[0m";
+    let unconstrained = Style::new().render(text);
+
+    assert_eq!(Style::new().max_width(99).render(text), unconstrained);
+    assert_eq!(Style::new().max_height(99).render(text), unconstrained);
+}
+
+#[test]
 fn width_only_rendering_is_unchanged_by_the_height_default() {
     assert_eq!(
         Style::new().width(4).render("a\nb"),

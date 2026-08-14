@@ -9,6 +9,8 @@ categories = ["command-line-interface"]
 
 [dependencies]
 ratatui = { version = "0.29", default-features = false }
+unicode-segmentation.workspace = true
+unicode-width.workspace = true
 urushi = { path = "../urushi", version = "=0.1.0" }
 
 [[example]]

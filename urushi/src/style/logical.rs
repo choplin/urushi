@@ -1,6 +1,6 @@
 //! The [`Style`] builder and its string renderer.
 
-use crate::text::{visible_width, wrap_text};
+use crate::text::{normalize_ansi_rows, truncate_visible_width, visible_width, wrap_text};
 use crate::{
     Align, Border, Color, Modifier, Sides, StyleProperty, StylePropertyKey, VerticalAlign,
 };
@@ -36,6 +36,8 @@ pub struct Style {
     border_bg: Option<Color>,
     width: Option<u16>,
     height: Option<u16>,
+    max_width: Option<u16>,
+    max_height: Option<u16>,
     align: Align,
     vertical_align: VerticalAlign,
 }
@@ -57,6 +59,8 @@ impl Default for Style {
             border_bg: None,
             width: None,
             height: None,
+            max_width: None,
+            max_height: None,
             align: Align::default(),
             vertical_align: VerticalAlign::default(),
         }
@@ -89,6 +93,8 @@ impl Style {
             StyleProperty::BorderBackground(color) => self.border_bg = Some(color),
             StyleProperty::Width(width) => self.width = Some(width),
             StyleProperty::Height(height) => self.height = Some(height),
+            StyleProperty::MaxWidth(width) => self.max_width = Some(width),
+            StyleProperty::MaxHeight(height) => self.max_height = Some(height),
             StyleProperty::Align(align) => self.align = align,
             StyleProperty::VerticalAlign(align) => self.vertical_align = align,
         }
@@ -114,6 +120,8 @@ impl Style {
             StylePropertyKey::BorderBackground => self.border_bg = None,
             StylePropertyKey::Width => self.width = None,
             StylePropertyKey::Height => self.height = None,
+            StylePropertyKey::MaxWidth => self.max_width = None,
+            StylePropertyKey::MaxHeight => self.max_height = None,
             StylePropertyKey::Align => self.align = Align::default(),
             StylePropertyKey::VerticalAlign => self.vertical_align = VerticalAlign::default(),
         }
@@ -218,6 +226,20 @@ impl Style {
         self.add(StyleProperty::Height(height))
     }
 
+    /// Limits the final rendered block width, including padding, border, and
+    /// margin. Positive values truncate without rewrapping; zero disables the
+    /// constraint.
+    pub fn max_width(self, width: u16) -> Self {
+        self.add(StyleProperty::MaxWidth(width))
+    }
+
+    /// Limits the final rendered block height, including padding, border, and
+    /// margin. Positive values remove rows from the bottom; zero disables the
+    /// constraint.
+    pub fn max_height(self, height: u16) -> Self {
+        self.add(StyleProperty::MaxHeight(height))
+    }
+
     /// Sets the horizontal alignment of content within the box.
     pub fn align(self, align: Align) -> Self {
         self.add(StyleProperty::Align(align))
@@ -296,6 +318,16 @@ impl Style {
     /// Returns the minimum padded content-box height, if one is set.
     pub const fn fixed_height(&self) -> Option<u16> {
         self.height
+    }
+
+    /// Returns the maximum final rendered width, if one is set.
+    pub const fn maximum_width(&self) -> Option<u16> {
+        self.max_width
+    }
+
+    /// Returns the maximum final rendered height, if one is set.
+    pub const fn maximum_height(&self) -> Option<u16> {
+        self.max_height
     }
 
     /// Returns the horizontal alignment within the content box.
@@ -448,25 +480,51 @@ impl Style {
 
         // 5. Margin: plain, unstyled space outside the border.
         let m = self.margin;
-        if m == Sides::default() {
-            return rows.join("\n");
+        if m != Sides::default() {
+            let outer = total
+                + usize::from(self.border.is_some() && self.border_left)
+                + usize::from(self.border.is_some() && self.border_right);
+            let (ml, mr) = (m.left as usize, m.right as usize);
+            let blank_margin = " ".repeat(ml + outer + mr);
+            let mut out: Vec<String> = Vec::with_capacity(rows.len() + (m.top + m.bottom) as usize);
+            for _ in 0..m.top {
+                out.push(blank_margin.clone());
+            }
+            for row in rows {
+                out.push(format!("{}{row}{}", " ".repeat(ml), " ".repeat(mr)));
+            }
+            for _ in 0..m.bottom {
+                out.push(blank_margin.clone());
+            }
+            rows = out;
         }
-        let outer = total
-            + usize::from(self.border.is_some() && self.border_left)
-            + usize::from(self.border.is_some() && self.border_right);
-        let (ml, mr) = (m.left as usize, m.right as usize);
-        let blank_margin = " ".repeat(ml + outer + mr);
-        let mut out: Vec<String> = Vec::with_capacity(rows.len() + (m.top + m.bottom) as usize);
-        for _ in 0..m.top {
-            out.push(blank_margin.clone());
+
+        // 6. Maximum dimensions constrain the final outer block. This is a
+        // crop, not another wrapping or layout pass, so fixed dimensions may
+        // be larger while the returned block still obeys these hard limits.
+        let max_width = self.max_width.filter(|width| *width > 0);
+        let max_height = self.max_height.filter(|height| *height > 0);
+        let width_is_binding = max_width.is_some_and(|width| {
+            rows.iter()
+                .any(|row| visible_width(row) > usize::from(width))
+        });
+        let height_is_binding = max_height.is_some_and(|height| rows.len() > usize::from(height));
+        if width_is_binding || height_is_binding {
+            normalize_ansi_rows(&mut rows);
         }
-        for row in rows {
-            out.push(format!("{}{row}{}", " ".repeat(ml), " ".repeat(mr)));
+        if let Some(max_width) = max_width {
+            rows = rows
+                .into_iter()
+                .map(|row| truncate_visible_width(&row, usize::from(max_width)))
+                .collect();
         }
-        for _ in 0..m.bottom {
-            out.push(blank_margin.clone());
+        if let Some(max_height) = max_height {
+            let max_height = usize::from(max_height);
+            if rows.len() > max_height {
+                rows.truncate(max_height);
+            }
         }
-        out.join("\n")
+        rows.join("\n")
     }
 
     /// The SGR sequence enabling this style's modifiers and colors, or an
@@ -581,6 +639,8 @@ mod tests {
             .border_background(Color::BLACK)
             .width(20)
             .height(10)
+            .max_width(18)
+            .max_height(8)
             .align(Align::Right)
             .align_vertical(VerticalAlign::Bottom)
             .remove(StylePropertyKey::Background)
@@ -595,6 +655,8 @@ mod tests {
             .remove(StylePropertyKey::BorderBackground)
             .remove(StylePropertyKey::Width)
             .remove(StylePropertyKey::Height)
+            .remove(StylePropertyKey::MaxWidth)
+            .remove(StylePropertyKey::MaxHeight)
             .remove(StylePropertyKey::Align)
             .remove(StylePropertyKey::VerticalAlign);
 
@@ -611,6 +673,8 @@ mod tests {
         assert_eq!(style.border_background_color(), None);
         assert_eq!(style.fixed_width(), None);
         assert_eq!(style.fixed_height(), None);
+        assert_eq!(style.maximum_width(), None);
+        assert_eq!(style.maximum_height(), None);
         assert_eq!(style.horizontal_alignment(), Align::Left);
         assert_eq!(style.vertical_alignment(), VerticalAlign::Top);
     }
@@ -624,6 +688,29 @@ mod tests {
         assert_eq!(named.fixed_height(), Some(4));
         assert_eq!(
             generic.remove(StylePropertyKey::Height).fixed_height(),
+            None
+        );
+    }
+
+    #[test]
+    fn maximum_dimension_builders_and_generic_properties_share_value_semantics() {
+        let named = Style::new().max_width(8).max_height(4);
+        let generic = Style::new()
+            .add(StyleProperty::MaxWidth(8))
+            .add(StyleProperty::MaxHeight(4));
+
+        assert_eq!(named, generic);
+        assert_eq!(named.maximum_width(), Some(8));
+        assert_eq!(named.maximum_height(), Some(4));
+        assert_eq!(
+            generic
+                .clone()
+                .remove(StylePropertyKey::MaxWidth)
+                .maximum_width(),
+            None
+        );
+        assert_eq!(
+            generic.remove(StylePropertyKey::MaxHeight).maximum_height(),
             None
         );
     }

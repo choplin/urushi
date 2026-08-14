@@ -23,6 +23,8 @@ pub enum StyleProperty {
     BorderBackground(Color),
     Width(u16),
     Height(u16),
+    MaxWidth(u16),
+    MaxHeight(u16),
     Align(Align),
     VerticalAlign(VerticalAlign),
 }
@@ -44,6 +46,8 @@ pub enum StylePropertyKey {
     BorderBackground,
     Width,
     Height,
+    MaxWidth,
+    MaxHeight,
     Align,
     VerticalAlign,
 }

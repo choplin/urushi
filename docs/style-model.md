@@ -51,6 +51,8 @@ enum StyleProperty {
     BorderBackground(Color),
     Width(u16),
     Height(u16),
+    MaxWidth(u16),
+    MaxHeight(u16),
     Align(Align),
     VerticalAlign(VerticalAlign),
 }
@@ -70,6 +72,8 @@ enum StylePropertyKey {
     BorderBackground,
     Width,
     Height,
+    MaxWidth,
+    MaxHeight,
     Align,
     VerticalAlign,
 }
@@ -103,6 +107,8 @@ let style = Style::new()
     .border(Border::ROUNDED)
     .width(20)
     .height(5)
+    .max_width(18)
+    .max_height(6)
     .align(Align::Center)
     .align_vertical(VerticalAlign::Center);
 ```
@@ -177,6 +183,24 @@ content block at the top, center, or bottom of the fixed content box. Like Lip
 Gloss, centered content puts an odd extra row below the padded block: a
 three-row gap is split as one row above and two below. Background color covers
 both padding and every alignment row in the fixed content box.
+
+## Maximum dimensions
+
+`max_width` and `max_height` are hard limits on the final rendered block. In
+contrast to fixed dimensions, they include padding, enabled border edges, and
+margin. Like Lip Gloss, a zero maximum disables that constraint; use generic
+`remove` when the property itself should be absent from the `Style` value.
+
+Rendering first wraps content only when `width` is present, then resolves fixed
+width and height, alignment, padding, border, and margin. Maximum dimensions
+are applied last: `max_width` truncates every rendered row without rewrapping,
+and `max_height` keeps rows from the top. Consequently, a maximum wins when it
+is smaller than a fixed dimension. Truncation preserves ANSI sequence
+boundaries, safely closes retained SGR and OSC 8 scopes, discards controls that
+start in cropped content, and never splits a grapheme cluster or wide character.
+
+Ratatui follows the same order. Its `Rect` remains an additional external clip;
+the smaller of the explicit maximum and the available area is visible.
 
 ## Theme contract
 

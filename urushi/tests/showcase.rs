@@ -51,6 +51,8 @@ fn showcase_has_a_consistent_visible_width() {
         "FULL BORDER",
         "FIXED WIDTH",
         "FIXED HEIGHT",
+        "MAX WIDTH",
+        "MAX HEIGHT",
         "VERTICAL ALIGNMENT",
         "HORIZONTAL ALIGNMENT",
         "JOIN HORIZONTAL",
@@ -126,4 +128,38 @@ fn showcase_has_a_consistent_visible_width() {
         .position(|line| line.contains("HORIZONTAL ALIGNMENT"))
         .expect("horizontal alignment row");
     assert_eq!(horizontal_alignment - vertical_alignment, 6);
+
+    let feature_position = |label: &str| {
+        plain_lines
+            .iter()
+            .position(|line| line.contains(label))
+            .unwrap_or_else(|| panic!("missing showcase feature: {label}"))
+    };
+    let fixed_width = feature_position("FIXED WIDTH");
+    let fixed_height = feature_position("FIXED HEIGHT");
+    let max_width = feature_position("MAX WIDTH");
+    let max_height = feature_position("MAX HEIGHT");
+    assert_eq!(fixed_height - fixed_width, 2);
+    assert_eq!(max_width - fixed_height, 4);
+    assert_eq!(max_height - max_width, 5);
+
+    assert!(plain_lines[max_width + 1].contains("abcdefghijklmnopqrst"));
+    assert!(plain_lines[max_width + 3].contains("abcdefghijkl"));
+    assert!(!plain_lines[max_width + 3].contains('m'));
+    for offset in 1..=3 {
+        let letter = char::from(b'a' + (offset - 1) as u8);
+        assert_eq!(
+            plain_lines[max_height + offset].matches(letter).count(),
+            2,
+            "{letter} should appear in before and after boxes"
+        );
+    }
+    for offset in 4..=6 {
+        let letter = char::from(b'a' + (offset - 1) as u8);
+        assert_eq!(
+            plain_lines[max_height + offset].matches(letter).count(),
+            1,
+            "{letter} should only remain in the before box"
+        );
+    }
 }

@@ -230,6 +230,8 @@ mod tests {
             .margin((4, 3, 2, 1))
             .width(12)
             .height(9)
+            .max_width(10)
+            .max_height(7)
             .align(Align::Right)
             .align_vertical(VerticalAlign::Center);
 
@@ -248,6 +250,8 @@ mod tests {
             assert_eq!(resolved.margin_sides(), Sides::from((4, 3, 2, 1)));
             assert_eq!(resolved.fixed_width(), Some(12));
             assert_eq!(resolved.fixed_height(), Some(9));
+            assert_eq!(resolved.maximum_width(), Some(10));
+            assert_eq!(resolved.maximum_height(), Some(7));
             assert_eq!(resolved.horizontal_alignment(), Align::Right);
             assert_eq!(resolved.vertical_alignment(), VerticalAlign::Center);
         }

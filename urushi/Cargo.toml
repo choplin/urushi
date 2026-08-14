@@ -10,6 +10,7 @@ categories = ["command-line-interface"]
 [dependencies]
 console = { version = "0.16", optional = true }
 indicatif = { version = "0.18", optional = true }
+unicode-segmentation.workspace = true
 unicode-width.workspace = true
 
 [features]

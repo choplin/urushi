@@ -1,6 +1,8 @@
 //! Ratatui widget rendering for urushi's box model.
 
 use ratatui::{buffer::Buffer, layout::Rect, style::Style as InnerStyle, widgets::Widget};
+use unicode_segmentation::UnicodeSegmentation;
+use unicode_width::UnicodeWidthStr;
 
 use super::{RatatuiStyle, style::convert_color};
 use urushi::{Align, Border, Color, Sides, Style, VerticalAlign, visible_width, wrap_text};
@@ -85,11 +87,23 @@ impl Widget for &RatatuiWidget<'_> {
 }
 
 fn render_widget(widget: RatatuiWidget<'_>, area: Rect, buffer: &mut Buffer) {
-    let area = area.intersection(buffer.area);
-    if area.is_empty() {
-        return;
-    }
+    let maximum_area = Rect::new(
+        area.x,
+        area.y,
+        parts_limit(area.width, widget.style.maximum_width()),
+        parts_limit(area.height, widget.style.maximum_height()),
+    );
+    let clip = maximum_area.intersection(buffer.area);
+    render_widget_in_area(widget, area, clip, true, buffer);
+}
 
+fn render_widget_in_area(
+    widget: RatatuiWidget<'_>,
+    area: Rect,
+    clip: Rect,
+    preserve_legacy_layout: bool,
+    buffer: &mut Buffer,
+) {
     let parts = BoxParts::from_style(widget.style);
     let Some(available) = inset(area, parts.margin) else {
         return;
@@ -167,12 +181,38 @@ fn render_widget(widget: RatatuiWidget<'_>, area: Rect, buffer: &mut Buffer) {
         box_width,
         box_height,
     );
-    fill(box_area, text_style, buffer);
+    let outer_right = widget_area
+        .right()
+        .saturating_add(parts.margin.right)
+        .min(area.right());
+    let outer_bottom = widget_area
+        .bottom()
+        .saturating_add(parts.margin.bottom)
+        .min(area.bottom());
+    let maximum_width_is_binding = widget
+        .style
+        .maximum_width()
+        .is_some_and(|maximum| maximum > 0 && area.x.saturating_add(maximum) < outer_right);
+    let maximum_height_is_binding = widget
+        .style
+        .maximum_height()
+        .is_some_and(|maximum| maximum > 0 && area.y.saturating_add(maximum) < outer_bottom);
+    if preserve_legacy_layout && !maximum_width_is_binding && !maximum_height_is_binding {
+        let legacy_area = area.intersection(buffer.area);
+        return render_widget_in_area(widget, legacy_area, legacy_area, false, buffer);
+    }
+    if clip.is_empty() {
+        return;
+    }
 
+    let maximum_width_crops_box = maximum_width_is_binding && clip.right() < box_area.right();
+    if !maximum_width_crops_box {
+        fill(box_area.intersection(clip), text_style, buffer);
+    }
     if let Some(border) = parts.border {
         draw_border(
             widget_area,
-            available,
+            available.intersection(clip),
             border,
             parts,
             border_style(parts),
@@ -201,6 +241,18 @@ fn render_widget(widget: RatatuiWidget<'_>, area: Rect, buffer: &mut Buffer) {
         VerticalAlign::Center => vertical_gap / 2,
         VerticalAlign::Bottom => vertical_gap,
     };
+    let first_content_row = content_y.saturating_add(vertical_offset);
+    let last_content_row = first_content_row.saturating_add(rendered_content_height);
+
+    for y in box_area.top()..box_area.bottom() {
+        if y < first_content_row || y >= last_content_row {
+            fill(
+                Rect::new(box_area.x, y, box_area.width, 1).intersection(clip),
+                text_style,
+                buffer,
+            );
+        }
+    }
 
     for (offset, line) in lines.iter().take(usize::from(content_rows)).enumerate() {
         let line_width = visible_width(line).min(usize::from(u16::MAX)) as u16;
@@ -213,13 +265,35 @@ fn render_widget(widget: RatatuiWidget<'_>, area: Rect, buffer: &mut Buffer) {
         let y = content_y
             .saturating_add(vertical_offset)
             .saturating_add(offset as u16);
-        buffer.set_stringn(
-            content_x.saturating_add(alignment_offset),
-            y,
-            line,
-            usize::from(content_width.saturating_sub(alignment_offset)),
-            text_style,
-        );
+        let x = content_x.saturating_add(alignment_offset);
+        if y >= clip.top() && y < clip.bottom() {
+            fill(
+                Rect::new(box_area.x, y, x.saturating_sub(box_area.x), 1).intersection(clip),
+                text_style,
+                buffer,
+            );
+        }
+        if y >= clip.top() && y < clip.bottom() {
+            let available_cells = content_width.saturating_sub(alignment_offset);
+            draw_line_clipped(line, x, y, available_cells, clip, text_style, buffer);
+            if line_width <= available_cells {
+                let end_x = x.saturating_add(line_width);
+                fill(
+                    Rect::new(end_x, y, box_area.right().saturating_sub(end_x), 1)
+                        .intersection(clip),
+                    text_style,
+                    buffer,
+                );
+            }
+        }
+    }
+}
+
+fn parts_limit(available: u16, maximum: Option<u16>) -> u16 {
+    match maximum {
+        Some(maximum) if maximum > 0 => available.min(maximum),
+        None => available,
+        Some(_) => available,
     }
 }
 
@@ -249,6 +323,31 @@ fn fill(area: Rect, style: InnerStyle, buffer: &mut Buffer) {
                 cell.set_symbol(" ").set_style(style);
             }
         }
+    }
+}
+
+fn draw_line_clipped(
+    line: &str,
+    x: u16,
+    y: u16,
+    available_cells: u16,
+    clip: Rect,
+    style: InnerStyle,
+    buffer: &mut Buffer,
+) {
+    let content_right = x.saturating_add(available_cells);
+    let mut cursor = x;
+
+    for grapheme in line.graphemes(true) {
+        let width = UnicodeWidthStr::width(grapheme).min(usize::from(u16::MAX)) as u16;
+        let next = cursor.saturating_add(width);
+        if next > content_right {
+            break;
+        }
+        if cursor >= clip.left() && next <= clip.right() {
+            buffer.set_stringn(cursor, y, grapheme, usize::from(width), style);
+        }
+        cursor = next;
     }
 }
 
@@ -435,6 +534,8 @@ mod tests {
                 .border_foreground(Color::RED)
                 .width(20)
                 .height(10)
+                .max_width(18)
+                .max_height(8)
                 .align(Align::Center)
                 .align_vertical(VerticalAlign::Center),
         )
@@ -653,13 +754,17 @@ mod tests {
 
     #[test]
     fn widget_preserves_narrow_width_only_clipping() {
-        let style = Style::new().width(1);
+        let style = Style::new().background(Color::BLUE).width(1);
         let area = Rect::new(0, 0, 2, 1);
         let mut buffer = Buffer::empty(area);
 
         style.widget("日").render(area, &mut buffer);
 
         assert_eq!(buffer_line(&buffer, 0), "  ");
+        assert_eq!(
+            buffer.cell((0, 0)).expect("clipped content cell").bg,
+            RatatuiColor::Blue
+        );
     }
 
     #[test]
@@ -674,6 +779,202 @@ mod tests {
         assert_eq!(buffer_line(&buffer, 1), "|x   |");
         assert_eq!(buffer_line(&buffer, 2), "|    |");
         assert_eq!(buffer_line(&buffer, 3), "+----+");
+    }
+
+    #[test]
+    fn widget_maximum_dimensions_crop_the_resolved_outer_block() {
+        let layout = Style::new()
+            .width(6)
+            .height(4)
+            .padding((1, 1))
+            .border(Border::ASCII)
+            .margin(1)
+            .max_width(6)
+            .max_height(4);
+        let direct = layout.render("ab");
+        let expected: Vec<_> = direct.lines().collect();
+        let style = layout.background(Color::BLUE);
+        let area = Rect::new(0, 0, 12, 8);
+        let mut buffer = Buffer::empty(area);
+
+        style.widget("ab").render(area, &mut buffer);
+
+        assert_eq!(expected.len(), 4);
+        for (y, expected_line) in expected.into_iter().enumerate() {
+            assert_eq!(&buffer_line(&buffer, y as u16)[..6], expected_line);
+        }
+        assert_eq!(
+            buffer.cell((6, 2)).expect("outside max width").bg,
+            RatatuiColor::Reset
+        );
+        assert_eq!(
+            buffer.cell((2, 4)).expect("outside max height").bg,
+            RatatuiColor::Reset
+        );
+    }
+
+    #[test]
+    fn widget_maximum_width_does_not_split_a_cjk_cell() {
+        let style = Style::new().background(Color::BLUE).max_width(3);
+        let area = Rect::new(0, 0, 6, 1);
+        let mut buffer = Buffer::empty(area);
+
+        style.widget("日本語").render(area, &mut buffer);
+
+        assert_eq!(buffer.cell((0, 0)).expect("first CJK cell").symbol(), "日");
+        assert_eq!(buffer.cell((2, 0)).expect("inside max width").symbol(), " ");
+        assert_eq!(
+            buffer.cell((2, 0)).expect("ragged crop cell").bg,
+            RatatuiColor::Reset
+        );
+        assert_eq!(
+            buffer.cell((3, 0)).expect("outside max width").bg,
+            RatatuiColor::Reset
+        );
+    }
+
+    #[test]
+    fn widget_maximum_width_accounts_for_margin_before_a_wide_cell() {
+        let style = Style::new()
+            .background(Color::BLUE)
+            .margin((0, 0, 0, 1))
+            .max_width(2);
+        let area = Rect::new(0, 0, 3, 1);
+        let mut buffer = Buffer::empty(area);
+
+        style.widget("日").render(area, &mut buffer);
+
+        assert_eq!(style.render("日"), " ");
+        assert_eq!(buffer.cell((0, 0)).expect("retained margin").symbol(), " ");
+        assert_eq!(
+            buffer.cell((1, 0)).expect("ragged crop cell").bg,
+            RatatuiColor::Reset
+        );
+        assert_eq!(
+            buffer.cell((2, 0)).expect("outside maximum width").bg,
+            RatatuiColor::Reset
+        );
+    }
+
+    #[test]
+    fn widget_maximum_width_uses_grapheme_width_for_zwj_emoji() {
+        let style = Style::new().background(Color::BLUE).max_width(3);
+        let area = Rect::new(0, 0, 6, 1);
+        let mut buffer = Buffer::empty(area);
+
+        style.widget("👩‍💻x").render(area, &mut buffer);
+
+        assert_eq!(buffer.cell((0, 0)).expect("emoji cell").symbol(), "👩‍💻");
+        assert_eq!(buffer.cell((2, 0)).expect("following cell").symbol(), "x");
+        assert_eq!(
+            buffer.cell((3, 0)).expect("outside max width").bg,
+            RatatuiColor::Reset
+        );
+    }
+
+    #[test]
+    fn widget_maximum_clip_stays_anchored_to_the_requested_area() {
+        let style = Style::new().background(Color::BLUE).width(10).max_width(6);
+        let buffer_area = Rect::new(5, 0, 10, 1);
+        let mut buffer = Buffer::empty(buffer_area);
+
+        style
+            .widget("x")
+            .render(Rect::new(0, 0, 10, 1), &mut buffer);
+
+        assert_eq!(
+            buffer.cell((5, 0)).expect("inside max width").bg,
+            RatatuiColor::Blue
+        );
+        assert_eq!(
+            buffer.cell((6, 0)).expect("outside max width").bg,
+            RatatuiColor::Reset
+        );
+    }
+
+    #[test]
+    fn widget_buffer_intersection_only_clips_the_resolved_layout() {
+        let horizontal = Style::new().width(10).max_width(6);
+        let horizontal_area = Rect::new(5, 0, 10, 1);
+        let mut horizontal_buffer = Buffer::empty(horizontal_area);
+
+        horizontal
+            .widget("abcdefghij")
+            .render(Rect::new(0, 0, 10, 1), &mut horizontal_buffer);
+
+        assert_eq!(
+            horizontal_buffer
+                .cell((5, 0))
+                .expect("sixth resolved cell")
+                .symbol(),
+            "f"
+        );
+        assert_eq!(
+            horizontal_buffer
+                .cell((6, 0))
+                .expect("outside maximum width")
+                .symbol(),
+            " "
+        );
+
+        let vertical = Style::new().width(1).max_height(4);
+        let vertical_area = Rect::new(0, 2, 1, 2);
+        let mut vertical_buffer = Buffer::empty(vertical_area);
+
+        vertical
+            .widget("a\nb\nc\nd\ne")
+            .render(Rect::new(0, 0, 1, 5), &mut vertical_buffer);
+
+        assert_eq!(
+            vertical_buffer.cell((0, 2)).expect("third row").symbol(),
+            "c"
+        );
+        assert_eq!(
+            vertical_buffer.cell((0, 3)).expect("fourth row").symbol(),
+            "d"
+        );
+    }
+
+    #[test]
+    fn widget_preserves_legacy_partial_buffer_layout_without_a_binding_maximum() {
+        let styles = [
+            Style::new().width(10),
+            Style::new().width(10).max_width(0),
+            Style::new().width(10).max_width(99),
+        ];
+        for style in styles {
+            let buffer_area = Rect::new(5, 0, 5, 1);
+            let mut buffer = Buffer::empty(buffer_area);
+
+            style
+                .widget("abcdefghij")
+                .render(Rect::new(0, 0, 10, 1), &mut buffer);
+
+            assert_eq!(buffer_line(&buffer, 0), "abcde");
+        }
+
+        let styles = [
+            Style::new().width(1).height(4),
+            Style::new().width(1).height(4).max_height(0),
+            Style::new().width(1).height(4).max_height(99),
+        ];
+        for style in styles {
+            let buffer_area = Rect::new(0, 2, 1, 2);
+            let mut buffer = Buffer::empty(buffer_area);
+
+            style
+                .widget("a\nb\nc\nd")
+                .render(Rect::new(0, 0, 1, 4), &mut buffer);
+
+            assert_eq!(
+                buffer.cell((0, 2)).expect("first visible row").symbol(),
+                "a"
+            );
+            assert_eq!(
+                buffer.cell((0, 3)).expect("second visible row").symbol(),
+                "b"
+            );
+        }
     }
 
     #[test]

@@ -51,6 +51,46 @@ fn horizontal_alignment_sample(left: &str, center: &str, right: &str) -> String 
     join_vertical(Align::Left, &[left, gap.clone(), center, gap, right])
 }
 
+fn maximum_width_sample() -> String {
+    let heading = |label| Style::new().width(20).align(Align::Center).render(label);
+    let before = Style::new()
+        .background(Color::BRIGHT_BLACK)
+        .width(20)
+        .render("abcdefghijklmnopqrst");
+    let after = Style::new()
+        .background(Color::BRIGHT_BLACK)
+        .width(20)
+        .max_width(12)
+        .render("abcdefghijklmnopqrst");
+
+    join_vertical(
+        Align::Left,
+        &[heading("BEFORE"), before, heading("AFTER"), after],
+    )
+}
+
+fn maximum_height_sample() -> String {
+    let heading = |label| Style::new().width(9).align(Align::Center).render(label);
+    let cell = Style::new()
+        .background(Color::BRIGHT_BLACK)
+        .width(9)
+        .height(6)
+        .align(Align::Center);
+    let before = join_vertical(
+        Align::Left,
+        &[heading("BEFORE"), cell.clone().render("a\nb\nc\nd\ne\nf")],
+    );
+    let after = join_vertical(
+        Align::Left,
+        &[
+            heading("AFTER"),
+            cell.max_height(3).render("a\nb\nc\nd\ne\nf"),
+        ],
+    );
+
+    join_horizontal(VerticalAlign::Top, &[before, "  ".to_string(), after])
+}
+
 fn side_card(label: &str, sample: String, blank_above: bool, blank_below: bool) -> String {
     let label = Style::new()
         .foreground(Color::BRIGHT_CYAN)
@@ -247,6 +287,7 @@ pub fn render_showcase() -> String {
                         .width(20)
                         .render("reserves 20 cols"),
                 ),
+                " ".repeat(43),
                 row_with_alignment(
                     "FIXED HEIGHT",
                     Style::new()
@@ -255,6 +296,11 @@ pub fn render_showcase() -> String {
                         .render("reserves 3 rows"),
                     VerticalAlign::Top,
                 ),
+                " ".repeat(43),
+                row_with_alignment("MAX WIDTH", maximum_width_sample(), VerticalAlign::Top),
+                " ".repeat(43),
+                row_with_alignment("MAX HEIGHT", maximum_height_sample(), VerticalAlign::Top),
+                " ".repeat(43),
                 border_side_grid(),
             ],
         ),
