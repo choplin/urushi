@@ -33,6 +33,7 @@ pub struct Style {
     border_fg: Option<Color>,
     border_bg: Option<Color>,
     width: Option<u16>,
+    height: Option<u16>,
     align: Align,
 }
 
@@ -52,6 +53,7 @@ impl Default for Style {
             border_fg: None,
             border_bg: None,
             width: None,
+            height: None,
             align: Align::default(),
         }
     }
@@ -82,6 +84,7 @@ impl Style {
             StyleProperty::BorderForeground(color) => self.border_fg = Some(color),
             StyleProperty::BorderBackground(color) => self.border_bg = Some(color),
             StyleProperty::Width(width) => self.width = Some(width),
+            StyleProperty::Height(height) => self.height = Some(height),
             StyleProperty::Align(align) => self.align = align,
         }
         self
@@ -105,6 +108,7 @@ impl Style {
             StylePropertyKey::BorderForeground => self.border_fg = None,
             StylePropertyKey::BorderBackground => self.border_bg = None,
             StylePropertyKey::Width => self.width = None,
+            StylePropertyKey::Height => self.height = None,
             StylePropertyKey::Align => self.align = Align::default(),
         }
         self
@@ -202,6 +206,12 @@ impl Style {
         self.add(StyleProperty::Width(width))
     }
 
+    /// Sets the minimum height of the padded content box (excluding border and
+    /// margin). Taller content expands the box instead of being truncated.
+    pub fn height(self, height: u16) -> Self {
+        self.add(StyleProperty::Height(height))
+    }
+
     /// Sets the horizontal alignment of content within the box.
     pub fn align(self, align: Align) -> Self {
         self.add(StyleProperty::Align(align))
@@ -272,6 +282,11 @@ impl Style {
         self.width
     }
 
+    /// Returns the minimum padded content-box height, if one is set.
+    pub const fn fixed_height(&self) -> Option<u16> {
+        self.height
+    }
+
     /// Returns the horizontal alignment within the content box.
     pub const fn horizontal_alignment(&self) -> Align {
         self.align
@@ -340,7 +355,11 @@ impl Style {
         let sgr = self.sgr_prefix();
         let reset = if sgr.is_empty() { "" } else { RESET };
         let blank_row = format!("{sgr}{}{reset}", " ".repeat(total));
-        let mut rows: Vec<String> = Vec::with_capacity(pt + lines.len() + pb);
+        let natural_height = pt + lines.len() + pb;
+        let target_height = self.height.map_or(natural_height, |height| {
+            usize::from(height).max(natural_height)
+        });
+        let mut rows: Vec<String> = Vec::with_capacity(target_height);
         for _ in 0..pt {
             rows.push(blank_row.clone());
         }
@@ -359,6 +378,9 @@ impl Style {
             ));
         }
         for _ in 0..pb {
+            rows.push(blank_row.clone());
+        }
+        for _ in natural_height..target_height {
             rows.push(blank_row.clone());
         }
 
@@ -533,6 +555,7 @@ mod tests {
             .border_foreground(Color::CYAN)
             .border_background(Color::BLACK)
             .width(20)
+            .height(10)
             .align(Align::Right)
             .remove(StylePropertyKey::Background)
             .remove(StylePropertyKey::Padding)
@@ -545,6 +568,7 @@ mod tests {
             .remove(StylePropertyKey::BorderForeground)
             .remove(StylePropertyKey::BorderBackground)
             .remove(StylePropertyKey::Width)
+            .remove(StylePropertyKey::Height)
             .remove(StylePropertyKey::Align);
 
         assert_eq!(style.foreground_color(), Some(Color::BLUE));
@@ -559,7 +583,21 @@ mod tests {
         assert_eq!(style.border_foreground_color(), None);
         assert_eq!(style.border_background_color(), None);
         assert_eq!(style.fixed_width(), None);
+        assert_eq!(style.fixed_height(), None);
         assert_eq!(style.horizontal_alignment(), Align::Left);
+    }
+
+    #[test]
+    fn height_builder_and_generic_property_share_value_semantics() {
+        let named = Style::new().height(4);
+        let generic = Style::new().add(StyleProperty::Height(4));
+
+        assert_eq!(named, generic);
+        assert_eq!(named.fixed_height(), Some(4));
+        assert_eq!(
+            generic.remove(StylePropertyKey::Height).fixed_height(),
+            None
+        );
     }
 
     #[test]

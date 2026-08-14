@@ -53,6 +53,66 @@ fn align_right_with_fixed_width() {
 }
 
 #[test]
+fn fixed_height_expands_the_padded_content_box() {
+    let style = Style::new()
+        .width(5)
+        .height(5)
+        .padding((1, 1))
+        .border(Border::ASCII);
+
+    assert_eq!(
+        style.render("x"),
+        "+-----+\n\
+         |     |\n\
+         | x   |\n\
+         |     |\n\
+         |     |\n\
+         |     |\n\
+         +-----+"
+    );
+}
+
+#[test]
+fn fixed_height_preserves_empty_multiline_and_cjk_content() {
+    let style = Style::new().width(4).height(3);
+
+    assert_eq!(style.render(""), "    \n    \n    ");
+    assert_eq!(style.render("a\nb"), "a   \nb   \n    ");
+    assert_eq!(style.render("日本"), "日本\n    \n    ");
+}
+
+#[test]
+fn content_taller_than_fixed_height_expands_instead_of_truncating() {
+    let out = Style::new().width(3).height(2).render("one\ntwo\n三");
+
+    assert_eq!(out, "one\ntwo\n三 ");
+}
+
+#[test]
+fn enabled_border_rows_and_margin_are_outside_fixed_height() {
+    let out = Style::new()
+        .width(3)
+        .height(2)
+        .border(Border::ASCII)
+        .border_top(false)
+        .margin((1, 0, 0, 0))
+        .render("x");
+
+    assert_eq!(out, "     \n|x  |\n|   |\n+---+");
+}
+
+#[test]
+fn width_only_rendering_is_unchanged_by_the_height_default() {
+    assert_eq!(
+        Style::new().width(4).render("a\nb"),
+        Style::new()
+            .width(4)
+            .remove(urushi::StylePropertyKey::Height)
+            .render("a\nb")
+    );
+}
+
+#[test]
 fn colors_and_modifiers_emit_sgr() {
     let out = Style::new()
         .foreground(Color::Ansi256(212))

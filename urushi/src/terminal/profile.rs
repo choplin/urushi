@@ -183,6 +183,7 @@ mod tests {
             .border(Border::ROUNDED)
             .padding((0, 1))
             .width(8)
+            .height(1)
             .align(Align::Center);
         let monochrome = TerminalProfile::new(ColorProfile::Monochrome, AnsiPolicy::Enabled)
             .resolve_style(&style)
@@ -191,14 +192,26 @@ mod tests {
             monochrome,
             "╭────────╮\n│\x1b[1;2;3;4;5;7;9m  日本  \x1b[0m│\n╰────────╯"
         );
+        assert_eq!(
+            TerminalProfile::new(ColorProfile::Monochrome, AnsiPolicy::Enabled)
+                .resolve_style(&style)
+                .fixed_height(),
+            Some(1)
+        );
         let disabled = TerminalProfile::new(ColorProfile::TrueColor, AnsiPolicy::Disabled)
             .resolve_style(&style)
             .render("日本");
         assert_eq!(disabled, "╭────────╮\n│  日本  │\n╰────────╯");
+        assert_eq!(
+            TerminalProfile::new(ColorProfile::TrueColor, AnsiPolicy::Disabled)
+                .resolve_style(&style)
+                .fixed_height(),
+            Some(1)
+        );
     }
 
     #[test]
-    fn color_resolution_preserves_border_side_layout_values() {
+    fn color_resolution_preserves_box_layout_values() {
         let style = Style::new()
             .foreground(Color::Rgb(1, 2, 3))
             .border(Border::ROUNDED)
@@ -209,6 +222,7 @@ mod tests {
             .padding((1, 2, 3, 4))
             .margin((4, 3, 2, 1))
             .width(12)
+            .height(9)
             .align(Align::Right);
 
         for profile in [
@@ -225,6 +239,7 @@ mod tests {
             assert_eq!(resolved.padding_sides(), Sides::from((1, 2, 3, 4)));
             assert_eq!(resolved.margin_sides(), Sides::from((4, 3, 2, 1)));
             assert_eq!(resolved.fixed_width(), Some(12));
+            assert_eq!(resolved.fixed_height(), Some(9));
             assert_eq!(resolved.horizontal_alignment(), Align::Right);
         }
     }

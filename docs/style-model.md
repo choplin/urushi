@@ -28,7 +28,7 @@ let style = Style::new()
 
 `Style::new()` and `Style::default()` are empty styles. Removing a property
 restores its ordinary default in the resulting value: no color, no border,
-zero spacing, automatic width, or left alignment.
+zero spacing, automatic width and height, or left alignment.
 
 ## Closed property vocabulary
 
@@ -49,6 +49,7 @@ enum StyleProperty {
     BorderForeground(Color),
     BorderBackground(Color),
     Width(u16),
+    Height(u16),
     Align(Align),
 }
 
@@ -66,6 +67,7 @@ enum StylePropertyKey {
     BorderForeground,
     BorderBackground,
     Width,
+    Height,
     Align,
 }
 ```
@@ -97,6 +99,7 @@ let style = Style::new()
     .padding((0, 1))
     .border(Border::ROUNDED)
     .width(20)
+    .height(5)
     .align(Align::Center);
 ```
 
@@ -148,6 +151,26 @@ fn focused(style: Style, accent: Color) -> Style {
 If an application needs several transforms, it can fold functions over a base
 style. Urushi does not introduce a separate patch data type without a concrete
 need to serialize or inspect such changes.
+
+## Fixed dimensions
+
+`width` and `height` describe the padded content box. Padding is inside the
+requested dimensions; enabled border columns and rows, followed by margin, are
+outside them. For example, `height(3)` with a top and bottom border produces
+five rows before margin.
+
+Fixed height is a minimum, not a clipping limit. Content taller than the fixed
+height expands the box so no row is discarded. An output boundary with a finite
+area, such as a Ratatui `Rect`, may still clip the resolved box to that area.
+Dedicated maximum-dimension properties own content truncation when present;
+fixed height does not. Styles without fixed height retain the existing
+fixed-width resolution policy. When fixed width and height are combined,
+Ratatui may expand a too-narrow content box within the available `Rect` to
+preserve a displayed wide character and match direct rendering.
+
+Until vertical alignment is set explicitly, shorter content is top-aligned and
+the extra styled rows follow the content and its bottom padding. Background
+color therefore covers the entire fixed content box.
 
 ## Theme contract
 

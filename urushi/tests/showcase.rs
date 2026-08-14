@@ -23,6 +23,7 @@ fn showcase_has_a_consistent_visible_width() {
         "PADDING",
         "FULL BORDER",
         "FIXED WIDTH",
+        "FIXED HEIGHT",
         "ALIGN LEFT",
         "ALIGN CENTER",
         "ALIGN RIGHT",
@@ -35,4 +36,22 @@ fn showcase_has_a_consistent_visible_width() {
     ] {
         assert!(output.contains(label), "missing feature label: {label}");
     }
+    assert!(output.contains("reserves 20 cols"));
+    assert!(output.contains("reserves 3 rows"));
+
+    let lines: Vec<_> = output.lines().collect();
+    let fixed_width = lines
+        .iter()
+        .position(|line| line.contains("FIXED WIDTH"))
+        .expect("fixed width row");
+    let fixed_height = lines
+        .iter()
+        .position(|line| line.contains("FIXED HEIGHT"))
+        .expect("fixed height row");
+    let align_left = lines
+        .iter()
+        .position(|line| line.contains("ALIGN LEFT"))
+        .expect("alignment group");
+    assert_eq!(fixed_height - fixed_width, 2);
+    assert_eq!(align_left - fixed_height, 4);
 }

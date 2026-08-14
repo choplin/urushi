@@ -47,6 +47,7 @@ struct BoxParts {
     border_foreground: Option<Color>,
     border_background: Option<Color>,
     width: Option<u16>,
+    height: Option<u16>,
     align: Align,
 }
 
@@ -63,6 +64,7 @@ impl BoxParts {
             border_foreground: style.border_foreground_color(),
             border_background: style.border_background_color(),
             width: style.fixed_width(),
+            height: style.fixed_height(),
             align: style.horizontal_alignment(),
         }
     }
@@ -110,11 +112,11 @@ fn render_widget(widget: RatatuiWidget<'_>, area: Rect, buffer: &mut Buffer) {
     let requested_box_width = parts
         .width
         .unwrap_or_else(|| natural_inner_width.saturating_add(horizontal_padding));
-    let box_width = requested_box_width.min(max_box_width);
-    let inner_width = box_width.saturating_sub(horizontal_padding);
+    let mut box_width = requested_box_width.min(max_box_width);
+    let initial_inner_width = box_width.saturating_sub(horizontal_padding);
 
-    let lines = if parts.width.is_some() && inner_width > 0 {
-        wrap_text(widget.content, usize::from(inner_width))
+    let lines = if parts.width.is_some() && (initial_inner_width > 0 || parts.height.is_some()) {
+        wrap_text(widget.content, usize::from(initial_inner_width.max(1)))
     } else {
         let mut lines: Vec<String> = widget.content.lines().map(str::to_owned).collect();
         if lines.is_empty() {
@@ -123,12 +125,30 @@ fn render_widget(widget: RatatuiWidget<'_>, area: Rect, buffer: &mut Buffer) {
         lines
     };
 
+    // For fixed-height boxes, match direct rendering when one displayed
+    // character is wider than the requested inner width: preserve the
+    // character and expand when the area can accommodate it. The height guard
+    // keeps width-only rendering on its existing resolution path.
+    if parts.height.is_some() {
+        let rendered_inner_width = lines
+            .iter()
+            .map(|line| visible_width(line))
+            .max()
+            .unwrap_or(0)
+            .min(usize::from(u16::MAX)) as u16;
+        let rendered_box_width = rendered_inner_width.saturating_add(horizontal_padding);
+        box_width = box_width.max(rendered_box_width).min(max_box_width);
+    }
+
     let content_height = u16::try_from(lines.len()).unwrap_or(u16::MAX);
-    let requested_box_height = parts
+    let natural_box_height = parts
         .padding
         .top
         .saturating_add(content_height)
         .saturating_add(parts.padding.bottom);
+    let requested_box_height = parts
+        .height
+        .map_or(natural_box_height, |height| height.max(natural_box_height));
     let box_height = requested_box_height.min(max_box_height);
     let total_width = box_width.saturating_add(border_columns);
     let total_height = box_height.saturating_add(border_rows);
@@ -403,6 +423,7 @@ mod tests {
                 .border(Border::ROUNDED)
                 .border_foreground(Color::RED)
                 .width(20)
+                .height(10)
                 .align(Align::Center),
         )
         .into_inner();
@@ -517,6 +538,80 @@ mod tests {
                 assert_eq!(buffer_line(&buffer, y as u16), expected_line);
             }
         }
+    }
+
+    #[test]
+    fn widget_matches_direct_rendering_for_fixed_height_content_cases() {
+        let cases = [
+            ("empty", ""),
+            ("single line", "x"),
+            ("multiple lines", "x\ny"),
+            ("CJK", "日本"),
+            ("overflow", "a\nb\nc\nd\ne"),
+        ];
+
+        for (case, content) in cases {
+            let style = Style::new()
+                .width(6)
+                .height(4)
+                .padding((1, 1))
+                .border(Border::ASCII)
+                .border_top(false);
+            let direct = style.render(content);
+            let expected: Vec<_> = direct.lines().collect();
+            let width = expected
+                .iter()
+                .map(|line| visible_width(line))
+                .max()
+                .unwrap() as u16;
+            let area = Rect::new(0, 0, width, expected.len() as u16);
+            let mut buffer = Buffer::empty(area);
+
+            style.widget(content).render(area, &mut buffer);
+
+            for (y, expected_line) in expected.into_iter().enumerate() {
+                assert_eq!(buffer_line(&buffer, y as u16), expected_line, "{case}");
+            }
+        }
+    }
+
+    #[test]
+    fn widget_expands_narrow_fixed_width_for_cjk_parity() {
+        let style = Style::new().width(1).height(2);
+        let direct = style.render("日本");
+        let area = Rect::new(0, 0, 2, 2);
+        let mut buffer = Buffer::empty(area);
+
+        style.widget("日本").render(area, &mut buffer);
+
+        assert_eq!(direct, "日\n本");
+        assert_eq!(buffer_line(&buffer, 0), "日");
+        assert_eq!(buffer_line(&buffer, 1), "本");
+    }
+
+    #[test]
+    fn widget_preserves_narrow_width_only_clipping() {
+        let style = Style::new().width(1);
+        let area = Rect::new(0, 0, 2, 1);
+        let mut buffer = Buffer::empty(area);
+
+        style.widget("日").render(area, &mut buffer);
+
+        assert_eq!(buffer_line(&buffer, 0), "  ");
+    }
+
+    #[test]
+    fn widget_clips_fixed_height_to_the_available_area() {
+        let style = Style::new().width(4).height(6).border(Border::ASCII);
+        let area = Rect::new(0, 0, 6, 4);
+        let mut buffer = Buffer::empty(area);
+
+        style.widget("x").render(area, &mut buffer);
+
+        assert_eq!(buffer_line(&buffer, 0), "+----+");
+        assert_eq!(buffer_line(&buffer, 1), "|x   |");
+        assert_eq!(buffer_line(&buffer, 2), "|    |");
+        assert_eq!(buffer_line(&buffer, 3), "+----+");
     }
 
     #[test]

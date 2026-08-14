@@ -22,6 +22,7 @@ pub enum StyleProperty {
     BorderForeground(Color),
     BorderBackground(Color),
     Width(u16),
+    Height(u16),
     Align(Align),
 }
 
@@ -41,6 +42,7 @@ pub enum StylePropertyKey {
     BorderForeground,
     BorderBackground,
     Width,
+    Height,
     Align,
 }
 

@@ -3,6 +3,10 @@ use urushi::{
 };
 
 fn row(label: &str, sample: String) -> String {
+    row_with_alignment(label, sample, VerticalAlign::Center)
+}
+
+fn row_with_alignment(label: &str, sample: String, alignment: VerticalAlign) -> String {
     let label = Style::new()
         .foreground(Color::BRIGHT_CYAN)
         .bold()
@@ -10,7 +14,7 @@ fn row(label: &str, sample: String) -> String {
         .align(Align::Right)
         .render(label);
     let divider = Style::new().foreground(Color::BRIGHT_BLACK).render(" | ");
-    join_horizontal(VerticalAlign::Center, &[label, divider, sample])
+    join_horizontal(alignment, &[label, divider, sample])
 }
 
 fn side_card(label: &str, sample: String, blank_above: bool, blank_below: bool) -> String {
@@ -165,8 +169,18 @@ pub fn render_showcase() -> String {
             Style::new()
                 .background(Color::BRIGHT_BLACK)
                 .width(20)
-                .render("20 cells"),
+                .render("reserves 20 cols"),
         ),
+        " ".repeat(43),
+        row_with_alignment(
+            "FIXED HEIGHT",
+            Style::new()
+                .background(Color::BRIGHT_BLACK)
+                .height(3)
+                .render("reserves 3 rows"),
+            VerticalAlign::Top,
+        ),
+        " ".repeat(43),
         row(
             "ALIGN LEFT",
             Style::new()
