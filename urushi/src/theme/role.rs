@@ -52,6 +52,36 @@ impl ComponentRole {
     }
 }
 
+/// A semantic style role used by the Tree component.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TreeRole {
+    Root,
+    Item,
+    Enumerator,
+    Indenter,
+}
+
+impl TreeRole {
+    pub(super) const fn index(self) -> usize {
+        match self {
+            Self::Root => 0,
+            Self::Item => 1,
+            Self::Enumerator => 2,
+            Self::Indenter => 3,
+        }
+    }
+}
+
+impl<E> ThemeRole<E> for TreeRole {
+    #[allow(
+        clippy::needless_lifetimes,
+        reason = "Matches the public ThemeRole contract signature."
+    )]
+    fn resolve<'a>(self, theme: &'a Theme<E>) -> &'a Style {
+        theme.components().tree_style(self)
+    }
+}
+
 /// A typed role that resolves a style from a [`Theme`].
 pub trait ThemeRole<E = ()>: Copy {
     #[allow(

@@ -81,7 +81,10 @@ mod text;
 mod theme;
 mod view;
 
-pub use component::{Summary, SummaryField, Warning};
+pub use component::{
+    SiblingPosition, Summary, SummaryField, Tree, TreeEnumerator, TreeIndenter, TreeNode, Warning,
+    default_tree_enumerator, default_tree_indenter,
+};
 pub use render::AnsiRenderer;
 pub use style::{
     Align, Border, Color, Modifier, Sides, Style, StyleProperty, StylePropertyKey, VerticalAlign,
@@ -92,5 +95,6 @@ pub use terminal::{OutputMode, ProgressBar, Spinner, StderrTerminal};
 pub use text::{visible_width, wrap_text};
 pub use theme::{
     ColorScheme, ComponentRole, ComponentStyles, SemanticTokens, Theme, ThemeRole, ThemeSet,
+    TreeRole,
 };
 pub use view::{Line, Span, View, join_horizontal, join_vertical};

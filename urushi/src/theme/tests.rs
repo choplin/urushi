@@ -47,6 +47,22 @@ fn component_styles_follow_the_token_mapping() {
         components.style(ComponentRole::PanelFocused).render("x"),
         "\x1b[35m╭───╮\x1b[0m\n\x1b[35m│\x1b[0m\x1b[31;44m x \x1b[0m\x1b[35m│\x1b[0m\n\x1b[35m╰───╯\x1b[0m"
     );
+    assert_eq!(
+        components.tree_style(TreeRole::Root).render("x"),
+        "\x1b[1;31mx\x1b[0m"
+    );
+    assert_eq!(
+        components.tree_style(TreeRole::Item).render("x"),
+        "\x1b[31mx\x1b[0m"
+    );
+    assert_eq!(
+        components.tree_style(TreeRole::Enumerator).render("x"),
+        "\x1b[32mx\x1b[0m"
+    );
+    assert_eq!(
+        components.tree_style(TreeRole::Indenter).render("x"),
+        "\x1b[32mx\x1b[0m"
+    );
 }
 
 #[test]
@@ -56,6 +72,26 @@ fn custom_component_style_replaces_the_default() {
     assert_eq!(
         components.style(ComponentRole::Warning).render("note"),
         "\x1b[4mnote\x1b[0m"
+    );
+}
+
+#[test]
+fn custom_tree_style_replaces_the_default() {
+    let components = ComponentStyles::from_tokens(&TOKENS)
+        .with_tree_style(TreeRole::Enumerator, Style::new().underline());
+    assert_eq!(
+        components.tree_style(TreeRole::Enumerator).render("branch"),
+        "\x1b[4mbranch\x1b[0m"
+    );
+}
+
+#[test]
+fn tree_roles_resolve_through_the_theme_contract() {
+    let theme = Theme::from_tokens(TOKENS);
+
+    assert_eq!(
+        theme.style(TreeRole::Root),
+        theme.components().tree_style(TreeRole::Root)
     );
 }
 

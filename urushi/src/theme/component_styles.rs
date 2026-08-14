@@ -2,14 +2,16 @@
 
 use crate::{Border, Style};
 
-use super::{ComponentRole, SemanticTokens};
+use super::{ComponentRole, SemanticTokens, TreeRole};
 
 const COMPONENT_ROLE_COUNT: usize = 18;
+const TREE_ROLE_COUNT: usize = 4;
 
 /// Styles for common components, indexed by [`ComponentRole`].
 #[derive(Debug, Clone, PartialEq)]
 pub struct ComponentStyles {
     styles: [Style; COMPONENT_ROLE_COUNT],
+    tree_styles: [Style; TREE_ROLE_COUNT],
 }
 
 impl ComponentStyles {
@@ -51,6 +53,12 @@ impl ComponentStyles {
                 panel.clone(),
                 panel.border_foreground(tokens.accent),
             ],
+            tree_styles: [
+                Style::new().foreground(tokens.text).bold(),
+                Style::new().foreground(tokens.text),
+                Style::new().foreground(tokens.text_muted),
+                Style::new().foreground(tokens.text_muted),
+            ],
         }
     }
 
@@ -58,9 +66,21 @@ impl ComponentStyles {
         &self.styles[role.index()]
     }
 
+    /// Returns the style assigned to one Tree-specific role.
+    pub fn tree_style(&self, role: TreeRole) -> &Style {
+        &self.tree_styles[role.index()]
+    }
+
     #[must_use]
     pub fn with_style(mut self, role: ComponentRole, style: Style) -> Self {
         self.styles[role.index()] = style;
+        self
+    }
+
+    /// Replaces the style assigned to one Tree-specific role.
+    #[must_use]
+    pub fn with_tree_style(mut self, role: TreeRole, style: Style) -> Self {
+        self.tree_styles[role.index()] = style;
         self
     }
 }

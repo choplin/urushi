@@ -1,5 +1,7 @@
 use urushi::{
-    Align, Border, Color, Style, VerticalAlign, join_horizontal, join_vertical, visible_width,
+    Align, AnsiPolicy, AnsiRenderer, Border, Color, ColorProfile, SemanticTokens, Style,
+    TerminalProfile, Theme, Tree, TreeNode, VerticalAlign, join_horizontal, join_vertical,
+    visible_width,
 };
 
 fn row(label: &str, sample: String) -> String {
@@ -14,7 +16,9 @@ fn row_with_alignment(label: &str, sample: String, alignment: VerticalAlign) -> 
         .align(Align::Right)
         .render(label);
     let divider = Style::new().foreground(Color::BRIGHT_BLACK).render(" | ");
-    join_horizontal(alignment, &[label, divider, sample])
+    let content = join_horizontal(alignment, &[label, divider, sample]);
+
+    Style::new().width(43).render(&content)
 }
 
 fn vertical_alignment_sample(top: &str, center: &str, bottom: &str) -> String {
@@ -134,7 +138,37 @@ fn border_side_grid() -> String {
     )
 }
 
-fn panel(title: &str, rows: &[String]) -> String {
+fn tree_sample() -> String {
+    let theme = Theme::from_tokens(SemanticTokens {
+        text: Color::WHITE,
+        text_muted: Color::BRIGHT_BLACK,
+        background: Color::BLACK,
+        surface: Color::BLACK,
+        accent: Color::CYAN,
+        accent_text: Color::BLACK,
+        success: Color::GREEN,
+        warning: Color::YELLOW,
+        error: Color::RED,
+        border: Color::BRIGHT_BLACK,
+    });
+    let tree = Tree::new()
+        .root("urushi")
+        .child(
+            TreeNode::new("src")
+                .child("component")
+                .child("render")
+                .child("theme"),
+        )
+        .child("Cargo.toml");
+    let renderer = AnsiRenderer::new(TerminalProfile::new(
+        ColorProfile::Ansi16,
+        AnsiPolicy::Enabled,
+    ));
+
+    renderer.render(&tree.view(theme.components()))
+}
+
+fn section(title: &str, rows: &[String]) -> String {
     let body = join_vertical(Align::Left, rows);
     let width = body.lines().map(visible_width).max().unwrap_or_default();
     let title = Style::new()
@@ -149,118 +183,155 @@ fn panel(title: &str, rows: &[String]) -> String {
         .padding((0, 1))
         .border(Border::ROUNDED)
         .border_foreground(Color::BRIGHT_BLACK)
-        .margin(1)
+        .margin((0, 1))
         .render(&catalog)
 }
 
 /// Renders a readable catalog with one primary feature per row.
 pub fn render_showcase() -> String {
     let inner = Style::new().foreground(Color::BRIGHT_RED).render("inner");
-    let rows = [
-        row(
-            "FOREGROUND COLOR",
-            Style::new()
-                .foreground(Color::BRIGHT_CYAN)
-                .render("cyan text"),
+    let heading = Style::new()
+        .foreground(Color::BRIGHT_YELLOW)
+        .bold()
+        .width(49)
+        .align(Align::Center)
+        .render("URUSHI STYLE SHOWCASE");
+    let sections = [
+        section(
+            "COLOR & TEXT",
+            &[
+                row(
+                    "FOREGROUND COLOR",
+                    Style::new()
+                        .foreground(Color::BRIGHT_CYAN)
+                        .render("cyan text"),
+                ),
+                row(
+                    "BACKGROUND COLOR",
+                    Style::new().background(Color::BLUE).render("blue field"),
+                ),
+                row("BOLD", Style::new().bold().render("bold text")),
+                row(
+                    "UNDERLINE",
+                    Style::new().underline().render("underlined text"),
+                ),
+                row(
+                    "NESTED ANSI",
+                    Style::new()
+                        .foreground(Color::BRIGHT_GREEN)
+                        .render(&format!("outer {inner} outer")),
+                ),
+            ],
         ),
-        row(
-            "BACKGROUND COLOR",
-            Style::new().background(Color::BLUE).render("blue field"),
+        section(
+            "BOX MODEL",
+            &[
+                row(
+                    "PADDING",
+                    Style::new()
+                        .background(Color::BRIGHT_BLACK)
+                        .padding((1, 2))
+                        .render("content"),
+                ),
+                row(
+                    "FULL BORDER",
+                    Style::new()
+                        .padding((0, 1))
+                        .border(Border::ROUNDED)
+                        .render("content"),
+                ),
+                row(
+                    "FIXED WIDTH",
+                    Style::new()
+                        .background(Color::BRIGHT_BLACK)
+                        .width(20)
+                        .render("reserves 20 cols"),
+                ),
+                row_with_alignment(
+                    "FIXED HEIGHT",
+                    Style::new()
+                        .background(Color::BRIGHT_BLACK)
+                        .height(3)
+                        .render("reserves 3 rows"),
+                    VerticalAlign::Top,
+                ),
+                border_side_grid(),
+            ],
         ),
-        row("BOLD", Style::new().bold().render("bold text")),
-        row(
-            "UNDERLINE",
-            Style::new().underline().render("underlined text"),
+        section(
+            "ALIGNMENT",
+            &[
+                row(
+                    "VERTICAL ALIGNMENT",
+                    vertical_alignment_sample("TOP", "CENTER", "BOTTOM"),
+                ),
+                " ".repeat(43),
+                row(
+                    "HORIZONTAL ALIGNMENT",
+                    horizontal_alignment_sample("LEFT", "CENTER", "RIGHT"),
+                ),
+            ],
         ),
-        row(
-            "NESTED ANSI",
-            Style::new()
-                .foreground(Color::BRIGHT_GREEN)
-                .render(&format!("outer {inner} outer")),
+        section(
+            "COMPOSITION",
+            &[
+                row(
+                    "JOIN HORIZONTAL",
+                    join_horizontal(
+                        VerticalAlign::Top,
+                        &[
+                            Style::new()
+                                .padding((0, 1))
+                                .border(Border::ROUNDED)
+                                .border_foreground(Color::BRIGHT_GREEN)
+                                .render("A"),
+                            Style::new()
+                                .padding((0, 1))
+                                .border(Border::ROUNDED)
+                                .border_foreground(Color::BRIGHT_GREEN)
+                                .render("B"),
+                        ],
+                    ),
+                ),
+                row(
+                    "JOIN VERTICAL",
+                    join_vertical(
+                        Align::Left,
+                        &[
+                            Style::new()
+                                .padding((0, 1))
+                                .border(Border::ROUNDED)
+                                .border_foreground(Color::BRIGHT_GREEN)
+                                .render("A"),
+                            Style::new()
+                                .padding((0, 1))
+                                .border(Border::ROUNDED)
+                                .border_foreground(Color::BRIGHT_GREEN)
+                                .render("B"),
+                        ],
+                    ),
+                ),
+            ],
         ),
-        " ".repeat(43),
-        row(
-            "PADDING",
-            Style::new()
-                .background(Color::BRIGHT_BLACK)
-                .padding((1, 2))
-                .render("content"),
-        ),
-        row(
-            "FULL BORDER",
-            Style::new()
-                .padding((0, 1))
-                .border(Border::ROUNDED)
-                .render("content"),
-        ),
-        " ".repeat(43),
-        row(
-            "FIXED WIDTH",
-            Style::new()
-                .background(Color::BRIGHT_BLACK)
-                .width(20)
-                .render("reserves 20 cols"),
-        ),
-        " ".repeat(43),
-        row_with_alignment(
-            "FIXED HEIGHT",
-            Style::new()
-                .background(Color::BRIGHT_BLACK)
-                .height(3)
-                .render("reserves 3 rows"),
-            VerticalAlign::Top,
-        ),
-        " ".repeat(43),
-        row(
-            "VERTICAL ALIGNMENT",
-            vertical_alignment_sample("TOP", "CENTER", "BOTTOM"),
-        ),
-        " ".repeat(43),
-        row(
-            "HORIZONTAL ALIGNMENT",
-            horizontal_alignment_sample("LEFT", "CENTER", "RIGHT"),
-        ),
-        " ".repeat(43),
-        row(
-            "JOIN HORIZONTAL",
-            join_horizontal(
+        section(
+            "COMPONENTS",
+            &[row_with_alignment(
+                "TREE",
+                tree_sample(),
                 VerticalAlign::Top,
-                &[
-                    Style::new()
-                        .padding((0, 1))
-                        .border(Border::ROUNDED)
-                        .border_foreground(Color::BRIGHT_GREEN)
-                        .render("A"),
-                    Style::new()
-                        .padding((0, 1))
-                        .border(Border::ROUNDED)
-                        .border_foreground(Color::BRIGHT_GREEN)
-                        .render("B"),
-                ],
-            ),
+            )],
         ),
-        row(
-            "JOIN VERTICAL",
-            join_vertical(
-                Align::Left,
-                &[
-                    Style::new()
-                        .padding((0, 1))
-                        .border(Border::ROUNDED)
-                        .border_foreground(Color::BRIGHT_GREEN)
-                        .render("A"),
-                    Style::new()
-                        .padding((0, 1))
-                        .border(Border::ROUNDED)
-                        .border_foreground(Color::BRIGHT_GREEN)
-                        .render("B"),
-                ],
-            ),
-        ),
-        border_side_grid(),
     ];
+    let gap = " ".repeat(49);
+    let mut blocks = vec![heading, gap.clone()];
+    for (index, section) in sections.into_iter().enumerate() {
+        if index > 0 {
+            blocks.push(gap.clone());
+        }
+        blocks.push(section);
+    }
 
-    panel("URUSHI STYLE SHOWCASE", &rows)
+    join_vertical(Align::Left, &blocks)
 }
 
 #[cfg_attr(test, allow(dead_code))]
