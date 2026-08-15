@@ -87,10 +87,44 @@ Two situations leave the region's extent unknown: a write failure inside an
 unanchored window, and a terminal resize, which may reflow existing content and
 invalidate both the origin and the row count.
 
-In both, the region is **lost**. Cleanup must not erase. It restores the cursor
-to visible, emits a carriage return and line feed so that subsequent output
-starts on a fresh row, and forgets the region. A prompt's remains left on
-screen are a smaller harm than erasing rows belonging to another writer.
+In both, the region is **lost**: `anchored`, `reserved_rows`, and `owned_rows`
+are reset, and the previously drawn rows are forgotten. Nothing is erased. A
+prompt's remains left on screen are a smaller harm than erasing rows belonging
+to another writer.
+
+A lost region has two continuations, and they are deliberately asymmetric.
+
+**The prompt is still running.** A resize arrives while the user is typing, so
+the prompt must keep drawing. The next frame re-establishes the region at the
+cursor's current row: it begins with `MoveToColumn(0)` and proceeds as a first
+frame. It does **not** emit a line feed first. Starting on the current row
+overwrites it, so the only rows left behind are those above the cursor's row at
+the moment of loss — none at all for a prompt whose cursor sits on its first
+row, which is the common case.
+
+**The prompt is finishing.** Cleanup restores the cursor to visible and emits a
+carriage return and line feed, so subsequent output starts below the remains
+rather than on top of them. It emits that line feed only when `owned_rows > 0`;
+a prompt that failed before drawing anything must not leave a blank row behind.
+
+The layer above is responsible for coalescing resize events. Dragging a window
+edge produces a stream of them, and re-establishing the region once per event
+would multiply whatever remains are left behind. One re-establishment per
+settled size is the requirement; the plan stage cannot enforce it.
+
+#### The cost this accepts
+
+Treating every resize as region loss is broad. Both a width change, through
+reflow, and a height reduction, by pushing content up, invalidate an absolute
+origin, so a narrower rule would still cover nearly every resize. The design
+accepts the breadth rather than guessing.
+
+This is not only a safety judgement. It is also a decision to accept visible
+residue: after a resize the previous frame's upper rows may stay on screen, and
+nothing will ever remove them. The alternative — erasing rows whose position
+was inferred rather than known — risks destroying output this prompt does not
+own, which is unrecoverable for the user. Residue is ugly and bounded; erasure
+is invisible and unbounded.
 
 ## Stages
 
@@ -144,6 +178,24 @@ Runs rather than individual cells: the plan writes whole rows and never
 addresses a cell, so per-grapheme granularity would cost an allocation per
 character on the redraw path without being used. Grapheme-level resolution
 remains internal to Resolve.
+
+### Runs have a canonical form
+
+A row is the unit the plan compares to decide whether to redraw, and the unit a
+shared conformance corpus compares across implementations. Both break if the
+same visible row can be represented by more than one sequence of runs. The Frame
+stage therefore emits runs in a canonical form:
+
+- adjacent runs with equal styles are merged, greedily and left to right;
+- no run is empty; and
+- styles are compared by resolved value, so two spellings of the same
+  appearance produce one run rather than two.
+
+Without the third rule a row can differ structurally while rendering
+identically, and every frame redraws every row.
+
+This matters most where rows are aggregated from grapheme-level content on each
+frame, because the aggregation is what establishes the form.
 
 ## Commands
 
@@ -249,6 +301,24 @@ This replaces claiming rows pessimistically before writing. A high-water mark
 maintained by `step` is both simpler and more accurate than over-stating the
 extent up front, because it reflects what was actually touched.
 
+### Recovery depends on clearing a row before writing it
+
+`fold` applies only commands that succeeded, so a `Write` that fails partway
+does not raise `owned_rows` — yet its bytes may already be on screen. That row
+is nevertheless covered, because the uniform row form places a `ClearLine` on
+the row immediately before the `Write`, and the successful `ClearLine` has
+already raised the mark.
+
+The accuracy of recovery therefore rests on an invariant, not on `step` alone:
+
+> Every row is cleared before it is written, in the same frame.
+
+Dropping the clear for rows believed to be empty, or for content believed to be
+appended rather than replaced, would be a plausible optimization and would
+silently leave residue after a failed write. Any change to the uniform row form
+must preserve this invariant or replace it with something that covers a
+partially completed write.
+
 For `step` to be total, every plan must begin either with the region
 unestablished — the cursor is at the region top by definition — or with a
 `RestorePosition` before any command that depends on position.
@@ -275,10 +345,13 @@ Identical across implementations:
 
 - the `Command` variants and their meaning;
 - the two canonicalization invariants on command lists;
+- the canonical form of runs within a row;
 - `InlinePresentation` and its fields' invariants;
 - `step`, and the fold that derives recovery state;
+- the clear-before-write invariant that recovery depends on;
 - the plan function: same input, same command list, same `next`;
-- the region rules, including reserve-before-anchor and region loss; and
+- the region rules, including reserve-before-anchor, region loss, and both
+  continuations after a loss; and
 - the concept names above, modulo module qualification.
 
 Free to differ:
