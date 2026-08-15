@@ -386,6 +386,11 @@ into a list of terminal commands and their recovery checkpoints, and
 command vocabulary is Urushi's own, not crossterm's, so the same region
 semantics can back a different execution environment.
 
+[`inline-prompt-rendering.md`](inline-prompt-rendering.md) defines the target
+architecture for this subsystem, shared with the sibling project noctui. It
+revises the stage boundaries and the recovery contract described here; treat
+this section as the implemented state and that document as where it is going.
+
 ### External backends stay behind adapters
 
 Ratatui types stay in `urushi-tui`; Indicatif types stay in the private core
