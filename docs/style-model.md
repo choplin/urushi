@@ -1,25 +1,22 @@
 # Style Value Model
 
-This document defines Urushi's logical style contract.
+This document defines Urushi's logical style contract: the value model
+governing [`TextStyle`](../urushi/src/style/text.rs) and
+[`BlockStyle`](../urushi/src/style/block.rs).
 
-Presentation splits into two values, and geometry belongs to only one of them:
+The two style types themselves, and the view tree they style, are defined in
+[`view-model.md`](view-model.md); why presentation splits between them is
+settled in [`design/view-block-model.md`](design/view-block-model.md); why the
+value model has this shape is recorded in
+[`design/style-value-model.md`](design/style-value-model.md).
 
-- `TextStyle` — everything a terminal can express about a run of text:
-  foreground, background, and modifiers. It produces no rectangle;
-  [`TextStyle::paint`](../urushi/src/style/text.rs) wraps text in its SGR scope.
-- `BlockStyle` — a rectangle: padding, margin, border, dimensions, alignment,
-  and the `TextStyle` that fills the geometry they create.
-  [`BlockStyle::render`](../urushi/src/style/block.rs) produces a rectangle.
+The value model governs both types identically: the same immutable builders,
+the same closed vocabulary, the same generic `add` and `remove`. Statements
+below written about `TextStyle` hold for `BlockStyle` too; sections that
+concern geometry apply to `BlockStyle` alone, since `TextStyle` has no
+geometry to describe.
 
-Why the split, and which combinations it makes unrepresentable, is settled in
-[`design/view-block-model.md`](design/view-block-model.md). This document
-defines the value model, which governs both types identically: the same
-immutable builders, the same closed vocabulary, the same generic `add` and
-`remove`. Statements below written about `TextStyle` hold for `BlockStyle` too;
-sections that concern geometry apply to `BlockStyle` alone, since `TextStyle`
-has no geometry to describe.
-
-## Decision
+## Value model
 
 A style is an immutable collection of effective presentation values. It is not
 a patch, an instruction list, or a completed ANSI state transition.
@@ -111,9 +108,8 @@ enum BlockStylePropertyKey {
 
 `TextStyleProperty` converts into `BlockStyleProperty`, so `BlockStyle::add` accepts
 a text property directly and `BlockStyle::foreground` reads the same as
-`TextStyle::foreground`. There is no conversion in the other direction: geometry
-cannot reach a `TextStyle`, and that is what makes the illegal combination
-unrepresentable rather than merely discouraged.
+`TextStyle::foreground`. There is no conversion in the other direction:
+geometry cannot reach a `TextStyle`.
 
 The enums make the complete property vocabulary discoverable and give generic
 code an exhaustive match. Both types may store the values in typed fields rather
@@ -195,8 +191,8 @@ fn focused(style: TextStyle, accent: Color) -> TextStyle {
 ```
 
 If an application needs several transforms, it can fold functions over a base
-style. Urushi does not introduce a separate patch data type without a concrete
-need to serialize or inspect such changes.
+style. There is no separate patch data type; the reasoning is recorded in
+[`design/style-value-model.md`](design/style-value-model.md).
 
 ## Fixed dimensions
 
@@ -251,11 +247,9 @@ role of either kind builds its value with the ordinary consuming builders.
 and `Theme::components` exposes the stored built-in values as borrows for
 consumers that want to avoid the copy.
 
-Styles do not implicitly flow from a parent view to a child. A block's style
-applies to the geometry that block creates — border glyphs, padding, alignment
-fill — and each child carries its own complete value. There is no inheritance
-and no patch operation; the reasoning is recorded in
-[`design/view-block-model.md`](design/view-block-model.md).
+Styles do not implicitly flow from a parent view to a child: as
+[`view-model.md`](view-model.md) specifies, each child carries its own
+complete value, so a theme role resolves to the whole style its position uses.
 
 ## Output-boundary contract
 
@@ -296,18 +290,6 @@ rectangle. A `Rect` smaller than the block clips it at the area's right and
 bottom boundaries; it does not lay the box out again inside the smaller area,
 so a trailing border edge outside the area is cropped rather than pulled
 inwards.
-
-## Alignment with Lip Gloss and noctui
-
-Like Lip Gloss, Urushi treats `TextStyle` as an immutable value containing a set of
-rules. Lip Gloss tracks property presence separately and exposes many
-property-specific `Unset*` methods. Urushi instead exposes a closed enum and
-one generic `remove`, while retaining named builders for common construction.
-
-This deliberately differs from noctui's incremental add/sub modifier sets and
-`patch` operation. Urushi does not adopt that representation because reusable
-changes can be ordinary `fn(TextStyle) -> TextStyle` transforms and no current Urushi
-boundary requires a separately inspectable patch value.
 
 ## Required verification
 

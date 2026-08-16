@@ -48,8 +48,8 @@ result.
 
 Presentation splits in two, and geometry belongs to only one half: a `TextStyle` is
 everything a terminal can express about a run of text, and a `BlockStyle` is a
-rectangle plus the style filling it. A style that cannot be honored where it is
-attached is therefore unrepresentable rather than merely discouraged.
+rectangle plus the style filling it. [`view-model.md`](view-model.md) defines
+this model.
 
 Direct box-model rendering of static content is the single-block case of that
 same pass:
@@ -62,8 +62,8 @@ plain text + BlockStyle --> BlockStyle::render --> RenderedBlock
 unbounded limits, so there is one implementation of the box model in the
 workspace. [`RenderedBlock`](../urushi/src/view/rendered.rs) carries the size it
 was measured at; `join_horizontal` and `join_vertical` compose such blocks
-without re-measuring escape sequences. The model is defined in
-[`design/view-block-model.md`](design/view-block-model.md).
+without re-measuring escape sequences. The reasoning behind this shape is
+recorded in [`design/view-block-model.md`](design/view-block-model.md).
 
 Terminal and Ratatui integrations sit outside these semantic types:
 
@@ -89,8 +89,9 @@ and lifecycle rules appropriate to it.
 
 The contracts shared across surfaces are:
 
-- [`TextStyle`](../urushi/src/style/text.rs), which describes logical color,
-  modifiers, and box-model presentation without owning terminal state;
+- [`TextStyle`](../urushi/src/style/text.rs) and
+  [`BlockStyle`](../urushi/src/style/block.rs), which describe logical text and
+  box-model presentation without owning terminal state;
 - [`Theme`](../urushi/src/theme/definition.rs),
   [`SemanticTokens`](../urushi/src/theme/tokens.rs), and
   [`ComponentRole`](../urushi/src/theme/role.rs), which give presentation a
