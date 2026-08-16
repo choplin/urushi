@@ -282,6 +282,78 @@ fn corpus() -> Vec<(&'static str, View, Rect)> {
             Rect::new(0, 0, 10, 3),
         ),
         (
+            "a row splits its width between a stated child and a fill",
+            View::row(
+                VerticalAlign::Top,
+                [
+                    View::block(
+                        BlockStyle::new().border(Border::NORMAL).width(5),
+                        View::text("nav", plain.clone()),
+                    ),
+                    View::block(
+                        BlockStyle::new()
+                            .border(Border::NORMAL)
+                            .width(Length::Fill(1)),
+                        View::text("main", plain.clone()),
+                    ),
+                ],
+            ),
+            Rect::new(0, 0, 14, 3),
+        ),
+        (
+            "a row shrinks past its intrinsic width, fill first",
+            View::row(
+                VerticalAlign::Top,
+                [
+                    View::block(
+                        BlockStyle::new().border(Border::NORMAL),
+                        View::text("abcd", plain.clone()),
+                    ),
+                    View::block(
+                        BlockStyle::new()
+                            .border(Border::NORMAL)
+                            .width(Length::Fill(1)),
+                        View::text("wxyz", plain.clone()),
+                    ),
+                ],
+            ),
+            Rect::new(0, 0, 8, 4),
+        ),
+        (
+            "a fill stretches across a row's cross axis",
+            View::row(
+                VerticalAlign::Top,
+                [
+                    View::block(
+                        BlockStyle::new()
+                            .border(Border::NORMAL)
+                            .width(5)
+                            .height(Length::Fill(1)),
+                        View::text("nav", plain.clone()),
+                    ),
+                    View::text("x", plain.clone()),
+                ],
+            ),
+            Rect::new(0, 0, 6, 5),
+        ),
+        (
+            "a column divides its height between a fill and its siblings",
+            View::column(
+                Align::Left,
+                [
+                    View::text("head", plain.clone()),
+                    View::block(
+                        BlockStyle::new()
+                            .border(Border::NORMAL)
+                            .height(Length::Fill(1)),
+                        View::text("body", plain.clone()),
+                    ),
+                    View::text("foot", plain.clone()),
+                ],
+            ),
+            Rect::new(0, 0, 6, 6),
+        ),
+        (
             "a degenerate area cuts the frame only as a last resort",
             View::block(
                 BlockStyle::new().border(Border::NORMAL).padding(1),

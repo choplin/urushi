@@ -110,9 +110,8 @@ pub fn resolve(view: &View, available: Available) -> ResolvedView;
 ```
 
 `Available` — a terminal width, or a Ratatui `Rect` — participates in sizing
-from the start: it flows down the tree, each node's resolved size flows back
-up, and each node is visited once in each direction. It is not a clip applied
-to a finished rectangle. The Sizing section defines how a bound reshapes a
+from the start: it flows down the tree, and each node's resolved size flows
+back up. It is not a clip applied to a finished rectangle. The Sizing section defines how a bound reshapes a
 box, node by node, and closes with the order those rules apply in; a raw crop
 survives only as the degenerate-case safety net defined there.
 
@@ -209,6 +208,11 @@ View::row([a.width(Fill(1)), b.width(Fill(2))])
 View::row([mode, path.width(Fill(1)).overflow(Overflow::ellipsis()), pos])
 ```
 
+A remainder that does not divide evenly is not lost. Shares are cut from a
+running prefix of it, so the odd cells fall to the last children and the
+shares always sum to the remainder: three equal weights over ten cells are
+3, 3, 4.
+
 On the cross axis — height in a `Row`, width in a `Column` — there is nothing
 to divide: the container passes its available extent to every child
 unchanged, and a `Fill` length there stretches to it. A fixed-width sidebar
@@ -235,7 +239,7 @@ When even minimum sizes exceed the area, children shrink below their intrinsic
 sizes: `Fill` children first, then auto children, then `Cells` children, each
 proportionally to size and floored at its own `max(min_width, min-content)`. A
 floor that binds freezes that child and the shortfall falls on the rest — an
-iteration over numbers only; no child is laid out twice.
+iteration over numbers only, settled before any child is assembled.
 
 A `Fill` length resolves against an area, so it needs one: a box containing a
 `Fill` child spans its own available extent (through its own clamp). Under
@@ -289,15 +293,18 @@ cut, and it is unreachable while the frame fits.
 
 The sections above define the rules; this one is the procedure that applies
 them, and it is the whole of resolution. Every node receives an area and
-returns the rectangle it resolved to: the area flows down, the resolved size
-flows back up, and no node is laid out twice. What each node does with the
-area it receives — and what it hands its own children — is fixed.
+returns the rectangle it resolved to: the area flows down, and the resolved
+size flows back up. What each node does with the area it receives — and what
+it hands its own children — is fixed.
 
-Sizing a box does ask its content two questions before laying it out — its
-max-content and min-content widths, which the clamp needs — but those are
-measurements, not layouts: they return a number, produce no rectangle, and
-nothing is resolved and then resolved again against a different size. That
-distinction is the boundary against a constraint solver, and
+Deciding a size may ask a subtree more than once: for the max-content and
+min-content widths the clamp needs, and for the extent a `Column` divides
+among its children. Those questions are pure — an answer depends only on the
+subtree and the area it is asked about, never on what a sibling resolved to —
+so asking again is not solving. What never happens is renegotiation: a size,
+once decided, is not revised in the light of what a child or a sibling
+resolved to, and no node is assembled twice. That is the boundary against a
+constraint solver, and
 [`design/view-block-model.md`](design/view-block-model.md) records why it is
 drawn there.
 

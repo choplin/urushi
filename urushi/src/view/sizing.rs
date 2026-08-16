@@ -80,6 +80,185 @@ impl Axis {
     }
 }
 
+/// How a child claims space on its container's main axis.
+///
+/// The three kinds are the distribution rule's three cases, and their order in
+/// this enum is also the order a deficit shrinks them.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum Kind {
+    /// A weighted share of whatever the other children leave.
+    Fill(u16),
+    /// No stated length: the intrinsic size.
+    Auto,
+    /// A stated size in cells.
+    Cells,
+}
+
+/// One child's claim on its container's main axis.
+#[derive(Debug, Clone, Copy)]
+pub(super) struct Claim {
+    pub kind: Kind,
+    /// The size the child asks for. A `Fill` child's is decided by
+    /// [`distribute`], so its value here is unused.
+    pub demand: usize,
+    /// The size below which this child cannot be shrunk.
+    pub floor: usize,
+}
+
+/// Divides `area` among the children that claim it.
+///
+/// Stated and intrinsic children take their demand; `Fill` children divide
+/// what remains in proportion to their weights. When the claims exceed the
+/// area, they shrink in the order `Fill`, then auto, then `Cells` —
+/// proportionally to their current size within each group, each floored at its
+/// own floor, and a floor that binds freezes that child so the shortfall falls
+/// on the rest. That freeze loop is an iteration over numbers, settled here
+/// before any child is assembled.
+///
+/// The returned sizes sum to `area` unless a floor prevented it, in which case
+/// the container resolves larger than its area and the degenerate safety net
+/// is what finally bounds it.
+pub(super) fn distribute(area: usize, claims: &[Claim]) -> Vec<usize> {
+    let stated: usize = claims
+        .iter()
+        .filter(|claim| !matches!(claim.kind, Kind::Fill(_)))
+        .map(|claim| claim.demand)
+        .sum();
+    let weights: usize = claims.iter().map(|claim| claim.weight()).sum();
+    let remaining = area.saturating_sub(stated);
+
+    // Shares are cut from a running prefix of the remainder, so they sum to it
+    // exactly: three equal weights over ten cells are 3, 3, 4, not 3, 3, 3
+    // with a cell lost to rounding.
+    let mut assigned = Vec::with_capacity(claims.len());
+    let (mut weighted, mut given) = (0, 0);
+    for claim in claims {
+        assigned.push(match claim.kind {
+            Kind::Fill(_) if weights > 0 => {
+                weighted += claim.weight();
+                let upto = remaining * weighted / weights;
+                let share = upto - given;
+                given = upto;
+                // A share below the child's own floor is not a share it can
+                // take; the deficit pass below settles the shortfall.
+                share.max(claim.floor)
+            }
+            _ => claim.demand,
+        });
+    }
+
+    let mut excess = assigned.iter().sum::<usize>().saturating_sub(area);
+    for group in [Kind::Fill(0), Kind::Auto, Kind::Cells] {
+        if excess == 0 {
+            break;
+        }
+        excess = shrink(&mut assigned, claims, group, excess);
+    }
+    assigned
+}
+
+impl Claim {
+    const fn weight(&self) -> usize {
+        match self.kind {
+            Kind::Fill(weight) => weight as usize,
+            _ => 0,
+        }
+    }
+}
+
+/// Takes `excess` cells from one group, proportionally, and returns what it
+/// could not take because every member sat on its floor.
+fn shrink(assigned: &mut [usize], claims: &[Claim], group: Kind, mut excess: usize) -> usize {
+    let holds = |kind: Kind| match group {
+        Kind::Fill(_) => matches!(kind, Kind::Fill(_)),
+        other => kind == other,
+    };
+    while excess > 0 {
+        let active: Vec<usize> = (0..claims.len())
+            .filter(|&index| holds(claims[index].kind) && assigned[index] > claims[index].floor)
+            .collect();
+        let total: usize = active.iter().map(|&index| assigned[index]).sum();
+        if total == 0 {
+            break;
+        }
+        let mut removed = 0;
+        for &index in &active {
+            if removed == excess {
+                break;
+            }
+            // Rounding up keeps every pass making progress, and the remaining
+            // excess caps what the last children give.
+            let cut = (excess * assigned[index])
+                .div_ceil(total)
+                .min(excess - removed)
+                .min(assigned[index] - claims[index].floor);
+            assigned[index] -= cut;
+            removed += cut;
+        }
+        if removed == 0 {
+            break;
+        }
+        excess -= removed;
+    }
+    excess
+}
+
+/// The kind of claim a view makes on a `Row`'s main axis.
+pub(super) fn width_kind(view: &View) -> Kind {
+    match view {
+        View::Block(style, _) => kind_of(style.width_length()),
+        _ => Kind::Auto,
+    }
+}
+
+/// The kind of claim a view makes on a `Column`'s main axis.
+pub(super) fn height_kind(view: &View) -> Kind {
+    match view {
+        View::Block(style, _) => kind_of(style.height_length()),
+        _ => Kind::Auto,
+    }
+}
+
+const fn kind_of(length: Option<Length>) -> Kind {
+    match length {
+        Some(Length::Fill(weight)) => Kind::Fill(weight),
+        Some(Length::Cells(_)) => Kind::Cells,
+        None => Kind::Auto,
+    }
+}
+
+/// The claims a `Row`'s children make on its width.
+pub(super) fn width_claims(children: &[View]) -> Vec<Claim> {
+    children
+        .iter()
+        .map(|child| Claim {
+            kind: width_kind(child),
+            demand: max_content_width(child),
+            floor: min_content_width(child),
+        })
+        .collect()
+}
+
+/// Whether a view spans whatever area it is given, rather than taking an
+/// intrinsic size.
+///
+/// A `Fill` length needs an area to divide, so a box that contains one spans
+/// its own available extent. The height axis gets this for free — a box
+/// resolves its height after its content, so a stretched child is already in
+/// the row count — but the width is decided before the content is laid out,
+/// which is why the width axis has to ask.
+pub(super) fn fills_width(view: &View) -> bool {
+    match view {
+        View::Text(..) => false,
+        View::Block(style, child) => match style.width_length() {
+            Some(Length::Fill(_)) => true,
+            Some(Length::Cells(_)) => false,
+            None => fills_width(child),
+        },
+        View::Row(_, children) | View::Column(_, children) => children.iter().any(fills_width),
+    }
+}
+
 /// Which parts of the frame an area forces away, on one axis.
 ///
 /// Margin collapses first, then padding, and only by what the area cannot
@@ -181,6 +360,27 @@ pub(super) fn min_content_width(view: &View) -> usize {
         }
         View::Row(_, children) => children.iter().map(min_content_width).sum(),
         View::Column(_, children) => children.iter().map(min_content_width).max().unwrap_or(0),
+    }
+}
+
+/// The height below which a view cannot be shrunk.
+///
+/// The axes are not symmetric: a row can simply be absent, so a box's height
+/// floor is its frame — plus whatever frame its own content cannot give up —
+/// rather than a content extent.
+pub(super) fn min_content_height(view: &View) -> usize {
+    match view {
+        View::Text(..) => 0,
+        View::Block(style, child) => {
+            let frame = style.frame_size().height();
+            let floor = style
+                .minimum_height()
+                .map_or(0, usize::from)
+                .max(frame + min_content_height(child));
+            floor + vertical(style.margin_sides())
+        }
+        View::Row(_, children) => children.iter().map(min_content_height).max().unwrap_or(0),
+        View::Column(_, children) => children.iter().map(min_content_height).sum(),
     }
 }
 
@@ -404,6 +604,113 @@ mod tests {
             },
             "below that the content and the safety net take over"
         );
+    }
+
+    fn claim(kind: Kind, demand: usize, floor: usize) -> Claim {
+        Claim {
+            kind,
+            demand,
+            floor,
+        }
+    }
+
+    #[test]
+    fn fill_children_divide_what_the_others_leave() {
+        let stated = claim(Kind::Cells, 6, 0);
+        let auto = claim(Kind::Auto, 4, 0);
+        let fill = |weight| claim(Kind::Fill(weight), 0, 0);
+
+        assert_eq!(distribute(20, &[stated, fill(1)]), vec![6, 14]);
+        assert_eq!(distribute(20, &[stated, auto, fill(1)]), vec![6, 4, 10]);
+        assert_eq!(distribute(10, &[fill(1), fill(1)]), vec![5, 5]);
+        assert_eq!(distribute(9, &[fill(1), fill(2)]), vec![3, 6]);
+    }
+
+    #[test]
+    fn a_share_never_loses_a_cell_to_rounding() {
+        let fill = claim(Kind::Fill(1), 0, 0);
+
+        // Three equal weights over ten cells: the odd cell goes to the last,
+        // and the shares still sum to the area.
+        assert_eq!(distribute(10, &[fill, fill, fill]), vec![3, 3, 4]);
+        for area in 0..40 {
+            let shares = distribute(area, &[fill, fill, fill]);
+            assert_eq!(shares.iter().sum::<usize>(), area, "at {area}");
+        }
+    }
+
+    #[test]
+    fn nothing_is_redistributed_when_a_child_leaves_slack() {
+        // A capped Fill child is capped by its own clamp, not by distribution:
+        // the share is handed over whole and the remainder simply goes unused.
+        assert_eq!(
+            distribute(20, &[claim(Kind::Fill(1), 0, 0), claim(Kind::Cells, 4, 0)]),
+            vec![16, 4]
+        );
+    }
+
+    #[test]
+    fn a_deficit_shrinks_fill_then_auto_then_stated() {
+        let claims = [
+            claim(Kind::Cells, 6, 3),
+            claim(Kind::Auto, 6, 3),
+            claim(Kind::Fill(1), 0, 3),
+        ];
+
+        assert_eq!(distribute(16, &claims), vec![6, 6, 4], "no deficit at all");
+        // The Fill child is already at its floor, so the automatic child gives
+        // way next, and the stated one only once that floor binds too.
+        assert_eq!(distribute(14, &claims), vec![6, 5, 3]);
+        assert_eq!(distribute(12, &claims), vec![6, 3, 3]);
+        assert_eq!(distribute(10, &claims), vec![4, 3, 3]);
+        // Below the sum of the floors every child is frozen and the container
+        // resolves larger than its area, where the safety net takes over.
+        assert_eq!(distribute(4, &claims), vec![3, 3, 3]);
+    }
+
+    #[test]
+    fn a_deficit_within_one_group_is_proportional_and_freezes_at_a_floor() {
+        let claims = [claim(Kind::Auto, 12, 0), claim(Kind::Auto, 4, 3)];
+
+        // Twice the size gives twice the cells, until the smaller child hits
+        // its floor and the rest of the shortfall falls on the larger one.
+        assert_eq!(distribute(12, &claims), vec![9, 3]);
+        assert_eq!(distribute(8, &claims), vec![5, 3]);
+    }
+
+    #[test]
+    fn a_view_fills_its_area_when_anything_inside_it_does() {
+        let filling = View::block(BlockStyle::new().width(Length::Fill(1)), text("a"));
+
+        assert!(!fills_width(&text("a")));
+        assert!(fills_width(&filling));
+        assert!(
+            fills_width(&View::block(BlockStyle::new(), filling.clone())),
+            "an automatic box inherits its content's appetite"
+        );
+        assert!(
+            !fills_width(&View::block(BlockStyle::new().width(4), filling.clone())),
+            "a stated size settles the box, whatever it contains"
+        );
+        assert!(fills_width(&View::row(
+            crate::VerticalAlign::Top,
+            [text("a"), filling]
+        )));
+    }
+
+    #[test]
+    fn a_height_floor_is_the_frame_and_a_width_floor_is_the_content() {
+        let bordered = View::block(BlockStyle::new().border(Border::NORMAL), text("abc"));
+
+        assert_eq!(min_content_height(&text("abc")), 0, "a row can be absent");
+        assert_eq!(min_content_height(&bordered), 2, "the frame cannot");
+        assert_eq!(min_content_width(&bordered), 3, "one grapheme plus it");
+
+        let floored = View::block(BlockStyle::new().min_height(5), text("a"));
+        assert_eq!(min_content_height(&floored), 5);
+
+        let spaced = View::block(BlockStyle::new().margin((1, 0)), text("a"));
+        assert_eq!(min_content_height(&spaced), 2, "margin lies outside");
     }
 
     #[test]

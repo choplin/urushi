@@ -18,8 +18,9 @@ use crate::{Align, BlockStyle, Overflow, Sides, TextStyle, VerticalAlign, View, 
 use super::geometry::{Available, Size};
 use super::rendered::RenderedBlock;
 use super::sizing::{
-    Degraded, border_extent, degrade, height_axis, horizontal, max_content_width,
-    min_content_width, text_lines, vertical, width_axis,
+    Claim, Degraded, Kind, border_extent, degrade, distribute, fills_width, height_axis,
+    height_kind, horizontal, max_content_width, min_content_height, min_content_width, text_lines,
+    vertical, width_axis, width_claims,
 };
 
 /// One grapheme, the width it occupies, and its logical style.
@@ -390,8 +391,18 @@ fn layout_block(style: &BlockStyle, child: &View, available: Available) -> Rect 
         .height()
         .map(|area| area.saturating_sub(vertical(margin)));
 
-    // 2. The used width, settled before anything is assembled.
-    let used_width = width.used(box_width, max_content_width(child), min_child);
+    // 2. The used width, settled before anything is assembled. A `Fill` length
+    // inside the content needs an area to divide, so a box holding one spans
+    // its own extent instead of taking an intrinsic width.
+    let intrinsic = if fills_width(child) {
+        box_width.map_or_else(
+            || max_content_width(child),
+            |area| area.saturating_sub(width.frame),
+        )
+    } else {
+        max_content_width(child)
+    };
+    let used_width = width.used(box_width, intrinsic, min_child);
     let content_width = used_width - width.frame;
 
     // 3. The content, resolved inside what the box leaves it. A directly
@@ -582,18 +593,33 @@ fn edge_row(
 
 /// Places children side by side.
 ///
-/// The main axis is not distributed yet: every child takes its intrinsic
-/// width, and a `Length::Fill` child resolves like an automatic one. Only the
-/// cross axis passes the area down, where there is nothing to divide.
+/// The main axis is divided: stated widths, then intrinsic ones, then `Fill`
+/// weights over what remains. The cross axis has nothing to divide, so every
+/// child receives the row's own height and a `Fill` there stretches to it.
+/// Nothing is renegotiated — a child that resolves narrower than its
+/// assignment leaves the remainder unused, and the row resolves smaller than
+/// its area.
+///
+/// With no width to divide — under `measure` — every child takes its intrinsic
+/// width, which is what makes a `Fill` contribute its content size there.
 fn layout_row(align: VerticalAlign, children: &[View], available: Available) -> Rect {
     if children.is_empty() {
         return Rect::default();
     }
 
-    let child_available = Available::new(None, available.height());
+    let widths = available
+        .width()
+        .map(|area| distribute(area, &width_claims(children)));
     let rects: Vec<(Rect, TextStyle)> = children
         .iter()
-        .map(|child| (layout(child, child_available), child.fill_style()))
+        .enumerate()
+        .map(|(index, child)| {
+            let width = widths.as_ref().map(|widths| widths[index]);
+            (
+                layout(child, Available::new(width, available.height())),
+                child.fill_style(),
+            )
+        })
         .collect();
     let height = rects
         .iter()
@@ -629,18 +655,26 @@ fn layout_row(align: VerticalAlign, children: &[View], available: Available) -> 
 
 /// Stacks children.
 ///
-/// As in [`layout_row`], the main axis — height here — is not distributed
-/// yet; the cross axis passes the area down unchanged.
+/// The same rule as [`layout_row`] with the axes swapped: the height is
+/// divided, and the width passes down unchanged.
 fn layout_column(align: Align, children: &[View], available: Available) -> Rect {
     if children.is_empty() {
         return Rect::default();
     }
 
-    let child_available = Available::new(available.width(), None);
-    let rects: Vec<(Rect, TextStyle)> = children
-        .iter()
-        .map(|child| (layout(child, child_available), child.fill_style()))
-        .collect();
+    let cross = available.width();
+    let rects: Vec<(Rect, TextStyle)> = match available.height() {
+        None => children
+            .iter()
+            .map(|child| {
+                (
+                    layout(child, Available::new(cross, None)),
+                    child.fill_style(),
+                )
+            })
+            .collect(),
+        Some(area) => distribute_height(children, cross, area),
+    };
     let width = rects.iter().map(|(rect, _)| rect.width).max().unwrap_or(0);
 
     let mut rows = Vec::new();
@@ -651,6 +685,58 @@ fn layout_column(align: Align, children: &[View], available: Available) -> Rect 
     }
 
     Rect { width, rows }
+}
+
+/// Divides `area` among a column's children and resolves each at its share.
+///
+/// A height demand cannot be read off a style the way a width can: it depends
+/// on how the content wrapped at the cross-axis width, and there is no numeric
+/// measurement of that. So the measurement here *is* a resolution: every child
+/// that is not a `Fill` is resolved with its height unbounded, and its row
+/// count is the demand. Because a resolution is a pure function of the view
+/// and its area, that answer says nothing about a sibling — which is why the
+/// model permits the question (`docs/view-model.md`, "The order the rules
+/// apply").
+///
+/// The rectangle is kept, so the ordinary case builds each child exactly once.
+/// Only a child a deficit assigns *less* than it asked for is resolved again
+/// at that assignment, which closes its frame at the smaller size instead of
+/// cutting it.
+fn distribute_height(
+    children: &[View],
+    cross: Option<usize>,
+    area: usize,
+) -> Vec<(Rect, TextStyle)> {
+    let asked: Vec<Option<Rect>> = children
+        .iter()
+        .map(|child| match height_kind(child) {
+            Kind::Fill(_) => None,
+            _ => Some(layout(child, Available::new(cross, None))),
+        })
+        .collect();
+    let claims: Vec<Claim> = children
+        .iter()
+        .zip(&asked)
+        .map(|(child, rect)| Claim {
+            kind: height_kind(child),
+            demand: rect.as_ref().map_or(0, |rect| rect.rows.len()),
+            floor: min_content_height(child),
+        })
+        .collect();
+    let heights = distribute(area, &claims);
+
+    children
+        .iter()
+        .zip(asked)
+        .zip(heights)
+        .map(|((child, asked), height)| {
+            let rect = match asked {
+                Some(rect) if rect.rows.len() <= height => rect,
+                _ => layout(child, Available::new(cross, Some(height))),
+            };
+            (rect, child.fill_style())
+        })
+        .collect()
 }
 
 #[cfg(test)]

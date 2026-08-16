@@ -126,11 +126,14 @@ arises.
 Without `Fill`, "a fixed sidebar and main takes the rest" — the most ordinary
 full-screen layout — is inexpressible under any non-negotiating rule, which
 is why this much is reclaimed from the rejected constraint-solving design.
-The boundary against that design stays sharp: sizes flow down once, results
-flow up once, and the only iteration is the numeric freeze loop over one
-axis's floors when an area is too small. No cross-axis coupling, no re-layout
-of a resolved child, no propagation of one sibling's resolution into
-another's content.
+The boundary against that design stays sharp: a size is decided from an area
+and pure measurements of the subtree below it, results flow up once, and the
+only iteration is the numeric freeze loop over one axis's floors when an area
+is too small. No cross-axis coupling, no size revised once decided, no
+propagation of one sibling's resolution into another's content. Measuring a
+subtree more than once does not cross that line — a measurement is a question
+about that subtree alone, so its answer cannot depend on what a sibling
+resolved to, which is exactly what a solver's iteration does.
 
 Slack is deliberately not renegotiated either: a `Fill` child capped by its
 own `max_width` leaves the remainder unused rather than triggering
