@@ -148,7 +148,7 @@ design exists to make identical.
 | Stage | Input → output | Concern |
 | --- | --- | --- |
 | Resolve | `View` + `Available` → `ResolvedView` | Generic. Size content into a box under the available area. No prompt policy. |
-| Frame | `ResolvedView` + policy → `FramedView` | Prompt-specific. Window a bounded viewport onto the resolved content, vertically and horizontally. |
+| Frame | `ResolvedView` + policy → `FramedView` | Prompt-specific. Choose which rows a bounded viewport shows. |
 | Plan | `FramedView` + `InlinePresentation` + geometry → `InlineRenderPlan` | Pure. Decide which commands reach the terminal. **Shared.** |
 | Execute | `InlineRenderPlan` → terminal | I/O and byte encoding only. |
 
@@ -156,39 +156,53 @@ design exists to make identical.
 view model.
 
 **Frame** carries the policy a prompt needs when its content does not fit:
-scroll the viewport so the focused row stays visible, keep the text cursor
-visible within its row, and reinstate the validation error and the help line
-when scrolling has pushed them out of view. A prompt's usefulness depends on
+scroll the viewport so the focused row stays visible, and reinstate the
+validation error and the help line when scrolling has pushed them out of view. A prompt's usefulness depends on
 these; they are not layout details. Keeping them in their own stage stops them
 from being entangled with wrapping and clipping, and keeps the plan stage free
 of prompt semantics.
 
 **Plan** and **Execute** are described below.
 
-### A prompt resolves unbounded in width
+### The cursor's horizontal window is chosen before Resolve
 
-Following the cursor is a windowing decision, and windowing belongs to Frame.
-That forces a constraint upstream: **Frame cannot undo what Resolve did to a
-line.** A width bound makes Resolve absorb the overflow — wrapping reflows the
-line's geometry, clipping discards its tail — and either way the single line
-the cursor's column addresses no longer exists for Frame to scroll.
+A text cursor can sit beyond the viewport width, and following it there is
+horizontal scrolling. That needs the part of the line the viewport width would
+have removed — which Resolve has already absorbed by the time Frame runs,
+reflowing it under `Wrap` or discarding it under `Clip`.
 
-A prompt therefore resolves with no width bound and lets Frame take the
-horizontal window. Height is still bounded at Resolve, because Frame selects
-rows rather than reflowing them.
+Resolving the prompt with no width bound would preserve it, and that is not an
+option. **An unbounded width axis is the measurement mode, not a narrower
+layout.** Under it `Fill` contributes an intrinsic size and its weights stop
+meaning anything, so a field can no longer be sized as a share of what the
+prefix leaves; `Wrap` has nothing to wrap against, so every row loses the
+overflow policy the application chose; and a bounded row's `used` size stops
+being capped by an area that no longer exists. Asking a prompt to resolve
+unbounded asks it to render its measurement.
 
-This is a constraint on how a prompt *calls* Resolve, not a change to Resolve.
-`Available` keeps both bounds for consumers that want them; a prompt simply
-does not use the width bound.
+Widening one block instead does not work either: a box's used size is capped by
+the available area, so a field cannot declare itself wider than the terminal to
+keep its tail alive.
 
-The alternative — making the cursor an input to Resolve so it can clip around it
-— would put prompt policy inside the stage this design defines as generic, and
-would make every other consumer of the view model carry a parameter that means
-nothing to it.
+The window is therefore chosen where the knowledge already is, before a `View`
+exists. A text field holds its value and its cursor; the view function that
+places that field knows the available width and the structure it is placing the
+field into. It puts the **visible window of the value** into the `View`, with
+the cursor's column expressed within that window. Cutting an already-rendered
+string at a column is a text-layer utility rather than a box-model operation,
+which is where this belongs.
 
-The cost is resolving a long line at full length every frame. Prompt rows are
-few and short-lived, so this is not on a path where it matters; a viewport that
-windows a very large document would need a different arrangement.
+Consequences:
+
+- Resolve is called with the real available area, so every row absorbs its own
+  overflow under the policy its block declares.
+- Frame windows rows and does not reflow them. It has no horizontal concern.
+- The cursor reaches Plan as a position inside an already-windowed row.
+
+This puts one layout fact — how much width a field ends up with — in the view
+function as well as in Resolve. That duplication is the cost. It is bounded:
+the view function is the prompt's own code, placing its own structure, and a
+view function is expected to hold the size that `resolve` will be given.
 
 ## The row unit
 
@@ -249,6 +263,52 @@ modes, and a style type must rule out both:
 
 This matters most where rows are aggregated from grapheme-level content on each
 frame, because the aggregation is what establishes the form.
+
+#### What a style type cannot rule out
+
+A third failure mode survives the type. It is a duplication *between* fields,
+so no signature makes it unrepresentable, and it is closed by normalization
+instead:
+
+| Rule | Condition | Applied |
+| --- | --- | --- |
+| Fold an underline colour to *absent* | the foreground is a concrete colour and the underline colour is **the same value** | once the style is final — after a profile stage if there is one, otherwise at run aggregation |
+
+An underline is drawn in the foreground colour unless one is set, so stating
+the colour a run already has changes nothing but the bytes. The values must be
+compared as values: a palette red and a true-colour red look different on
+screen and must not be folded together.
+
+Normalization runs **after the style is final**, not when it is built. A style
+value is immutable and its builder returns a new value, so folding earlier is
+always undone by a later change:
+
+```text
+new().underline(Single, colour = red)   // foreground absent; nothing to fold
+     .foreground(red)                   // the duplication appears here
+```
+
+A profile stage is one instance of "final", not the reason for the rule.
+
+The rule for admitting any future fold is narrow:
+
+> **Fold only what is inert.** A value may be dropped when doing so cannot
+> change the output, whatever the terminal does. An equivalence that holds only
+> because a terminal is assumed to implement an attribute a particular way is
+> not a fold.
+
+Reversed video is the case this excludes. Swapping a foreground and a
+background looks the same as setting reverse, but a dim attribute may apply to
+the declared foreground or to the effective one depending on the terminal, so
+rewriting one form into the other can change what is drawn.
+
+One residue is not closable: when the foreground is absent, its concrete colour
+is the terminal's default and unknown here, so an underline colour equal to it
+cannot be recognized. This weakens only the first purpose of a canonical form —
+not redrawing a row that has not changed. The second — two implementations
+answering the same input with the same value — holds regardless, because the
+rule is the same on both sides. A canonical form owes the corpus determinism,
+not minimality.
 
 ## Commands
 
