@@ -293,18 +293,20 @@ cut, and it is unreachable while the frame fits.
 
 The sections above define the rules; this one is the procedure that applies
 them, and it is the whole of resolution. Every node receives an area and
-returns the rectangle it resolved to: the area flows down, and the resolved
-size flows back up. What each node does with the area it receives — and what
-it hands its own children — is fixed.
+returns the size it resolved to: the area flows down, and the size flows back
+up. What each node does with the area it receives — and what it hands its own
+children — is fixed.
 
-Deciding a size may ask a subtree more than once: for the max-content and
-min-content widths the clamp needs, and for the extent a `Column` divides
-among its children. Those questions are pure — an answer depends only on the
+The extents the clamp needs — a subtree's max-content and min-content widths —
+depend on the subtree alone, so they are read off the tree once, before any
+area is handed down. One question does have to be asked of a subtree again: the
+height a `Column` divides among its children, because a height is what fitting
+the content produced. That question is pure — its answer depends only on the
 subtree and the area it is asked about, never on what a sibling resolved to —
-so asking again is not solving. What never happens is renegotiation: a size,
-once decided, is not revised in the light of what a child or a sibling
-resolved to, and no node is assembled twice. That is the boundary against a
-constraint solver, and
+so asking it is not solving. What never happens is renegotiation: a size, once
+decided, is not revised in the light of what a child or a sibling resolved to,
+and no node is assembled twice. That is the boundary against a constraint
+solver, and
 [`design/view-block-model.md`](design/view-block-model.md) records why it is
 drawn there.
 
@@ -336,9 +338,9 @@ assignment leaves the remainder unused, and the container resolves smaller
 than its area.
 
 `resolve` applies the degenerate safety net once, to the finished rectangle;
-`measure` runs this same pass with no area at all, which is what makes an
-intrinsic size the same computation as a bounded one rather than a second
-rule.
+`measure` runs these same rules with no area at all and stops at the size they
+settle, which is what makes an intrinsic size the same computation as a bounded
+one rather than a second rule.
 
 The axes are asymmetric on purpose. Width is decided before the content
 because wrapping needs a width to wrap to; height is decided after it because

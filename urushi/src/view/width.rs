@@ -1,0 +1,525 @@
+//! The width phase: two passes that settle every node's width.
+//!
+//! Width comes first because wrapping needs a width to wrap to. That makes the
+//! dependency one-way — width, then height, then assembly — and this module is
+//! the end of it that must not look forward: it never wraps a line, never
+//! counts a row, and reaches nothing the height phase or assembly owns. The
+//! rules it applies are `docs/view-model.md`'s, in its Sizing order.
+//!
+//! It runs in two passes over the tree, each visiting a node once.
+//!
+//! - Pass A, bottom-up, fills [`Metrics`]: the width a node takes unbounded,
+//!   the width below which it cannot go, the height below which it cannot be
+//!   shrunk, and whether anything inside it spans its area. Each is `O(1)` from
+//!   the children's, so the whole pass is one walk.
+//! - Pass B, top-down, hands each node an area and reads pass A's numbers to
+//!   settle the width it uses, descending into every child exactly once.
+//!
+//! Asking a subtree for its extent used to be a walk of its own, so a chain of
+//! blocks measured the same leaves once per level. Folding those questions into
+//! a table is what makes the phase linear; nothing about what they answer
+//! changed.
+
+use crate::text::PrintableText;
+use crate::{Align, BlockStyle, Length, Overflow, Sides, TextStyle, VerticalAlign, View};
+
+use super::sizing::{
+    Claim, Kind, border_extent, degrade, distribute, horizontal, kind_of, text_lines, vertical,
+    width_axis,
+};
+
+/// The overflow policy a text leaf outside a block is fitted under.
+static WRAP: Overflow = Overflow::Wrap;
+
+/// What a subtree fixes about its own size, whatever area it is later given.
+///
+/// These are the numbers the clamp needs before the content is laid out. They
+/// depend on the subtree alone, so pass A can read them off the tree once and
+/// pass B can consume them without walking anything again.
+#[derive(Debug)]
+pub(super) struct Metrics {
+    /// The width the node takes when no area bounds it — its max-content size.
+    natural: usize,
+    /// The width below which it cannot go without splitting a grapheme.
+    floor: usize,
+    /// The height below which it cannot be shrunk.
+    height_floor: usize,
+    /// Whether anything inside it spans its area rather than taking a size.
+    ///
+    /// A `Fill` length needs an area to divide, so a box containing one spans
+    /// its own extent. The height axis gets this for free — a box sizes its
+    /// height after its content — but the width is decided before the content
+    /// is laid out, which is why the width axis has to ask.
+    fills: bool,
+    width_kind: Kind,
+    height_kind: Kind,
+    /// One entry per child; a block has exactly one.
+    children: Vec<Metrics>,
+}
+
+/// Pass A: the bottom-up walk that fills [`Metrics`] for every node.
+fn metrics(view: &View) -> Metrics {
+    match view {
+        View::Text(text, _) => {
+            let lines = text_lines(text);
+            Metrics {
+                natural: lines.iter().map(|line| line.width()).max().unwrap_or(0),
+                floor: lines
+                    .iter()
+                    .flat_map(|line| line.graphemes().map(PrintableText::width))
+                    .max()
+                    .unwrap_or(0),
+                height_floor: 0,
+                fills: false,
+                width_kind: Kind::Auto,
+                height_kind: Kind::Auto,
+                children: Vec::new(),
+            }
+        }
+        View::Block(style, child) => {
+            let inner = metrics(child);
+            let frame = style.frame_size();
+            let margin = style.margin_sides();
+            // The undegraded frame: no area is known yet, and degradation is
+            // what an area does to a frame.
+            let natural = width_axis(style, frame.width()).used(None, inner.natural, inner.floor)
+                + horizontal(margin);
+            let floor = style
+                .minimum_width()
+                .map_or(0, usize::from)
+                .max(frame.width() + inner.floor)
+                + horizontal(margin);
+            let height_floor = style
+                .minimum_height()
+                .map_or(0, usize::from)
+                .max(frame.height() + inner.height_floor)
+                + vertical(margin);
+            Metrics {
+                natural,
+                floor,
+                height_floor,
+                fills: match style.width_length() {
+                    Some(Length::Fill(_)) => true,
+                    Some(Length::Cells(_)) => false,
+                    None => inner.fills,
+                },
+                width_kind: kind_of(style.width_length()),
+                height_kind: kind_of(style.height_length()),
+                children: vec![inner],
+            }
+        }
+        View::Row(_, children) => {
+            let children: Vec<Metrics> = children.iter().map(metrics).collect();
+            Metrics {
+                natural: children.iter().map(|child| child.natural).sum(),
+                floor: children.iter().map(|child| child.floor).sum(),
+                height_floor: children
+                    .iter()
+                    .map(|child| child.height_floor)
+                    .max()
+                    .unwrap_or(0),
+                fills: children.iter().any(|child| child.fills),
+                width_kind: Kind::Auto,
+                height_kind: Kind::Auto,
+                children,
+            }
+        }
+        View::Column(_, children) => {
+            let children: Vec<Metrics> = children.iter().map(metrics).collect();
+            Metrics {
+                natural: children
+                    .iter()
+                    .map(|child| child.natural)
+                    .max()
+                    .unwrap_or(0),
+                floor: children.iter().map(|child| child.floor).max().unwrap_or(0),
+                height_floor: children.iter().map(|child| child.height_floor).sum(),
+                fills: children.iter().any(|child| child.fills),
+                width_kind: Kind::Auto,
+                height_kind: Kind::Auto,
+                children,
+            }
+        }
+    }
+}
+
+/// One node with its width settled, and what the later phases still need.
+#[derive(Debug)]
+pub(super) struct Widths<'a> {
+    /// The outer width this node occupies, margin included.
+    pub width: usize,
+    /// How the node claims space on an enclosing `Column`'s axis.
+    pub height_kind: Kind,
+    /// The height below which the node cannot be shrunk.
+    pub height_floor: usize,
+    pub node: WidthNode<'a>,
+}
+
+#[derive(Debug)]
+pub(super) enum WidthNode<'a> {
+    Text(TextBox<'a>),
+    Block(BlockBox<'a>),
+    Row(VerticalAlign, Vec<Widths<'a>>),
+    Column(Align, Vec<Widths<'a>>),
+}
+
+/// A text leaf and everything needed to fit its lines, once a width exists.
+#[derive(Debug)]
+pub(super) struct TextBox<'a> {
+    pub text: &'a str,
+    pub style: &'a TextStyle,
+    /// The area the leaf was given, which is what the policy fits against —
+    /// not the width it resolved to, which a grapheme it cannot split may
+    /// widen.
+    pub target: Option<usize>,
+    pub overflow: &'a Overflow,
+    /// Per-line alignment and the style filling the gap, both supplied by an
+    /// enclosing block.
+    pub align: Align,
+    pub fill: &'a TextStyle,
+}
+
+/// A block whose horizontal frame and content width are settled.
+///
+/// `padding` and `margin` carry the horizontal degradation this phase decided;
+/// their vertical sides are still as the style stated them, because only the
+/// height phase knows the area that degrades those.
+#[derive(Debug)]
+pub(super) struct BlockBox<'a> {
+    pub style: &'a BlockStyle,
+    pub padding: Sides,
+    pub margin: Sides,
+    pub content_width: usize,
+    pub child: Box<Widths<'a>>,
+}
+
+/// What an enclosing block fits a text leaf it directly contains under.
+#[derive(Clone, Copy)]
+struct TextFit<'a> {
+    align: Align,
+    fill: &'a TextStyle,
+    overflow: &'a Overflow,
+}
+
+/// Settles every node's width under `area`.
+pub(super) fn widths(view: &View, area: Option<usize>) -> Widths<'_> {
+    place(view, &metrics(view), area, None)
+}
+
+/// Pass B: hands `area` down and reads pass A's numbers to settle each width.
+fn place<'a>(
+    view: &'a View,
+    metrics: &Metrics,
+    area: Option<usize>,
+    fit: Option<TextFit<'a>>,
+) -> Widths<'a> {
+    match view {
+        View::Text(text, style) => {
+            let fit = fit.unwrap_or(TextFit {
+                // A bare text leaf wraps under a width bound: the same default
+                // a block's content gets. Another policy requires a block,
+                // because the policy is a box property.
+                align: Align::Left,
+                fill: style,
+                overflow: &WRAP,
+            });
+            Widths {
+                width: text_width(area, fit.overflow, metrics),
+                height_kind: metrics.height_kind,
+                height_floor: metrics.height_floor,
+                node: WidthNode::Text(TextBox {
+                    text,
+                    style,
+                    target: area,
+                    overflow: fit.overflow,
+                    align: fit.align,
+                    fill: fit.fill,
+                }),
+            }
+        }
+        View::Block(style, child) => {
+            let inner = &metrics.children[0];
+            let border = border_extent(style);
+            let mut padding = style.padding_sides();
+            let mut margin = style.margin_sides();
+
+            // 1. Degrade the frame to the area — the horizontal half of it.
+            //    The axes degrade independently, so the height phase decides
+            //    the other half against the area it is given.
+            let across = degrade(
+                area,
+                horizontal(margin),
+                border.width(),
+                horizontal(padding),
+                inner.floor,
+            );
+            if across.margin {
+                margin.left = 0;
+                margin.right = 0;
+            }
+            if across.padding {
+                padding.left = 0;
+                padding.right = 0;
+            }
+
+            // 2. Resolve the width by the clamp. The content has not been laid
+            //    out yet: the width comes from the intrinsic width, the bounds,
+            //    and the area, never from what wrapping is about to do.
+            let axis = width_axis(
+                style,
+                border.width() + usize::from(padding.left) + usize::from(padding.right),
+            );
+            // Every sizing property measures the box; margin lies outside it.
+            let box_width = area.map(|area| area.saturating_sub(horizontal(margin)));
+            let intrinsic = if inner.fills {
+                box_width.map_or(inner.natural, |area| area.saturating_sub(axis.frame))
+            } else {
+                inner.natural
+            };
+            let used = axis.used(box_width, intrinsic, inner.floor);
+            let content_width = used - axis.frame;
+
+            // 3. The child, under what the box leaves it. A directly contained
+            //    text leaf meets the block's overflow policy here; any other
+            //    child absorbs its own overflow when it resolves.
+            let child = place(
+                child,
+                inner,
+                Some(content_width),
+                Some(TextFit {
+                    align: style.horizontal_alignment(),
+                    fill: style.text(),
+                    overflow: style.overflow_policy(),
+                }),
+            );
+            debug_assert!(
+                child.width <= content_width,
+                "a child never resolves wider than the box that assigned it: \
+                 {} > {content_width}",
+                child.width
+            );
+
+            Widths {
+                width: used + horizontal(margin),
+                height_kind: metrics.height_kind,
+                height_floor: metrics.height_floor,
+                node: WidthNode::Block(BlockBox {
+                    style,
+                    padding,
+                    margin,
+                    content_width,
+                    child: Box::new(child),
+                }),
+            }
+        }
+        View::Row(align, children) => {
+            // The main axis is divided: stated widths, then intrinsic ones,
+            // then `Fill` weights over what remains. With no width to divide —
+            // under `measure` — every child takes its intrinsic width.
+            let shares = area.map(|area| {
+                let claims: Vec<Claim> = metrics
+                    .children
+                    .iter()
+                    .map(|child| Claim {
+                        kind: child.width_kind,
+                        demand: child.natural,
+                        floor: child.floor,
+                    })
+                    .collect();
+                distribute(area, &claims)
+            });
+            let children: Vec<Widths<'a>> = children
+                .iter()
+                .zip(&metrics.children)
+                .enumerate()
+                .map(|(index, (child, inner))| {
+                    place(
+                        child,
+                        inner,
+                        shares.as_ref().map(|share| share[index]),
+                        None,
+                    )
+                })
+                .collect();
+            Widths {
+                // Nothing is renegotiated: a child that resolves narrower than
+                // its assignment leaves the remainder unused.
+                width: children.iter().map(|child| child.width).sum(),
+                height_kind: metrics.height_kind,
+                height_floor: metrics.height_floor,
+                node: WidthNode::Row(*align, children),
+            }
+        }
+        View::Column(align, children) => {
+            // The cross axis has nothing to divide: every child receives the
+            // column's own width.
+            let children: Vec<Widths<'a>> = children
+                .iter()
+                .zip(&metrics.children)
+                .map(|(child, inner)| place(child, inner, area, None))
+                .collect();
+            Widths {
+                width: children.iter().map(|child| child.width).max().unwrap_or(0),
+                height_kind: metrics.height_kind,
+                height_floor: metrics.height_floor,
+                node: WidthNode::Column(*align, children),
+            }
+        }
+    }
+}
+
+/// The width a text leaf uses, without fitting a single line.
+///
+/// Fitting cannot widen a leaf past what the policy and the graphemes already
+/// fix. `Overflow::Clip` cuts to the target, so the target is the width. Under
+/// `Overflow::Wrap` a line is at most the target, except where one grapheme is
+/// wider than that — and a grapheme that cannot be split is exactly the floor
+/// pass A measured. With no target at all, the leaf takes its own lines.
+///
+/// This is what keeps the phase order honest: the width of a text leaf is
+/// decided from the text, never from what wrapping is about to do with it.
+fn text_width(target: Option<usize>, overflow: &Overflow, metrics: &Metrics) -> usize {
+    match (target, overflow) {
+        (None, _) => metrics.natural,
+        (Some(target), Overflow::Wrap) => target.max(metrics.floor),
+        (Some(target), Overflow::Clip(_)) => target,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{Border, TextStyle};
+
+    fn text(content: &str) -> View {
+        View::text(content, TextStyle::new())
+    }
+
+    fn natural(view: &View) -> usize {
+        metrics(view).natural
+    }
+
+    fn floor(view: &View) -> usize {
+        metrics(view).floor
+    }
+
+    fn fills(view: &View) -> bool {
+        metrics(view).fills
+    }
+
+    #[test]
+    fn text_is_measured_by_its_widest_line_and_its_widest_grapheme() {
+        assert_eq!(natural(&text("ab\nabcd\nabc")), 4);
+        assert_eq!(floor(&text("ab\nabcd\nabc")), 1);
+
+        assert_eq!(natural(&text("日本語")), 6);
+        assert_eq!(
+            floor(&text("日本語")),
+            2,
+            "a wide character cannot be split"
+        );
+        assert_eq!(floor(&text("a👩‍💻")), 2, "nor can a cluster");
+
+        assert_eq!(natural(&text("")), 0);
+        assert_eq!(floor(&text("")), 0);
+    }
+
+    #[test]
+    fn a_block_measures_its_frame_bounds_and_margin() {
+        let bordered = View::block(
+            BlockStyle::new().border(Border::NORMAL).padding((0, 1)),
+            text("abc"),
+        );
+        assert_eq!(natural(&bordered), 7, "3 content + 2 padding + 2 border");
+        assert_eq!(floor(&bordered), 5, "one grapheme plus the frame");
+
+        let bounded = View::block(BlockStyle::new().max_width(2), text("abcd"));
+        assert_eq!(natural(&bounded), 2, "the maximum caps the measure");
+
+        let floored = View::block(BlockStyle::new().min_width(9), text("abcd"));
+        assert_eq!(natural(&floored), 9);
+        assert_eq!(floor(&floored), 9, "the minimum is a floor too");
+
+        let spaced = View::block(BlockStyle::new().margin((0, 2)), text("ab"));
+        assert_eq!(natural(&spaced), 6, "margin lies outside the box");
+        assert_eq!(floor(&spaced), 5);
+    }
+
+    #[test]
+    fn a_row_sums_its_children_and_a_column_takes_the_widest() {
+        let children = [text("abcd"), text("日本")];
+        let row = View::row(VerticalAlign::Top, children.clone());
+        let column = View::column(Align::Left, children);
+
+        assert_eq!(natural(&row), 8);
+        assert_eq!(floor(&row), 3, "one grapheme from each child");
+        assert_eq!(natural(&column), 4);
+        assert_eq!(floor(&column), 2);
+    }
+
+    #[test]
+    fn a_height_floor_is_the_frame_and_a_width_floor_is_the_content() {
+        let bordered = View::block(BlockStyle::new().border(Border::NORMAL), text("abc"));
+
+        assert_eq!(metrics(&text("abc")).height_floor, 0, "a row can be absent");
+        assert_eq!(metrics(&bordered).height_floor, 2, "the frame cannot");
+        assert_eq!(floor(&bordered), 3, "one grapheme plus it");
+
+        let floored = View::block(BlockStyle::new().min_height(5), text("a"));
+        assert_eq!(metrics(&floored).height_floor, 5);
+
+        let spaced = View::block(BlockStyle::new().margin((1, 0)), text("a"));
+        assert_eq!(metrics(&spaced).height_floor, 2, "margin lies outside");
+    }
+
+    #[test]
+    fn a_view_fills_its_area_when_anything_inside_it_does() {
+        let filling = View::block(BlockStyle::new().width(Length::Fill(1)), text("a"));
+
+        assert!(!fills(&text("a")));
+        assert!(fills(&filling));
+        assert!(
+            fills(&View::block(BlockStyle::new(), filling.clone())),
+            "an automatic box inherits its content's appetite"
+        );
+        assert!(
+            !fills(&View::block(BlockStyle::new().width(4), filling.clone())),
+            "a stated size settles the box, whatever it contains"
+        );
+        assert!(fills(&View::row(VerticalAlign::Top, [text("a"), filling])));
+    }
+
+    #[test]
+    fn a_text_leaf_takes_the_width_it_was_given_unless_a_grapheme_exceeds_it() {
+        let wide = metrics(&text("日本"));
+
+        assert_eq!(text_width(None, &Overflow::Wrap, &wide), 4, "its own lines");
+        assert_eq!(text_width(Some(3), &Overflow::Wrap, &wide), 3);
+        assert_eq!(
+            text_width(Some(1), &Overflow::Wrap, &wide),
+            2,
+            "one unsplittable grapheme is wider than the target"
+        );
+        assert_eq!(
+            text_width(Some(1), &Overflow::clip(), &wide),
+            1,
+            "a clip cuts to the target instead of widening"
+        );
+    }
+
+    #[test]
+    fn a_block_hands_its_content_width_down_and_keeps_its_own() {
+        let view = View::block(
+            BlockStyle::new().border(Border::NORMAL).padding((0, 1)),
+            text("abcdefgh"),
+        );
+
+        let placed = widths(&view, Some(6));
+        assert_eq!(placed.width, 6);
+        let WidthNode::Block(block) = &placed.node else {
+            panic!("a block");
+        };
+        assert_eq!(block.content_width, 2, "6 less two borders and two pads");
+        assert_eq!(block.child.width, 2);
+    }
+}

@@ -13,6 +13,13 @@ indicatif = { version = "0.18", optional = true }
 unicode-segmentation.workspace = true
 unicode-width.workspace = true
 
+[[bench]]
+name = "layout"
+harness = false
+
 [features]
 default = []
 terminal = ["dep:console", "dep:indicatif"]
+
+[dev-dependencies]
+divan = "0.1.21"

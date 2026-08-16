@@ -201,7 +201,7 @@ to share styling.
 | [`style`](../urushi/src/style/) | Colors, border glyphs, box spacing and alignment, the text `TextStyle` and the geometry-bearing `BlockStyle`, and the direct block render entry point. | `text`, `view` |
 | [`text`](../urushi/src/text/) | Plain-text display-width measurement and cell-aware word/CJK wrapping, over the `PrintableText` / `PrintableLines` types that carry the plain-text domain. | None |
 | [`theme`](../urushi/src/theme/) | Semantic color tokens, reusable component roles and styles, application role resolution, and explicit light/dark selection. | `style` |
-| [`view`](../urushi/src/view/) | The renderer-neutral `View` tree, the one layout pass (`measure` / `resolve`, `Size`, `Available`, `StyledGrapheme`, `ResolvedView`), and composition of already-rendered `RenderedBlock` values. | `style`, `text` |
+| [`view`](../urushi/src/view/) | The renderer-neutral `View` tree, the one layout pass in its three phases — width, height, assembly — behind `measure` / `resolve` (`Size`, `Available`, `StyledGrapheme`, `ResolvedView`), and composition of already-rendered `RenderedBlock` values. | `style`, `text` |
 | [`component`](../urushi/src/component/) | Reusable semantic components that return `View`; currently summaries, warnings, owned lists, owned trees, and owned tables. | `theme`, `view`, `text` |
 | [`render`](../urushi/src/render/) | Translation of renderer-neutral views to ANSI text. | `style`, `view`, `terminal/profile` |
 | [`terminal`](../urushi/src/terminal/) | Terminal capability detection, color degradation, stderr ownership, output-mode selection, and optional progress lifecycle. | `style`, `theme`, `view`, `render` |
@@ -268,14 +268,28 @@ ANSI, or retain an output writer.
 - [`view/model.rs`](../urushi/src/view/model.rs) owns the four-node `View` tree.
 - [`view/geometry.rs`](../urushi/src/view/geometry.rs) owns `Available` and
   `Size`: the area resolution takes in and the size it returns.
-- [`view/sizing.rs`](../urushi/src/view/sizing.rs) owns the numeric half of the
-  pass — the clamp, the degenerate degradation, and max/min-content
-  measurement. It builds no rectangle, so these rules are unit-tested on their
-  own.
-- [`view/resolve.rs`](../urushi/src/view/resolve.rs) owns the pass itself: a
-  `View` and an `Available` in, one `ResolvedView` of styled graphemes out. It
-  assembles the rectangle the sizes describe — the box model, row and column
-  composition, overflow, and the degenerate safety net.
+- [`view/sizing.rs`](../urushi/src/view/sizing.rs) owns the arithmetic the pass
+  is made of — the clamp, the degenerate degradation, and the distribution
+  rule. Every function maps sizes to sizes and touches no `View`, so these
+  rules are unit-tested on their own.
+- the pass itself is three phases, in the only order the dependencies allow.
+  Each is a module, and each may look back at the phase before it but never
+  forward:
+  - [`view/width.rs`](../urushi/src/view/width.rs) settles every width, because
+    wrapping needs a width to wrap to. It walks the tree twice — bottom-up for
+    the extents the clamp needs, top-down to hand out areas — so the phase is
+    linear in the number of nodes and never fits a line.
+  - [`view/height.rs`](../urushi/src/view/height.rs) fits each text leaf to its
+    settled width exactly once, then counts rows under the height bounds. A
+    height is what fitting produced, which is why it cannot be decided earlier.
+  - [`view/assemble.rs`](../urushi/src/view/assemble.rs) builds the rectangle
+    those numbers describe — graphemes, alignment, padding, border, margin —
+    and decides no size.
+- [`view/resolve.rs`](../urushi/src/view/resolve.rs) owns the entry points and
+  the public output: `measure` and `resolve`, `StyledGrapheme` and
+  `ResolvedView`, and the degenerate safety net that crops a rectangle no area
+  could hold. `measure` stops after the two sizing phases and allocates no
+  rectangle.
 - [`view/rendered.rs`](../urushi/src/view/rendered.rs) owns `RenderedBlock`, the
   one place ANSI-aware measurement happens.
 - [`view/ansi.rs`](../urushi/src/view/ansi.rs) owns that measurement: row
@@ -526,6 +540,16 @@ changed deliberately and this document is updated in the same change:
 | Prompt submission, viewport behavior, and cleanup | tests beside [`urushi-prompt/src/runtime.rs`](../urushi-prompt/src/runtime.rs) |
 | Prompt owned-region command order and recovery checkpoints | plan assertions beside [`urushi-prompt/src/runtime.rs`](../urushi-prompt/src/runtime.rs), against [`runtime/inline_plan.rs`](../urushi-prompt/src/runtime/inline_plan.rs) |
 | Public progress behavior remains usable by a real consumer | Agentlog dogfood unit and CLI integration tests using the global Cargo patch configuration |
+| Sizing stays linear in the size of the view tree | [`urushi/benches/layout.rs`](../urushi/benches/layout.rs) |
+
+A correctness test cannot see how the layout pass scales, and losing that is
+exactly what a refactor of it risks. `cargo bench --bench layout` runs each tree
+shape at sizes a factor of four apart, so the growth rate reads off the ratio
+between two rows: linear is 4, quadratic is 16. The `measuring` group is the
+sizing phases, and every shape there is expected to stay near 4. The `resolving`
+group also builds the rectangle, whose area grows faster than the tree for the
+nested shapes, so its ratios are larger by design; compare them against their
+own history rather than against 4.
 
 Use the Nix development environment for repository checks:
 

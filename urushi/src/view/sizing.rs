@@ -1,14 +1,16 @@
-//! The numeric half of resolution: how large a box is, before anything is
-//! drawn.
+//! The arithmetic resolution is made of: how large a box is, before anything
+//! is drawn.
 //!
-//! Nothing here builds a rectangle. Every function maps sizes to sizes, which
-//! is what lets the rules of `docs/view-model.md`'s Sizing section be checked
-//! on their own — and what keeps measuring a subtree distinct from laying it
-//! out. The assembly that consumes these numbers lives in
-//! [`resolve`](super::resolve).
+//! Every function here maps sizes to sizes. None of them touches a [`View`], so
+//! none can walk a tree, and the rules of `docs/view-model.md`'s Sizing section
+//! can be checked on their own. The phases that apply them to a tree are
+//! [`width`](super::width) and [`height`](super::height); the rectangle they
+//! describe is built in [`assemble`](super::assemble).
+//!
+//! [`View`]: crate::View
 
 use crate::text::{PrintableLines, PrintableText};
-use crate::{BlockStyle, Length, Sides, View};
+use crate::{BlockStyle, Length, Sides};
 
 use super::geometry::Size;
 
@@ -201,59 +203,11 @@ fn shrink(assigned: &mut [usize], claims: &[Claim], group: Kind, mut excess: usi
     excess
 }
 
-/// The kind of claim a view makes on a `Row`'s main axis.
-pub(super) fn width_kind(view: &View) -> Kind {
-    match view {
-        View::Block(style, _) => kind_of(style.width_length()),
-        _ => Kind::Auto,
-    }
-}
-
-/// The kind of claim a view makes on a `Column`'s main axis.
-pub(super) fn height_kind(view: &View) -> Kind {
-    match view {
-        View::Block(style, _) => kind_of(style.height_length()),
-        _ => Kind::Auto,
-    }
-}
-
-const fn kind_of(length: Option<Length>) -> Kind {
+pub(super) const fn kind_of(length: Option<Length>) -> Kind {
     match length {
         Some(Length::Fill(weight)) => Kind::Fill(weight),
         Some(Length::Cells(_)) => Kind::Cells,
         None => Kind::Auto,
-    }
-}
-
-/// The claims a `Row`'s children make on its width.
-pub(super) fn width_claims(children: &[View]) -> Vec<Claim> {
-    children
-        .iter()
-        .map(|child| Claim {
-            kind: width_kind(child),
-            demand: max_content_width(child),
-            floor: min_content_width(child),
-        })
-        .collect()
-}
-
-/// Whether a view spans whatever area it is given, rather than taking an
-/// intrinsic size.
-///
-/// A `Fill` length needs an area to divide, so a box that contains one spans
-/// its own available extent. The height axis gets this for free — a box
-/// resolves its height after its content, so a stretched child is already in
-/// the row count — but the width is decided before the content is laid out,
-/// which is why the width axis has to ask.
-pub(super) fn fills_width(view: &View) -> bool {
-    match view {
-        View::Text(..) => false,
-        View::Block(style, child) => match style.width_length() {
-            Some(Length::Fill(_)) => true,
-            Some(Length::Cells(_)) => false,
-            None => fills_width(child),
-        },
-        View::Row(_, children) | View::Column(_, children) => children.iter().any(fills_width),
     }
 }
 
@@ -315,73 +269,6 @@ pub(super) const fn vertical(sides: Sides) -> usize {
     sides.top as usize + sides.bottom as usize
 }
 
-/// The width a view takes when nothing bounds it: its max-content size.
-///
-/// This measures without assembling a rectangle, so a block resolves its own
-/// width in one downward pass instead of laying its child out twice.
-pub(super) fn max_content_width(view: &View) -> usize {
-    match view {
-        View::Text(text, _) => text_lines(text)
-            .iter()
-            .map(|line| line.width())
-            .max()
-            .unwrap_or(0),
-        View::Block(style, child) => {
-            let axis = width_axis(style, style.frame_size().width());
-            let used = axis.used(None, max_content_width(child), min_content_width(child));
-            used + horizontal(style.margin_sides())
-        }
-        View::Row(_, children) => children.iter().map(max_content_width).sum(),
-        View::Column(_, children) => children.iter().map(max_content_width).max().unwrap_or(0),
-    }
-}
-
-/// The width below which a view cannot go without splitting a grapheme.
-pub(super) fn min_content_width(view: &View) -> usize {
-    match view {
-        View::Text(text, _) => text_lines(text)
-            .iter()
-            .flat_map(|line| {
-                line.graphemes()
-                    .map(PrintableText::width)
-                    .collect::<Vec<_>>()
-            })
-            .max()
-            .unwrap_or(0),
-        View::Block(style, child) => {
-            let frame = style.frame_size().width();
-            let floor = style
-                .minimum_width()
-                .map_or(0, usize::from)
-                .max(frame + min_content_width(child));
-            floor + horizontal(style.margin_sides())
-        }
-        View::Row(_, children) => children.iter().map(min_content_width).sum(),
-        View::Column(_, children) => children.iter().map(min_content_width).max().unwrap_or(0),
-    }
-}
-
-/// The height below which a view cannot be shrunk.
-///
-/// The axes are not symmetric: a row can simply be absent, so a box's height
-/// floor is its frame — plus whatever frame its own content cannot give up —
-/// rather than a content extent.
-pub(super) fn min_content_height(view: &View) -> usize {
-    match view {
-        View::Text(..) => 0,
-        View::Block(style, child) => {
-            let frame = style.frame_size().height();
-            let floor = style
-                .minimum_height()
-                .map_or(0, usize::from)
-                .max(frame + min_content_height(child));
-            floor + vertical(style.margin_sides())
-        }
-        View::Row(_, children) => children.iter().map(min_content_height).max().unwrap_or(0),
-        View::Column(_, children) => children.iter().map(min_content_height).sum(),
-    }
-}
-
 /// The width axis a block's style states, for a frame of `frame` cells.
 pub(super) fn width_axis(style: &BlockStyle, frame: usize) -> Axis {
     Axis {
@@ -414,11 +301,7 @@ pub(super) fn text_lines(text: &str) -> Vec<&PrintableText> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{Border, TextStyle};
-
-    fn text(content: &str) -> View {
-        View::text(content, TextStyle::new())
-    }
+    use crate::Border;
 
     #[test]
     fn the_floor_wins_over_the_cap() {
@@ -675,41 +558,6 @@ mod tests {
     }
 
     #[test]
-    fn a_view_fills_its_area_when_anything_inside_it_does() {
-        let filling = View::block(BlockStyle::new().width(Length::Fill(1)), text("a"));
-
-        assert!(!fills_width(&text("a")));
-        assert!(fills_width(&filling));
-        assert!(
-            fills_width(&View::block(BlockStyle::new(), filling.clone())),
-            "an automatic box inherits its content's appetite"
-        );
-        assert!(
-            !fills_width(&View::block(BlockStyle::new().width(4), filling.clone())),
-            "a stated size settles the box, whatever it contains"
-        );
-        assert!(fills_width(&View::row(
-            crate::VerticalAlign::Top,
-            [text("a"), filling]
-        )));
-    }
-
-    #[test]
-    fn a_height_floor_is_the_frame_and_a_width_floor_is_the_content() {
-        let bordered = View::block(BlockStyle::new().border(Border::NORMAL), text("abc"));
-
-        assert_eq!(min_content_height(&text("abc")), 0, "a row can be absent");
-        assert_eq!(min_content_height(&bordered), 2, "the frame cannot");
-        assert_eq!(min_content_width(&bordered), 3, "one grapheme plus it");
-
-        let floored = View::block(BlockStyle::new().min_height(5), text("a"));
-        assert_eq!(min_content_height(&floored), 5);
-
-        let spaced = View::block(BlockStyle::new().margin((1, 0)), text("a"));
-        assert_eq!(min_content_height(&spaced), 2, "margin lies outside");
-    }
-
-    #[test]
     fn border_extent_counts_only_enabled_edges_of_a_present_border() {
         assert_eq!(border_extent(&BlockStyle::new()), Size::ZERO);
 
@@ -726,67 +574,5 @@ mod tests {
             .border_bottom(false)
             .border_left(false);
         assert_eq!(border_extent(&none), Size::ZERO);
-    }
-
-    #[test]
-    fn text_is_measured_by_its_widest_line_and_its_widest_grapheme() {
-        assert_eq!(max_content_width(&text("ab\nabcd\nabc")), 4);
-        assert_eq!(min_content_width(&text("ab\nabcd\nabc")), 1);
-
-        assert_eq!(max_content_width(&text("日本語")), 6);
-        assert_eq!(
-            min_content_width(&text("日本語")),
-            2,
-            "a wide character cannot be split"
-        );
-        assert_eq!(min_content_width(&text("a👩‍💻")), 2, "nor can a cluster");
-
-        assert_eq!(max_content_width(&text("")), 0);
-        assert_eq!(min_content_width(&text("")), 0);
-    }
-
-    #[test]
-    fn a_block_measures_its_frame_bounds_and_margin() {
-        let bordered = View::block(
-            BlockStyle::new().border(Border::NORMAL).padding((0, 1)),
-            text("abc"),
-        );
-        assert_eq!(
-            max_content_width(&bordered),
-            7,
-            "3 content + 2 padding + 2 border"
-        );
-        assert_eq!(
-            min_content_width(&bordered),
-            5,
-            "one grapheme plus the frame"
-        );
-
-        let bounded = View::block(BlockStyle::new().max_width(2), text("abcd"));
-        assert_eq!(
-            max_content_width(&bounded),
-            2,
-            "the maximum caps the measure"
-        );
-
-        let floored = View::block(BlockStyle::new().min_width(9), text("abcd"));
-        assert_eq!(max_content_width(&floored), 9);
-        assert_eq!(min_content_width(&floored), 9, "the minimum is a floor too");
-
-        let spaced = View::block(BlockStyle::new().margin((0, 2)), text("ab"));
-        assert_eq!(max_content_width(&spaced), 6, "margin lies outside the box");
-        assert_eq!(min_content_width(&spaced), 5);
-    }
-
-    #[test]
-    fn a_row_sums_its_children_and_a_column_takes_the_widest() {
-        let children = [text("abcd"), text("日本")];
-        let row = View::row(crate::VerticalAlign::Top, children.clone());
-        let column = View::column(crate::Align::Left, children);
-
-        assert_eq!(max_content_width(&row), 8);
-        assert_eq!(min_content_width(&row), 3, "one grapheme from each child");
-        assert_eq!(max_content_width(&column), 4);
-        assert_eq!(min_content_width(&column), 2);
     }
 }

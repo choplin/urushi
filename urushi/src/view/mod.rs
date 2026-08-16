@@ -2,12 +2,15 @@
 //! composition.
 
 mod ansi;
+mod assemble;
 mod geometry;
+mod height;
 mod join;
 mod model;
 mod rendered;
 mod resolve;
 mod sizing;
+mod width;
 
 pub use geometry::{Available, Size};
 pub use join::{join_horizontal, join_vertical};

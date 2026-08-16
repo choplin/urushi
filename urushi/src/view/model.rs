@@ -75,12 +75,4 @@ impl View {
     pub const fn empty() -> Self {
         Self::Column(Align::Left, Vec::new())
     }
-
-    /// The style filling padding a parent introduces around this view.
-    pub(super) fn fill_style(&self) -> TextStyle {
-        match self {
-            Self::Block(style, _) => style.text().clone(),
-            _ => TextStyle::new(),
-        }
-    }
 }
