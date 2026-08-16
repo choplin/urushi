@@ -1,121 +1,82 @@
 //! Renderer-neutral terminal output.
 
-use crate::Style;
-
-/// One styled text span in a [`Line`].
-#[derive(Debug, Clone, PartialEq)]
-pub struct Span {
-    text: String,
-    style: Style,
-}
-
-impl Span {
-    /// Creates a span with logical styling that has not been terminal-resolved.
-    pub fn new(text: impl Into<String>, style: Style) -> Self {
-        Self {
-            text: text.into(),
-            style,
-        }
-    }
-
-    /// Returns the span text.
-    pub fn text(&self) -> &str {
-        &self.text
-    }
-
-    /// Returns the logical style.
-    pub fn style(&self) -> &Style {
-        &self.style
-    }
-}
-
-/// One horizontal row of styled spans.
-#[derive(Debug, Clone, Default, PartialEq)]
-pub struct Line {
-    spans: Vec<Span>,
-}
-
-impl Line {
-    /// Creates an empty line.
-    pub const fn new() -> Self {
-        Self { spans: Vec::new() }
-    }
-
-    /// Creates a line containing one span.
-    pub fn styled(text: impl Into<String>, style: Style) -> Self {
-        Self::new().span(text, style)
-    }
-
-    /// Appends a styled span.
-    #[must_use]
-    pub fn span(mut self, text: impl Into<String>, style: Style) -> Self {
-        self.spans.push(Span::new(text, style));
-        self
-    }
-
-    /// Returns the spans in display order.
-    pub fn spans(&self) -> &[Span] {
-        &self.spans
-    }
-}
+use crate::{Align, BlockStyle, TextStyle, VerticalAlign};
 
 /// A fully composed, renderer-neutral terminal view.
 ///
-/// Components return a `View`; output adapters decide how its logical styles
-/// map to ANSI sequences, a terminal buffer, or another representation.
-#[derive(Debug, Clone, Default, PartialEq)]
-pub struct View {
-    lines: Vec<Line>,
+/// A view is a tree of the four things terminal output does: carry text, put a
+/// box around something, place things beside each other, and stack them. Every
+/// node resolves to a rectangle, so a bordered block composes inside a row the
+/// same way a word does.
+///
+/// Components return a `View`; output adapters resolve it once
+/// ([`resolve`](crate::resolve)) and serialize the resulting
+/// [`ResolvedView`](crate::ResolvedView).
+///
+/// ```
+/// use urushi::{Align, BlockStyle, Border, TextStyle, VerticalAlign, View, measure};
+///
+/// let badge = View::block(
+///     BlockStyle::new().border(Border::ROUNDED),
+///     View::text("ok", TextStyle::new()),
+/// );
+/// let row = View::row(VerticalAlign::Center, [View::text("status: ", TextStyle::new()), badge]);
+///
+/// assert_eq!(measure(&row).height(), 3);
+/// ```
+#[derive(Debug, Clone, PartialEq)]
+pub enum View {
+    /// Plain text and the style applied to it.
+    Text(String, TextStyle),
+    /// One [`BlockStyle`] around exactly one child.
+    Block(BlockStyle, Box<View>),
+    /// Children placed side by side, aligned vertically.
+    Row(VerticalAlign, Vec<View>),
+    /// Children stacked, aligned horizontally.
+    Column(Align, Vec<View>),
+}
+
+impl Default for View {
+    fn default() -> Self {
+        Self::empty()
+    }
 }
 
 impl View {
-    /// Creates an empty view.
-    pub const fn new() -> Self {
-        Self { lines: Vec::new() }
+    /// Creates a text leaf.
+    ///
+    /// The text is plain: escape sequences in it are measured as ordinary
+    /// graphemes rather than detected. Adopt already-rendered output with
+    /// [`RenderedBlock::from_ansi`](crate::RenderedBlock::from_ansi) instead.
+    pub fn text(text: impl Into<String>, style: TextStyle) -> Self {
+        Self::Text(text.into(), style)
     }
 
-    /// Creates a one-line view.
-    pub fn line(line: Line) -> Self {
-        Self { lines: vec![line] }
+    /// Wraps one child in a block.
+    pub fn block(style: BlockStyle, child: Self) -> Self {
+        Self::Block(style, Box::new(child))
     }
 
-    /// Appends one line.
-    #[must_use]
-    pub fn push(mut self, line: Line) -> Self {
-        self.lines.push(line);
-        self
+    /// Places children side by side.
+    pub fn row(align: VerticalAlign, children: impl IntoIterator<Item = Self>) -> Self {
+        Self::Row(align, children.into_iter().collect())
     }
 
-    /// Appends all lines from another view.
-    #[must_use]
-    pub fn extend(mut self, other: Self) -> Self {
-        self.lines.extend(other.lines);
-        self
+    /// Stacks children.
+    pub fn column(align: Align, children: impl IntoIterator<Item = Self>) -> Self {
+        Self::Column(align, children.into_iter().collect())
     }
 
-    /// Returns the lines in display order.
-    pub fn lines(&self) -> &[Line] {
-        &self.lines
+    /// Creates a view that resolves to an empty rectangle.
+    pub const fn empty() -> Self {
+        Self::Column(Align::Left, Vec::new())
     }
 
-    /// Returns whether the view contains no lines.
-    pub fn is_empty(&self) -> bool {
-        self.lines.is_empty()
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn view_preserves_line_and_span_order() {
-        let view = View::line(Line::new().span("a", Style::new()).span("b", Style::new()))
-            .push(Line::styled("c", Style::new()));
-
-        assert_eq!(view.lines().len(), 2);
-        assert_eq!(view.lines()[0].spans()[0].text(), "a");
-        assert_eq!(view.lines()[0].spans()[1].text(), "b");
-        assert_eq!(view.lines()[1].spans()[0].text(), "c");
+    /// The style filling padding a parent introduces around this view.
+    pub(super) fn fill_style(&self) -> TextStyle {
+        match self {
+            Self::Block(style, _) => style.text().clone(),
+            _ => TextStyle::new(),
+        }
     }
 }

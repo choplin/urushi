@@ -1,6 +1,6 @@
 //! Stable renderer-neutral views for progress state.
 
-use crate::{ComponentRole, ComponentStyles, Line, Style, View};
+use crate::{ComponentRole, ComponentStyles, TextStyle, VerticalAlign, View};
 
 #[derive(Debug, Clone, Copy)]
 pub(super) enum FinishKind {
@@ -10,21 +10,25 @@ pub(super) enum FinishKind {
 }
 
 pub(super) fn work(styles: &ComponentStyles, marker: &str, message: &str) -> View {
-    View::line(
-        Line::new()
-            .span(marker, styles.style(ComponentRole::Muted).clone())
-            .span("  ", Style::new())
-            .span(message, styles.style(ComponentRole::Body).clone()),
+    View::row(
+        VerticalAlign::Top,
+        [
+            View::text(marker, styles.text_style(ComponentRole::Muted).clone()),
+            View::text("  ", TextStyle::new()),
+            View::text(message, styles.text_style(ComponentRole::Body).clone()),
+        ],
     )
 }
 
 pub(super) fn progress(styles: &ComponentStyles, position: u64, total: u64, message: &str) -> View {
-    View::line(
-        Line::new()
-            .span("…", styles.style(ComponentRole::Muted).clone())
-            .span("  ", Style::new())
-            .span(format!("{position}/{total} "), Style::new())
-            .span(message, styles.style(ComponentRole::Body).clone()),
+    View::row(
+        VerticalAlign::Top,
+        [
+            View::text("…", styles.text_style(ComponentRole::Muted).clone()),
+            View::text("  ", TextStyle::new()),
+            View::text(format!("{position}/{total} "), TextStyle::new()),
+            View::text(message, styles.text_style(ComponentRole::Body).clone()),
+        ],
     )
 }
 
@@ -34,10 +38,12 @@ pub(super) fn finished(styles: &ComponentStyles, kind: FinishKind, message: &str
         FinishKind::Neutral => ("◇", ComponentRole::Muted),
         FinishKind::Error => ("×", ComponentRole::Error),
     };
-    View::line(
-        Line::new()
-            .span(marker, styles.style(role).clone())
-            .span("  ", Style::new())
-            .span(message, styles.style(ComponentRole::Body).clone()),
+    View::row(
+        VerticalAlign::Top,
+        [
+            View::text(marker, styles.text_style(role).clone()),
+            View::text("  ", TextStyle::new()),
+            View::text(message, styles.text_style(ComponentRole::Body).clone()),
+        ],
     )
 }

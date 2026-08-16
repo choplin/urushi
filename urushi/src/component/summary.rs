@@ -1,6 +1,8 @@
 //! Titled, aligned result summaries.
 
-use crate::{ComponentRole, ComponentStyles, Line, View, text::wrap_text, visible_width};
+use crate::{
+    Align, ComponentRole, ComponentStyles, VerticalAlign, View, text::wrap_text, visible_width,
+};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SummaryField {
@@ -60,39 +62,47 @@ impl Summary {
             .max()
             .unwrap_or(0);
         let label_width = natural_label_width.min(width.saturating_sub(8) / 2);
-        let muted = styles.style(ComponentRole::Muted).clone();
-        let accent = styles.style(ComponentRole::Accent).clone();
-        let body = styles.style(ComponentRole::Body).clone();
-        let mut view = View::line(Line::styled("│", muted.clone())).push(
-            Line::new()
-                .span("◇", accent.clone())
-                .span("  ", muted.clone())
-                .span(self.title.clone(), accent),
-        );
+        let muted = styles.text_style(ComponentRole::Muted).clone();
+        let accent = styles.text_style(ComponentRole::Accent).clone();
+        let body = styles.text_style(ComponentRole::Body).clone();
+        let mut rows = vec![
+            View::text("│", muted.clone()),
+            View::row(
+                VerticalAlign::Top,
+                [
+                    View::text("◇", accent.clone()),
+                    View::text("  ", muted.clone()),
+                    View::text(self.title.clone(), accent),
+                ],
+            ),
+        ];
         for field in &self.fields {
             let value_width = width.saturating_sub(label_width + 5).max(1);
             for (index, value) in wrap_text(field.value(), value_width).iter().enumerate() {
                 let label = if index == 0 { field.label() } else { "" };
                 let padding = " ".repeat(label_width.saturating_sub(visible_width(label)));
-                view = view.push(
-                    Line::new()
-                        .span("│", muted.clone())
-                        .span("  ", muted.clone())
-                        .span(label, muted.clone())
-                        .span(padding, muted.clone())
-                        .span("  ", muted.clone())
-                        .span(value, body.clone()),
-                );
+                rows.push(View::row(
+                    VerticalAlign::Top,
+                    [
+                        View::text("│", muted.clone()),
+                        View::text("  ", muted.clone()),
+                        View::text(label, muted.clone()),
+                        View::text(padding, muted.clone()),
+                        View::text("  ", muted.clone()),
+                        View::text(value, body.clone()),
+                    ],
+                ));
             }
         }
-        view
+        View::column(Align::Left, rows)
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{Color, SemanticTokens, Theme};
+    use crate::test_support::plain_rows;
+    use crate::{Color, SemanticTokens, Theme, measure};
 
     #[test]
     fn wraps_cjk_values_and_aligns_continuations() {
@@ -111,8 +121,13 @@ mod tests {
         let view = Summary::new("Result")
             .field("Name", "日本語日本語")
             .view(theme.components(), 12);
-        assert!(view.lines().len() > 3);
-        assert_eq!(view.lines()[2].spans()[2].text(), "Name");
-        assert_eq!(view.lines()[3].spans()[2].text(), "");
+        let rows = plain_rows(&view);
+        assert!(measure(&view).height() > 3);
+        assert_eq!(rows[2].trim_end(), "│  Name  日本");
+        assert_eq!(
+            rows[3].trim_end(),
+            "│      語日",
+            "a wrapped continuation keeps the label column blank"
+        );
     }
 }

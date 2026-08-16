@@ -5,9 +5,9 @@ use unicode_segmentation::UnicodeSegmentation;
 use unicode_width::UnicodeWidthStr;
 
 use super::{RatatuiStyle, style::convert_color};
-use urushi::{Align, Border, Color, Sides, Style, VerticalAlign, visible_width, wrap_text};
+use urushi::{Align, BlockStyle, Border, Color, Sides, VerticalAlign, visible_width, wrap_text};
 
-/// A stateless ratatui widget backed by an urushi [`Style`].
+/// A stateless ratatui widget backed by an urushi [`BlockStyle`].
 ///
 /// The widget draws into the buffer passed to [`Widget::render`]. It does not
 /// initialize a terminal, read events, or own terminal I/O. Content is plain
@@ -15,12 +15,12 @@ use urushi::{Align, Border, Color, Sides, Style, VerticalAlign, visible_width, w
 #[derive(Debug, Clone, Copy)]
 pub struct RatatuiWidget<'a> {
     content: &'a str,
-    style: &'a Style,
+    style: &'a BlockStyle,
 }
 
 impl<'a> RatatuiWidget<'a> {
     /// Creates a widget that renders `content` with `style`.
-    pub const fn new(content: &'a str, style: &'a Style) -> Self {
+    pub const fn new(content: &'a str, style: &'a BlockStyle) -> Self {
         Self { content, style }
     }
 }
@@ -31,7 +31,7 @@ pub trait RatatuiStyleExt {
     fn widget<'a>(&'a self, content: &'a str) -> RatatuiWidget<'a>;
 }
 
-impl RatatuiStyleExt for Style {
+impl RatatuiStyleExt for BlockStyle {
     fn widget<'a>(&'a self, content: &'a str) -> RatatuiWidget<'a> {
         RatatuiWidget::new(content, self)
     }
@@ -55,7 +55,7 @@ struct BoxParts {
 }
 
 impl BoxParts {
-    const fn from_style(style: &Style) -> Self {
+    const fn from_style(style: &BlockStyle) -> Self {
         Self {
             padding: style.padding_sides(),
             margin: style.margin_sides(),
@@ -451,7 +451,7 @@ mod tests {
     #[test]
     fn converts_colors_and_every_modifier() {
         let converted = RatatuiStyle::from(
-            &Style::new()
+            &BlockStyle::new()
                 .foreground(Color::Rgb(1, 2, 3))
                 .background(Color::Ansi256(212))
                 .bold()
@@ -481,7 +481,7 @@ mod tests {
     #[test]
     fn preserves_border_colors_for_composed_ratatui_widgets() {
         let converted = RatatuiStyle::from(
-            &Style::new()
+            &BlockStyle::new()
                 .border_foreground(Color::Rgb(10, 20, 30))
                 .border_background(Color::Ansi256(236)),
         );
@@ -518,16 +518,17 @@ mod tests {
 
         for (index, expected) in expected.into_iter().enumerate() {
             let converted =
-                RatatuiStyle::from(&Style::new().foreground(Color::Ansi(index as u8))).into_inner();
+                RatatuiStyle::from(&BlockStyle::new().foreground(Color::Ansi(index as u8)))
+                    .into_inner();
             assert_eq!(converted.fg, Some(expected));
         }
     }
 
     #[test]
     fn box_model_properties_are_not_in_the_subset() {
-        let plain = RatatuiStyle::from(&Style::new()).into_inner();
+        let plain = RatatuiStyle::from(&BlockStyle::new()).into_inner();
         let boxed = RatatuiStyle::from(
-            &Style::new()
+            &BlockStyle::new()
                 .padding(1)
                 .margin(1)
                 .border(Border::ROUNDED)
@@ -546,7 +547,7 @@ mod tests {
 
     #[test]
     fn widget_preserves_box_model_alignment_and_cjk_width() {
-        let style = Style::new()
+        let style = BlockStyle::new()
             .foreground(Color::GREEN)
             .background(Color::BLUE)
             .padding((0, 1))
@@ -576,7 +577,7 @@ mod tests {
         let area = Rect::new(0, 0, 5, 3);
         let mut buffer = Buffer::empty(area);
 
-        Style::new()
+        BlockStyle::new()
             .border(Border::NORMAL)
             .widget("日本語")
             .render(area, &mut buffer);
@@ -588,7 +589,7 @@ mod tests {
 
     #[test]
     fn widget_is_safe_for_zero_and_narrow_areas() {
-        let style = Style::new().border(Border::NORMAL).padding(2);
+        let style = BlockStyle::new().border(Border::NORMAL).padding(2);
         let mut empty = Buffer::empty(Rect::new(0, 0, 0, 0));
         style
             .widget("content")
@@ -603,32 +604,32 @@ mod tests {
     #[test]
     fn widget_matches_direct_rendering_for_border_side_combinations() {
         let styles = [
-            Style::new().border(Border::ASCII),
-            Style::new()
+            BlockStyle::new().border(Border::ASCII),
+            BlockStyle::new()
                 .border(Border::ASCII)
                 .border_top(false)
                 .border_right(false)
                 .border_bottom(false)
                 .border_left(false),
-            Style::new()
+            BlockStyle::new()
                 .border(Border::ASCII)
                 .border_right(false)
                 .border_bottom(false)
                 .border_left(false),
-            Style::new()
+            BlockStyle::new()
                 .border(Border::ASCII)
                 .border_top(false)
                 .border_right(false)
                 .border_bottom(false),
-            Style::new()
+            BlockStyle::new()
                 .border(Border::ASCII)
                 .border_right(false)
                 .border_bottom(false),
-            Style::new()
+            BlockStyle::new()
                 .border(Border::ASCII)
                 .border_right(false)
                 .border_left(false),
-            Style::new()
+            BlockStyle::new()
                 .border(Border::ASCII)
                 .border_top(false)
                 .border_bottom(false),
@@ -636,6 +637,7 @@ mod tests {
 
         for style in styles {
             let direct = style.render("x");
+            let direct = direct.into_string();
             let expected: Vec<_> = direct.lines().collect();
             let width = expected
                 .iter()
@@ -664,13 +666,14 @@ mod tests {
         ];
 
         for (case, content) in cases {
-            let style = Style::new()
+            let style = BlockStyle::new()
                 .width(6)
                 .height(4)
                 .padding((1, 1))
                 .border(Border::ASCII)
                 .border_top(false);
             let direct = style.render(content);
+            let direct = direct.into_string();
             let expected: Vec<_> = direct.lines().collect();
             let width = expected
                 .iter()
@@ -697,13 +700,14 @@ mod tests {
                 VerticalAlign::Bottom,
             ] {
                 let content = "日\nx";
-                let style = Style::new()
+                let style = BlockStyle::new()
                     .width(6)
                     .height(7)
                     .padding((1, 1))
                     .align(horizontal)
                     .align_vertical(vertical);
                 let direct = style.render(content);
+                let direct = direct.into_string();
                 let expected: Vec<_> = direct.lines().collect();
                 let area = Rect::new(0, 0, 6, 7);
                 let mut buffer = Buffer::empty(area);
@@ -726,7 +730,7 @@ mod tests {
         let area = Rect::new(0, 0, 4, 4);
 
         for (align, expected_y) in [(VerticalAlign::Center, 1), (VerticalAlign::Bottom, 3)] {
-            let style = Style::new().width(4).height(6).align_vertical(align);
+            let style = BlockStyle::new().width(4).height(6).align_vertical(align);
             let mut buffer = Buffer::empty(area);
 
             style.widget("x").render(area, &mut buffer);
@@ -740,21 +744,21 @@ mod tests {
 
     #[test]
     fn widget_expands_narrow_fixed_width_for_cjk_parity() {
-        let style = Style::new().width(1).height(2);
+        let style = BlockStyle::new().width(1).height(2);
         let direct = style.render("日本");
         let area = Rect::new(0, 0, 2, 2);
         let mut buffer = Buffer::empty(area);
 
         style.widget("日本").render(area, &mut buffer);
 
-        assert_eq!(direct, "日\n本");
+        assert_eq!(direct.as_str(), "日\n本");
         assert_eq!(buffer_line(&buffer, 0), "日");
         assert_eq!(buffer_line(&buffer, 1), "本");
     }
 
     #[test]
     fn widget_preserves_narrow_width_only_clipping() {
-        let style = Style::new().background(Color::BLUE).width(1);
+        let style = BlockStyle::new().background(Color::BLUE).width(1);
         let area = Rect::new(0, 0, 2, 1);
         let mut buffer = Buffer::empty(area);
 
@@ -769,7 +773,7 @@ mod tests {
 
     #[test]
     fn widget_clips_fixed_height_to_the_available_area() {
-        let style = Style::new().width(4).height(6).border(Border::ASCII);
+        let style = BlockStyle::new().width(4).height(6).border(Border::ASCII);
         let area = Rect::new(0, 0, 6, 4);
         let mut buffer = Buffer::empty(area);
 
@@ -783,7 +787,7 @@ mod tests {
 
     #[test]
     fn widget_maximum_dimensions_crop_the_resolved_outer_block() {
-        let layout = Style::new()
+        let layout = BlockStyle::new()
             .width(6)
             .height(4)
             .padding((1, 1))
@@ -792,6 +796,7 @@ mod tests {
             .max_width(6)
             .max_height(4);
         let direct = layout.render("ab");
+        let direct = direct.into_string();
         let expected: Vec<_> = direct.lines().collect();
         let style = layout.background(Color::BLUE);
         let area = Rect::new(0, 0, 12, 8);
@@ -815,7 +820,7 @@ mod tests {
 
     #[test]
     fn widget_maximum_width_does_not_split_a_cjk_cell() {
-        let style = Style::new().background(Color::BLUE).max_width(3);
+        let style = BlockStyle::new().background(Color::BLUE).max_width(3);
         let area = Rect::new(0, 0, 6, 1);
         let mut buffer = Buffer::empty(area);
 
@@ -835,7 +840,7 @@ mod tests {
 
     #[test]
     fn widget_maximum_width_accounts_for_margin_before_a_wide_cell() {
-        let style = Style::new()
+        let style = BlockStyle::new()
             .background(Color::BLUE)
             .margin((0, 0, 0, 1))
             .max_width(2);
@@ -844,7 +849,9 @@ mod tests {
 
         style.widget("日").render(area, &mut buffer);
 
-        assert_eq!(style.render("日"), " ");
+        // Cropping drops the wide cell rather than splitting it, and the freed
+        // cell keeps the block rectangular at the cropped width.
+        assert_eq!(style.render("日").as_str(), "  ");
         assert_eq!(buffer.cell((0, 0)).expect("retained margin").symbol(), " ");
         assert_eq!(
             buffer.cell((1, 0)).expect("ragged crop cell").bg,
@@ -858,7 +865,7 @@ mod tests {
 
     #[test]
     fn widget_maximum_width_uses_grapheme_width_for_zwj_emoji() {
-        let style = Style::new().background(Color::BLUE).max_width(3);
+        let style = BlockStyle::new().background(Color::BLUE).max_width(3);
         let area = Rect::new(0, 0, 6, 1);
         let mut buffer = Buffer::empty(area);
 
@@ -874,7 +881,10 @@ mod tests {
 
     #[test]
     fn widget_maximum_clip_stays_anchored_to_the_requested_area() {
-        let style = Style::new().background(Color::BLUE).width(10).max_width(6);
+        let style = BlockStyle::new()
+            .background(Color::BLUE)
+            .width(10)
+            .max_width(6);
         let buffer_area = Rect::new(5, 0, 10, 1);
         let mut buffer = Buffer::empty(buffer_area);
 
@@ -894,7 +904,7 @@ mod tests {
 
     #[test]
     fn widget_buffer_intersection_only_clips_the_resolved_layout() {
-        let horizontal = Style::new().width(10).max_width(6);
+        let horizontal = BlockStyle::new().width(10).max_width(6);
         let horizontal_area = Rect::new(5, 0, 10, 1);
         let mut horizontal_buffer = Buffer::empty(horizontal_area);
 
@@ -917,7 +927,7 @@ mod tests {
             " "
         );
 
-        let vertical = Style::new().width(1).max_height(4);
+        let vertical = BlockStyle::new().width(1).max_height(4);
         let vertical_area = Rect::new(0, 2, 1, 2);
         let mut vertical_buffer = Buffer::empty(vertical_area);
 
@@ -938,9 +948,9 @@ mod tests {
     #[test]
     fn widget_preserves_legacy_partial_buffer_layout_without_a_binding_maximum() {
         let styles = [
-            Style::new().width(10),
-            Style::new().width(10).max_width(0),
-            Style::new().width(10).max_width(99),
+            BlockStyle::new().width(10),
+            BlockStyle::new().width(10).max_width(0),
+            BlockStyle::new().width(10).max_width(99),
         ];
         for style in styles {
             let buffer_area = Rect::new(5, 0, 5, 1);
@@ -954,9 +964,9 @@ mod tests {
         }
 
         let styles = [
-            Style::new().width(1).height(4),
-            Style::new().width(1).height(4).max_height(0),
-            Style::new().width(1).height(4).max_height(99),
+            BlockStyle::new().width(1).height(4),
+            BlockStyle::new().width(1).height(4).max_height(0),
+            BlockStyle::new().width(1).height(4).max_height(99),
         ];
         for style in styles {
             let buffer_area = Rect::new(0, 2, 1, 2);
@@ -979,7 +989,7 @@ mod tests {
 
     #[test]
     fn widget_styles_only_enabled_border_edges() {
-        let style = Style::new()
+        let style = BlockStyle::new()
             .foreground(Color::GREEN)
             .border(Border::NORMAL)
             .border_top(false)
@@ -1006,7 +1016,7 @@ mod tests {
     fn widget_draws_the_configured_edge_in_degenerate_areas() {
         let cases = [
             (
-                Style::new()
+                BlockStyle::new()
                     .border(Border::ASCII)
                     .border_right(false)
                     .border_bottom(false)
@@ -1014,7 +1024,7 @@ mod tests {
                 "-",
             ),
             (
-                Style::new()
+                BlockStyle::new()
                     .border(Border::ASCII)
                     .border_top(false)
                     .border_right(false)
@@ -1022,7 +1032,7 @@ mod tests {
                 "|",
             ),
             (
-                Style::new()
+                BlockStyle::new()
                     .border(Border::ASCII)
                     .border_top(false)
                     .border_right(false)
@@ -1030,7 +1040,7 @@ mod tests {
                 "-",
             ),
             (
-                Style::new()
+                BlockStyle::new()
                     .border(Border::ASCII)
                     .border_top(false)
                     .border_bottom(false)

@@ -2,7 +2,7 @@
 
 use ratatui::style::{Color as RatatuiColor, Modifier as RatatuiModifier, Style as InnerStyle};
 
-use urushi::{Color, Modifier, Style};
+use urushi::{BlockStyle, Color, Modifier, TextStyle};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct RatatuiStyle {
@@ -19,8 +19,10 @@ impl RatatuiStyle {
     }
 }
 
-impl From<&Style> for RatatuiStyle {
-    fn from(value: &Style) -> Self {
+impl From<&TextStyle> for RatatuiStyle {
+    /// Converts a text style. A [`TextStyle`] carries no geometry, so the border
+    /// style stays empty.
+    fn from(value: &TextStyle) -> Self {
         let mut style = InnerStyle::new();
         if let Some(color) = value.foreground_color() {
             style = style.fg(convert_color(color));
@@ -28,7 +30,18 @@ impl From<&Style> for RatatuiStyle {
         if let Some(color) = value.background_color() {
             style = style.bg(convert_color(color));
         }
-        let modifier = convert_modifier(value.modifiers());
+        Self {
+            content: style.add_modifier(convert_modifier(value.modifiers())),
+            border: InnerStyle::new(),
+        }
+    }
+}
+
+impl From<&BlockStyle> for RatatuiStyle {
+    /// Converts a block style: its fill becomes the content style and its
+    /// border colors the border style.
+    fn from(value: &BlockStyle) -> Self {
+        let content = Self::from(value.text()).content;
         let mut border = InnerStyle::new();
         if let Some(color) = value.border_foreground_color() {
             border = border.fg(convert_color(color));
@@ -36,10 +49,7 @@ impl From<&Style> for RatatuiStyle {
         if let Some(color) = value.border_background_color() {
             border = border.bg(convert_color(color));
         }
-        Self {
-            content: style.add_modifier(modifier),
-            border,
-        }
+        Self { content, border }
     }
 }
 
@@ -105,7 +115,7 @@ mod tests {
     #[test]
     fn converts_active_modifiers() {
         let converted = RatatuiStyle::from(
-            &Style::new()
+            &TextStyle::new()
                 .add(Modifier::BOLD | Modifier::ITALIC)
                 .remove(Modifier::ITALIC),
         )

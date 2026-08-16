@@ -1,92 +1,89 @@
-//! ANSI- and CJK-aware helpers for composing rendered text blocks.
+//! Composition of rendered blocks.
+//!
+//! These compose output this crate did not lay out — text adopted with
+//! [`RenderedBlock::from_ansi`] — or output destined straight for a writer.
+//! Content that participates in layout is expressed as a [`View`](crate::View)
+//! and resolved instead.
 
-use crate::{Align, VerticalAlign, visible_width};
+use crate::{Align, VerticalAlign};
+
+use super::layout::Size;
+use super::rendered::RenderedBlock;
 
 /// Joins rendered blocks side by side.
 ///
-/// Each line is padded to the maximum visible width of its own block. Shorter
-/// blocks are placed at the top, center, or bottom of the tallest block.
-/// ANSI escape sequences and East Asian wide characters are measured with
-/// [`visible_width`].
-pub fn join_horizontal<T: AsRef<str>>(align: VerticalAlign, blocks: &[T]) -> String {
+/// Shorter blocks are placed at the top, center, or bottom of the tallest
+/// block. Each block carries the size it was measured at, so no escape
+/// sequence is measured again here.
+pub fn join_horizontal(align: VerticalAlign, blocks: &[RenderedBlock]) -> RenderedBlock {
     match blocks {
-        [] => return String::new(),
-        [block] => return block.as_ref().to_string(),
+        [] => return RenderedBlock::empty(),
+        [block] => return block.clone(),
         _ => {}
     }
 
-    let blocks: Vec<Vec<&str>> = blocks
+    let height = blocks
         .iter()
-        .map(|block| block.as_ref().split('\n').collect())
-        .collect();
-    let widths: Vec<usize> = blocks
-        .iter()
-        .map(|block| {
-            block
-                .iter()
-                .map(|line| visible_width(line))
-                .max()
-                .unwrap_or(0)
-        })
-        .collect();
-    let max_height = blocks.iter().map(Vec::len).max().unwrap_or(0);
+        .map(|block| block.size().height())
+        .max()
+        .unwrap_or(0);
+    let width = blocks.iter().map(|block| block.size().width()).sum();
 
-    let mut rows = Vec::with_capacity(max_height);
-    for row in 0..max_height {
-        let mut joined = String::new();
-        for (block, width) in blocks.iter().zip(&widths) {
-            let offset = vertical_offset(align, max_height - block.len());
-            if let Some(line) = row.checked_sub(offset).and_then(|index| block.get(index)) {
-                joined.push_str(line);
-                joined.push_str(&" ".repeat(width.saturating_sub(visible_width(line))));
-            } else {
-                joined.push_str(&" ".repeat(*width));
+    let mut rows = vec![String::new(); height];
+    for block in blocks {
+        let block_rows = block.rows();
+        let blank = " ".repeat(block.size().width());
+        let offset = vertical_offset(align, height - block_rows.len());
+        for (index, row) in rows.iter_mut().enumerate() {
+            match index
+                .checked_sub(offset)
+                .and_then(|source| block_rows.get(source))
+            {
+                Some(source) => row.push_str(source),
+                None => row.push_str(&blank),
             }
         }
-        rows.push(joined);
     }
-    rows.join("\n")
+
+    RenderedBlock::measured(rows.join("\n"), Size::new(width, height))
 }
 
 /// Stacks rendered blocks vertically.
 ///
-/// Every line is padded to the maximum visible width of all blocks, using the
-/// requested horizontal alignment. ANSI escape sequences and East Asian wide
-/// characters are measured with [`visible_width`].
-pub fn join_vertical<T: AsRef<str>>(align: Align, blocks: &[T]) -> String {
+/// Every row is padded to the widest block using the requested horizontal
+/// alignment. Each block carries the size it was measured at, so no escape
+/// sequence is measured again here.
+pub fn join_vertical(align: Align, blocks: &[RenderedBlock]) -> RenderedBlock {
     match blocks {
-        [] => return String::new(),
-        [block] => return block.as_ref().to_string(),
+        [] => return RenderedBlock::empty(),
+        [block] => return block.clone(),
         _ => {}
     }
 
-    let blocks: Vec<Vec<&str>> = blocks
-        .iter()
-        .map(|block| block.as_ref().split('\n').collect())
-        .collect();
     let width = blocks
         .iter()
-        .flatten()
-        .map(|line| visible_width(line))
+        .map(|block| block.size().width())
         .max()
         .unwrap_or(0);
 
     let mut rows = Vec::new();
     for block in blocks {
-        for line in block {
-            let gap = width.saturating_sub(visible_width(line));
-            let (left, right) = match align {
-                Align::Left => (0, gap),
-                Align::Center => (gap / 2, gap - gap / 2),
-                Align::Right => (gap, 0),
-            };
-            rows.push(format!("{}{}{}", " ".repeat(left), line, " ".repeat(right)));
+        let gap = width - block.size().width();
+        let (left, right) = match align {
+            Align::Left => (0, gap),
+            Align::Center => (gap / 2, gap - gap / 2),
+            Align::Right => (gap, 0),
+        };
+        for row in block.rows() {
+            rows.push(format!("{}{row}{}", " ".repeat(left), " ".repeat(right)));
         }
     }
-    rows.join("\n")
+
+    let height = rows.len();
+    RenderedBlock::measured(rows.join("\n"), Size::new(width, height))
 }
 
-fn vertical_offset(align: VerticalAlign, gap: usize) -> usize {
+const fn vertical_offset(align: VerticalAlign, gap: usize) -> usize {
     match align {
         VerticalAlign::Top => 0,
         // This matches lipgloss's center position: an odd extra row appears

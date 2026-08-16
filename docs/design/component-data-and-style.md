@@ -30,10 +30,10 @@ or `TreeRenderer`.
 
 | Value | Owns | Does not own |
 | --- | --- | --- |
-| Component data | Semantic content, hierarchy, structural visibility, offsets, and data inspection | `Style` values, marker callbacks, terminal capabilities, or output lifecycle |
+| Component data | Semantic content, hierarchy, structural visibility, offsets, and data inspection | `TextStyle` values, marker callbacks, terminal capabilities, or output lifecycle |
 | Component style | Logical styles, marker and indentation policy, component layout, and `View` composition | Component content, writers, terminal state, or event loops |
 | `ComponentStyles` | Theme-wide default component styles | Runtime component data |
-| `View` | Composed logical lines, spans, and styles | Terminal capability decisions or output |
+| `View` | The composed tree of text, blocks, rows, and columns, and its logical styles | Terminal capability decisions or output |
 | Output adapter | Translation of `View` or logical styles for a concrete backend | Component semantics or application workflow |
 
 Data builders should describe content and structure rather than appearance.

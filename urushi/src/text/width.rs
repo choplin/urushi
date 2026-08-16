@@ -114,20 +114,6 @@ pub(super) fn ansi_graphemes(text: &str) -> (Vec<AnsiGrapheme>, String) {
     (output, trailing_controls)
 }
 
-/// Makes ANSI SGR and OSC 8 scopes self-contained on every rendered row.
-pub(crate) fn normalize_ansi_rows(rows: &mut [String]) {
-    let mut state = AnsiState::default();
-    for row in rows {
-        let reopen = state.reopen();
-        observe_ansi_sequences(row, &mut state);
-        let closures = state.closures();
-        if !reopen.is_empty() {
-            row.insert_str(0, &reopen);
-        }
-        row.push_str(&closures);
-    }
-}
-
 fn observe_ansi_sequences(text: &str, state: &mut AnsiState) {
     let mut offset = 0;
     while let Some(relative) = text[offset..].find('\u{1b}') {
@@ -216,15 +202,6 @@ impl AnsiState {
         }
     }
 
-    fn reopen(&self) -> String {
-        let mut output = String::new();
-        if let Some(hyperlink) = &self.hyperlink_reopen {
-            output.push_str(hyperlink);
-        }
-        output.push_str(&self.sgr_reopen);
-        output
-    }
-
     fn closures(&self) -> String {
         let mut output = String::new();
         if self.hyperlink_reopen.is_some() {
@@ -287,31 +264,6 @@ mod tests {
         assert_eq!(
             truncate_visible_width("👩\x1b[31m\u{200d}💻x", 2),
             "👩\x1b[31m\u{200d}💻\x1b[0m"
-        );
-    }
-
-    #[test]
-    fn normalizes_multiline_sgr_and_hyperlink_scopes() {
-        let mut rows = vec![
-            "\x1b[38;2;255;0;0mred".to_string(),
-            "text\x1b[0m".to_string(),
-        ];
-        normalize_ansi_rows(&mut rows);
-        assert_eq!(rows[0], "\x1b[38;2;255;0;0mred\x1b[0m");
-        assert_eq!(rows[1], "\x1b[38;2;255;0;0mtext\x1b[0m");
-
-        let mut links = vec![
-            "\x1b]8;;https://example.com\x1b\\link".to_string(),
-            "text\x1b]8;;\x1b\\".to_string(),
-        ];
-        normalize_ansi_rows(&mut links);
-        assert_eq!(
-            links[0],
-            "\x1b]8;;https://example.com\x1b\\link\x1b]8;;\x1b\\"
-        );
-        assert_eq!(
-            links[1],
-            "\x1b]8;;https://example.com\x1b\\text\x1b]8;;\x1b\\"
         );
     }
 

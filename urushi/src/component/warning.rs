@@ -1,6 +1,6 @@
 //! Titled warning messages with a rail-aligned body.
 
-use crate::{ComponentRole, ComponentStyles, Line, View, text::wrap_text};
+use crate::{Align, ComponentRole, ComponentStyles, VerticalAlign, View, text::wrap_text};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Warning {
@@ -17,30 +17,38 @@ impl Warning {
     }
 
     pub fn view(&self, styles: &ComponentStyles, width: usize) -> View {
-        let muted = styles.style(ComponentRole::Muted).clone();
-        let warning = styles.style(ComponentRole::Warning).clone();
-        let body = styles.style(ComponentRole::Body).clone();
-        let mut view = View::line(Line::styled("│", muted.clone())).push(
-            Line::new()
-                .span("▲", warning.clone())
-                .span("  ", muted.clone())
-                .span(self.title.clone(), warning),
-        );
+        let muted = styles.text_style(ComponentRole::Muted).clone();
+        let warning = styles.text_style(ComponentRole::Warning).clone();
+        let body = styles.text_style(ComponentRole::Body).clone();
+        let mut rows = vec![
+            View::text("│", muted.clone()),
+            View::row(
+                VerticalAlign::Top,
+                [
+                    View::text("▲", warning.clone()),
+                    View::text("  ", muted.clone()),
+                    View::text(self.title.clone(), warning),
+                ],
+            ),
+        ];
         for line in wrap_text(&self.message, width.saturating_sub(3).max(1)) {
-            view = view.push(
-                Line::new()
-                    .span("│", muted.clone())
-                    .span("  ", muted.clone())
-                    .span(line, body.clone()),
-            );
+            rows.push(View::row(
+                VerticalAlign::Top,
+                [
+                    View::text("│", muted.clone()),
+                    View::text("  ", muted.clone()),
+                    View::text(line, body.clone()),
+                ],
+            ));
         }
-        view
+        View::column(Align::Left, rows)
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_support::plain;
     use crate::{Color, SemanticTokens, Theme};
 
     #[test]
@@ -58,7 +66,6 @@ mod tests {
             border: Color::Ansi(8),
         });
         let view = Warning::new("Caution", "Careful").view(theme.components(), 80);
-        assert_eq!(view.lines()[1].spans()[2].text(), "Caution");
-        assert_eq!(view.lines()[2].spans()[2].text(), "Careful");
+        assert_eq!(plain(&view), "│\n▲  Caution\n│  Careful");
     }
 }

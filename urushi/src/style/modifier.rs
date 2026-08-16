@@ -5,7 +5,7 @@ use std::ops::BitOr;
 /// A set of terminal text modifiers.
 ///
 /// Modifiers are stored as a bitset so several flags can be passed to
-/// [`Style::add`](crate::Style::add) or [`Style::remove`](crate::Style::remove)
+/// [`TextStyle::add`](crate::TextStyle::add) or [`TextStyle::remove`](crate::TextStyle::remove)
 /// at once.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
 pub struct Modifier(u16);

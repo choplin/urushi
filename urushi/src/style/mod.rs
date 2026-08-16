@@ -1,15 +1,19 @@
-//! Logical styling primitives and box-model rendering.
+//! Logical styling primitives and the block box model.
 
+mod block;
 mod border;
 mod color;
 mod layout;
-mod logical;
 mod modifier;
 mod property;
+mod text;
 
+pub use block::BlockStyle;
 pub use border::Border;
 pub use color::Color;
 pub use layout::{Align, Sides, VerticalAlign};
-pub use logical::Style;
 pub use modifier::Modifier;
-pub use property::{StyleProperty, StylePropertyKey};
+pub use property::{
+    BlockStyleProperty, BlockStylePropertyKey, TextStyleProperty, TextStylePropertyKey,
+};
+pub use text::TextStyle;

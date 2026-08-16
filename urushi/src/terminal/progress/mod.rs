@@ -15,10 +15,11 @@ use super::StderrTerminal;
 fn themed_message(terminal: &StderrTerminal, styles: &ComponentStyles, message: &str) -> String {
     terminal
         .renderer
-        .render(&crate::View::line(crate::Line::styled(
+        .render(&crate::View::text(
             message,
-            styles.style(ComponentRole::Body).clone(),
-        )))
+            styles.text_style(ComponentRole::Body).clone(),
+        ))
+        .into_string()
 }
 
 #[cfg(test)]

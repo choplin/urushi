@@ -14,8 +14,9 @@ Rust has excellent TUI foundations ([ratatui](https://ratatui.rs)) and several
 prompt libraries, but no shared styling substrate that works across plain CLI
 output, interactive prompts, and full TUIs. `urushi` aims to fill that gap:
 
-- **Standalone first.** A `Style` renders to a plain ANSI `String`, so it
-  works with `println!` — no terminal setup, raw mode, or event loop.
+- **Standalone first.** A `BlockStyle` renders to a block that displays as a
+  plain ANSI string, so it works with `println!` — no terminal setup, raw mode,
+  or event loop.
 - **Ride the ratatui ecosystem via an adapter.** The `urushi-tui` crate lets
   the same styles be used as ratatui widgets, mapping the
   fg/bg/modifier subset onto `ratatui::style::Style` and carrying the box
@@ -57,7 +58,7 @@ cargo run --example cjk_showcase
 Define one light theme and one dark theme, choose `ColorScheme` explicitly,
 then resolve a component role through the profile of the writer that will
 receive it. The runnable example uses the public path from `ThemeSet` to
-`Style::render`:
+`BlockStyle::render`:
 
 ```sh
 cargo run -p urushi --example themed_output
@@ -89,7 +90,7 @@ palette.
 ```rust
 use urushi_tui::RatatuiStyleExt as _;
 
-let panel = profile.resolve_style(&theme.style(ComponentRole::PanelFocused));
+let panel = profile.resolve_block_style(&theme.block_style(PanelRole::PanelFocused));
 frame.render_widget(panel.widget("保存しました"), frame.area());
 ```
 
@@ -101,9 +102,9 @@ knows the backend capability.
 
 `urushi_tui::RatatuiStyleExt::widget` carries margin, border, padding, fixed width, and alignment
 into the ratatui `Buffer`, including CJK-aware clipping. It is stateless and
-does not initialize or restore the terminal. `RatatuiStyle::from(&style)` is
-available when only foreground, background, and text modifiers are needed;
-that conversion deliberately omits the box model and border colors.
+does not initialize or restore the terminal. `RatatuiStyle::from(&style)` converts a
+`TextStyle` when only foreground, background, and text modifiers are needed;
+that conversion carries no geometry, because a `TextStyle` has none.
 
 Run the complete Theme → plain CLI / ratatui example with:
 
@@ -150,12 +151,12 @@ the left of the prompt's starting position.
 
 ## Roadmap
 
-- [x] `Style` builder: colors, modifiers, padding, margin, border, width, align
+- [x] `TextStyle` / `BlockStyle` builders: colors, modifiers, padding, margin, border, width, align
 - [x] ANSI-aware width measurement and CJK-aware word wrap
 - [x] Composition helpers (`join_horizontal`, `join_vertical`)
 - [x] Color profile detection and degradation (truecolor → 256 → 16), `NO_COLOR`, non-TTY
 - [ ] Adaptive colors (light/dark terminal backgrounds)
-- [x] Correct re-styling of content that already contains ANSI sequences (nested styles)
+- [x] Nested styles as a view tree (`View::text` / `block` / `row` / `column`) resolved in one layout pass, rather than re-styling already-rendered text
 - [x] Theme layer: per-component style sets derived from a small set of semantic tokens
 - [x] `urushi-tui`: box-model Widget and loss-aware Ratatui style conversion
 - [x] `urushi-prompt`: themed `Form` / `Group` with `Input`, `Select`, `Confirm`, and synchronous validation

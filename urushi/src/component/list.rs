@@ -1,6 +1,6 @@
 //! Renderer-neutral lists with an independent public model.
 
-use crate::{ListRole, Style, View};
+use crate::{ListRole, TextStyle, View};
 
 use super::traversable::{Traversable, TraversalStyles, render as render_traversable};
 
@@ -228,9 +228,9 @@ impl Traversable for ListItem {
 /// Presentation policy used to compose a [`List`] into a [`View`].
 #[derive(Debug, Clone)]
 pub struct ListStyle {
-    item: Style,
-    enumerator_style: Style,
-    indenter_style: Style,
+    item: TextStyle,
+    enumerator_style: TextStyle,
+    indenter_style: TextStyle,
     enumerator: ListEnumerator,
     indenter: ListIndenter,
 }
@@ -247,7 +247,7 @@ impl PartialEq for ListStyle {
 
 impl ListStyle {
     /// Creates a list style with the default bullet and continuation policies.
-    pub fn new(item: Style, enumerator: Style, indenter: Style) -> Self {
+    pub fn new(item: TextStyle, enumerator: TextStyle, indenter: TextStyle) -> Self {
         Self {
             item,
             enumerator_style: enumerator,
@@ -258,7 +258,7 @@ impl ListStyle {
     }
 
     /// Returns the style assigned to one logical list role.
-    pub fn style(&self, role: ListRole) -> &Style {
+    pub fn style(&self, role: ListRole) -> &TextStyle {
         match role {
             ListRole::Item => &self.item,
             ListRole::Enumerator => &self.enumerator_style,
@@ -268,7 +268,7 @@ impl ListStyle {
 
     /// Replaces the style assigned to one logical list role.
     #[must_use]
-    pub fn with_style(mut self, role: ListRole, style: Style) -> Self {
+    pub fn with_style(mut self, role: ListRole, style: TextStyle) -> Self {
         match role {
             ListRole::Item => self.item = style,
             ListRole::Enumerator => self.enumerator_style = style,
@@ -279,19 +279,19 @@ impl ListStyle {
 
     /// Replaces the item style.
     #[must_use]
-    pub fn item_style(self, style: Style) -> Self {
+    pub fn item_style(self, style: TextStyle) -> Self {
         self.with_style(ListRole::Item, style)
     }
 
     /// Replaces the marker style.
     #[must_use]
-    pub fn enumerator_style(self, style: Style) -> Self {
+    pub fn enumerator_style(self, style: TextStyle) -> Self {
         self.with_style(ListRole::Enumerator, style)
     }
 
     /// Replaces the continuation style.
     #[must_use]
-    pub fn indenter_style(self, style: Style) -> Self {
+    pub fn indenter_style(self, style: TextStyle) -> Self {
         self.with_style(ListRole::Indenter, style)
     }
 
@@ -312,7 +312,7 @@ impl ListStyle {
     /// Composes list data into a renderer-neutral view.
     pub fn view(&self, list: &List) -> View {
         if list.hidden {
-            return View::new();
+            return View::empty();
         }
 
         let traversal_styles = TraversalStyles {
@@ -322,7 +322,7 @@ impl ListStyle {
         };
         let items = visible_items(&list.items, list.offset);
         render_traversable(
-            View::new(),
+            Vec::new(),
             &items,
             &traversal_styles,
             ListPosition::new,
@@ -406,7 +406,8 @@ fn visible_items(items: &[ListItem], offset: ItemOffset) -> Vec<&ListItem> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{Color, ComponentStyles, SemanticTokens, visible_width};
+    use crate::test_support::{plain, plain_rows, style_at};
+    use crate::{Color, ComponentStyles, SemanticTokens, measure};
 
     fn styles() -> ComponentStyles {
         ComponentStyles::from_tokens(&SemanticTokens {
@@ -423,22 +424,9 @@ mod tests {
         })
     }
 
-    fn plain(view: &View) -> String {
-        view.lines()
-            .iter()
-            .map(|line| {
-                line.spans()
-                    .iter()
-                    .map(|span| span.text())
-                    .collect::<String>()
-            })
-            .collect::<Vec<_>>()
-            .join("\n")
-    }
-
     #[test]
     fn renders_empty_flat_and_nested_lists() {
-        assert!(styles().list().view(&List::new()).is_empty());
+        assert!(measure(&styles().list().view(&List::new())).is_empty());
 
         let list = List::new()
             .item("alpha")
@@ -527,9 +515,9 @@ mod tests {
 
     #[test]
     fn supports_custom_markers_styles_visibility_and_offsets() {
-        let item = Style::new().foreground(Color::GREEN);
-        let enumerator = Style::new().foreground(Color::BLUE);
-        let indenter = Style::new().foreground(Color::YELLOW);
+        let item = TextStyle::new().foreground(Color::GREEN);
+        let enumerator = TextStyle::new().foreground(Color::BLUE);
+        let indenter = TextStyle::new().foreground(Color::YELLOW);
         let list = List::new()
             .items([
                 ListItem::new("skip"),
@@ -549,10 +537,10 @@ mod tests {
         let view = list_style.view(&list);
 
         assert_eq!(plain(&view), "[0] parent\n→   [0] child");
-        assert_eq!(view.lines()[0].spans()[0].style(), &enumerator);
-        assert_eq!(view.lines()[0].spans()[1].style(), &item);
-        assert_eq!(view.lines()[1].spans()[0].style(), &indenter);
-        assert_eq!(view.lines()[1].spans()[1].style(), &enumerator);
+        assert_eq!(style_at(&view, 0, 0), enumerator);
+        assert_eq!(style_at(&view, 0, 4), item);
+        assert_eq!(style_at(&view, 1, 0), indenter);
+        assert_eq!(style_at(&view, 1, 4), enumerator);
     }
 
     #[test]
@@ -581,17 +569,18 @@ mod tests {
         let view = list_style.view(&list);
 
         assert_eq!(plain(&view), "1. 日本語\n   second\n2. 終端\n   続き");
-        for pair in view.lines().chunks_exact(2) {
-            assert_eq!(
-                visible_width(pair[0].spans()[0].text()),
-                visible_width(pair[1].spans()[0].text())
-            );
-        }
+        let rows = plain_rows(&view);
+        assert!(
+            rows.iter().all(|row| row.starts_with("1. ")
+                || row.starts_with("2. ")
+                || row.starts_with("   ")),
+            "a continuation aligns under its marker: {rows:?}"
+        );
     }
 
     #[test]
     fn hidden_list_returns_an_empty_view() {
         let list = List::new().item("item").hidden(true);
-        assert!(styles().list().view(&list).is_empty());
+        assert!(measure(&styles().list().view(&list)).is_empty());
     }
 }

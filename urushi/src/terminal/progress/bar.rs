@@ -2,7 +2,7 @@
 
 use std::io;
 
-use crate::{ComponentRole, ComponentStyles, Line, OutputMode, View};
+use crate::{ComponentRole, ComponentStyles, OutputMode, View};
 
 use super::{
     StderrTerminal,
@@ -32,14 +32,20 @@ impl ProgressBar {
     ) -> io::Result<Self> {
         let live = match terminal.mode() {
             OutputMode::Live => {
-                let rail = terminal.renderer.render(&View::line(Line::styled(
-                    "│",
-                    styles.style(ComponentRole::Muted).clone(),
-                )));
-                let progress = terminal.renderer.render(&View::line(Line::styled(
-                    "{wide_bar}",
-                    styles.style(ComponentRole::Accent).clone(),
-                )));
+                let rail = terminal
+                    .renderer
+                    .render(&View::text(
+                        "│",
+                        styles.text_style(ComponentRole::Muted).clone(),
+                    ))
+                    .into_string();
+                let progress = terminal
+                    .renderer
+                    .render(&View::text(
+                        "{wide_bar}",
+                        styles.text_style(ComponentRole::Accent).clone(),
+                    ))
+                    .into_string();
                 Some(LiveRegion::progress(
                     total,
                     &rail,

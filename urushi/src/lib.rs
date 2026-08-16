@@ -1,18 +1,21 @@
 //! Composable styling and rendering for terminal applications.
 //!
 //! `urushi` separates logical styles, renderer-neutral component views, output
-//! rendering, and terminal lifecycle. Basic [`Style`] rendering returns a
-//! `String`, so it composes with `println!`, logging, or any other place text
-//! goes. The optional `terminal` feature adds stderr output and live progress.
+//! rendering, and terminal lifecycle. Presentation splits in two: a [`TextStyle`]
+//! is everything a terminal can express about a run of text, and a
+//! [`BlockStyle`] is a rectangle. [`BlockStyle::render`] returns a
+//! [`RenderedBlock`] that displays as a string, so it composes with `println!`,
+//! logging, or any other place text goes. The optional `terminal` feature adds
+//! stderr output and live progress.
 //!
 //! The API is modeled after Go's [lipgloss](https://github.com/charmbracelet/lipgloss).
 //!
 //! # Example
 //!
 //! ```
-//! use urushi::{Align, Border, Color, Style};
+//! use urushi::{Align, BlockStyle, Border, Color};
 //!
-//! let style = Style::new()
+//! let style = BlockStyle::new()
 //!     .foreground(Color::Ansi256(212))
 //!     .border(Border::ROUNDED)
 //!     .padding((0, 1))
@@ -25,10 +28,12 @@
 //! Width calculations are aware of East Asian wide characters, so padding,
 //! borders, and alignment stay correct for CJK text.
 //!
-//! Reusable components return [`View`] values containing logical [`Style`]
-//! values. [`AnsiRenderer`] resolves those styles for a [`TerminalProfile`] at
-//! the output boundary. Applications retain ownership of workflow-specific
-//! composition such as command headers and final outcomes.
+//! Reusable components return [`View`] values: trees of text, blocks, rows, and
+//! columns carrying logical styles. [`resolve`] turns a tree into one
+//! [`ResolvedView`] rectangle, and [`AnsiRenderer`] resolves the styles in it
+//! for a [`TerminalProfile`] at the output boundary. Applications retain
+//! ownership of workflow-specific composition such as command headers and final
+//! outcomes.
 //!
 //! # Theme-aware CLI output
 //!
@@ -39,7 +44,7 @@
 //! use std::io::stdout;
 //!
 //! use urushi::{
-//!     Color, ColorScheme, ComponentRole, SemanticTokens, TerminalProfile, Theme, ThemeSet,
+//!     Color, ColorScheme, PanelRole, SemanticTokens, TerminalProfile, Theme, ThemeSet,
 //! };
 //!
 //! let light = SemanticTokens {
@@ -60,8 +65,8 @@
 //! let theme = themes.select(ColorScheme::Dark);
 //! let output = stdout();
 //! let profile = TerminalProfile::detect_for(&output);
-//! let panel = profile.resolve_style(&theme.style(ComponentRole::PanelFocused));
-//! assert!(!panel.render("保存しました").is_empty());
+//! let panel = profile.resolve_block_style(&theme.block_style(PanelRole::PanelFocused));
+//! assert!(!panel.render("保存しました").as_str().is_empty());
 //! ```
 //!
 //! Call [`TerminalProfile::detect_for`] for each output writer rather than
@@ -77,6 +82,8 @@ mod component;
 mod render;
 mod style;
 mod terminal;
+#[cfg(test)]
+mod test_support;
 mod text;
 mod theme;
 mod view;
@@ -90,14 +97,18 @@ pub use component::{
 };
 pub use render::AnsiRenderer;
 pub use style::{
-    Align, Border, Color, Modifier, Sides, Style, StyleProperty, StylePropertyKey, VerticalAlign,
+    Align, BlockStyle, BlockStyleProperty, BlockStylePropertyKey, Border, Color, Modifier, Sides,
+    TextStyle, TextStyleProperty, TextStylePropertyKey, VerticalAlign,
 };
 pub use terminal::{AnsiPolicy, ColorProfile, TerminalProfile};
 #[cfg(feature = "terminal")]
 pub use terminal::{OutputMode, ProgressBar, Spinner, StderrTerminal};
 pub use text::{visible_width, wrap_text};
 pub use theme::{
-    ColorScheme, ComponentRole, ComponentStyles, ListRole, SemanticTokens, TableRole, Theme,
-    ThemeRole, ThemeSet, TreeRole,
+    BlockThemeRole, ColorScheme, ComponentRole, ComponentStyles, ListRole, PanelRole,
+    SemanticTokens, TableRole, TextThemeRole, Theme, ThemeSet, TreeRole,
 };
-pub use view::{Line, Span, View, join_horizontal, join_vertical};
+pub use view::{
+    Limits, RenderedBlock, ResolvedView, Size, StyledGrapheme, View, join_horizontal,
+    join_vertical, measure, resolve,
+};

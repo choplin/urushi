@@ -1,15 +1,13 @@
 use std::error::Error;
 
 use ratatui::{Terminal, backend::TestBackend};
-use urushi::{
-    AnsiPolicy, Color, ColorProfile, ComponentRole, SemanticTokens, TerminalProfile, Theme,
-};
+use urushi::{AnsiPolicy, Color, ColorProfile, PanelRole, SemanticTokens, TerminalProfile, Theme};
 use urushi_tui::RatatuiStyleExt as _;
 
 fn main() -> Result<(), Box<dyn Error>> {
     let theme = Theme::from_tokens(tokens());
     let plain_profile = TerminalProfile::new(ColorProfile::TrueColor, AnsiPolicy::Enabled);
-    let panel = plain_profile.resolve_style(&theme.style(ComponentRole::PanelFocused));
+    let panel = plain_profile.resolve_block_style(&theme.block_style(PanelRole::PanelFocused));
     println!("plain CLI:\n{}", panel.render("保存しました"));
 
     let backend = TestBackend::new(16, 3);

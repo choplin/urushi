@@ -1,6 +1,6 @@
 //! Renderer-neutral trees with reusable owned nodes.
 
-use crate::{Line, Style, TreeRole, View};
+use crate::{TextStyle, TreeRole, View};
 
 use super::traversable::{Traversable, TraversalStyles, render as render_traversable};
 
@@ -41,13 +41,13 @@ impl SiblingPosition {
 /// Produces the single-line marker drawn before one visible tree node.
 ///
 /// Line breaks in returned markers are normalized to spaces so a marker cannot
-/// violate the one-horizontal-row contract of [`Line`].
+/// violate the one-horizontal-row contract of a row cell.
 pub type TreeEnumerator = fn(SiblingPosition) -> String;
 
 /// Produces the single-line continuation drawn beneath one visible tree node.
 ///
 /// Line breaks in returned markers are normalized to spaces so a marker cannot
-/// violate the one-horizontal-row contract of [`Line`].
+/// violate the one-horizontal-row contract of a row cell.
 pub type TreeIndenter = fn(SiblingPosition) -> String;
 
 /// Draws the standard square tree branch for one node.
@@ -171,10 +171,10 @@ impl From<&str> for TreeNode {
 /// Presentation policy used to compose a [`Tree`] into a [`View`].
 #[derive(Debug, Clone)]
 pub struct TreeStyle {
-    root: Style,
-    item: Style,
-    enumerator_style: Style,
-    indenter_style: Style,
+    root: TextStyle,
+    item: TextStyle,
+    enumerator_style: TextStyle,
+    indenter_style: TextStyle,
     enumerator: TreeEnumerator,
     indenter: TreeIndenter,
 }
@@ -192,7 +192,12 @@ impl PartialEq for TreeStyle {
 
 impl TreeStyle {
     /// Creates a tree style with the default branch and continuation policies.
-    pub fn new(root: Style, item: Style, enumerator: Style, indenter: Style) -> Self {
+    pub fn new(
+        root: TextStyle,
+        item: TextStyle,
+        enumerator: TextStyle,
+        indenter: TextStyle,
+    ) -> Self {
         Self {
             root,
             item,
@@ -204,7 +209,7 @@ impl TreeStyle {
     }
 
     /// Returns the style assigned to one logical tree role.
-    pub fn style(&self, role: TreeRole) -> &Style {
+    pub fn style(&self, role: TreeRole) -> &TextStyle {
         match role {
             TreeRole::Root => &self.root,
             TreeRole::Item => &self.item,
@@ -215,7 +220,7 @@ impl TreeStyle {
 
     /// Replaces the style assigned to one logical tree role.
     #[must_use]
-    pub fn with_style(mut self, role: TreeRole, style: Style) -> Self {
+    pub fn with_style(mut self, role: TreeRole, style: TextStyle) -> Self {
         match role {
             TreeRole::Root => self.root = style,
             TreeRole::Item => self.item = style,
@@ -227,25 +232,25 @@ impl TreeStyle {
 
     /// Replaces the root style.
     #[must_use]
-    pub fn root_style(self, style: Style) -> Self {
+    pub fn root_style(self, style: TextStyle) -> Self {
         self.with_style(TreeRole::Root, style)
     }
 
     /// Replaces the item style.
     #[must_use]
-    pub fn item_style(self, style: Style) -> Self {
+    pub fn item_style(self, style: TextStyle) -> Self {
         self.with_style(TreeRole::Item, style)
     }
 
     /// Replaces the branch-marker style.
     #[must_use]
-    pub fn enumerator_style(self, style: Style) -> Self {
+    pub fn enumerator_style(self, style: TextStyle) -> Self {
         self.with_style(TreeRole::Enumerator, style)
     }
 
     /// Replaces the continuation style.
     #[must_use]
-    pub fn indenter_style(self, style: Style) -> Self {
+    pub fn indenter_style(self, style: TextStyle) -> Self {
         self.with_style(TreeRole::Indenter, style)
     }
 
@@ -266,7 +271,7 @@ impl TreeStyle {
     /// Composes tree data into a renderer-neutral view.
     pub fn view(&self, tree: &Tree) -> View {
         if tree.hidden {
-            return View::new();
+            return View::empty();
         }
 
         let traversal_styles = TraversalStyles {
@@ -274,16 +279,16 @@ impl TreeStyle {
             enumerator: self.enumerator_style.clone(),
             indenter: self.indenter_style.clone(),
         };
-        let mut view = View::new();
+        let mut rows = Vec::new();
         if let Some(root) = &tree.root {
             for line in root.split('\n') {
-                view = view.push(Line::styled(line, self.root.clone()));
+                rows.push(View::text(line, self.root.clone()));
             }
         }
 
         let children = visible_children(&tree.children, tree.child_offset);
         render_traversable(
-            view,
+            rows,
             &children,
             &traversal_styles,
             SiblingPosition::new,
@@ -375,7 +380,8 @@ fn visible_children(children: &[TreeNode], offset: ChildOffset) -> Vec<&TreeNode
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{Color, ComponentStyles, SemanticTokens, visible_width};
+    use crate::test_support::{plain, plain_rows, style_at};
+    use crate::{Color, ComponentStyles, SemanticTokens, measure, visible_width};
 
     fn styles() -> ComponentStyles {
         ComponentStyles::from_tokens(&SemanticTokens {
@@ -392,22 +398,9 @@ mod tests {
         })
     }
 
-    fn plain(view: &View) -> String {
-        view.lines()
-            .iter()
-            .map(|line| {
-                line.spans()
-                    .iter()
-                    .map(|span| span.text())
-                    .collect::<String>()
-            })
-            .collect::<Vec<_>>()
-            .join("\n")
-    }
-
     #[test]
     fn renders_empty_and_root_only_trees() {
-        assert!(styles().tree().view(&Tree::new()).is_empty());
+        assert!(measure(&styles().tree().view(&Tree::new())).is_empty());
         assert_eq!(
             plain(&styles().tree().view(&Tree::new().root("root"))),
             "root"
@@ -446,7 +439,7 @@ mod tests {
             .child(TreeNode::new("hidden").hidden(true));
 
         assert_eq!(plain(&styles().tree().view(&tree)), "└── visible");
-        assert!(styles().tree().view(&tree.hidden(true)).is_empty());
+        assert!(measure(&styles().tree().view(&tree.hidden(true))).is_empty());
     }
 
     #[test]
@@ -479,12 +472,11 @@ mod tests {
             plain(&styles().tree().view(&tree)),
             "└── 親\n    ├── 日本語\n    │   second\n    └── 終端\n        続き"
         );
-        let view = styles().tree().view(&tree);
-        assert_eq!(
-            visible_width(view.lines()[1].spans()[0].text())
-                + visible_width(view.lines()[1].spans()[1].text()),
-            visible_width(view.lines()[2].spans()[0].text())
-                + visible_width(view.lines()[2].spans()[1].text())
+        let rows = plain_rows(&styles().tree().view(&tree));
+        assert!(
+            rows[2].starts_with("    │   "),
+            "a continuation aligns under its node body: {:?}",
+            rows[2]
         );
     }
 
@@ -510,10 +502,10 @@ mod tests {
 
     #[test]
     fn applies_each_style_hook_to_its_semantic_span() {
-        let root = Style::new().foreground(Color::RED);
-        let item = Style::new().foreground(Color::GREEN);
-        let enumerator = Style::new().foreground(Color::BLUE);
-        let indenter = Style::new().foreground(Color::YELLOW);
+        let root = TextStyle::new().foreground(Color::RED);
+        let item = TextStyle::new().foreground(Color::GREEN);
+        let enumerator = TextStyle::new().foreground(Color::BLUE);
+        let indenter = TextStyle::new().foreground(Color::YELLOW);
         let tree = Tree::new()
             .root("root")
             .child(TreeNode::new("parent").child("child"));
@@ -526,12 +518,12 @@ mod tests {
             .indenter_style(indenter.clone());
         let view = tree_style.view(&tree);
 
-        assert_eq!(view.lines()[0].spans()[0].style(), &root);
-        assert_eq!(view.lines()[1].spans()[0].style(), &enumerator);
-        assert_eq!(view.lines()[1].spans()[1].style(), &item);
-        assert_eq!(view.lines()[2].spans()[0].style(), &indenter);
-        assert_eq!(view.lines()[2].spans()[1].style(), &enumerator);
-        assert_eq!(view.lines()[2].spans()[2].style(), &item);
+        assert_eq!(style_at(&view, 0, 0), root);
+        assert_eq!(style_at(&view, 1, 0), enumerator);
+        assert_eq!(style_at(&view, 1, 4), item);
+        assert_eq!(style_at(&view, 2, 0), indenter);
+        assert_eq!(style_at(&view, 2, 4), enumerator);
+        assert_eq!(style_at(&view, 2, 8), item);
     }
 
     fn mixed_width_enumerator(position: SiblingPosition) -> String {
@@ -549,9 +541,11 @@ mod tests {
         let view = tree_style.view(&tree);
 
         assert_eq!(plain(&view), "  界one\n   .two");
+        let rows = plain_rows(&view);
         assert_eq!(
-            visible_width(view.lines()[0].spans()[0].text()),
-            visible_width(view.lines()[1].spans()[0].text())
+            visible_width(&rows[0][..rows[0].find("one").unwrap()]),
+            visible_width(&rows[1][..rows[1].find("two").unwrap()]),
+            "markers of different cell widths still start the values in one column"
         );
     }
 
@@ -569,7 +563,7 @@ mod tests {
             .indenter(multiline_marker);
         let view = tree_style.view(&tree);
 
-        assert_eq!(view.lines().len(), 1);
+        assert_eq!(measure(&view).height(), 1);
         assert_eq!(plain(&view), "a b c ditem");
     }
 

@@ -1,8 +1,8 @@
 //! Theme construction and light/dark selection.
 
-use crate::Style;
+use crate::{BlockStyle, TextStyle};
 
-use super::{ComponentStyles, SemanticTokens, ThemeRole};
+use super::{BlockThemeRole, ComponentStyles, SemanticTokens, TextThemeRole};
 
 /// An explicit choice between a light and dark theme.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -14,8 +14,8 @@ pub enum ColorScheme {
 /// A theme with common semantic tokens and component styles.
 ///
 /// A theme carries no application-specific slot. Applications extend it by
-/// implementing [`ThemeRole`] for their own role type and deriving the style
-/// inside [`ThemeRole::resolve`]; see the module documentation for the
+/// implementing [`TextThemeRole`] for their own role type and deriving the style
+/// inside [`TextThemeRole::resolve`]; see the module documentation for the
 /// conventions that follow from that.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Theme {
@@ -48,9 +48,17 @@ impl Theme {
     /// roles inside a draw loop should resolve once into their own cache and
     /// borrow from it; [`Theme::components`] also exposes built-in styles as
     /// borrows.
-    pub fn style<R>(&self, role: R) -> Style
+    pub fn text_style<R>(&self, role: R) -> TextStyle
     where
-        R: ThemeRole,
+        R: TextThemeRole,
+    {
+        role.resolve(self)
+    }
+
+    /// Resolves one geometry-bearing role against this theme.
+    pub fn block_style<R>(&self, role: R) -> BlockStyle
+    where
+        R: BlockThemeRole,
     {
         role.resolve(self)
     }

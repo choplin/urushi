@@ -11,7 +11,7 @@ Presentation splits into two values, and geometry belongs to only one of them:
 
 ```rust
 /// Everything a terminal can express about a run of text.
-pub struct Style { fg, bg, modifiers }
+pub struct TextStyle { fg, bg, modifiers }
 
 /// A rectangle, and the style filling the geometry it creates.
 pub struct BlockStyle {
@@ -20,7 +20,7 @@ pub struct BlockStyle {
     border_foreground, border_background,
     width, height, max_width, max_height,
     align, vertical_align,
-    text: Style,
+    text: TextStyle,
 }
 ```
 
@@ -28,7 +28,7 @@ A view is a tree of four nodes:
 
 ```rust
 pub enum View {
-    Text(String, Style),
+    Text(String, TextStyle),
     Block(BlockStyle, Box<View>),
     Row(VerticalAlign, Vec<View>),
     Column(Align, Vec<View>),
@@ -47,7 +47,7 @@ there is one way to express each node.
 
 ### Why text cannot carry geometry
 
-A `Style` attached to text has no padding, no border, and no dimensions,
+A `TextStyle` attached to text has no padding, no border, and no dimensions,
 because a position that renders inline text cannot honor them. A row of text
 occupies one row. Give one of those texts a border and it occupies three, and
 the renderer folding that row has no correct answer: whatever it does, either
@@ -68,10 +68,17 @@ to the text for a renderer to apply a second time.
 
 The split also makes geometry themeable on its own terms: a `panel` role is a
 `BlockStyle`, served the way `ComponentStyles::list`, `tree`, and `table` serve
-their dedicated style values, while text roles are `Style` values.
+their dedicated style values, while text roles are `TextStyle` values.
 
-`Style` alone produces no rectangle. `Style::paint` wraps text in its SGR scope;
-`BlockStyle::render` produces a rectangle.
+Neither type is named `Style`. The two are peers — the model privileges
+neither — and the node names say which is which at every call site:
+`Text(String, TextStyle)` beside `Block(BlockStyle, View)`. An unqualified
+`Style` would also read as one thing to a Lip Gloss reader and the other to a
+Ratatui reader, so it is the one name that cannot mean the same thing to
+everyone.
+
+`TextStyle` alone produces no rectangle. `TextStyle::paint` wraps text in its
+SGR scope; `BlockStyle::render` produces a rectangle.
 
 ## Composition
 
@@ -87,7 +94,7 @@ Every node resolves to a rectangle.
   according to `align`.
 - Padding introduced by composition carries the child's own fill style — a
   `Block`'s `BlockStyle::text`, so a background-colored block keeps its
-  background across alignment rows — and an empty `Style` for a `Text` child.
+  background across alignment rows — and an empty `TextStyle` for a `Text` child.
 
 Alignment belongs to the `Row` or `Column`, not to its children: a child cannot
 align itself inside a height that is only known once its siblings are measured.
@@ -100,7 +107,7 @@ own position, so they are separate rules.
 
 A block's style does not flow into its child. Inheritance is the obvious move
 once views nest — a panel with a surface background would set it once and inner
-text would pick it up — and it is deliberately not adopted. `Style` is a
+text would pick it up — and it is deliberately not adopted. `TextStyle` is a
 complete immutable value, and [`style-model.md`](../style-model.md) rejects
 implicit parent-to-child flow; expressing "inherit unless overridden" requires a
 patch representation, which Urushi does not have as an operation anywhere, and
@@ -122,7 +129,7 @@ pub struct Size { width: usize, height: usize }
 pub struct Limits { max_width: Option<usize>, max_height: Option<usize> }
 
 /// One grapheme, the width it occupies, and its logical style.
-pub struct StyledGrapheme { symbol: String, width: usize, style: Style }
+pub struct StyledGrapheme { symbol: String, width: usize, style: TextStyle }
 
 pub struct ResolvedView { size: Size, rows: Vec<Vec<StyledGrapheme>> }
 
@@ -194,7 +201,7 @@ escape sequences at all.
 - `AnsiRenderer` resolves a view and serializes each row, coalescing adjacent
   graphemes of equal effective style into one SGR scope.
 - `urushi-tui`'s `ViewWidget` derives `Limits` from the target `Rect`, resolves
-  the view, converts each grapheme's logical `Style` through `RatatuiStyle`, and
+  the view, converts each grapheme's logical `TextStyle` through `RatatuiStyle`, and
   writes cells. `RatatuiWidget` draws a single `BlockStyle` through the same
   path.
 - The core crate holds no Ratatui dependency: `ResolvedView` and `Limits` are
@@ -230,6 +237,10 @@ the layout pass already decided.
   appears regardless; the line spine then adds a second, weaker way to write a
   `Row`, and it keeps alive the intuition that a line contains spans, which is
   what makes a bordered inline element look constructible.
+- **Naming one of the two `Style`.** Whichever one takes it becomes the default
+  in the reader's mind, and the model has no default. It also forces a choice
+  between Lip Gloss, where `Style` is the box, and Ratatui, where `Style` is the
+  run of text — a name that means the opposite thing to half the audience.
 - **A constraint-solving layout tree with flex-like grow and shrink.** Out of
   proportion to a sizing vocabulary of intrinsic size plus optional fixed and
   maximum dimensions. `Row`, `Column`, and `Block` cover it, and a solver can be

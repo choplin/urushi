@@ -47,7 +47,8 @@ fn showcase_has_a_consistent_visible_width() {
         "BACKGROUND COLOR",
         "BOLD",
         "UNDERLINE",
-        "NESTED ANSI",
+        "INLINE STYLES",
+        "INLINE BLOCK",
         "PADDING",
         "FULL BORDER",
         "FIXED WIDTH",
@@ -56,8 +57,8 @@ fn showcase_has_a_consistent_visible_width() {
         "MAX HEIGHT",
         "VERTICAL ALIGNMENT",
         "HORIZONTAL ALIGNMENT",
-        "JOIN HORIZONTAL",
-        "JOIN VERTICAL",
+        "ROW",
+        "COLUMN",
         "BORDER PRESETS",
         "BORDER TOP ONLY",
         "BORDER RIGHT ONLY",
@@ -145,7 +146,7 @@ fn showcase_has_a_consistent_visible_width() {
             .unwrap_or_else(|| panic!("missing divider for showcase row: {label}"))
     };
     let center_divider = divider_column("FOREGROUND COLOR");
-    assert_eq!(divider_column("JOIN HORIZONTAL"), center_divider);
+    assert_eq!(divider_column("ROW"), center_divider);
     assert_eq!(divider_column("TREE"), center_divider);
     assert_eq!(divider_column("LIST"), center_divider);
     assert_eq!(divider_column("TABLE"), center_divider);

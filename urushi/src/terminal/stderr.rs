@@ -52,12 +52,15 @@ impl StderrTerminal {
     }
 
     pub fn write(&self, view: &View) -> io::Result<()> {
-        if view.is_empty() {
+        // The view is written at its intrinsic size, as before: a component
+        // that must fit the terminal is given `width()` when it is built.
+        let rendered = self.renderer.render(view);
+        if rendered.size().height() == 0 {
             return Ok(());
         }
         let stderr = io::stderr();
         let mut writer = stderr.lock();
-        writeln!(writer, "{}", self.renderer.render(view))?;
+        writeln!(writer, "{rendered}")?;
         writer.flush()
     }
 

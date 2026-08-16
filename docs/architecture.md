@@ -21,8 +21,8 @@ boundaries documented here prematurely.
 
 ## Architecture at a glance
 
-Reusable line components produce a renderer-neutral `View`. Terminal
-capabilities are applied only at the output boundary.
+Reusable components produce a renderer-neutral `View`. Terminal capabilities
+are applied only at the output boundary.
 
 ```text
 SemanticTokens --> Theme --> ComponentStyles
@@ -30,41 +30,48 @@ SemanticTokens --> Theme --> ComponentStyles
 Component props ------------------+
         |
         v
-       View + TerminalProfile --> AnsiRenderer --> ANSI text
+       View --> resolve --> ResolvedView + TerminalProfile --> AnsiRenderer --> ANSI text
          |
          +--> StderrTerminal (owns renderer/profile) --> stable stderr output
 ```
 
-The core [`View`](../urushi/src/view/model.rs) is an ordered collection of
-styled lines and spans. It contains logical [`Style`](../urushi/src/style/logical.rs)
-values rather than terminal-resolved ANSI strings. Components stop at this
-boundary. [`AnsiRenderer`](../urushi/src/render/ansi.rs) applies a
-[`TerminalProfile`](../urushi/src/terminal/profile.rs) to each span and converts
-the result to text.
+The core [`View`](../urushi/src/view/model.rs) is a tree of four nodes — `Text`,
+`Block`, `Row`, and `Column` — carrying logical
+[`TextStyle`](../urushi/src/style/text.rs) and
+[`BlockStyle`](../urushi/src/style/block.rs) values rather than
+terminal-resolved ANSI strings. Components stop at this boundary.
+[`resolve`](../urushi/src/view/layout.rs) turns the tree into one `ResolvedView`
+rectangle of styled graphemes, and
+[`AnsiRenderer`](../urushi/src/render/ansi.rs) applies a
+[`TerminalProfile`](../urushi/src/terminal/profile.rs) to it and serializes the
+result.
 
-Urushi also retains a direct box-model rendering path for static content:
+Presentation splits in two, and geometry belongs to only one half: a `TextStyle` is
+everything a terminal can express about a run of text, and a `BlockStyle` is a
+rectangle plus the style filling it. A style that cannot be honored where it is
+attached is therefore unrepresentable rather than merely discouraged.
+
+Direct box-model rendering of static content is the single-block case of that
+same pass:
 
 ```text
-plain text + Style --> Style::render --> ANSI-capable String
+plain text + BlockStyle --> BlockStyle::render --> RenderedBlock
 ```
 
-This path owns wrapping, alignment, padding, margins, and borders for one
-styled block. It is separate from `View`, whose current model represents lines
-that a component has already composed.
-
-That separation is a known defect, not a boundary to preserve: a `Span` style may
-carry box-model properties that the line-oriented renderer cannot express, so a
-bordered span emits newlines inside one line.
-[`design/view-block-model.md`](design/view-block-model.md) defines the model
-this is being changed to.
+`BlockStyle::render` resolves `Block(style, Text(content, style.text))` with
+unbounded limits, so there is one implementation of the box model in the
+workspace. [`RenderedBlock`](../urushi/src/view/rendered.rs) carries the size it
+was measured at; `join_horizontal` and `join_vertical` compose such blocks
+without re-measuring escape sequences. The model is defined in
+[`design/view-block-model.md`](design/view-block-model.md).
 
 Terminal and Ratatui integrations sit outside these semantic types:
 
 ```text
 Progress state --> Urushi progress lifecycle --> private indicatif adapter
 
-Resolved Style --> RatatuiStyle
-Style + text  --> RatatuiWidget --> caller-owned Ratatui Buffer
+Resolved TextStyle   --> RatatuiStyle
+BlockStyle + text    --> RatatuiWidget --> caller-owned Ratatui Buffer
 ```
 
 ## Shared foundation and surface layers
@@ -76,7 +83,7 @@ and lifecycle rules appropriate to it.
 
 The contracts shared across surfaces are:
 
-- [`Style`](../urushi/src/style/logical.rs), which describes logical color,
+- [`TextStyle`](../urushi/src/style/text.rs), which describes logical color,
   modifiers, and box-model presentation without owning terminal state;
 - [`Theme`](../urushi/src/theme/definition.rs),
   [`SemanticTokens`](../urushi/src/theme/tokens.rs), and
@@ -87,17 +94,13 @@ The contracts shared across surfaces are:
 - [`TerminalProfile`](../urushi/src/terminal/profile.rs), which resolves the
   same logical styles for the capabilities of the actual output surface.
 
-`View` is not in this lowest common set today. It is the renderer-neutral line
-model used by reusable line components and ANSI output. The prompt needs cursor,
-viewport, help/error priority, and final cleanup information that `View` does
-not model, while Ratatui applications render into a cell buffer. Those surfaces
-therefore share the contracts above but use surface-specific view and runtime
-types.
-
-The `View` half of that statement holds for the line-oriented model only.
-Under [`design/view-block-model.md`](design/view-block-model.md) the ANSI and
-Ratatui boundaries share one resolved view, so `View` belongs to the foundation
-for those two surfaces. The prompt's surface-specific view is unaffected.
+`View` belongs to that foundation for the plain-CLI and Ratatui surfaces, which
+share one resolved view. The prompt does not use it: it needs cursor, viewport,
+help/error priority, and final cleanup information that `View` does not model,
+so it keeps a surface-specific view and runtime type while sharing the contracts
+above. The Ratatui adapter's migration onto `ResolvedView` is not yet
+implemented; it currently draws a single `BlockStyle` with its own box-model
+code.
 
 The implemented layers above the foundation are:
 
@@ -108,7 +111,7 @@ runtime or to adopt its application model.
 
 | Surface | Urushi-provided layer | Lifecycle owner | Current status |
 | --- | --- | --- | --- |
-| Plain CLI output | Direct box-model `Style::render`; reusable components producing `View`; `AnsiRenderer`; `StderrTerminal`; optional spinner and progress-bar lifecycles | The application owns its command workflow and stdout policy. `StderrTerminal` and progress handles own the stderr resources they acquire. | Implemented and dogfooded. Static output, themed line components, terminal degradation, and live/plain progress are covered by repository tests and runnable examples; public progress is also exercised by Agentlog dogfood. |
+| Plain CLI output | Direct box-model `BlockStyle::render`; reusable components producing `View`; `AnsiRenderer`; `StderrTerminal`; optional spinner and progress-bar lifecycles | The application owns its command workflow and stdout policy. `StderrTerminal` and progress handles own the stderr resources they acquire. | Implemented and dogfooded. Static output, themed line components, terminal degradation, and live/plain progress are covered by repository tests and runnable examples; public progress is also exercised by Agentlog dogfood. |
 | Interactive prompt | `Form` / `Group`; typed `Input`, `Select`, and `Confirm`; synchronous validation; a prompt-specific view; inline redraw; terminal session setup and cleanup | `urushi-prompt` owns the blocking prompt session and resources it acquires. The application owns when the form runs and what submitted values mean. | Implemented and dogfooded. The core prompt flow, viewport behavior, validation, cancellation, and cleanup are covered by tests and runnable terminal examples. |
 | Full-screen TUI | `urushi-tui` logical-style conversion and box-model widgets that draw into a caller-provided Ratatui `Buffer` | Today, the consuming Ratatui application owns state, events, layout orchestration, frame scheduling, and terminal lifecycle. | Adapter implemented in a provisional crate boundary. A general Urushi TUI runtime is not implemented; [`tui-architecture.md`](tui-architecture.md) defines its target architecture. |
 
@@ -118,7 +121,7 @@ The resulting flows are deliberately related but not identical:
 application semantics
         |
         v
-SemanticTokens --> Theme --> ComponentRole --> logical Style
+SemanticTokens --> Theme --> ComponentRole --> logical TextStyle
                                               |
              +--------------------------------+-----------------------------+
              |                                |                             |
@@ -126,7 +129,7 @@ SemanticTokens --> Theme --> ComponentRole --> logical Style
      plain CLI layer                  prompt layer                 Ratatui adapter
  Component props / text          Form / Group / Field             application view
              |                                |                             |
-     View or Style::render              PromptView                  Style / widget
+  View or BlockStyle::render            PromptView               BlockStyle / widget
              |                                |                             |
  AnsiRenderer / terminal        inline renderer + session        caller-owned Buffer
 ```
@@ -145,7 +148,7 @@ in those application roles rather than expanding Urushi's common roles or
 moving application state into a surface adapter.
 
 `Theme` is a concrete type and carries no application-owned data slot. The
-extension point is `ThemeRole::resolve`, which derives the style from the theme
+extension point is `TextThemeRole::resolve`, which derives the style from the theme
 each time it is asked, so an application style keeps following theme overrides
 and light/dark selection instead of freezing at construction time. The
 convention is:
@@ -159,9 +162,9 @@ convention is:
    read from a config file — carries a reference to that data in the role value,
    or the application owns a composite type that wraps `Theme` alongside it.
 4. Terminal-capability downgrading is not part of resolution. It stays in
-   `TerminalProfile::resolve_style`.
+   `TerminalProfile::resolve_text_style`.
 
-`ThemeRole::resolve` returns an owned `Style` because a role that must be
+`TextThemeRole::resolve` returns an owned `TextStyle` because a role that must be
 re-resolved is one whose style is derived rather than stored. A consumer that
 resolves many roles per frame should resolve once into its own struct of styles
 and borrow from that struct while drawing; `urushi-prompt`'s inline renderer
@@ -184,10 +187,10 @@ to share styling.
 
 | Module | Responsibility | Internal dependencies |
 | --- | --- | --- |
-| [`style`](../urushi/src/style/) | Colors, border glyphs, box spacing and alignment, logical style values, and direct box-model string rendering. | `text` |
+| [`style`](../urushi/src/style/) | Colors, border glyphs, box spacing and alignment, the text `TextStyle` and the geometry-bearing `BlockStyle`, and the direct block render entry point. | `text`, `view` |
 | [`text`](../urushi/src/text/) | ANSI-aware visible-width measurement and cell-aware word/CJK wrapping. | None |
 | [`theme`](../urushi/src/theme/) | Semantic color tokens, reusable component roles and styles, application role resolution, and explicit light/dark selection. | `style` |
-| [`view`](../urushi/src/view/) | Renderer-neutral `Span`, `Line`, and `View` values, plus composition of already-rendered string blocks. | `style`, `text` |
+| [`view`](../urushi/src/view/) | The renderer-neutral `View` tree, the one layout pass (`measure` / `resolve`, `Size`, `Limits`, `StyledGrapheme`, `ResolvedView`), and composition of already-rendered `RenderedBlock` values. | `style`, `text` |
 | [`component`](../urushi/src/component/) | Reusable semantic components that return `View`; currently summaries, warnings, owned lists, owned trees, and owned tables. | `theme`, `view`, `text` |
 | [`render`](../urushi/src/render/) | Translation of renderer-neutral views to ANSI text. | `style`, `view`, `terminal/profile` |
 | [`terminal`](../urushi/src/terminal/) | Terminal capability detection, color degradation, stderr ownership, output-mode selection, and optional progress lifecycle. | `style`, `theme`, `view`, `render` |
@@ -215,7 +218,7 @@ Keep this table consistent with them.
 Files separate concepts or external change drivers without creating additional
 crate boundaries.
 
-### Style and text
+### TextStyle and text
 
 - [`style/color.rs`](../urushi/src/style/color.rs) owns color representation and
   SGR encoding.
@@ -223,8 +226,8 @@ crate boundaries.
 - [`style/layout.rs`](../urushi/src/style/layout.rs) owns `Align`,
   `VerticalAlign`, and `Sides`.
 - [`style/property.rs`](../urushi/src/style/property.rs) owns the closed generic
-  property vocabulary used by `Style::add` and `Style::remove`.
-- [`style/logical.rs`](../urushi/src/style/logical.rs) owns the `Style` builder,
+  property vocabulary used by `TextStyle::add` and `TextStyle::remove`.
+- [`style/text.rs`](../urushi/src/style/text.rs) owns the `TextStyle` builder,
   box-model rules, and direct string rendering.
 - [`text/width.rs`](../urushi/src/text/width.rs) owns visible cell measurement
   and ANSI/grapheme-safe row truncation.
@@ -248,9 +251,13 @@ ANSI, or retain an output writer.
 
 ### View and components
 
-- [`view/model.rs`](../urushi/src/view/model.rs) owns `Span`, `Line`, and `View`.
-- [`view/join.rs`](../urushi/src/view/join.rs) composes strings that have already
-  been rendered into rectangular blocks.
+- [`view/model.rs`](../urushi/src/view/model.rs) owns the four-node `View` tree.
+- [`view/layout.rs`](../urushi/src/view/layout.rs) owns the one layout pass: the
+  box model, row and column composition, and the resulting `ResolvedView`.
+- [`view/rendered.rs`](../urushi/src/view/rendered.rs) owns `RenderedBlock`, the
+  one place ANSI-aware measurement happens.
+- [`view/join.rs`](../urushi/src/view/join.rs) composes blocks that have already
+  been rendered.
 - each file under [`component`](../urushi/src/component/) owns one reusable
   component and its conversion to `View`.
 
@@ -271,14 +278,17 @@ continuation, marker alignment, and display-width handling. The reusable
 criteria for this separation are defined in
 [`design/component-data-and-style.md`](design/component-data-and-style.md).
 
-`Table` and `TableStyle` follow the same separation. A table draws its borders
-as logical `Line` and `Span` values rather than through `Style::render`, so the
-box model it composes stays on the renderer-neutral side of the boundary above.
+`Table` and `TableStyle` follow the same separation. A table cell is a `Block`:
+the table supplies the column width, the cell padding, and the row height, and
+the cell's `BlockStyle` supplies the alignment applied inside them, so the table
+implements no alignment of its own.
 
 ### Renderers
 
-- [`render/ansi.rs`](../urushi/src/render/ansi.rs) resolves each logical span for
-  a `TerminalProfile` and serializes the `View`.
+- [`render/ansi.rs`](../urushi/src/render/ansi.rs) resolves the view once,
+  degrades each grapheme's logical style for a `TerminalProfile`, and serializes
+  the rectangle, coalescing adjacent graphemes of equal style into one SGR
+  scope.
 - [`urushi-tui/src/style.rs`](../urushi-tui/src/style.rs) converts the
   stylable subset and border colors to Ratatui types.
 - [`urushi-tui/src/widget.rs`](../urushi-tui/src/widget.rs) draws the
@@ -314,9 +324,9 @@ not require changes in consumers such as Agentlog.
 
 ## Core contracts
 
-### Style remains logical until an output boundary
+### TextStyle remains logical until an output boundary
 
-`Theme` and `View` retain logical `Style` values. `TerminalProfile` applies the
+`Theme` and `View` retain logical `TextStyle` values. `TerminalProfile` applies the
 writer-specific ANSI policy and color fidelity at an output boundary. Detect a
 profile for the writer that will receive the result; do not reuse stdout's
 profile for stderr or a Ratatui surface.
@@ -325,13 +335,9 @@ The immutable value model, closed property vocabulary, and generic
 `add`/`remove` operations are specified in
 [`style-model.md`](style-model.md).
 
-`Style::render` is also an output boundary. It renders one box-model block
-directly and does not inspect terminal capabilities by itself. Callers that
-need capability degradation resolve the style first.
-
-[`design/view-block-model.md`](design/view-block-model.md) defines a separate
-`BlockStyle` as the owner of the box model and of the direct render entry point.
-The boundary rule above applies to it unchanged.
+`BlockStyle::render` is also an output boundary. It renders one block directly
+and does not inspect terminal capabilities by itself. Callers that need
+capability degradation call `TerminalProfile::resolve_block_style` first.
 
 ### Components stop at View
 
@@ -497,15 +503,18 @@ Clippy with `config-urushi-dev.toml`.
 ## Current limitations
 
 These are descriptions of the current implementation, not commitments to a
-future roadmap. The first three are addressed by
-[`design/view-block-model.md`](design/view-block-model.md):
+future roadmap:
 
-- `View` is an ordered line/span representation, not a general layout tree or
-  canonical resolved cell grid, so a span style carrying a border or vertical
-  padding produces broken ANSI output;
-- component-specific width handling occurs while constructing a `View`;
-- `Style::render`, `View` rendering, and the `urushi-tui` widget implement the
-  box model separately;
+- `View` has no constraint-solving layout: sizing is intrinsic size plus optional
+  fixed and maximum dimensions, with no flex-like grow or shrink;
+- there is no placement helper for positioning a `RenderedBlock` inside larger
+  whitespace;
+- the `urushi-tui` widget still implements the box model separately instead of
+  drawing a `ResolvedView`, so the two backends share the model but not yet the
+  code;
+- text in a `Text` node is plain: escape sequences in it are measured as
+  ordinary graphemes, so already-rendered output must be adopted as a
+  `RenderedBlock` rather than fed back into the tree;
 - live progress currently uses a private Indicatif backend;
 - `urushi-tui` is currently limited to style conversion and box-model widget
   drawing;

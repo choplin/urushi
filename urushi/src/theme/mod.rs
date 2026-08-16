@@ -4,7 +4,7 @@
 //!
 //! [`Theme`] is a concrete type with no application-specific slot. An
 //! application extends it by defining its own role type and implementing
-//! [`ThemeRole`] for it, which keeps the derived style following theme
+//! [`TextThemeRole`] for it, which keeps the derived style following theme
 //! overrides and light/dark selection instead of freezing it at construction
 //! time.
 //!
@@ -17,18 +17,18 @@
 //!    the application owns a composite type wrapping [`Theme`] alongside that
 //!    data.
 //! 4. Terminal-capability downgrading is not part of resolution; it stays in
-//!    [`crate::TerminalProfile::resolve_style`].
+//!    [`crate::TerminalProfile::resolve_text_style`].
 //!
 //! ```
-//! use urushi::{Color, ComponentRole, SemanticTokens, Style, Theme, ThemeRole};
+//! use urushi::{Color, ComponentRole, SemanticTokens, TextStyle, Theme, TextThemeRole};
 //!
 //! #[derive(Clone, Copy)]
 //! struct ReportTitle;
 //!
-//! impl ThemeRole for ReportTitle {
-//!     fn resolve(self, theme: &Theme) -> Style {
+//! impl TextThemeRole for ReportTitle {
+//!     fn resolve(self, theme: &Theme) -> TextStyle {
 //!         theme
-//!             .style(ComponentRole::Body)
+//!             .text_style(ComponentRole::Body)
 //!             .foreground(theme.tokens().accent)
 //!             .bold()
 //!     }
@@ -47,12 +47,12 @@
 //! #     border: Color::BRIGHT_BLACK,
 //! # };
 //! let theme = Theme::from_tokens(tokens);
-//! println!("{}", theme.style(ReportTitle).render("report"));
+//! println!("{}", theme.text_style(ReportTitle).paint("report"));
 //! ```
 //!
 //! # Resolving in a draw loop
 //!
-//! [`Theme::style`] returns an owned [`Style`](crate::Style), because a role
+//! [`Theme::style`] returns an owned [`TextStyle`](crate::TextStyle), because a role
 //! that must be re-resolved every frame is one whose style is derived rather
 //! than stored. When many roles are resolved per frame, resolve them once into
 //! a struct of styles and borrow from that struct while drawing;
@@ -66,7 +66,9 @@ mod tokens;
 
 pub use component_styles::ComponentStyles;
 pub use definition::{ColorScheme, Theme, ThemeSet};
-pub use role::{ComponentRole, ListRole, TableRole, ThemeRole, TreeRole};
+pub use role::{
+    BlockThemeRole, ComponentRole, ListRole, PanelRole, TableRole, TextThemeRole, TreeRole,
+};
 pub use tokens::SemanticTokens;
 
 #[cfg(test)]

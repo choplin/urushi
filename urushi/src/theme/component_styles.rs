@@ -1,15 +1,17 @@
 //! Standard style mapping for reusable component roles.
 
-use crate::{Border, ListStyle, Style, TableStyle, TreeStyle};
+use crate::{BlockStyle, Border, ListStyle, TableStyle, TextStyle, TreeStyle};
 
 use super::{ComponentRole, ListRole, SemanticTokens, TableRole, TreeRole};
 
-const COMPONENT_ROLE_COUNT: usize = 18;
+const COMPONENT_ROLE_COUNT: usize = 16;
 
 /// Styles for common components, indexed by [`ComponentRole`].
 #[derive(Debug, Clone, PartialEq)]
 pub struct ComponentStyles {
-    styles: [Style; COMPONENT_ROLE_COUNT],
+    styles: [TextStyle; COMPONENT_ROLE_COUNT],
+    panel: BlockStyle,
+    panel_focused: BlockStyle,
     list: ListStyle,
     tree: TreeStyle,
     table: TableStyle,
@@ -18,7 +20,7 @@ pub struct ComponentStyles {
 impl ComponentStyles {
     /// Builds the standard component styles from semantic tokens.
     pub fn from_tokens(tokens: &SemanticTokens) -> Self {
-        let panel = Style::new()
+        let panel = BlockStyle::new()
             .foreground(tokens.text)
             .background(tokens.surface)
             .border(Border::ROUNDED)
@@ -27,68 +29,78 @@ impl ComponentStyles {
 
         Self {
             styles: [
-                Style::new().foreground(tokens.text),
-                Style::new().foreground(tokens.text_muted).dim(),
-                Style::new().foreground(tokens.accent).bold(),
-                Style::new().foreground(tokens.success),
-                Style::new().foreground(tokens.warning),
-                Style::new().foreground(tokens.error).bold(),
-                Style::new().foreground(tokens.accent).bold(),
-                Style::new().foreground(tokens.text),
-                Style::new().foreground(tokens.text_muted).italic(),
-                Style::new().foreground(tokens.accent).bold(),
-                Style::new().foreground(tokens.text),
-                Style::new()
+                TextStyle::new().foreground(tokens.text),
+                TextStyle::new().foreground(tokens.text_muted).dim(),
+                TextStyle::new().foreground(tokens.accent).bold(),
+                TextStyle::new().foreground(tokens.success),
+                TextStyle::new().foreground(tokens.warning),
+                TextStyle::new().foreground(tokens.error).bold(),
+                TextStyle::new().foreground(tokens.accent).bold(),
+                TextStyle::new().foreground(tokens.text),
+                TextStyle::new().foreground(tokens.text_muted).italic(),
+                TextStyle::new().foreground(tokens.accent).bold(),
+                TextStyle::new().foreground(tokens.text),
+                TextStyle::new()
                     .foreground(tokens.accent_text)
                     .background(tokens.accent)
                     .bold(),
-                Style::new()
+                TextStyle::new()
                     .foreground(tokens.text)
                     .background(tokens.surface),
-                Style::new()
+                TextStyle::new()
                     .foreground(tokens.accent_text)
                     .background(tokens.accent)
                     .bold(),
-                Style::new().foreground(tokens.text_muted).dim(),
-                Style::new().foreground(tokens.error),
-                panel.clone(),
-                panel.border_foreground(tokens.accent),
+                TextStyle::new().foreground(tokens.text_muted).dim(),
+                TextStyle::new().foreground(tokens.error),
             ],
+            panel: panel.clone(),
+            panel_focused: panel.border_foreground(tokens.accent),
             list: ListStyle::new(
-                Style::new().foreground(tokens.text),
-                Style::new().foreground(tokens.text_muted),
-                Style::new().foreground(tokens.text_muted),
+                TextStyle::new().foreground(tokens.text),
+                TextStyle::new().foreground(tokens.text_muted),
+                TextStyle::new().foreground(tokens.text_muted),
             ),
             tree: TreeStyle::new(
-                Style::new().foreground(tokens.text).bold(),
-                Style::new().foreground(tokens.text),
-                Style::new().foreground(tokens.text_muted),
-                Style::new().foreground(tokens.text_muted),
+                TextStyle::new().foreground(tokens.text).bold(),
+                TextStyle::new().foreground(tokens.text),
+                TextStyle::new().foreground(tokens.text_muted),
+                TextStyle::new().foreground(tokens.text_muted),
             ),
             table: TableStyle::new(
-                Style::new().foreground(tokens.text).bold(),
-                Style::new().foreground(tokens.text),
-                Style::new().foreground(tokens.border),
+                BlockStyle::new().foreground(tokens.text).bold(),
+                BlockStyle::new().foreground(tokens.text),
+                TextStyle::new().foreground(tokens.border),
             ),
         }
     }
 
-    pub fn style(&self, role: ComponentRole) -> &Style {
+    pub fn text_style(&self, role: ComponentRole) -> &TextStyle {
         &self.styles[role.index()]
     }
 
+    /// Returns the framed-surface block style.
+    pub const fn panel(&self) -> &BlockStyle {
+        &self.panel
+    }
+
+    /// Returns the focused framed-surface block style.
+    pub const fn panel_focused(&self) -> &BlockStyle {
+        &self.panel_focused
+    }
+
     /// Returns the style assigned to one List-specific role.
-    pub fn list_style(&self, role: ListRole) -> &Style {
+    pub fn list_style(&self, role: ListRole) -> &TextStyle {
         self.list.style(role)
     }
 
     /// Returns the style assigned to one Tree-specific role.
-    pub fn tree_style(&self, role: TreeRole) -> &Style {
+    pub fn tree_style(&self, role: TreeRole) -> &TextStyle {
         self.tree.style(role)
     }
 
-    /// Returns the style assigned to one Table-specific role.
-    pub fn table_style(&self, role: TableRole) -> &Style {
+    /// Returns the block style assigned to one Table-specific cell role.
+    pub fn table_style(&self, role: TableRole) -> &BlockStyle {
         self.table.style(role)
     }
 
@@ -108,28 +120,42 @@ impl ComponentStyles {
     }
 
     #[must_use]
-    pub fn with_style(mut self, role: ComponentRole, style: Style) -> Self {
+    pub fn with_text_style(mut self, role: ComponentRole, style: TextStyle) -> Self {
         self.styles[role.index()] = style;
+        self
+    }
+
+    /// Replaces the framed-surface block style.
+    #[must_use]
+    pub fn with_panel(mut self, panel: BlockStyle) -> Self {
+        self.panel = panel;
+        self
+    }
+
+    /// Replaces the focused framed-surface block style.
+    #[must_use]
+    pub fn with_panel_focused(mut self, panel: BlockStyle) -> Self {
+        self.panel_focused = panel;
         self
     }
 
     /// Replaces the style assigned to one List-specific role.
     #[must_use]
-    pub fn with_list_style(mut self, role: ListRole, style: Style) -> Self {
+    pub fn with_list_style(mut self, role: ListRole, style: TextStyle) -> Self {
         self.list = self.list.with_style(role, style);
         self
     }
 
     /// Replaces the style assigned to one Tree-specific role.
     #[must_use]
-    pub fn with_tree_style(mut self, role: TreeRole, style: Style) -> Self {
+    pub fn with_tree_style(mut self, role: TreeRole, style: TextStyle) -> Self {
         self.tree = self.tree.with_style(role, style);
         self
     }
 
-    /// Replaces the style assigned to one Table-specific role.
+    /// Replaces the block style assigned to one Table-specific cell role.
     #[must_use]
-    pub fn with_table_style(mut self, role: TableRole, style: Style) -> Self {
+    pub fn with_table_style(mut self, role: TableRole, style: BlockStyle) -> Self {
         self.table = self.table.with_style(role, style);
         self
     }

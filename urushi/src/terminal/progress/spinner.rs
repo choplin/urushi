@@ -2,7 +2,7 @@
 
 use std::io;
 
-use crate::{ComponentRole, ComponentStyles, Line, View};
+use crate::{ComponentRole, ComponentStyles, View};
 
 use super::{
     StderrTerminal,
@@ -30,15 +30,21 @@ impl Spinner {
     ) -> io::Result<Self> {
         let live = match terminal.mode() {
             OutputMode::Live => {
-                let rail = terminal.renderer.render(&View::line(Line::styled(
-                    "│",
-                    styles.style(ComponentRole::Muted).clone(),
-                )));
+                let rail = terminal
+                    .renderer
+                    .render(&View::text(
+                        "│",
+                        styles.text_style(ComponentRole::Muted).clone(),
+                    ))
+                    .into_string();
                 let ticks = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"].map(|tick| {
-                    terminal.renderer.render(&View::line(Line::styled(
-                        tick,
-                        styles.style(ComponentRole::Accent).clone(),
-                    )))
+                    terminal
+                        .renderer
+                        .render(&View::text(
+                            tick,
+                            styles.text_style(ComponentRole::Accent).clone(),
+                        ))
+                        .into_string()
                 });
                 Some(LiveRegion::spinner(
                     &rail,

@@ -1,8 +1,8 @@
 use std::fs::File;
 
 use urushi::{
-    Align, AnsiPolicy, Border, Color, ColorProfile, ColorScheme, ComponentRole, ComponentStyles,
-    SemanticTokens, Style, TerminalProfile, Theme, ThemeSet, visible_width,
+    Align, AnsiPolicy, BlockStyle, Border, Color, ColorProfile, ColorScheme, ComponentRole,
+    ComponentStyles, PanelRole, SemanticTokens, TerminalProfile, Theme, ThemeSet, visible_width,
 };
 
 fn light_tokens() -> SemanticTokens {
@@ -36,9 +36,8 @@ fn dark_tokens() -> SemanticTokens {
 }
 
 fn theme(tokens: SemanticTokens) -> Theme {
-    let components = ComponentStyles::from_tokens(&tokens).with_style(
-        ComponentRole::PanelFocused,
-        Style::new()
+    let components = ComponentStyles::from_tokens(&tokens).with_panel_focused(
+        BlockStyle::new()
             .foreground(tokens.text)
             .background(tokens.surface)
             .bold()
@@ -105,21 +104,22 @@ fn theme_set_resolves_roles_for_each_terminal_profile() {
 
     for (profile, expected_selection, expected_panel_border) in profiles {
         let selection = profile
-            .resolve_style(
+            .resolve_text_style(
                 &themes
                     .select(ColorScheme::Light)
-                    .style(ComponentRole::PromptOptionSelected),
+                    .text_style(ComponentRole::PromptOptionSelected),
             )
-            .render("selected");
+            .paint("selected");
         assert_eq!(selection, expected_selection);
 
         let panel = profile
-            .resolve_style(
+            .resolve_block_style(
                 &themes
                     .select(ColorScheme::Dark)
-                    .style(ComponentRole::PanelFocused),
+                    .block_style(PanelRole::PanelFocused),
             )
-            .render("名前");
+            .render("名前")
+            .into_string();
         assert!(panel.starts_with(expected_panel_border));
         assert_eq!(strip_csi(&panel), expected_panel);
         assert!(panel.lines().all(|line| visible_width(line) == 14));
@@ -134,12 +134,12 @@ fn explicit_profile_is_a_deterministic_consumer_override() {
     assert_eq!(forced.ansi_policy(), AnsiPolicy::Enabled);
     assert_eq!(
         forced
-            .resolve_style(
+            .resolve_text_style(
                 &themes()
                     .select(ColorScheme::Light)
-                    .style(ComponentRole::PromptOptionSelected),
+                    .text_style(ComponentRole::PromptOptionSelected),
             )
-            .render("selected"),
+            .paint("selected"),
         "\x1b[1;97;100mselected\x1b[0m"
     );
 }
@@ -154,12 +154,13 @@ fn non_tty_file_disables_ansi_without_changing_theme_layout() {
     assert_eq!(profile.ansi_policy(), AnsiPolicy::Disabled);
 
     let rendered = profile
-        .resolve_style(
+        .resolve_block_style(
             &themes()
                 .select(ColorScheme::Dark)
-                .style(ComponentRole::PanelFocused),
+                .block_style(PanelRole::PanelFocused),
         )
-        .render("名前");
+        .render("名前")
+        .into_string();
 
     assert!(!rendered.contains("\x1b["));
     assert_eq!(rendered, "╭────────────╮\n│    名前    │\n╰────────────╯");

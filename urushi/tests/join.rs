@@ -1,30 +1,38 @@
 use urushi::{
-    Align, Border, Color, Style, VerticalAlign, join_horizontal, join_vertical, visible_width,
+    Align, BlockStyle, Border, Color, RenderedBlock, VerticalAlign, join_horizontal, join_vertical,
+    visible_width,
 };
+
+fn adopted(text: &str) -> RenderedBlock {
+    RenderedBlock::from_ansi(text)
+}
 
 #[test]
 fn horizontal_join_places_short_blocks_at_each_vertical_alignment() {
-    let blocks = ["L", "a\nb\nc"];
+    let blocks = [adopted("L"), adopted("a\nb\nc")];
 
-    assert_eq!(join_horizontal(VerticalAlign::Top, &blocks), "La\n b\n c");
     assert_eq!(
-        join_horizontal(VerticalAlign::Center, &blocks),
+        join_horizontal(VerticalAlign::Top, &blocks).as_str(),
+        "La\n b\n c"
+    );
+    assert_eq!(
+        join_horizontal(VerticalAlign::Center, &blocks).as_str(),
         " a\nLb\n c"
     );
     assert_eq!(
-        join_horizontal(VerticalAlign::Bottom, &blocks),
+        join_horizontal(VerticalAlign::Bottom, &blocks).as_str(),
         " a\n b\nLc"
     );
 }
 
 #[test]
 fn horizontal_join_keeps_cjk_borders_aligned() {
-    let japanese = Style::new().border(Border::NORMAL).render("日本語");
-    let tall = Style::new().border(Border::NORMAL).render("A\nB");
+    let japanese = BlockStyle::new().border(Border::NORMAL).render("日本語");
+    let tall = BlockStyle::new().border(Border::NORMAL).render("A\nB");
 
     let joined = join_horizontal(VerticalAlign::Top, &[japanese, tall]);
     assert_eq!(
-        joined,
+        joined.as_str(),
         concat!(
             "┌──────┐┌─┐\n",
             "│日本語││A│\n",
@@ -32,32 +40,58 @@ fn horizontal_join_keeps_cjk_borders_aligned() {
             "        └─┘"
         )
     );
-    assert!(joined.lines().all(|line| visible_width(line) == 11));
+    assert_eq!(joined.size().width(), 11);
+    assert!(
+        joined
+            .as_str()
+            .lines()
+            .all(|line| visible_width(line) == 11)
+    );
 }
 
 #[test]
 fn horizontal_join_preserves_ansi_and_visible_alignment() {
-    let red = Style::new().foreground(Color::RED).render("赤\nx");
-    let joined = join_horizontal(VerticalAlign::Top, &[red, "A\nBB".to_string()]);
+    let red = BlockStyle::new().foreground(Color::RED).render("赤\nx");
+    let joined = join_horizontal(VerticalAlign::Top, &[red, adopted("A\nBB")]);
 
-    assert_eq!(joined, "\x1b[31m赤\x1b[0mA \n\x1b[31mx \x1b[0mBB");
-    assert!(joined.lines().all(|line| visible_width(line) == 4));
+    assert_eq!(joined.as_str(), "\x1b[31m赤\x1b[0mA \n\x1b[31mx \x1b[0mBB");
+    assert!(joined.as_str().lines().all(|line| visible_width(line) == 4));
 }
 
 #[test]
 fn vertical_join_places_blocks_at_each_horizontal_alignment() {
-    let blocks = ["甲\nx", "long"];
+    let blocks = [adopted("甲\nx"), adopted("long")];
 
-    assert_eq!(join_vertical(Align::Left, &blocks), "甲  \nx   \nlong");
-    assert_eq!(join_vertical(Align::Center, &blocks), " 甲 \n x  \nlong");
-    assert_eq!(join_vertical(Align::Right, &blocks), "  甲\n   x\nlong");
+    assert_eq!(
+        join_vertical(Align::Left, &blocks).as_str(),
+        "甲  \nx   \nlong"
+    );
+    assert_eq!(
+        join_vertical(Align::Center, &blocks).as_str(),
+        " 甲 \n x  \nlong"
+    );
+    // A block is placed as a rectangle, so its own rows keep the shape they
+    // were measured with rather than being realigned one by one.
+    assert_eq!(
+        join_vertical(Align::Right, &blocks).as_str(),
+        "  甲\n  x \nlong"
+    );
 }
 
 #[test]
 fn vertical_join_preserves_ansi_and_visible_alignment() {
-    let red = Style::new().foreground(Color::RED).render("赤");
-    let joined = join_vertical(Align::Right, &[red, "x".to_string()]);
+    let red = BlockStyle::new().foreground(Color::RED).render("赤");
+    let joined = join_vertical(Align::Right, &[red, adopted("x")]);
 
-    assert_eq!(joined, "\x1b[31m赤\x1b[0m\n x");
-    assert!(joined.lines().all(|line| visible_width(line) == 2));
+    assert_eq!(joined.as_str(), "\x1b[31m赤\x1b[0m\n x");
+    assert!(joined.as_str().lines().all(|line| visible_width(line) == 2));
+}
+
+#[test]
+fn an_adopted_block_is_measured_once_and_kept_rectangular() {
+    let adopted = RenderedBlock::from_ansi("\x1b[31m赤\x1b[0m\nx");
+
+    assert_eq!(adopted.size().width(), 2);
+    assert_eq!(adopted.size().height(), 2);
+    assert_eq!(adopted.as_str(), "\x1b[31m赤\x1b[0m\nx ");
 }

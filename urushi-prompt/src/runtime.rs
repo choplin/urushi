@@ -15,7 +15,7 @@ use crossterm::{
     execute,
     terminal::{self},
 };
-use urushi::{ComponentRole, Style, TerminalProfile, Theme};
+use urushi::{ComponentRole, TerminalProfile, TextStyle, Theme};
 
 mod crossterm_executor;
 mod inline_plan;
@@ -1061,42 +1061,44 @@ impl<W: Write> Renderer for CrosstermRenderer<W> {
 }
 
 struct PromptStyles {
-    body: Style,
-    muted: Style,
-    accent: Style,
-    question: Style,
-    answer: Style,
-    placeholder: Style,
-    cursor: Style,
-    option: Style,
-    option_selected: Style,
-    button: Style,
-    button_focused: Style,
-    help: Style,
-    error: Style,
+    body: TextStyle,
+    muted: TextStyle,
+    accent: TextStyle,
+    question: TextStyle,
+    answer: TextStyle,
+    placeholder: TextStyle,
+    cursor: TextStyle,
+    option: TextStyle,
+    option_selected: TextStyle,
+    button: TextStyle,
+    button_focused: TextStyle,
+    help: TextStyle,
+    error: TextStyle,
 }
 
 impl PromptStyles {
     fn resolve(theme: &Theme, profile: &TerminalProfile) -> Self {
         Self {
-            body: profile.resolve_style(&theme.style(ComponentRole::Body)),
-            muted: profile.resolve_style(&theme.style(ComponentRole::Muted)),
-            accent: profile.resolve_style(&theme.style(ComponentRole::Accent)),
-            question: profile.resolve_style(&theme.style(ComponentRole::PromptQuestion)),
-            answer: profile.resolve_style(&theme.style(ComponentRole::PromptAnswer)),
-            placeholder: profile.resolve_style(&theme.style(ComponentRole::PromptPlaceholder)),
-            cursor: profile.resolve_style(&theme.style(ComponentRole::PromptCursor)),
-            option: profile.resolve_style(&theme.style(ComponentRole::PromptOption)),
+            body: profile.resolve_text_style(&theme.text_style(ComponentRole::Body)),
+            muted: profile.resolve_text_style(&theme.text_style(ComponentRole::Muted)),
+            accent: profile.resolve_text_style(&theme.text_style(ComponentRole::Accent)),
+            question: profile.resolve_text_style(&theme.text_style(ComponentRole::PromptQuestion)),
+            answer: profile.resolve_text_style(&theme.text_style(ComponentRole::PromptAnswer)),
+            placeholder: profile
+                .resolve_text_style(&theme.text_style(ComponentRole::PromptPlaceholder)),
+            cursor: profile.resolve_text_style(&theme.text_style(ComponentRole::PromptCursor)),
+            option: profile.resolve_text_style(&theme.text_style(ComponentRole::PromptOption)),
             option_selected: profile
-                .resolve_style(&theme.style(ComponentRole::PromptOptionSelected)),
-            button: profile.resolve_style(&theme.style(ComponentRole::PromptButton)),
-            button_focused: profile.resolve_style(&theme.style(ComponentRole::PromptButtonFocused)),
-            help: profile.resolve_style(&theme.style(ComponentRole::PromptHelp)),
-            error: profile.resolve_style(&theme.style(ComponentRole::PromptError)),
+                .resolve_text_style(&theme.text_style(ComponentRole::PromptOptionSelected)),
+            button: profile.resolve_text_style(&theme.text_style(ComponentRole::PromptButton)),
+            button_focused: profile
+                .resolve_text_style(&theme.text_style(ComponentRole::PromptButtonFocused)),
+            help: profile.resolve_text_style(&theme.text_style(ComponentRole::PromptHelp)),
+            error: profile.resolve_text_style(&theme.text_style(ComponentRole::PromptError)),
         }
     }
 
-    fn style(&self, role: ComponentRole) -> &Style {
+    fn style(&self, role: ComponentRole) -> &TextStyle {
         match role {
             ComponentRole::Body => &self.body,
             ComponentRole::Muted => &self.muted,
@@ -1111,11 +1113,7 @@ impl PromptStyles {
             ComponentRole::PromptButtonFocused => &self.button_focused,
             ComponentRole::PromptHelp => &self.help,
             ComponentRole::PromptError => &self.error,
-            ComponentRole::Success
-            | ComponentRole::Warning
-            | ComponentRole::Error
-            | ComponentRole::Panel
-            | ComponentRole::PanelFocused => &self.body,
+            ComponentRole::Success | ComponentRole::Warning | ComponentRole::Error => &self.body,
         }
     }
 }
@@ -1794,8 +1792,8 @@ mod tests {
             border: Color::Rgb(28, 29, 30),
         };
         let components = ComponentStyles::from_tokens(&tokens)
-            .with_style(ComponentRole::PromptQuestion, Style::new().bold())
-            .with_style(ComponentRole::PromptCursor, Style::new().underline());
+            .with_text_style(ComponentRole::PromptQuestion, TextStyle::new().bold())
+            .with_text_style(ComponentRole::PromptCursor, TextStyle::new().underline());
         Theme::new(tokens, components)
     }
 

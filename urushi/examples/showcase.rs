@@ -1,94 +1,126 @@
 use urushi::{
-    Align, AnsiPolicy, AnsiRenderer, Border, Color, ColorProfile, List, ListItem, SemanticTokens,
-    Style, Table, TableCell, TerminalProfile, Theme, Tree, TreeNode, VerticalAlign,
-    arabic_enumerator, join_horizontal, join_vertical, visible_width,
+    Align, AnsiPolicy, AnsiRenderer, BlockStyle, Border, Color, ColorProfile, List, ListItem,
+    SemanticTokens, Table, TableCell, TerminalProfile, TextStyle, Theme, Tree, TreeNode,
+    VerticalAlign, View, arabic_enumerator, measure,
 };
 
-fn row(label: &str, sample: String) -> String {
+/// Blank space of a fixed width, used to separate samples.
+fn gap(width: usize) -> View {
+    View::text(" ".repeat(width), TextStyle::new())
+}
+
+/// Fits one sample into the catalog's content column.
+fn fit(width: u16, view: View) -> View {
+    View::block(BlockStyle::new().width(width), view)
+}
+
+fn row(label: &str, sample: View) -> View {
     row_with_alignment(label, sample, VerticalAlign::Center)
 }
 
-fn row_with_alignment(label: &str, sample: String, alignment: VerticalAlign) -> String {
-    let label = Style::new()
-        .foreground(Color::BRIGHT_CYAN)
-        .bold()
-        .width(20)
-        .align(Align::Right)
-        .render(label);
-    let divider = Style::new().foreground(Color::BRIGHT_BLACK).render(" | ");
-    let content = join_horizontal(alignment, &[label, divider, sample]);
+fn row_with_alignment(label: &str, sample: View, alignment: VerticalAlign) -> View {
+    let label = View::block(
+        BlockStyle::new()
+            .foreground(Color::BRIGHT_CYAN)
+            .bold()
+            .width(20)
+            .align(Align::Right),
+        View::text(
+            label,
+            TextStyle::new().foreground(Color::BRIGHT_CYAN).bold(),
+        ),
+    );
+    let divider = View::text(" | ", TextStyle::new().foreground(Color::BRIGHT_BLACK));
 
-    Style::new().width(43).render(&content)
+    fit(43, View::row(alignment, [label, divider, sample]))
 }
 
-fn vertical_alignment_sample(top: &str, center: &str, bottom: &str) -> String {
-    let cell = Style::new()
+fn vertical_alignment_sample(top: &str, center: &str, bottom: &str) -> View {
+    let cell = BlockStyle::new()
         .background(Color::BRIGHT_BLACK)
         .width(6)
         .height(5)
         .align(Align::Center);
-    let top = cell.clone().align_vertical(VerticalAlign::Top).render(top);
-    let center = cell
-        .clone()
-        .align_vertical(VerticalAlign::Center)
-        .render(center);
-    let bottom = cell.align_vertical(VerticalAlign::Bottom).render(bottom);
+    let filled = |style: BlockStyle, text: &str| {
+        let content = View::text(text, style.text().clone());
+        View::block(style, content)
+    };
 
-    join_horizontal(
+    View::row(
         VerticalAlign::Top,
-        &[top, " ".to_string(), center, " ".to_string(), bottom],
+        [
+            filled(cell.clone().align_vertical(VerticalAlign::Top), top),
+            gap(1),
+            filled(cell.clone().align_vertical(VerticalAlign::Center), center),
+            gap(1),
+            filled(cell.align_vertical(VerticalAlign::Bottom), bottom),
+        ],
     )
 }
 
-fn horizontal_alignment_sample(left: &str, center: &str, right: &str) -> String {
-    let cell = Style::new().background(Color::BRIGHT_BLACK).width(20);
-    let left = cell.clone().align(Align::Left).render(left);
-    let center = cell.clone().align(Align::Center).render(center);
-    let right = cell.align(Align::Right).render(right);
+fn horizontal_alignment_sample(left: &str, center: &str, right: &str) -> View {
+    let cell = BlockStyle::new().background(Color::BRIGHT_BLACK).width(20);
+    let filled = |style: BlockStyle, text: &str| {
+        let content = View::text(text, style.text().clone());
+        View::block(style, content)
+    };
 
-    let gap = " ".repeat(20);
-
-    join_vertical(Align::Left, &[left, gap.clone(), center, gap, right])
-}
-
-fn maximum_width_sample() -> String {
-    let heading = |label| Style::new().width(20).align(Align::Center).render(label);
-    let before = Style::new()
-        .background(Color::BRIGHT_BLACK)
-        .width(20)
-        .render("abcdefghijklmnopqrst");
-    let after = Style::new()
-        .background(Color::BRIGHT_BLACK)
-        .width(20)
-        .max_width(12)
-        .render("abcdefghijklmnopqrst");
-
-    join_vertical(
+    View::column(
         Align::Left,
-        &[heading("BEFORE"), before, heading("AFTER"), after],
+        [
+            filled(cell.clone().align(Align::Left), left),
+            gap(20),
+            filled(cell.clone().align(Align::Center), center),
+            gap(20),
+            filled(cell.align(Align::Right), right),
+        ],
     )
 }
 
-fn maximum_height_sample() -> String {
-    let heading = |label| Style::new().width(9).align(Align::Center).render(label);
-    let cell = Style::new()
+fn maximum_width_sample() -> View {
+    let heading = |label: &str| {
+        View::block(
+            BlockStyle::new().width(20).align(Align::Center),
+            View::text(label, TextStyle::new()),
+        )
+    };
+    let cell = BlockStyle::new().background(Color::BRIGHT_BLACK).width(20);
+    let content = || View::text("abcdefghijklmnopqrst", TextStyle::new());
+
+    View::column(
+        Align::Left,
+        [
+            heading("BEFORE"),
+            View::block(cell.clone(), content()),
+            heading("AFTER"),
+            View::block(cell.max_width(12), content()),
+        ],
+    )
+}
+
+fn maximum_height_sample() -> View {
+    let heading = |label: &str| {
+        View::block(
+            BlockStyle::new().width(9).align(Align::Center),
+            View::text(label, TextStyle::new()),
+        )
+    };
+    let cell = BlockStyle::new()
         .background(Color::BRIGHT_BLACK)
         .width(9)
         .height(6)
         .align(Align::Center);
-    let before = join_vertical(
+    let content = || View::text("a\nb\nc\nd\ne\nf", TextStyle::new());
+    let before = View::column(
         Align::Left,
-        &[heading("BEFORE"), cell.clone().render("a\nb\nc\nd\ne\nf")],
+        [heading("BEFORE"), View::block(cell.clone(), content())],
     );
-    let after = join_vertical(
+    let after = View::column(
         Align::Left,
-        &[
-            heading("AFTER"),
-            cell.max_height(3).render("a\nb\nc\nd\ne\nf"),
-        ],
+        [heading("AFTER"), View::block(cell.max_height(3), content())],
     );
 
-    join_horizontal(VerticalAlign::Top, &[before, "  ".to_string(), after])
+    View::row(VerticalAlign::Top, [before, gap(2), after])
 }
 
 fn junction_grid(border: Border) -> String {
@@ -122,42 +154,44 @@ fn junction_grid(border: Border) -> String {
     )
 }
 
-fn border_card(label: &str, border: Border, color: Color) -> String {
-    let label = Style::new()
-        .foreground(color)
-        .bold()
-        .width(9)
-        .align(Align::Center)
-        .render(label);
-    let mut grid_style = Style::new().foreground(color);
+fn border_card(label: &str, border: Border, color: Color) -> View {
+    let label = View::block(
+        BlockStyle::new()
+            .foreground(color)
+            .bold()
+            .width(9)
+            .align(Align::Center),
+        View::text(label, TextStyle::new().foreground(color).bold()),
+    );
+    let mut grid_style = TextStyle::new().foreground(color);
     if border == Border::HIDDEN {
         grid_style = grid_style.background(Color::BRIGHT_BLACK);
     }
-    let grid = grid_style.render(&junction_grid(border));
+    let grid = View::text(junction_grid(border), grid_style);
 
-    join_vertical(Align::Left, &[label, grid])
+    View::column(Align::Left, [label, grid])
 }
 
-fn border_preset_sample() -> String {
-    let pair = |left, right| join_horizontal(VerticalAlign::Top, &[left, " ".to_string(), right]);
-    join_vertical(
+fn border_preset_sample() -> View {
+    let pair = |left, right| View::row(VerticalAlign::Top, [left, gap(1), right]);
+    View::column(
         Align::Left,
-        &[
+        [
             pair(
                 border_card("NORMAL", Border::NORMAL, Color::BRIGHT_GREEN),
                 border_card("ROUNDED", Border::ROUNDED, Color::BRIGHT_CYAN),
             ),
-            " ".repeat(19),
+            gap(19),
             pair(
                 border_card("THICK", Border::THICK, Color::BRIGHT_MAGENTA),
                 border_card("DOUBLE", Border::DOUBLE, Color::BRIGHT_BLUE),
             ),
-            " ".repeat(19),
+            gap(19),
             pair(
                 border_card("ASCII", Border::ASCII, Color::BRIGHT_YELLOW),
                 border_card("MARKDOWN", Border::MARKDOWN, Color::BRIGHT_RED),
             ),
-            " ".repeat(19),
+            gap(19),
             pair(
                 border_card("BOOKTABS", Border::BOOKTABS, Color::BRIGHT_CYAN),
                 border_card("HIDDEN", Border::HIDDEN, Color::BRIGHT_BLACK),
@@ -166,37 +200,43 @@ fn border_preset_sample() -> String {
     )
 }
 
-fn side_card(label: &str, sample: String, blank_above: bool, blank_below: bool) -> String {
-    let label = Style::new()
-        .foreground(Color::BRIGHT_CYAN)
-        .bold()
-        .width(20)
-        .align(Align::Center)
-        .render(label);
-    let sample = Style::new().width(20).align(Align::Center).render(&sample);
-    let blank = " ".repeat(20);
-    let mut lines = vec![label];
+fn side_card(label: &str, sample: View, blank_above: bool, blank_below: bool) -> View {
+    let label = View::block(
+        BlockStyle::new()
+            .foreground(Color::BRIGHT_CYAN)
+            .bold()
+            .width(20)
+            .align(Align::Center),
+        View::text(
+            label,
+            TextStyle::new().foreground(Color::BRIGHT_CYAN).bold(),
+        ),
+    );
+    let sample = View::block(BlockStyle::new().width(20).align(Align::Center), sample);
+    let mut rows = vec![label];
     if blank_above {
-        lines.push(blank.clone());
+        rows.push(gap(20));
     }
-    lines.push(sample);
+    rows.push(sample);
     if blank_below {
-        lines.push(blank);
+        rows.push(gap(20));
     }
-    join_vertical(Align::Left, &lines)
+    View::column(Align::Left, rows)
 }
 
-fn border_side_grid() -> String {
-    let border = |style: Style| {
-        style
-            .border(Border::NORMAL)
-            .border_foreground(Color::BRIGHT_MAGENTA)
-            .render("content")
+fn border_side_grid() -> View {
+    let border = |style: BlockStyle| {
+        View::block(
+            style
+                .border(Border::NORMAL)
+                .border_foreground(Color::BRIGHT_MAGENTA),
+            View::text("content", TextStyle::new()),
+        )
     };
     let top = side_card(
         "BORDER TOP ONLY",
         border(
-            Style::new()
+            BlockStyle::new()
                 .border_right(false)
                 .border_bottom(false)
                 .border_left(false),
@@ -207,7 +247,7 @@ fn border_side_grid() -> String {
     let right = side_card(
         "BORDER RIGHT ONLY",
         border(
-            Style::new()
+            BlockStyle::new()
                 .border_top(false)
                 .border_bottom(false)
                 .border_left(false),
@@ -218,7 +258,7 @@ fn border_side_grid() -> String {
     let bottom = side_card(
         "BORDER BOTTOM ONLY",
         border(
-            Style::new()
+            BlockStyle::new()
                 .border_top(false)
                 .border_right(false)
                 .border_left(false),
@@ -229,7 +269,7 @@ fn border_side_grid() -> String {
     let left = side_card(
         "BORDER LEFT ONLY",
         border(
-            Style::new()
+            BlockStyle::new()
                 .border_top(false)
                 .border_right(false)
                 .border_bottom(false),
@@ -237,24 +277,35 @@ fn border_side_grid() -> String {
         true,
         true,
     );
-    let top = Style::new().width(43).align(Align::Center).render(&top);
-    let middle = join_horizontal(VerticalAlign::Top, &[left, "  ".to_string(), right]);
-    let bottom = Style::new().width(43).align(Align::Center).render(&bottom);
-    let heading = Style::new()
-        .foreground(Color::BRIGHT_YELLOW)
-        .bold()
-        .width(43)
-        .align(Align::Center)
-        .render("PER-SIDE BORDER");
+    let centered = |view| View::block(BlockStyle::new().width(43).align(Align::Center), view);
+    let middle = View::row(VerticalAlign::Top, [left, gap(2), right]);
+    let heading = View::block(
+        BlockStyle::new()
+            .foreground(Color::BRIGHT_YELLOW)
+            .bold()
+            .width(43)
+            .align(Align::Center),
+        View::text(
+            "PER-SIDE BORDER",
+            TextStyle::new().foreground(Color::BRIGHT_YELLOW).bold(),
+        ),
+    );
 
-    join_vertical(
+    View::column(
         Align::Left,
-        &[heading, top, " ".repeat(43), middle, " ".repeat(43), bottom],
+        [
+            heading,
+            centered(top),
+            gap(43),
+            middle,
+            gap(43),
+            centered(bottom),
+        ],
     )
 }
 
-fn tree_sample() -> String {
-    let theme = Theme::from_tokens(SemanticTokens {
+fn sample_theme() -> Theme {
+    Theme::from_tokens(SemanticTokens {
         text: Color::WHITE,
         text_muted: Color::BRIGHT_BLACK,
         background: Color::BLACK,
@@ -265,7 +316,10 @@ fn tree_sample() -> String {
         warning: Color::YELLOW,
         error: Color::RED,
         border: Color::BRIGHT_BLACK,
-    });
+    })
+}
+
+fn tree_sample() -> View {
     let tree = Tree::new()
         .root("urushi")
         .child(
@@ -275,67 +329,32 @@ fn tree_sample() -> String {
                 .child("theme"),
         )
         .child("Cargo.toml");
-    let renderer = AnsiRenderer::new(TerminalProfile::new(
-        ColorProfile::Ansi16,
-        AnsiPolicy::Enabled,
-    ));
 
-    renderer.render(&theme.components().tree().view(&tree))
+    sample_theme().components().tree().view(&tree)
 }
 
-fn list_sample() -> String {
-    let theme = Theme::from_tokens(SemanticTokens {
-        text: Color::WHITE,
-        text_muted: Color::BRIGHT_BLACK,
-        background: Color::BLACK,
-        surface: Color::BLACK,
-        accent: Color::CYAN,
-        accent_text: Color::BLACK,
-        success: Color::GREEN,
-        warning: Color::YELLOW,
-        error: Color::RED,
-        border: Color::BRIGHT_BLACK,
-    });
+fn list_sample() -> View {
     let list = List::new()
         .item("Define the API")
         .item(ListItem::new("Implement").items(["model", "view"]))
         .item("Verify behavior");
-    let renderer = AnsiRenderer::new(TerminalProfile::new(
-        ColorProfile::Ansi16,
-        AnsiPolicy::Enabled,
-    ));
-
+    let theme = sample_theme();
     let list_style = theme
         .components()
         .list()
         .clone()
         .enumerator(arabic_enumerator);
-    renderer.render(&list_style.view(&list))
+
+    list_style.view(&list)
 }
 
-fn table_sample() -> String {
-    let theme = Theme::from_tokens(SemanticTokens {
-        text: Color::WHITE,
-        text_muted: Color::BRIGHT_BLACK,
-        background: Color::BLACK,
-        surface: Color::BLACK,
-        accent: Color::CYAN,
-        accent_text: Color::BLACK,
-        success: Color::GREEN,
-        warning: Color::YELLOW,
-        error: Color::RED,
-        border: Color::BRIGHT_BLACK,
-    });
+fn table_sample() -> View {
     let table = Table::new()
         .headers(["Key", "Value"])
         .row(["mode", "plain"])
         .row(["theme", "dark"]);
-    let renderer = AnsiRenderer::new(TerminalProfile::new(
-        ColorProfile::Ansi16,
-        AnsiPolicy::Enabled,
-    ));
 
-    renderer.render(&theme.components().table().view(&table))
+    sample_theme().components().table().view(&table)
 }
 
 /// Styles every cell from its own coordinates: one checkerboard covering the
@@ -343,7 +362,7 @@ fn table_sample() -> String {
 ///
 /// A style the hook returns replaces the role default rather than layering over
 /// it, so it restates the foreground it wants.
-fn checkerboard(cell: TableCell<'_>) -> Option<Style> {
+fn checkerboard(cell: TableCell<'_>) -> Option<BlockStyle> {
     // The header sits one row above the first body row, so it continues the
     // same board instead of starting a new one.
     let parity = match cell.row() {
@@ -363,7 +382,7 @@ fn checkerboard(cell: TableCell<'_>) -> Option<Style> {
         Align::Right
     };
 
-    let square = Style::new()
+    let square = BlockStyle::new()
         .foreground(Color::WHITE)
         .background(shade)
         .align(align);
@@ -376,24 +395,13 @@ fn checkerboard(cell: TableCell<'_>) -> Option<Style> {
 
 /// Shows the presentation policy a caller can vary: every border edge off, a
 /// total width, and a per-cell style hook driven by row and column.
-fn table_style_sample() -> String {
-    let theme = Theme::from_tokens(SemanticTokens {
-        text: Color::WHITE,
-        text_muted: Color::BRIGHT_BLACK,
-        background: Color::BLACK,
-        surface: Color::BLACK,
-        accent: Color::CYAN,
-        accent_text: Color::BLACK,
-        success: Color::GREEN,
-        warning: Color::YELLOW,
-        error: Color::RED,
-        border: Color::BRIGHT_BLACK,
-    });
+fn table_style_sample() -> View {
     let table = Table::new()
         .headers(["Cmd", "Ok", "Err"])
         .row(["build", "12", "0"])
         .row(["test", "340", "2"])
         .row(["lint", "97", "1"]);
+    let theme = sample_theme();
     let table_style = theme
         .components()
         .table()
@@ -406,120 +414,158 @@ fn table_style_sample() -> String {
         .border_column(false)
         .width(20)
         .style_func(checkerboard);
-    let renderer = AnsiRenderer::new(TerminalProfile::new(
-        ColorProfile::Ansi16,
-        AnsiPolicy::Enabled,
-    ));
 
-    renderer.render(&table_style.view(&table))
+    table_style.view(&table)
 }
 
-fn section(title: &str, rows: &[String]) -> String {
-    let body = join_vertical(Align::Left, rows);
-    let width = body.lines().map(visible_width).max().unwrap_or_default();
-    let title = Style::new()
-        .foreground(Color::BRIGHT_YELLOW)
-        .bold()
-        .width(width as u16)
-        .align(Align::Center)
-        .render(title);
-    let catalog = join_vertical(Align::Left, &[title, body]);
+fn section(title: &str, rows: Vec<View>) -> View {
+    let body = View::column(Align::Left, rows);
+    let width = measure(&body).width() as u16;
+    let title = View::block(
+        BlockStyle::new()
+            .foreground(Color::BRIGHT_YELLOW)
+            .bold()
+            .width(width)
+            .align(Align::Center),
+        View::text(
+            title,
+            TextStyle::new().foreground(Color::BRIGHT_YELLOW).bold(),
+        ),
+    );
+    let catalog = View::column(Align::Left, [title, body]);
 
-    Style::new()
-        .padding((0, 1))
-        .border(Border::ROUNDED)
-        .border_foreground(Color::BRIGHT_BLACK)
-        .margin((0, 1))
-        .render(&catalog)
+    View::block(
+        BlockStyle::new()
+            .padding((0, 1))
+            .border(Border::ROUNDED)
+            .border_foreground(Color::BRIGHT_BLACK)
+            .margin((0, 1)),
+        catalog,
+    )
 }
 
-/// Renders a readable catalog with one primary feature per row.
-pub fn render_showcase() -> String {
-    let inner = Style::new().foreground(Color::BRIGHT_RED).render("inner");
-    let heading = Style::new()
-        .foreground(Color::BRIGHT_YELLOW)
-        .bold()
-        .width(49)
-        .align(Align::Center)
-        .render("URUSHI STYLE SHOWCASE");
+/// Builds a readable catalog with one primary feature per row.
+pub fn showcase_view() -> View {
+    let heading = View::block(
+        BlockStyle::new()
+            .foreground(Color::BRIGHT_YELLOW)
+            .bold()
+            .width(49)
+            .align(Align::Center),
+        View::text(
+            "URUSHI STYLE SHOWCASE",
+            TextStyle::new().foreground(Color::BRIGHT_YELLOW).bold(),
+        ),
+    );
+    let boxed = |style: BlockStyle, text: &str| {
+        let content = View::text(text, style.text().clone());
+        View::block(style, content)
+    };
     let sections = [
         section(
             "COLOR & TEXT",
-            &[
+            vec![
                 row(
                     "FOREGROUND COLOR",
-                    Style::new()
-                        .foreground(Color::BRIGHT_CYAN)
-                        .render("cyan text"),
+                    View::text("cyan text", TextStyle::new().foreground(Color::BRIGHT_CYAN)),
                 ),
                 row(
                     "BACKGROUND COLOR",
-                    Style::new().background(Color::BLUE).render("blue field"),
+                    View::text("blue field", TextStyle::new().background(Color::BLUE)),
                 ),
-                row("BOLD", Style::new().bold().render("bold text")),
+                row("BOLD", View::text("bold text", TextStyle::new().bold())),
                 row(
                     "UNDERLINE",
-                    Style::new().underline().render("underlined text"),
+                    View::text("underlined text", TextStyle::new().underline()),
                 ),
+                // Styles compose by placing text beside text, not by nesting
+                // rendered output inside a style.
                 row(
-                    "NESTED ANSI",
-                    Style::new()
-                        .foreground(Color::BRIGHT_GREEN)
-                        .render(&format!("outer {inner} outer")),
+                    "INLINE STYLES",
+                    View::row(
+                        VerticalAlign::Top,
+                        [
+                            View::text("outer ", TextStyle::new().foreground(Color::BRIGHT_GREEN)),
+                            View::text("inner", TextStyle::new().foreground(Color::BRIGHT_RED)),
+                            View::text(" outer", TextStyle::new().foreground(Color::BRIGHT_GREEN)),
+                        ],
+                    ),
+                ),
+                // A bordered block inside a row: the row is one rectangle as
+                // tall as the block, which a line of spans could not express.
+                row(
+                    "INLINE BLOCK",
+                    View::row(
+                        VerticalAlign::Center,
+                        [
+                            View::text("status ", TextStyle::new()),
+                            boxed(
+                                BlockStyle::new()
+                                    .padding((0, 1))
+                                    .border(Border::ROUNDED)
+                                    .border_foreground(Color::BRIGHT_GREEN)
+                                    .foreground(Color::BRIGHT_GREEN),
+                                "ok",
+                            ),
+                            View::text(" done", TextStyle::new()),
+                        ],
+                    ),
                 ),
             ],
         ),
         section(
             "BOX MODEL",
-            &[
+            vec![
                 row(
                     "PADDING",
-                    Style::new()
-                        .background(Color::BRIGHT_BLACK)
-                        .padding((1, 2))
-                        .render("content"),
+                    boxed(
+                        BlockStyle::new()
+                            .background(Color::BRIGHT_BLACK)
+                            .padding((1, 2)),
+                        "content",
+                    ),
                 ),
                 row(
                     "FULL BORDER",
-                    Style::new()
-                        .padding((0, 1))
-                        .border(Border::ROUNDED)
-                        .render("content"),
+                    boxed(
+                        BlockStyle::new().padding((0, 1)).border(Border::ROUNDED),
+                        "content",
+                    ),
                 ),
                 row(
                     "FIXED WIDTH",
-                    Style::new()
-                        .background(Color::BRIGHT_BLACK)
-                        .width(20)
-                        .render("reserves 20 cols"),
+                    boxed(
+                        BlockStyle::new().background(Color::BRIGHT_BLACK).width(20),
+                        "reserves 20 cols",
+                    ),
                 ),
-                " ".repeat(43),
+                gap(43),
                 row_with_alignment(
                     "FIXED HEIGHT",
-                    Style::new()
-                        .background(Color::BRIGHT_BLACK)
-                        .height(3)
-                        .render("reserves 3 rows"),
+                    boxed(
+                        BlockStyle::new().background(Color::BRIGHT_BLACK).height(3),
+                        "reserves 3 rows",
+                    ),
                     VerticalAlign::Top,
                 ),
-                " ".repeat(43),
+                gap(43),
                 row_with_alignment("MAX WIDTH", maximum_width_sample(), VerticalAlign::Top),
-                " ".repeat(43),
+                gap(43),
                 row_with_alignment("MAX HEIGHT", maximum_height_sample(), VerticalAlign::Top),
-                " ".repeat(43),
+                gap(43),
                 row_with_alignment("BORDER PRESETS", border_preset_sample(), VerticalAlign::Top),
-                " ".repeat(43),
+                gap(43),
                 border_side_grid(),
             ],
         ),
         section(
             "ALIGNMENT",
-            &[
+            vec![
                 row(
                     "VERTICAL ALIGNMENT",
                     vertical_alignment_sample("TOP", "CENTER", "BOTTOM"),
                 ),
-                " ".repeat(43),
+                gap(43),
                 row(
                     "HORIZONTAL ALIGNMENT",
                     horizontal_alignment_sample("LEFT", "CENTER", "RIGHT"),
@@ -528,66 +574,64 @@ pub fn render_showcase() -> String {
         ),
         section(
             "COMPOSITION",
-            &[
-                row(
-                    "JOIN HORIZONTAL",
-                    join_horizontal(
-                        VerticalAlign::Top,
-                        &[
-                            Style::new()
+            vec![
+                row("ROW", {
+                    let card = |label| {
+                        boxed(
+                            BlockStyle::new()
                                 .padding((0, 1))
                                 .border(Border::ROUNDED)
-                                .border_foreground(Color::BRIGHT_GREEN)
-                                .render("A"),
-                            Style::new()
+                                .border_foreground(Color::BRIGHT_GREEN),
+                            label,
+                        )
+                    };
+                    View::row(VerticalAlign::Top, [card("A"), card("B")])
+                }),
+                row("COLUMN", {
+                    let card = |label| {
+                        boxed(
+                            BlockStyle::new()
                                 .padding((0, 1))
                                 .border(Border::ROUNDED)
-                                .border_foreground(Color::BRIGHT_GREEN)
-                                .render("B"),
-                        ],
-                    ),
-                ),
-                row(
-                    "JOIN VERTICAL",
-                    join_vertical(
-                        Align::Left,
-                        &[
-                            Style::new()
-                                .padding((0, 1))
-                                .border(Border::ROUNDED)
-                                .border_foreground(Color::BRIGHT_GREEN)
-                                .render("A"),
-                            Style::new()
-                                .padding((0, 1))
-                                .border(Border::ROUNDED)
-                                .border_foreground(Color::BRIGHT_GREEN)
-                                .render("B"),
-                        ],
-                    ),
-                ),
+                                .border_foreground(Color::BRIGHT_GREEN),
+                            label,
+                        )
+                    };
+                    View::column(Align::Left, [card("A"), card("B")])
+                }),
             ],
         ),
         section(
             "COMPONENTS",
-            &[
+            vec![
                 row_with_alignment("TREE", tree_sample(), VerticalAlign::Top),
                 row_with_alignment("LIST", list_sample(), VerticalAlign::Top),
                 row_with_alignment("TABLE", table_sample(), VerticalAlign::Top),
-                " ".repeat(43),
+                gap(43),
                 row_with_alignment("TABLE STYLE", table_style_sample(), VerticalAlign::Top),
             ],
         ),
     ];
-    let gap = " ".repeat(49);
-    let mut blocks = vec![heading, gap.clone()];
+
+    let mut blocks = vec![heading, gap(49)];
     for (index, section) in sections.into_iter().enumerate() {
         if index > 0 {
-            blocks.push(gap.clone());
+            blocks.push(gap(49));
         }
         blocks.push(section);
     }
 
-    join_vertical(Align::Left, &blocks)
+    View::column(Align::Left, blocks)
+}
+
+/// Renders the catalog for a terminal that keeps every color as written.
+pub fn render_showcase() -> String {
+    AnsiRenderer::new(TerminalProfile::new(
+        ColorProfile::TrueColor,
+        AnsiPolicy::Enabled,
+    ))
+    .render(&showcase_view())
+    .into_string()
 }
 
 #[cfg_attr(test, allow(dead_code))]

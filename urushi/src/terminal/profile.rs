@@ -2,7 +2,7 @@
 
 use std::io::IsTerminal;
 
-use crate::Style;
+use crate::{BlockStyle, TextStyle};
 
 use super::palette::{quantize_to_ansi16, quantize_to_ansi256};
 
@@ -50,7 +50,22 @@ impl TerminalProfile {
         self.ansi_policy
     }
 
-    pub fn resolve_style(&self, style: &Style) -> Style {
+    /// Degrades one text style to this terminal's capabilities.
+    pub fn resolve_text_style(&self, style: &TextStyle) -> TextStyle {
+        if self.ansi_policy == AnsiPolicy::Disabled {
+            return TextStyle::new();
+        }
+        match self.color_profile {
+            ColorProfile::TrueColor => style.clone(),
+            ColorProfile::Ansi256 => style.clone().map_colors(quantize_to_ansi256),
+            ColorProfile::Ansi16 => style.clone().map_colors(quantize_to_ansi16),
+            ColorProfile::Monochrome => style.clone().without_colors(),
+        }
+    }
+
+    /// Degrades one block style to this terminal's capabilities, preserving its
+    /// box model.
+    pub fn resolve_block_style(&self, style: &BlockStyle) -> BlockStyle {
         if self.ansi_policy == AnsiPolicy::Disabled {
             return style.clone().without_ansi();
         }
@@ -168,7 +183,7 @@ mod tests {
 
     #[test]
     fn monochrome_and_disabled_preserve_layout() {
-        let style = Style::new()
+        let style = BlockStyle::new()
             .foreground(Color::RED)
             .background(Color::BLUE)
             .border_foreground(Color::GREEN)
@@ -187,31 +202,33 @@ mod tests {
             .align(Align::Center)
             .align_vertical(VerticalAlign::Bottom);
         let monochrome = TerminalProfile::new(ColorProfile::Monochrome, AnsiPolicy::Enabled)
-            .resolve_style(&style)
-            .render("日本");
+            .resolve_block_style(&style)
+            .render("日本")
+            .into_string();
         assert_eq!(
             monochrome,
             "╭────────╮\n│\x1b[1;2;3;4;5;7;9m  日本  \x1b[0m│\n╰────────╯"
         );
         assert_eq!(
             TerminalProfile::new(ColorProfile::Monochrome, AnsiPolicy::Enabled)
-                .resolve_style(&style)
+                .resolve_block_style(&style)
                 .fixed_height(),
             Some(1)
         );
         assert_eq!(
             TerminalProfile::new(ColorProfile::Monochrome, AnsiPolicy::Enabled)
-                .resolve_style(&style)
+                .resolve_block_style(&style)
                 .vertical_alignment(),
             VerticalAlign::Bottom
         );
         let disabled = TerminalProfile::new(ColorProfile::TrueColor, AnsiPolicy::Disabled)
-            .resolve_style(&style)
-            .render("日本");
+            .resolve_block_style(&style)
+            .render("日本")
+            .into_string();
         assert_eq!(disabled, "╭────────╮\n│  日本  │\n╰────────╯");
         assert_eq!(
             TerminalProfile::new(ColorProfile::TrueColor, AnsiPolicy::Disabled)
-                .resolve_style(&style)
+                .resolve_block_style(&style)
                 .fixed_height(),
             Some(1)
         );
@@ -219,7 +236,7 @@ mod tests {
 
     #[test]
     fn color_resolution_preserves_box_layout_values() {
-        let style = Style::new()
+        let style = BlockStyle::new()
             .foreground(Color::Rgb(1, 2, 3))
             .border(Border::ROUNDED)
             .border_top(false)
@@ -240,7 +257,7 @@ mod tests {
             TerminalProfile::new(ColorProfile::Monochrome, AnsiPolicy::Enabled),
             TerminalProfile::new(ColorProfile::TrueColor, AnsiPolicy::Disabled),
         ] {
-            let resolved = profile.resolve_style(&style);
+            let resolved = profile.resolve_block_style(&style);
             assert_eq!(resolved.border_kind(), Some(Border::ROUNDED));
             assert!(!resolved.is_border_top_enabled());
             assert!(resolved.is_border_right_enabled());

@@ -1,6 +1,6 @@
 use std::io::stdout;
 
-use urushi::{Color, ColorScheme, ComponentRole, SemanticTokens, TerminalProfile, Theme, ThemeSet};
+use urushi::{Color, ColorScheme, PanelRole, SemanticTokens, TerminalProfile, Theme, ThemeSet};
 
 fn light_tokens() -> SemanticTokens {
     SemanticTokens {
@@ -41,7 +41,7 @@ fn main() {
 
     let output = stdout();
     let profile = TerminalProfile::detect_for(&output);
-    let panel = profile.resolve_style(&theme.style(ComponentRole::PanelFocused));
+    let panel = profile.resolve_block_style(&theme.block_style(PanelRole::PanelFocused));
 
     println!("{}", panel.render("保存しました"));
 }

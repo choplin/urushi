@@ -1,16 +1,16 @@
-use urushi::{Align, Border, Color, Modifier, Style, VerticalAlign, visible_width};
+use urushi::{Align, BlockStyle, Border, Color, Modifier, VerticalAlign, visible_width};
 
 #[test]
 fn plain_text_passes_through() {
-    assert_eq!(Style::new().render("hello"), "hello");
-    assert_eq!(Style::new().render("a\nb"), "a\nb");
+    assert_eq!(BlockStyle::new().render("hello").into_string(), "hello");
+    assert_eq!(BlockStyle::new().render("a\nb").into_string(), "a\nb");
 }
 
 #[test]
 fn padding_and_border() {
-    let style = Style::new().padding((0, 1)).border(Border::ROUNDED);
+    let style = BlockStyle::new().padding((0, 1)).border(Border::ROUNDED);
     assert_eq!(
-        style.render("Hello"),
+        style.render("Hello").into_string(),
         "╭───────╮\n\
          │ Hello │\n\
          ╰───────╯"
@@ -19,9 +19,9 @@ fn padding_and_border() {
 
 #[test]
 fn cjk_content_keeps_border_aligned() {
-    let style = Style::new().border(Border::NORMAL);
+    let style = BlockStyle::new().border(Border::NORMAL);
     assert_eq!(
-        style.render("日本語"),
+        style.render("日本語").into_string(),
         "┌──────┐\n\
          │日本語│\n\
          └──────┘"
@@ -30,7 +30,10 @@ fn cjk_content_keeps_border_aligned() {
 
 #[test]
 fn mixed_width_lines_align() {
-    let out = Style::new().border(Border::ASCII).render("ab\nあい");
+    let out = BlockStyle::new()
+        .border(Border::ASCII)
+        .render("ab\nあい")
+        .into_string();
     assert_eq!(
         out,
         "+----+\n\
@@ -42,26 +45,34 @@ fn mixed_width_lines_align() {
 
 #[test]
 fn align_center_with_fixed_width() {
-    let out = Style::new().width(11).align(Align::Center).render("abc");
+    let out = BlockStyle::new()
+        .width(11)
+        .align(Align::Center)
+        .render("abc")
+        .into_string();
     assert_eq!(out, "    abc    ");
 }
 
 #[test]
 fn align_right_with_fixed_width() {
-    let out = Style::new().width(5).align(Align::Right).render("ab");
+    let out = BlockStyle::new()
+        .width(5)
+        .align(Align::Right)
+        .render("ab")
+        .into_string();
     assert_eq!(out, "   ab");
 }
 
 #[test]
 fn fixed_height_expands_the_padded_content_box() {
-    let style = Style::new()
+    let style = BlockStyle::new()
         .width(5)
         .height(5)
         .padding((1, 1))
         .border(Border::ASCII);
 
     assert_eq!(
-        style.render("x"),
+        style.render("x").into_string(),
         "+-----+\n\
          |     |\n\
          | x   |\n\
@@ -74,42 +85,49 @@ fn fixed_height_expands_the_padded_content_box() {
 
 #[test]
 fn fixed_height_preserves_empty_multiline_and_cjk_content() {
-    let style = Style::new().width(4).height(3);
+    let style = BlockStyle::new().width(4).height(3);
 
-    assert_eq!(style.render(""), "    \n    \n    ");
-    assert_eq!(style.render("a\nb"), "a   \nb   \n    ");
-    assert_eq!(style.render("日本"), "日本\n    \n    ");
+    assert_eq!(style.render("").into_string(), "    \n    \n    ");
+    assert_eq!(style.render("a\nb").into_string(), "a   \nb   \n    ");
+    assert_eq!(style.render("日本").into_string(), "日本\n    \n    ");
 }
 
 #[test]
 fn fixed_height_aligns_content_vertically_inside_padding() {
-    let base = Style::new().width(4).height(6).padding((1, 0));
+    let base = BlockStyle::new().width(4).height(6).padding((1, 0));
 
     assert_eq!(
-        base.clone().align_vertical(VerticalAlign::Top).render("x"),
+        base.clone()
+            .align_vertical(VerticalAlign::Top)
+            .render("x")
+            .into_string(),
         "    \nx   \n    \n    \n    \n    "
     );
     assert_eq!(
         base.clone()
             .align_vertical(VerticalAlign::Center)
-            .render("x"),
+            .render("x")
+            .into_string(),
         "    \n    \nx   \n    \n    \n    "
     );
     assert_eq!(
-        base.align_vertical(VerticalAlign::Bottom).render("x"),
+        base.align_vertical(VerticalAlign::Bottom)
+            .render("x")
+            .into_string(),
         "    \n    \n    \n    \nx   \n    "
     );
 }
 
 #[test]
 fn centered_vertical_alignment_puts_an_odd_extra_row_below_like_lip_gloss() {
-    let out = Style::new()
+    let out = BlockStyle::new()
         .width(6)
         .height(7)
         .padding((1, 1))
         .align(Align::Center)
         .align_vertical(VerticalAlign::Center)
-        .render("日\nx");
+        .render("日\nx")
+        .into_string();
 
     assert_eq!(
         out,
@@ -119,13 +137,14 @@ fn centered_vertical_alignment_puts_an_odd_extra_row_below_like_lip_gloss() {
 
 #[test]
 fn right_and_center_alignment_combine_for_cjk_content() {
-    let out = Style::new()
+    let out = BlockStyle::new()
         .width(6)
         .height(7)
         .padding((1, 1))
         .align(Align::Right)
         .align_vertical(VerticalAlign::Center)
-        .render("日\nx");
+        .render("日\nx")
+        .into_string();
 
     assert_eq!(
         out,
@@ -135,27 +154,32 @@ fn right_and_center_alignment_combine_for_cjk_content() {
 
 #[test]
 fn content_taller_than_fixed_height_expands_instead_of_truncating() {
-    let out = Style::new().width(3).height(2).render("one\ntwo\n三");
+    let out = BlockStyle::new()
+        .width(3)
+        .height(2)
+        .render("one\ntwo\n三")
+        .into_string();
 
     assert_eq!(out, "one\ntwo\n三 ");
 }
 
 #[test]
 fn enabled_border_rows_and_margin_are_outside_fixed_height() {
-    let out = Style::new()
+    let out = BlockStyle::new()
         .width(3)
         .height(2)
         .border(Border::ASCII)
         .border_top(false)
         .margin((1, 0, 0, 0))
-        .render("x");
+        .render("x")
+        .into_string();
 
     assert_eq!(out, "     \n|x  |\n|   |\n+---+");
 }
 
 #[test]
 fn maximum_dimensions_crop_the_final_outer_block() {
-    let out = Style::new()
+    let out = BlockStyle::new()
         .width(4)
         .height(3)
         .padding((1, 1))
@@ -163,7 +187,8 @@ fn maximum_dimensions_crop_the_final_outer_block() {
         .margin(1)
         .max_width(6)
         .max_height(4)
-        .render("ab");
+        .render("ab")
+        .into_string();
 
     assert_eq!(out, "      \n +----\n |    \n | ab ");
     assert_eq!(out.lines().count(), 4);
@@ -172,153 +197,152 @@ fn maximum_dimensions_crop_the_final_outer_block() {
 
 #[test]
 fn maximum_width_truncates_after_fixed_width_without_rewrapping() {
-    let out = Style::new().width(6).max_width(4).render("ab");
+    let out = BlockStyle::new()
+        .width(6)
+        .max_width(4)
+        .render("ab")
+        .into_string();
     assert_eq!(out, "ab  ");
 
-    let max_only = Style::new().max_width(5).render("hello world");
+    let max_only = BlockStyle::new()
+        .max_width(5)
+        .render("hello world")
+        .into_string();
     assert_eq!(max_only, "hello");
 }
 
 #[test]
 fn maximum_height_truncates_after_fixed_height_and_vertical_alignment() {
-    let out = Style::new()
+    let out = BlockStyle::new()
         .width(3)
         .height(5)
         .align_vertical(VerticalAlign::Bottom)
         .max_height(3)
-        .render("x");
+        .render("x")
+        .into_string();
 
     assert_eq!(out, "   \n   \n   ");
 }
 
 #[test]
-fn maximum_width_preserves_ansi_scopes_graphemes_and_cjk_cells() {
-    let styled = Style::new()
+fn maximum_width_crops_between_graphemes_and_keeps_the_block_rectangular() {
+    // A wide grapheme that would straddle the bound is dropped rather than
+    // split, and the freed cell keeps the row at the cropped width.
+    let styled = BlockStyle::new()
         .foreground(Color::RED)
         .max_width(3)
         .render("日本語");
-    assert_eq!(styled, "\x1b[31m日\x1b[0m");
-    assert_eq!(visible_width(&styled), 2);
+    assert_eq!(styled.as_str(), "\x1b[31m日\x1b[0m ");
+    assert_eq!(styled.size().width(), 3);
 
-    assert_eq!(Style::new().max_width(1).render("e\u{301}x"), "e\u{301}");
+    assert_eq!(
+        BlockStyle::new().max_width(1).render("e\u{301}x").as_str(),
+        "e\u{301}"
+    );
 }
 
 #[test]
 fn zero_maximum_dimensions_are_disabled_like_lip_gloss() {
-    assert_eq!(Style::new().max_width(0).render("x"), "x");
-    assert_eq!(Style::new().max_height(0).render("x"), "x");
-}
-
-#[test]
-fn maximum_height_preserves_ansi_closures_from_removed_rows() {
-    let out = Style::new()
-        .max_height(1)
-        .render("\x1b[31mred\nhidden\x1b[0m");
-
-    assert_eq!(out, "\x1b[31mred   \x1b[0m");
-}
-
-#[test]
-fn maximum_dimensions_discard_controls_that_start_in_cropped_content() {
-    assert_eq!(Style::new().max_width(2).render("abcdef\x1b[2J"), "ab");
     assert_eq!(
-        Style::new().max_height(1).render("safe\n\x1b[31mhidden"),
-        "safe  "
+        BlockStyle::new().max_width(0).render("x").into_string(),
+        "x"
+    );
+    assert_eq!(
+        BlockStyle::new().max_height(0).render("x").into_string(),
+        "x"
     );
 }
 
 #[test]
-fn fixed_and_maximum_width_preserve_ansi_during_wrap_and_truncate() {
-    let out = Style::new()
+fn a_fixed_width_wraps_before_a_maximum_width_crops() {
+    let out = BlockStyle::new()
+        .foreground(Color::RED)
         .width(4)
         .max_width(3)
-        .render("\x1b[31mabcdef\x1b[0m");
+        .render("abcdef")
+        .into_string();
 
-    assert_eq!(out, "\x1b[31mabc\x1b[0m\n\x1b[31mef\x1b[0m ");
-    assert!(out.lines().all(|line| visible_width(line) <= 3));
-}
-
-#[test]
-fn fixed_and_maximum_width_keep_control_strings_with_spaces_atomic() {
-    let rendered = Style::new()
-        .width(2)
-        .max_width(1)
-        .render("\x1b]8;;https://exa mple.com\x1b\\link\x1b]8;;\x1b\\");
-
-    assert_eq!(
-        rendered,
-        "\x1b]8;;https://exa mple.com\x1b\\l\x1b]8;;\x1b\\\n\
-         \x1b]8;;https://exa mple.com\x1b\\n\x1b]8;;\x1b\\"
-    );
+    assert_eq!(out, "\x1b[31mabc\x1b[0m\n\x1b[31mef \x1b[0m");
+    assert!(out.lines().all(|line| visible_width(line) == 3));
 }
 
 #[test]
 fn maximum_width_uses_grapheme_width_for_zwj_emoji() {
-    let out = Style::new().width(3).max_width(2).render("👩‍💻x");
+    let out = BlockStyle::new()
+        .width(3)
+        .max_width(2)
+        .render("👩‍💻x")
+        .into_string();
 
     assert_eq!(out, "👩‍💻");
     assert_eq!(visible_width(&out), 2);
 }
 
 #[test]
-fn maximum_width_keeps_ansi_embedded_inside_a_grapheme() {
-    let out = Style::new().max_width(1).render("e\x1b[31m\u{301}x");
+fn non_binding_maximum_preserves_the_rendered_bytes() {
+    let text = "red\ntext";
+    let unconstrained = BlockStyle::new().render(text).into_string();
 
-    assert_eq!(out, "e\x1b[31m\u{301}\x1b[0m");
-    assert_eq!(visible_width(&out), 1);
-}
-
-#[test]
-fn non_binding_maximum_preserves_ansi_bytes() {
-    let text = "\x1b[31mred\ntext\x1b[0m";
-    let unconstrained = Style::new().render(text);
-
-    assert_eq!(Style::new().max_width(99).render(text), unconstrained);
-    assert_eq!(Style::new().max_height(99).render(text), unconstrained);
+    assert_eq!(
+        BlockStyle::new().max_width(99).render(text).into_string(),
+        unconstrained
+    );
+    assert_eq!(
+        BlockStyle::new().max_height(99).render(text).into_string(),
+        unconstrained
+    );
 }
 
 #[test]
 fn width_only_rendering_is_unchanged_by_the_height_default() {
     assert_eq!(
-        Style::new().width(4).render("a\nb"),
-        Style::new()
+        BlockStyle::new().width(4).render("a\nb").into_string(),
+        BlockStyle::new()
             .width(4)
-            .remove(urushi::StylePropertyKey::Height)
+            .remove(urushi::BlockStylePropertyKey::Height)
             .render("a\nb")
+            .into_string()
     );
 }
 
 #[test]
 fn colors_and_modifiers_emit_sgr() {
-    let out = Style::new()
+    let out = BlockStyle::new()
         .foreground(Color::Ansi256(212))
         .bold()
-        .render("hi");
+        .render("hi")
+        .into_string();
     assert_eq!(out, "\x1b[1;38;5;212mhi\x1b[0m");
 }
 
 #[test]
 fn modifiers_can_be_removed_from_a_style_value() {
-    let out = Style::new().bold().remove(Modifier::all()).render("plain");
+    let out = BlockStyle::new()
+        .bold()
+        .remove(Modifier::all())
+        .render("plain")
+        .into_string();
 
     assert_eq!(out, "plain");
 }
 
 #[test]
 fn background_covers_padding() {
-    let out = Style::new()
+    let out = BlockStyle::new()
         .background(Color::BLUE)
         .padding((0, 1))
-        .render("x");
+        .render("x")
+        .into_string();
     assert_eq!(out, "\x1b[44m x \x1b[0m");
 }
 
 #[test]
 fn border_color_is_scoped_to_border() {
-    let out = Style::new()
+    let out = BlockStyle::new()
         .border(Border::NORMAL)
         .border_foreground(Color::RED)
-        .render("x");
+        .render("x")
+        .into_string();
     let lines: Vec<&str> = out.lines().collect();
     assert_eq!(lines[0], "\x1b[31m┌─┐\x1b[0m");
     assert_eq!(lines[1], "\x1b[31m│\x1b[0mx\x1b[31m│\x1b[0m");
@@ -329,12 +353,12 @@ fn border_color_is_scoped_to_border() {
 fn border_sides_render_independently_with_geometric_corners() {
     let cases = [
         (
-            Style::new().border(Border::ASCII),
+            BlockStyle::new().border(Border::ASCII),
             "+-+\n|x|\n+-+",
             "all sides",
         ),
         (
-            Style::new()
+            BlockStyle::new()
                 .border(Border::ASCII)
                 .border_top(false)
                 .border_right(false)
@@ -344,7 +368,7 @@ fn border_sides_render_independently_with_geometric_corners() {
             "no sides",
         ),
         (
-            Style::new()
+            BlockStyle::new()
                 .border(Border::ASCII)
                 .border_right(false)
                 .border_bottom(false)
@@ -353,7 +377,7 @@ fn border_sides_render_independently_with_geometric_corners() {
             "top only",
         ),
         (
-            Style::new()
+            BlockStyle::new()
                 .border(Border::ASCII)
                 .border_top(false)
                 .border_right(false)
@@ -362,7 +386,7 @@ fn border_sides_render_independently_with_geometric_corners() {
             "left only",
         ),
         (
-            Style::new()
+            BlockStyle::new()
                 .border(Border::ASCII)
                 .border_right(false)
                 .border_bottom(false),
@@ -370,7 +394,7 @@ fn border_sides_render_independently_with_geometric_corners() {
             "adjacent sides",
         ),
         (
-            Style::new()
+            BlockStyle::new()
                 .border(Border::ASCII)
                 .border_right(false)
                 .border_left(false),
@@ -378,7 +402,7 @@ fn border_sides_render_independently_with_geometric_corners() {
             "opposite horizontal sides",
         ),
         (
-            Style::new()
+            BlockStyle::new()
                 .border(Border::ASCII)
                 .border_top(false)
                 .border_bottom(false),
@@ -388,7 +412,7 @@ fn border_sides_render_independently_with_geometric_corners() {
     ];
 
     for (style, expected, case) in cases {
-        let actual = style.render("x");
+        let actual = style.render("x").into_string();
         assert_eq!(actual, expected, "{case}");
         let widths: Vec<_> = actual.lines().map(visible_width).collect();
         assert!(
@@ -400,102 +424,89 @@ fn border_sides_render_independently_with_geometric_corners() {
 
 #[test]
 fn enabled_edges_are_the_only_border_cells_styled() {
-    let style = Style::new()
+    let style = BlockStyle::new()
         .border(Border::NORMAL)
         .border_top(false)
         .border_right(false)
         .border_bottom(false)
         .border_foreground(Color::RED);
 
-    assert_eq!(style.render("x"), "\x1b[31m│\x1b[0mx");
+    assert_eq!(style.render("x").into_string(), "\x1b[31m│\x1b[0mx");
 
     let no_edges = style.border_left(false);
-    assert_eq!(no_edges.render("x"), "x");
+    assert_eq!(no_edges.render("x").into_string(), "x");
 }
 
 #[test]
 fn empty_content_keeps_degenerate_border_geometry_consistent() {
-    let all_sides = Style::new().border(Border::ASCII).render("");
+    let all_sides = BlockStyle::new()
+        .border(Border::ASCII)
+        .render("")
+        .into_string();
     assert_eq!(all_sides, "++\n||\n++");
     assert!(all_sides.lines().all(|line| visible_width(line) == 2));
 
-    let adjacent = Style::new()
+    let adjacent = BlockStyle::new()
         .border(Border::ASCII)
         .border_right(false)
         .border_bottom(false)
-        .render("");
+        .render("")
+        .into_string();
     assert_eq!(adjacent, "+\n|");
     assert!(adjacent.lines().all(|line| visible_width(line) == 1));
 }
 
 #[test]
 fn width_wraps_cjk_text() {
-    let out = Style::new().width(4).render("こんにちは");
+    let out = BlockStyle::new()
+        .width(4)
+        .render("こんにちは")
+        .into_string();
     assert_eq!(out, "こん\nにち\nは  ");
 }
 
 #[test]
 fn margin_is_unstyled() {
-    let out = Style::new()
+    let out = BlockStyle::new()
         .background(Color::BLUE)
         .margin((0, 0, 0, 2))
-        .render("hi");
+        .render("hi")
+        .into_string();
     assert_eq!(out, "  \x1b[44mhi\x1b[0m");
 }
 
 #[test]
-fn styled_content_is_measured_by_visible_width() {
-    let inner = Style::new().foreground(Color::RED).render("hi");
-    let out = Style::new().border(Border::NORMAL).render(&inner);
-    assert_eq!(out.lines().next().unwrap(), "┌──┐");
-}
+fn block_content_is_plain_text() {
+    // The layout pass never inspects text for escape sequences: rendered output
+    // handed back as content is measured as ordinary graphemes, so the block
+    // comes out deterministically too wide instead of guessing.
+    let inner = BlockStyle::new()
+        .foreground(Color::RED)
+        .render("hi")
+        .into_string();
+    let out = BlockStyle::new().border(Border::NORMAL).render(&inner);
 
-#[test]
-fn nested_style_restores_outer_style_after_inner_reset() {
-    let inner = Style::new().foreground(Color::RED).render("hi");
-    let out = Style::new()
-        .background(Color::BLUE)
-        .bold()
-        .underline()
-        .padding((0, 1))
-        .width(8)
-        .border(Border::NORMAL)
-        .render(&inner);
-
+    assert!(out.size().width() > 4);
     assert_eq!(
-        out,
-        "┌────────┐\n\
-         │\x1b[1;4;44m \x1b[31mhi\x1b[0m\x1b[1;4;44m     \x1b[0m│\n\
-         └────────┘"
+        BlockStyle::new()
+            .border(Border::NORMAL)
+            .render("hi")
+            .size()
+            .width(),
+        4
     );
-    assert!(out.lines().all(|line| visible_width(line) == 10));
-}
-
-#[test]
-fn nested_style_preserves_osc_hyperlinks() {
-    let link = "\x1b]8;;https://example.com\x1b\\link\x1b]8;;\x1b\\";
-    let inner = Style::new().foreground(Color::RED).render(link);
-    let out = Style::new()
-        .background(Color::BLUE)
-        .bold()
-        .padding((0, 1))
-        .render(&inner);
-
-    assert_eq!(
-        out,
-        "\x1b[1;44m \x1b[31m\x1b]8;;https://example.com\x1b\\link\x1b]8;;\x1b\\\x1b[0m\x1b[1;44m \x1b[0m"
-    );
-    assert_eq!(visible_width(&out), 6);
 }
 
 #[test]
 fn rendered_block_width_is_consistent() {
-    let style = Style::new()
+    let style = BlockStyle::new()
         .padding(1)
         .margin(1)
         .border(Border::DOUBLE)
         .width(10);
-    let out = style.render("wrap して しまう ながい ぶんしょう");
+    let out = style
+        .render("wrap して しまう ながい ぶんしょう")
+        .into_string();
     let widths: Vec<usize> = out.lines().map(visible_width).collect();
     assert!(
         widths.iter().all(|&w| w == widths[0]),

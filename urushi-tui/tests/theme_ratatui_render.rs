@@ -4,8 +4,8 @@ use ratatui::{
     style::{Color as RatatuiColor, Modifier},
 };
 use urushi::{
-    AnsiPolicy, Color, ColorProfile, ComponentRole, Modifier as UrushiModifier, SemanticTokens,
-    Style, TerminalProfile, Theme, visible_width,
+    AnsiPolicy, Color, ColorProfile, Modifier as UrushiModifier, PanelRole, SemanticTokens,
+    TerminalProfile, TextStyle, Theme, visible_width,
 };
 use urushi_tui::{RatatuiStyle, RatatuiStyleExt as _};
 
@@ -13,9 +13,9 @@ use urushi_tui::{RatatuiStyle, RatatuiStyleExt as _};
 fn one_theme_component_renders_to_plain_cli_and_ratatui() {
     let theme = Theme::from_tokens(tokens());
     let profile = TerminalProfile::new(ColorProfile::TrueColor, AnsiPolicy::Enabled);
-    let panel = profile.resolve_style(&theme.style(ComponentRole::PanelFocused));
+    let panel = profile.resolve_block_style(&theme.block_style(PanelRole::PanelFocused));
 
-    let plain = panel.render("保存しました");
+    let plain = panel.render("保存しました").into_string();
     assert!(plain.contains("保存しました"));
     assert!(plain.lines().all(|line| visible_width(line) == 16));
     assert!(plain.contains("38;2;80;160;255"));
@@ -43,7 +43,7 @@ fn one_theme_component_renders_to_plain_cli_and_ratatui() {
 fn theme_widget_clips_safely_at_a_boundary_size() {
     let theme = Theme::from_tokens(tokens());
     let profile = TerminalProfile::new(ColorProfile::TrueColor, AnsiPolicy::Enabled);
-    let panel = profile.resolve_style(&theme.style(ComponentRole::PanelFocused));
+    let panel = profile.resolve_block_style(&theme.block_style(PanelRole::PanelFocused));
     let backend = TestBackend::new(6, 3);
     let mut terminal = Terminal::new(backend).expect("test terminal");
 
@@ -67,34 +67,34 @@ fn ratatui_uses_the_same_terminal_profile_degradation_as_plain_output() {
         (ColorProfile::Ansi16, RatatuiColor::LightCyan),
     ] {
         let profile = TerminalProfile::new(color_profile, AnsiPolicy::Enabled);
-        let panel = profile.resolve_style(&theme.style(ComponentRole::PanelFocused));
+        let panel = profile.resolve_block_style(&theme.block_style(PanelRole::PanelFocused));
         let buffer = render_panel(&panel);
         assert_eq!(
             buffer.cell((0, 0)).expect("border cell").fg,
             expected_border
         );
-        assert!(panel.render("保存しました").contains('\x1b'));
+        assert!(panel.render("保存しました").as_str().contains('\x1b'));
     }
 
     for profile in [
         TerminalProfile::new(ColorProfile::Monochrome, AnsiPolicy::Enabled),
         TerminalProfile::new(ColorProfile::TrueColor, AnsiPolicy::Disabled),
     ] {
-        let panel = profile.resolve_style(&theme.style(ComponentRole::PanelFocused));
+        let panel = profile.resolve_block_style(&theme.block_style(PanelRole::PanelFocused));
         let buffer = render_panel(&panel);
         let border = buffer.cell((0, 0)).expect("border cell");
         let content = buffer.cell((2, 1)).expect("content cell");
         assert_eq!(border.fg, RatatuiColor::Reset);
         assert_eq!(content.fg, RatatuiColor::Reset);
         assert_eq!(content.bg, RatatuiColor::Reset);
-        assert!(!panel.render("保存しました").contains('\x1b'));
+        assert!(!panel.render("保存しました").as_str().contains('\x1b'));
     }
 }
 
 #[test]
 fn ratatui_converts_the_active_modifier_set() {
     let converted = RatatuiStyle::from(
-        &Style::new()
+        &TextStyle::new()
             .add(UrushiModifier::BOLD | UrushiModifier::ITALIC)
             .remove(UrushiModifier::ITALIC),
     )
@@ -104,7 +104,7 @@ fn ratatui_converts_the_active_modifier_set() {
     assert!(converted.sub_modifier.is_empty());
 }
 
-fn render_panel(style: &urushi::Style) -> ratatui::buffer::Buffer {
+fn render_panel(style: &urushi::BlockStyle) -> ratatui::buffer::Buffer {
     let backend = TestBackend::new(16, 3);
     let mut terminal = Terminal::new(backend).expect("test terminal");
     terminal

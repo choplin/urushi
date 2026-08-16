@@ -1,6 +1,6 @@
 //! Shared traversal and layout for hierarchical components.
 
-use crate::{Line, Style, View, visible_width};
+use crate::{Align, TextStyle, VerticalAlign, View, visible_width};
 
 /// The private recursive boundary shared by hierarchical component models.
 pub(super) trait Traversable {
@@ -10,19 +10,19 @@ pub(super) trait Traversable {
 
 #[derive(Debug, Clone)]
 pub(super) struct TraversalStyles {
-    pub(super) item: Style,
-    pub(super) enumerator: Style,
-    pub(super) indenter: Style,
+    pub(super) item: TextStyle,
+    pub(super) enumerator: TextStyle,
+    pub(super) indenter: TextStyle,
 }
 
 #[derive(Debug, Clone)]
 struct PrefixPart {
     text: String,
-    style: Style,
+    style: TextStyle,
 }
 
 pub(super) fn render<T, P>(
-    view: View,
+    rows: Vec<View>,
     children: &[&T],
     styles: &TraversalStyles,
     position: fn(usize, usize) -> P,
@@ -33,18 +33,21 @@ where
     T: Traversable,
     P: Copy,
 {
-    render_children(view, children, &[], styles, position, enumerator, indenter)
+    View::column(
+        Align::Left,
+        render_children(rows, children, &[], styles, position, enumerator, indenter),
+    )
 }
 
 fn render_children<T, P>(
-    mut view: View,
+    mut rows: Vec<View>,
     children: &[&T],
     prefix: &[PrefixPart],
     styles: &TraversalStyles,
     position: fn(usize, usize) -> P,
     enumerator: fn(P) -> String,
     indenter: fn(P) -> String,
-) -> View
+) -> Vec<View>
 where
     T: Traversable,
     P: Copy,
@@ -70,16 +73,16 @@ where
         let indent_text = align_left(indent_marker.clone(), segment_width);
         let mut value_lines = child.value().split('\n');
         let first = value_lines.next().unwrap_or_default();
-        let mut line = append_prefix(Line::new(), prefix)
-            .span(enum_text, styles.enumerator.clone())
-            .span(first, styles.item.clone());
-        view = view.push(line);
+        let mut cells = prefix_cells(prefix);
+        cells.push(View::text(enum_text, styles.enumerator.clone()));
+        cells.push(View::text(first, styles.item.clone()));
+        rows.push(View::row(VerticalAlign::Top, cells));
 
         for continuation in value_lines {
-            line = append_prefix(Line::new(), prefix)
-                .span(indent_text.clone(), styles.indenter.clone())
-                .span(continuation, styles.item.clone());
-            view = view.push(line);
+            let mut cells = prefix_cells(prefix);
+            cells.push(View::text(indent_text.clone(), styles.indenter.clone()));
+            cells.push(View::text(continuation, styles.item.clone()));
+            rows.push(View::row(VerticalAlign::Top, cells));
         }
 
         let nested = child.visible_children();
@@ -89,8 +92,8 @@ where
                 text: indent_text,
                 style: styles.indenter.clone(),
             });
-            view = render_children(
-                view,
+            rows = render_children(
+                rows,
                 &nested,
                 &nested_prefix,
                 styles,
@@ -100,14 +103,14 @@ where
             );
         }
     }
-    view
+    rows
 }
 
-fn append_prefix(mut line: Line, prefix: &[PrefixPart]) -> Line {
-    for part in prefix {
-        line = line.span(part.text.clone(), part.style.clone());
-    }
-    line
+fn prefix_cells(prefix: &[PrefixPart]) -> Vec<View> {
+    prefix
+        .iter()
+        .map(|part| View::text(part.text.clone(), part.style.clone()))
+        .collect()
 }
 
 fn align_right(text: String, width: usize) -> String {

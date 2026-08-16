@@ -1,8 +1,12 @@
 //! Output adapters for renderer-neutral views.
 
-use crate::{TerminalProfile, View};
+use crate::{Limits, RenderedBlock, TerminalProfile, View, resolve};
 
 /// Renders a [`View`] as ANSI-capable text for one terminal profile.
+///
+/// The renderer computes no geometry: it resolves the view once and serializes
+/// the resulting rectangle, coalescing adjacent graphemes of equal effective
+/// style into one SGR scope.
 #[derive(Debug, Clone, Copy)]
 pub struct AnsiRenderer {
     profile: TerminalProfile,
@@ -19,42 +23,53 @@ impl AnsiRenderer {
         self.profile
     }
 
-    /// Renders without adding a trailing newline.
-    pub fn render(&self, view: &View) -> String {
-        view.lines()
-            .iter()
-            .map(|line| {
-                line.spans()
-                    .iter()
-                    .map(|span| self.profile.resolve_style(span.style()).render(span.text()))
-                    .collect::<String>()
-            })
-            .collect::<Vec<_>>()
-            .join("\n")
+    /// Renders at the view's intrinsic size, without a trailing newline.
+    pub fn render(&self, view: &View) -> RenderedBlock {
+        self.render_within(view, Limits::NONE)
+    }
+
+    /// Renders cropped to `limits` — a terminal width, for instance.
+    pub fn render_within(&self, view: &View, limits: Limits) -> RenderedBlock {
+        resolve(view, limits)
+            .map_styles(|style| self.profile.resolve_text_style(style))
+            .into_rendered_block()
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::{AnsiPolicy, Color, ColorProfile, Line, Style};
+    use crate::{AnsiPolicy, Color, ColorProfile, TextStyle};
 
     use super::*;
 
     #[test]
     fn renderer_resolves_styles_at_the_output_boundary() {
-        let view = View::line(Line::styled(
-            "result",
-            Style::new().foreground(Color::Rgb(10, 20, 30)).bold(),
-        ));
+        let style = TextStyle::new().foreground(Color::Rgb(10, 20, 30)).bold();
+        let view = View::text("result", style.clone());
         let plain = AnsiRenderer::new(TerminalProfile::new(
             ColorProfile::Monochrome,
             AnsiPolicy::Disabled,
         ));
 
-        assert_eq!(plain.render(&view), "result");
+        assert_eq!(plain.render(&view).as_str(), "result");
         assert_eq!(
-            view.lines()[0].spans()[0].style(),
-            &Style::new().foreground(Color::Rgb(10, 20, 30)).bold()
+            resolve(&view, Limits::NONE).rows()[0][0].style(),
+            &style,
+            "the resolved view keeps logical styles"
+        );
+    }
+
+    #[test]
+    fn limits_crop_the_resolved_rectangle() {
+        let renderer = AnsiRenderer::new(TerminalProfile::new(
+            ColorProfile::TrueColor,
+            AnsiPolicy::Disabled,
+        ));
+        let view = View::text("abcdef", TextStyle::new());
+
+        assert_eq!(
+            renderer.render_within(&view, Limits::width(3)).as_str(),
+            "abc"
         );
     }
 }

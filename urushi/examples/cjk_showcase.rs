@@ -1,52 +1,73 @@
 use urushi::{
-    Align, AnsiPolicy, AnsiRenderer, Border, Color, ColorProfile, List, ListItem, SemanticTokens,
-    Style, Table, TerminalProfile, Theme, Tree, TreeNode, VerticalAlign, arabic_enumerator,
-    join_horizontal, join_vertical, visible_width,
+    Align, AnsiPolicy, AnsiRenderer, BlockStyle, Border, Color, ColorProfile, List, ListItem,
+    SemanticTokens, Table, TerminalProfile, TextStyle, Theme, Tree, TreeNode, VerticalAlign, View,
+    arabic_enumerator, measure,
 };
 
-fn row(label: &str, sample: String) -> String {
+/// Blank space of a fixed width, used to separate samples.
+fn gap(width: usize) -> View {
+    View::text(" ".repeat(width), TextStyle::new())
+}
+
+/// Wraps plain text in a block filled with that block's own style.
+fn boxed(style: BlockStyle, text: &str) -> View {
+    let content = View::text(text, style.text().clone());
+    View::block(style, content)
+}
+
+fn row(label: &str, sample: View) -> View {
     row_with_alignment(label, sample, VerticalAlign::Center)
 }
 
-fn row_with_alignment(label: &str, sample: String, alignment: VerticalAlign) -> String {
-    let label = Style::new()
-        .foreground(Color::BRIGHT_CYAN)
-        .bold()
-        .width(20)
-        .align(Align::Right)
-        .render(label);
-    let divider = Style::new().foreground(Color::BRIGHT_BLACK).render(" | ");
-    join_horizontal(alignment, &[label, divider, sample])
+fn row_with_alignment(label: &str, sample: View, alignment: VerticalAlign) -> View {
+    let label = View::block(
+        BlockStyle::new()
+            .foreground(Color::BRIGHT_CYAN)
+            .bold()
+            .width(20)
+            .align(Align::Right),
+        View::text(
+            label,
+            TextStyle::new().foreground(Color::BRIGHT_CYAN).bold(),
+        ),
+    );
+    let divider = View::text(" | ", TextStyle::new().foreground(Color::BRIGHT_BLACK));
+
+    View::row(alignment, [label, divider, sample])
 }
 
-fn vertical_alignment_sample(top: &str, center: &str, bottom: &str) -> String {
-    let cell = Style::new()
+fn vertical_alignment_sample(top: &str, center: &str, bottom: &str) -> View {
+    let cell = BlockStyle::new()
         .background(Color::BRIGHT_BLACK)
         .width(6)
         .height(5)
         .align(Align::Center);
-    let top = cell.clone().align_vertical(VerticalAlign::Top).render(top);
-    let center = cell
-        .clone()
-        .align_vertical(VerticalAlign::Center)
-        .render(center);
-    let bottom = cell.align_vertical(VerticalAlign::Bottom).render(bottom);
 
-    join_horizontal(
+    View::row(
         VerticalAlign::Top,
-        &[top, " ".to_string(), center, " ".to_string(), bottom],
+        [
+            boxed(cell.clone().align_vertical(VerticalAlign::Top), top),
+            gap(1),
+            boxed(cell.clone().align_vertical(VerticalAlign::Center), center),
+            gap(1),
+            boxed(cell.align_vertical(VerticalAlign::Bottom), bottom),
+        ],
     )
 }
 
-fn horizontal_alignment_sample(left: &str, center: &str, right: &str) -> String {
-    let cell = Style::new().background(Color::BRIGHT_BLACK).width(20);
-    let left = cell.clone().align(Align::Left).render(left);
-    let center = cell.clone().align(Align::Center).render(center);
-    let right = cell.align(Align::Right).render(right);
+fn horizontal_alignment_sample(left: &str, center: &str, right: &str) -> View {
+    let cell = BlockStyle::new().background(Color::BRIGHT_BLACK).width(20);
 
-    let gap = " ".repeat(20);
-
-    join_vertical(Align::Left, &[left, gap.clone(), center, gap, right])
+    View::column(
+        Align::Left,
+        [
+            boxed(cell.clone().align(Align::Left), left),
+            gap(20),
+            boxed(cell.clone().align(Align::Center), center),
+            gap(20),
+            boxed(cell.align(Align::Right), right),
+        ],
+    )
 }
 
 fn junction_grid(border: Border) -> String {
@@ -80,42 +101,44 @@ fn junction_grid(border: Border) -> String {
     )
 }
 
-fn border_card(label: &str, border: Border, color: Color) -> String {
-    let label = Style::new()
-        .foreground(color)
-        .bold()
-        .width(9)
-        .align(Align::Center)
-        .render(label);
-    let mut grid_style = Style::new().foreground(color);
+fn border_card(label: &str, border: Border, color: Color) -> View {
+    let label = View::block(
+        BlockStyle::new()
+            .foreground(color)
+            .bold()
+            .width(9)
+            .align(Align::Center),
+        View::text(label, TextStyle::new().foreground(color).bold()),
+    );
+    let mut grid_style = TextStyle::new().foreground(color);
     if border == Border::HIDDEN {
         grid_style = grid_style.background(Color::BRIGHT_BLACK);
     }
-    let grid = grid_style.render(&junction_grid(border));
+    let grid = View::text(junction_grid(border), grid_style);
 
-    join_vertical(Align::Left, &[label, grid])
+    View::column(Align::Left, [label, grid])
 }
 
-fn border_preset_sample() -> String {
-    let pair = |left, right| join_horizontal(VerticalAlign::Top, &[left, " ".to_string(), right]);
-    join_vertical(
+fn border_preset_sample() -> View {
+    let pair = |left, right| View::row(VerticalAlign::Top, [left, gap(1), right]);
+    View::column(
         Align::Left,
-        &[
+        [
             pair(
                 border_card("標準", Border::NORMAL, Color::BRIGHT_GREEN),
                 border_card("角丸", Border::ROUNDED, Color::BRIGHT_CYAN),
             ),
-            " ".repeat(19),
+            gap(19),
             pair(
                 border_card("太線", Border::THICK, Color::BRIGHT_MAGENTA),
                 border_card("二重線", Border::DOUBLE, Color::BRIGHT_BLUE),
             ),
-            " ".repeat(19),
+            gap(19),
             pair(
                 border_card("ASCII", Border::ASCII, Color::BRIGHT_YELLOW),
                 border_card("Markdown", Border::MARKDOWN, Color::BRIGHT_RED),
             ),
-            " ".repeat(19),
+            gap(19),
             pair(
                 border_card("三線表", Border::BOOKTABS, Color::BRIGHT_CYAN),
                 border_card("非表示", Border::HIDDEN, Color::BRIGHT_BLACK),
@@ -124,37 +147,43 @@ fn border_preset_sample() -> String {
     )
 }
 
-fn side_card(label: &str, sample: String, blank_above: bool, blank_below: bool) -> String {
-    let label = Style::new()
-        .foreground(Color::BRIGHT_CYAN)
-        .bold()
-        .width(20)
-        .align(Align::Center)
-        .render(label);
-    let sample = Style::new().width(20).align(Align::Center).render(&sample);
-    let blank = " ".repeat(20);
-    let mut lines = vec![label];
+fn side_card(label: &str, sample: View, blank_above: bool, blank_below: bool) -> View {
+    let label = View::block(
+        BlockStyle::new()
+            .foreground(Color::BRIGHT_CYAN)
+            .bold()
+            .width(20)
+            .align(Align::Center),
+        View::text(
+            label,
+            TextStyle::new().foreground(Color::BRIGHT_CYAN).bold(),
+        ),
+    );
+    let sample = View::block(BlockStyle::new().width(20).align(Align::Center), sample);
+    let mut rows = vec![label];
     if blank_above {
-        lines.push(blank.clone());
+        rows.push(gap(20));
     }
-    lines.push(sample);
+    rows.push(sample);
     if blank_below {
-        lines.push(blank);
+        rows.push(gap(20));
     }
-    join_vertical(Align::Left, &lines)
+    View::column(Align::Left, rows)
 }
 
-fn border_side_grid() -> String {
-    let border = |style: Style| {
-        style
-            .border(Border::NORMAL)
-            .border_foreground(Color::BRIGHT_MAGENTA)
-            .render("内容")
+fn border_side_grid() -> View {
+    let border = |style: BlockStyle| {
+        boxed(
+            style
+                .border(Border::NORMAL)
+                .border_foreground(Color::BRIGHT_MAGENTA),
+            "内容",
+        )
     };
     let top = side_card(
         "上辺のみ",
         border(
-            Style::new()
+            BlockStyle::new()
                 .border_right(false)
                 .border_bottom(false)
                 .border_left(false),
@@ -165,7 +194,7 @@ fn border_side_grid() -> String {
     let right = side_card(
         "右辺のみ",
         border(
-            Style::new()
+            BlockStyle::new()
                 .border_top(false)
                 .border_bottom(false)
                 .border_left(false),
@@ -176,7 +205,7 @@ fn border_side_grid() -> String {
     let bottom = side_card(
         "下辺のみ",
         border(
-            Style::new()
+            BlockStyle::new()
                 .border_top(false)
                 .border_right(false)
                 .border_left(false),
@@ -187,7 +216,7 @@ fn border_side_grid() -> String {
     let left = side_card(
         "左辺のみ",
         border(
-            Style::new()
+            BlockStyle::new()
                 .border_top(false)
                 .border_right(false)
                 .border_bottom(false),
@@ -195,19 +224,30 @@ fn border_side_grid() -> String {
         true,
         true,
     );
-    let top = Style::new().width(43).align(Align::Center).render(&top);
-    let middle = join_horizontal(VerticalAlign::Top, &[left, "  ".to_string(), right]);
-    let bottom = Style::new().width(43).align(Align::Center).render(&bottom);
-    let heading = Style::new()
-        .foreground(Color::BRIGHT_YELLOW)
-        .bold()
-        .width(43)
-        .align(Align::Center)
-        .render("辺ごとの罫線");
+    let centered = |view| View::block(BlockStyle::new().width(43).align(Align::Center), view);
+    let middle = View::row(VerticalAlign::Top, [left, gap(2), right]);
+    let heading = View::block(
+        BlockStyle::new()
+            .foreground(Color::BRIGHT_YELLOW)
+            .bold()
+            .width(43)
+            .align(Align::Center),
+        View::text(
+            "辺ごとの罫線",
+            TextStyle::new().foreground(Color::BRIGHT_YELLOW).bold(),
+        ),
+    );
 
-    join_vertical(
+    View::column(
         Align::Left,
-        &[heading, top, " ".repeat(43), middle, " ".repeat(43), bottom],
+        [
+            heading,
+            centered(top),
+            gap(43),
+            middle,
+            gap(43),
+            centered(bottom),
+        ],
     )
 }
 
@@ -226,187 +266,186 @@ fn component_theme() -> Theme {
     })
 }
 
-fn component_renderer() -> AnsiRenderer {
-    AnsiRenderer::new(TerminalProfile::new(
-        ColorProfile::Ansi16,
-        AnsiPolicy::Enabled,
-    ))
-}
-
-fn tree_sample() -> String {
+fn tree_sample() -> View {
     let tree = Tree::new()
         .root("うるし")
         .child(TreeNode::new("ソース").child("部品").child("描画"))
         .child("設定");
 
-    component_renderer().render(&component_theme().components().tree().view(&tree))
+    component_theme().components().tree().view(&tree)
 }
 
-fn list_sample() -> String {
+fn list_sample() -> View {
     let list = List::new()
         .item("設計する")
         .item(ListItem::new("実装する").items(["モデル", "ビュー"]))
         .item("検証する");
-    let list_style = component_theme()
+    let theme = component_theme();
+    let list_style = theme
         .components()
         .list()
         .clone()
         .enumerator(arabic_enumerator);
 
-    component_renderer().render(&list_style.view(&list))
+    list_style.view(&list)
 }
 
-fn table_sample() -> String {
-    let theme = Theme::from_tokens(SemanticTokens {
-        text: Color::WHITE,
-        text_muted: Color::BRIGHT_BLACK,
-        background: Color::BLACK,
-        surface: Color::BLACK,
-        accent: Color::CYAN,
-        accent_text: Color::BLACK,
-        success: Color::GREEN,
-        warning: Color::YELLOW,
-        error: Color::RED,
-        border: Color::BRIGHT_BLACK,
-    });
+fn table_sample() -> View {
     let table = Table::new()
         .headers(["項目", "値"])
         .row(["表示", "有効"])
         .row(["色数", "16"]);
-    let renderer = AnsiRenderer::new(TerminalProfile::new(
-        ColorProfile::Ansi16,
-        AnsiPolicy::Enabled,
-    ));
 
-    renderer.render(&theme.components().table().view(&table))
+    component_theme().components().table().view(&table)
 }
 
-fn panel(title: &str, rows: &[String]) -> String {
-    let body = join_vertical(Align::Left, rows);
-    let width = body.lines().map(visible_width).max().unwrap_or_default();
-    let title = Style::new()
-        .foreground(Color::BRIGHT_YELLOW)
-        .bold()
-        .width(width as u16)
-        .align(Align::Center)
-        .render(title);
-    let catalog = join_vertical(Align::Left, &[title, body]);
+fn panel(title: &str, rows: Vec<View>) -> View {
+    let body = View::column(Align::Left, rows);
+    let width = measure(&body).width() as u16;
+    let title = View::block(
+        BlockStyle::new()
+            .foreground(Color::BRIGHT_YELLOW)
+            .bold()
+            .width(width)
+            .align(Align::Center),
+        View::text(
+            title,
+            TextStyle::new().foreground(Color::BRIGHT_YELLOW).bold(),
+        ),
+    );
+    let catalog = View::column(Align::Left, [title, body]);
 
-    Style::new()
-        .padding((0, 1))
-        .border(Border::ROUNDED)
-        .border_foreground(Color::BRIGHT_BLACK)
-        .margin(1)
-        .render(&catalog)
+    View::block(
+        BlockStyle::new()
+            .padding((0, 1))
+            .border(Border::ROUNDED)
+            .border_foreground(Color::BRIGHT_BLACK)
+            .margin(1),
+        catalog,
+    )
 }
 
-/// Renders a readable Japanese catalog that exercises CJK display widths.
-pub fn render_cjk_showcase() -> String {
-    let inner = Style::new().foreground(Color::BRIGHT_RED).render("内側");
-    let rows = [
+/// Builds a readable Japanese catalog that exercises CJK display widths.
+pub fn cjk_showcase_view() -> View {
+    let card = |label| {
+        boxed(
+            BlockStyle::new()
+                .padding((0, 1))
+                .border(Border::ROUNDED)
+                .border_foreground(Color::BRIGHT_GREEN),
+            label,
+        )
+    };
+    let rows = vec![
         row(
             "前景色",
-            Style::new()
-                .foreground(Color::BRIGHT_CYAN)
-                .render("水色の文字"),
+            View::text(
+                "水色の文字",
+                TextStyle::new().foreground(Color::BRIGHT_CYAN),
+            ),
         ),
         row(
             "背景色",
-            Style::new().background(Color::BLUE).render("青い領域"),
+            View::text("青い領域", TextStyle::new().background(Color::BLUE)),
         ),
-        row("太字", Style::new().bold().render("太い文字")),
-        row("下線", Style::new().underline().render("下線付き文字")),
+        row("太字", View::text("太い文字", TextStyle::new().bold())),
         row(
-            "入れ子 ANSI",
-            Style::new()
-                .foreground(Color::BRIGHT_GREEN)
-                .render(&format!("外側 {inner} 外側")),
+            "下線",
+            View::text("下線付き文字", TextStyle::new().underline()),
         ),
-        " ".repeat(43),
+        // 描画済みの文字列を入れ子にするのではなく、テキストを並べて合成する。
+        row(
+            "行内スタイル",
+            View::row(
+                VerticalAlign::Top,
+                [
+                    View::text("外側 ", TextStyle::new().foreground(Color::BRIGHT_GREEN)),
+                    View::text("内側", TextStyle::new().foreground(Color::BRIGHT_RED)),
+                    View::text(" 外側", TextStyle::new().foreground(Color::BRIGHT_GREEN)),
+                ],
+            ),
+        ),
+        // 行の中の block: 行全体が block の高さを持つ1つの矩形になる。
+        row(
+            "行内ブロック",
+            View::row(
+                VerticalAlign::Center,
+                [
+                    View::text("状態 ", TextStyle::new()),
+                    card("完了"),
+                    View::text(" です", TextStyle::new()),
+                ],
+            ),
+        ),
+        gap(43),
         row(
             "パディング",
-            Style::new()
-                .background(Color::BRIGHT_BLACK)
-                .padding((1, 2))
-                .render("内容"),
+            boxed(
+                BlockStyle::new()
+                    .background(Color::BRIGHT_BLACK)
+                    .padding((1, 2)),
+                "内容",
+            ),
         ),
         row(
             "四辺の罫線",
-            Style::new()
-                .padding((0, 1))
-                .border(Border::ROUNDED)
-                .render("内容"),
+            boxed(
+                BlockStyle::new().padding((0, 1)).border(Border::ROUNDED),
+                "内容",
+            ),
         ),
-        " ".repeat(43),
+        gap(43),
         row(
             "固定幅",
-            Style::new()
-                .background(Color::BRIGHT_BLACK)
-                .width(20)
-                .render("20列分を確保"),
+            boxed(
+                BlockStyle::new().background(Color::BRIGHT_BLACK).width(20),
+                "20列分を確保",
+            ),
         ),
-        " ".repeat(43),
+        gap(43),
         row_with_alignment(
             "固定高さ",
-            Style::new()
-                .background(Color::BRIGHT_BLACK)
-                .height(3)
-                .render("3行分を確保"),
+            boxed(
+                BlockStyle::new().background(Color::BRIGHT_BLACK).height(3),
+                "3行分を確保",
+            ),
             VerticalAlign::Top,
         ),
-        " ".repeat(43),
+        gap(43),
         row("垂直揃え", vertical_alignment_sample("上", "中央", "下")),
-        " ".repeat(43),
+        gap(43),
         row("水平揃え", horizontal_alignment_sample("左", "中央", "右")),
-        " ".repeat(43),
+        gap(43),
         row(
-            "横結合",
-            join_horizontal(
-                VerticalAlign::Top,
-                &[
-                    Style::new()
-                        .padding((0, 1))
-                        .border(Border::ROUNDED)
-                        .border_foreground(Color::BRIGHT_GREEN)
-                        .render("甲"),
-                    Style::new()
-                        .padding((0, 1))
-                        .border(Border::ROUNDED)
-                        .border_foreground(Color::BRIGHT_GREEN)
-                        .render("乙"),
-                ],
-            ),
+            "横並び",
+            View::row(VerticalAlign::Top, [card("甲"), card("乙")]),
         ),
         row(
-            "縦結合",
-            join_vertical(
-                Align::Left,
-                &[
-                    Style::new()
-                        .padding((0, 1))
-                        .border(Border::ROUNDED)
-                        .border_foreground(Color::BRIGHT_GREEN)
-                        .render("甲"),
-                    Style::new()
-                        .padding((0, 1))
-                        .border(Border::ROUNDED)
-                        .border_foreground(Color::BRIGHT_GREEN)
-                        .render("乙"),
-                ],
-            ),
+            "縦積み",
+            View::column(Align::Left, [card("甲"), card("乙")]),
         ),
-        " ".repeat(43),
+        gap(43),
         row_with_alignment("木構造", tree_sample(), VerticalAlign::Top),
-        " ".repeat(43),
+        gap(43),
         row_with_alignment("箇条書き", list_sample(), VerticalAlign::Top),
-        " ".repeat(43),
+        gap(43),
         row_with_alignment("表", table_sample(), VerticalAlign::Top),
-        " ".repeat(43),
+        gap(43),
         row("罫線の種類", border_preset_sample()),
         border_side_grid(),
     ];
 
-    panel("URUSHI スタイル・ショーケース", &rows)
+    panel("URUSHI スタイル・ショーケース", rows)
+}
+
+/// Renders the Japanese catalog for a 16-color terminal.
+pub fn render_cjk_showcase() -> String {
+    AnsiRenderer::new(TerminalProfile::new(
+        ColorProfile::Ansi16,
+        AnsiPolicy::Enabled,
+    ))
+    .render(&cjk_showcase_view())
+    .into_string()
 }
 
 #[cfg_attr(test, allow(dead_code))]

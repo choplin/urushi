@@ -71,7 +71,7 @@ fn write_command<W: Write>(
         InlineCommand::CarriageReturnNewline => writer.write_all(b"\r\n"),
         InlineCommand::WriteLine(line) => {
             for span in &line.spans {
-                writer.write_all(styles.style(span.role).render(&span.text).as_bytes())?;
+                writer.write_all(styles.style(span.role).paint(&span.text).as_bytes())?;
             }
             Ok(())
         }
