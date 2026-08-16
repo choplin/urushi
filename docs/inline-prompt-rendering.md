@@ -92,6 +92,10 @@ are reset, and the previously drawn rows are forgotten. Nothing is erased. A
 prompt's remains left on screen are a smaller harm than erasing rows belonging
 to another writer.
 
+`drawn` is the one field a loss does not reset. It records that this prompt has
+put something on screen at some point, which stays true however many regions
+have since been abandoned.
+
 A lost region has two continuations, and they are deliberately asymmetric.
 
 **The prompt is still running.** A resize arrives while the user is typing, so
@@ -104,8 +108,18 @@ row, which is the common case.
 
 **The prompt is finishing.** Cleanup restores the cursor to visible and emits a
 carriage return and line feed, so subsequent output starts below the remains
-rather than on top of them. It emits that line feed only when `owned_rows > 0`;
-a prompt that failed before drawing anything must not leave a blank row behind.
+rather than on top of them. It emits that line feed when `drawn` is true; a
+prompt that failed before putting anything on screen must not leave a blank row
+behind.
+
+The gate is `drawn`, not `owned_rows`. The two answer different questions and a
+loss separates them: a resize immediately followed by a cancellation leaves
+`owned_rows` at zero while remains are on screen, and gating on `owned_rows`
+would then skip the line feed and let subsequent output land on top of them —
+the exact outcome this continuation exists to prevent.
+
+- `owned_rows > 0` — whether there are rows to erase, and how many.
+- `drawn` — whether anything of this prompt is on screen at all.
 
 The layer above is responsible for coalescing resize events. Dragging a window
 edge produces a stream of them, and re-establishing the region once per event
@@ -188,11 +202,21 @@ stage therefore emits runs in a canonical form:
 
 - adjacent runs with equal styles are merged, greedily and left to right;
 - no run is empty; and
-- styles are compared by resolved value, so two spellings of the same
-  appearance produce one run rather than two.
+- a run's style is the style **as it will be emitted** — resolved for the
+  output profile, in a representation where equal appearance means equal value.
 
 Without the third rule a row can differ structurally while rendering
-identically, and every frame redraws every row.
+identically, and every frame redraws every row. It has two distinct failure
+modes, and a style type must rule out both:
+
+- **Redundant spellings.** If a default color can be written either as "absent"
+  or as an explicit reset, or if modifiers are carried as an add set and a
+  subtract set, one appearance has several values. The style a run carries must
+  be a normalized form with neither.
+- **Capability degradation.** Two colors a terminal profile collapses to the
+  same output are equal on screen and unequal in a logical style. The style a
+  run carries must therefore already be resolved against the profile, not left
+  logical for the executor to resolve.
 
 This matters most where rows are aggregated from grapheme-level content on each
 frame, because the aggregation is what establishes the form.
@@ -219,6 +243,14 @@ The vocabulary is the prompt's own, not a terminal library's. Reserving a row
 is a bare line feed, which terminal libraries generally do not model as a
 command, and the vocabulary is the artifact kept identical across
 implementations.
+
+These variants need not be the whole of an implementation's command type. A
+project that also drives a full-screen surface may keep one terminal-command
+vocabulary and make these a subset of it, rather than maintaining a second
+vocabulary for prompts; whether that applies depends on what else the project
+owns below the prompt. What must hold either way is that **the plan stage emits
+nothing outside this set** — no alternate screen, no full-screen clear, no
+absolute cursor addressing — and that the exclusion is asserted, not assumed.
 
 `LineFeed` and `CarriageReturnLineFeed` are distinct because their purposes
 differ: the first materializes a row inside the region, the second releases the
@@ -251,6 +283,7 @@ InlinePresentation {
   reserved_rows  : int         // rows materialized below the origin
   owned_rows     : int         // rows cleanup must erase
   rows           : [Row]       // last drawn content, for diffing
+  drawn          : bool        // this prompt has put something on screen
 }
 ```
 
@@ -261,6 +294,11 @@ identically, so they are one field.
 `reserved_rows` never decreases while a prompt runs. `owned_rows` is the extent
 cleanup must erase; after a successful frame it equals that frame's height,
 because stale rows were cleared during the frame.
+
+`drawn` is set by the first successful write and is never cleared for the
+lifetime of the prompt. Every other field describes the region currently being
+tracked and is reset when that region is lost; `drawn` describes the screen,
+which a loss does not undo.
 
 ## The plan and its recovery contract
 
@@ -343,7 +381,7 @@ value through the Frame and Plan stages.
 
 Identical across implementations:
 
-- the `Command` variants and their meaning;
+- the command variants a prompt plan emits, and their meaning;
 - the two canonicalization invariants on command lists;
 - the canonical form of runs within a row;
 - `InlinePresentation` and its fields' invariants;
