@@ -95,11 +95,15 @@ The contracts shared across surfaces are:
   same logical styles for the capabilities of the actual output surface.
 
 `View` belongs to that foundation for the plain-CLI and Ratatui surfaces, which
-share one resolved view. The prompt does not use it: it needs cursor, viewport,
-help/error priority, and final cleanup information that `View` does not model,
-so it keeps a surface-specific view and runtime type while sharing the contracts
-above. The Ratatui adapter's migration onto `ResolvedView` is not yet
-implemented; it currently draws a single `BlockStyle` with its own box-model
+share one resolved view. The prompt does not use it today: it keeps a
+surface-specific view and runtime type while sharing the contracts above.
+Cursor, viewport, help/error priority, and cleanup state are the information
+`View` does not model, but only the cursor is a reason to stay separate — the
+others belong to stages above and below a resolved view rather than to the view
+itself. [`inline-prompt-rendering.md`](inline-prompt-rendering.md) places them
+accordingly and moves the prompt onto `View`; that migration is not yet
+implemented. The Ratatui adapter's migration onto `ResolvedView` is likewise
+outstanding; it currently draws a single `BlockStyle` with its own box-model
 code.
 
 The implemented layers above the foundation are:

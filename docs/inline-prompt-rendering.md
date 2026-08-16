@@ -148,7 +148,7 @@ design exists to make identical.
 | Stage | Input → output | Concern |
 | --- | --- | --- |
 | Resolve | `View` + `Limits` → `ResolvedView` | Generic. Measure, wrap, and clip content to a box. No prompt policy. |
-| Frame | `ResolvedView` + policy → `FramedView` | Prompt-specific. Choose which rows a bounded viewport shows. |
+| Frame | `ResolvedView` + policy → `FramedView` | Prompt-specific. Window a bounded viewport onto the resolved content, vertically and horizontally. |
 | Plan | `FramedView` + `InlinePresentation` + geometry → `InlineRenderPlan` | Pure. Decide which commands reach the terminal. **Shared.** |
 | Execute | `InlineRenderPlan` → terminal | I/O and byte encoding only. |
 
@@ -156,13 +156,39 @@ design exists to make identical.
 view model.
 
 **Frame** carries the policy a prompt needs when its content does not fit:
-scroll the viewport so the focused row stays visible, and reinstate the
-validation error and the help line when scrolling has pushed them out of view.
-A prompt's usefulness depends on these; they are not layout details. Keeping
-them in their own stage stops them from being entangled with wrapping and
-clipping, and keeps the plan stage free of prompt semantics.
+scroll the viewport so the focused row stays visible, keep the text cursor
+visible within its row, and reinstate the validation error and the help line
+when scrolling has pushed them out of view. A prompt's usefulness depends on
+these; they are not layout details. Keeping them in their own stage stops them
+from being entangled with wrapping and clipping, and keeps the plan stage free
+of prompt semantics.
 
 **Plan** and **Execute** are described below.
+
+### A prompt resolves unbounded in width
+
+Following the cursor is a windowing decision, and windowing belongs to Frame.
+That forces a constraint upstream: **Frame cannot recover content that Resolve
+already clipped away.** If a line is clipped to the viewport width before Frame
+sees it, and the cursor sits beyond that width, the text it would need to scroll
+into view is gone.
+
+A prompt therefore resolves with no width bound and lets Frame take the
+horizontal window. Height is still bounded at Resolve, because Frame selects
+rows rather than reflowing them.
+
+This is a constraint on how a prompt *calls* Resolve, not a change to Resolve.
+`Limits` keeps both bounds for consumers that want them; a prompt simply does
+not use the width bound.
+
+The alternative — making the cursor an input to Resolve so it can clip around it
+— would put prompt policy inside the stage this design defines as generic, and
+would make every other consumer of the view model carry a parameter that means
+nothing to it.
+
+The cost is resolving a long line at full length every frame. Prompt rows are
+few and short-lived, so this is not on a path where it matters; a viewport that
+windows a very large document would need a different arrangement.
 
 ## The row unit
 
@@ -212,7 +238,10 @@ modes, and a style type must rule out both:
 - **Redundant spellings.** If a default color can be written either as "absent"
   or as an explicit reset, or if modifiers are carried as an add set and a
   subtract set, one appearance has several values. The style a run carries must
-  be a normalized form with neither.
+  be a normalized form with neither. `TextStyle` — an optional foreground, an
+  optional background, and one modifier set, over a color type with no reset
+  variant — is that form, which is why no separate "effective" style type is
+  needed alongside it.
 - **Capability degradation.** Two colors a terminal profile collapses to the
   same output are equal on screen and unequal in a logical style. The style a
   run carries must therefore already be resolved against the profile, not left
