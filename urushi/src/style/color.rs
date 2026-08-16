@@ -86,6 +86,18 @@ impl Color {
             Self::Rgb(r, g, b) => format!("{};2;{r};{g};{b}", if bg { 48 } else { 38 }),
         }
     }
+
+    /// Returns the SGR parameter string selecting this color for the underline
+    /// layer (e.g. `"58;5;212"`).
+    ///
+    /// SGR 58 has no short form for the first sixteen colors, so a palette
+    /// index always takes the indexed spelling.
+    pub(crate) fn sgr_underline_params(self) -> String {
+        match self {
+            Self::Ansi(n) | Self::Ansi256(n) => format!("58;5;{n}"),
+            Self::Rgb(r, g, b) => format!("58;2;{r};{g};{b}"),
+        }
+    }
 }
 
 impl From<u8> for Color {

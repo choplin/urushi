@@ -7,6 +7,7 @@ mod layout;
 mod modifier;
 mod property;
 mod text;
+mod underline;
 
 pub use block::BlockStyle;
 pub use border::Border;
@@ -17,3 +18,4 @@ pub use property::{
     BlockStyleProperty, BlockStylePropertyKey, TextStyleProperty, TextStylePropertyKey,
 };
 pub use text::TextStyle;
+pub use underline::{Underline, UnderlineStyle};

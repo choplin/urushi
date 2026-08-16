@@ -6,6 +6,7 @@ this table is the record of when each decision was made and what it replaced.
 
 | Date | Decision | Recorded in |
 | --- | --- | --- |
+| 2026-08-16 | Made the underline one optional value carrying its shape and its colour, removing `Modifier::UNDERLINED` and adding `hidden`, so that a single underline has one spelling and an underline colour cannot exist without an underline to draw it. | [`design/style-value-model.md`](design/style-value-model.md) |
 | 2026-08-16 | Closed the remaining canonical-form duplication by normalization rather than by type: fold an underline colour equal to the foreground, once the style is final, and fold only what is inert. | [`design/inline-prompt-rendering.md`](design/inline-prompt-rendering.md) |
 | 2026-08-16 | Chose a prompt's horizontal cursor window before Resolve, replacing the withdrawn decision to resolve a prompt unbounded in width — an unbounded axis is a measurement, so it costs every row its overflow policy. | [`design/inline-prompt-rendering.md`](design/inline-prompt-rendering.md) |
 | 2026-08-16 | Stated the no-solver boundary as "a decided size is never revised, and no node is assembled twice" rather than "no node is laid out twice", so that repeating a pure measurement of a subtree — which a `Column` needs to divide its height — is inside the model. | [`view-model.md`](view-model.md) |

@@ -4,7 +4,7 @@
 use crate::view::{Available, RenderedBlock, Size, View, resolve};
 use crate::{
     Align, BlockStyleProperty, BlockStylePropertyKey, Border, Color, Length, Modifier, Overflow,
-    Sides, TextStyle, TextStyleProperty, VerticalAlign,
+    Sides, TextStyle, TextStyleProperty, Underline, UnderlineStyle, VerticalAlign,
 };
 
 /// A rectangle: padding, margin, border, dimensions, alignment, and the
@@ -176,8 +176,23 @@ impl BlockStyle {
         self.add(Modifier::ITALIC)
     }
 
+    /// Underlines the fill text with a single line in the foreground color.
     pub fn underline(self) -> Self {
-        self.add(Modifier::UNDERLINED)
+        self.add(TextStyleProperty::Underline(Underline::default()))
+    }
+
+    /// Sets the shape the fill text's underline is drawn with, adding an
+    /// underline in the foreground color when the style has none.
+    pub fn underline_style(mut self, style: UnderlineStyle) -> Self {
+        self.text = self.text.underline_style(style);
+        self
+    }
+
+    /// Sets the color the fill text's underline is drawn in, adding a single
+    /// underline when the style has none.
+    pub fn underline_color(mut self, color: impl Into<Color>) -> Self {
+        self.text = self.text.underline_color(color);
+        self
     }
 
     pub fn blink(self) -> Self {
@@ -186,6 +201,10 @@ impl BlockStyle {
 
     pub fn reverse(self) -> Self {
         self.add(Modifier::REVERSED)
+    }
+
+    pub fn hide(self) -> Self {
+        self.add(Modifier::HIDDEN)
     }
 
     pub fn strikethrough(self) -> Self {
@@ -304,6 +323,11 @@ impl BlockStyle {
     /// Returns the fill background color instruction, if one is set.
     pub const fn background_color(&self) -> Option<Color> {
         self.text.background_color()
+    }
+
+    /// Returns the fill text's underline instruction, if one is set.
+    pub const fn underline_value(&self) -> Option<Underline> {
+        self.text.underline_value()
     }
 
     /// Returns the active fill text modifiers.
@@ -454,6 +478,13 @@ impl BlockStyle {
 
     /// Removes every property that can emit an SGR sequence while preserving
     /// the box model.
+    /// Folds the fill text's values that cannot reach the output, as
+    /// [`TextStyle::canonical`] defines.
+    pub(crate) fn canonical(mut self) -> Self {
+        self.text = self.text.canonical();
+        self
+    }
+
     pub(crate) fn without_ansi(mut self) -> Self {
         self = self.without_colors();
         self.text = TextStyle::new();

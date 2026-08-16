@@ -1,7 +1,7 @@
 //! The [`TextStyle`] builder: everything a terminal can express about a run of
 //! text.
 
-use crate::{Color, Modifier, TextStyleProperty, TextStylePropertyKey};
+use crate::{Color, Modifier, TextStyleProperty, TextStylePropertyKey, Underline, UnderlineStyle};
 
 pub(crate) const RESET: &str = "\x1b[0m";
 
@@ -41,6 +41,7 @@ pub(crate) const RESET: &str = "\x1b[0m";
 pub struct TextStyle {
     fg: Option<Color>,
     bg: Option<Color>,
+    underline: Option<Underline>,
     modifiers: Modifier,
 }
 
@@ -56,6 +57,7 @@ impl TextStyle {
         match property.into() {
             TextStyleProperty::Foreground(color) => self.fg = Some(color),
             TextStyleProperty::Background(color) => self.bg = Some(color),
+            TextStyleProperty::Underline(underline) => self.underline = Some(underline),
             TextStyleProperty::Modifier(modifier) => {
                 self.modifiers = self.modifiers.union(modifier);
             }
@@ -68,6 +70,7 @@ impl TextStyle {
         match property.into() {
             TextStylePropertyKey::Foreground => self.fg = None,
             TextStylePropertyKey::Background => self.bg = None,
+            TextStylePropertyKey::Underline => self.underline = None,
             TextStylePropertyKey::Modifier(modifier) => {
                 self.modifiers = self.modifiers.difference(modifier);
             }
@@ -97,8 +100,32 @@ impl TextStyle {
         self.add(Modifier::ITALIC)
     }
 
+    /// Underlines the text with a single line in the foreground color.
+    ///
+    /// This is the shorthand for `add(Underline::default())`; the other two
+    /// builders below refine an underline that may already be set.
     pub fn underline(self) -> Self {
-        self.add(Modifier::UNDERLINED)
+        self.add(TextStyleProperty::Underline(Underline::default()))
+    }
+
+    /// Sets the shape the underline is drawn with, adding an underline in the
+    /// foreground color when the style has none.
+    pub fn underline_style(self, style: UnderlineStyle) -> Self {
+        let underline = Underline {
+            style,
+            color: self.underline.and_then(|underline| underline.color),
+        };
+        self.add(TextStyleProperty::Underline(underline))
+    }
+
+    /// Sets the color the underline is drawn in, adding a single underline when
+    /// the style has none.
+    ///
+    /// A color is only reachable through an underline, so a style cannot carry
+    /// an underline color that nothing draws.
+    pub fn underline_color(self, color: impl Into<Color>) -> Self {
+        let underline = self.underline.unwrap_or_default().with_color(color.into());
+        self.add(TextStyleProperty::Underline(underline))
     }
 
     pub fn blink(self) -> Self {
@@ -107,6 +134,10 @@ impl TextStyle {
 
     pub fn reverse(self) -> Self {
         self.add(Modifier::REVERSED)
+    }
+
+    pub fn hide(self) -> Self {
+        self.add(Modifier::HIDDEN)
     }
 
     pub fn strikethrough(self) -> Self {
@@ -123,9 +154,53 @@ impl TextStyle {
         self.bg
     }
 
+    /// Returns the underline instruction, if this style sets one.
+    pub const fn underline_value(&self) -> Option<Underline> {
+        self.underline
+    }
+
     /// Returns the active text modifiers.
     pub const fn modifiers(&self) -> Modifier {
         self.modifiers
+    }
+
+    /// Folds values that cannot reach the output, so that two styles with the
+    /// same appearance are the same value.
+    ///
+    /// One fold exists: an underline color equal to the foreground draws
+    /// exactly what an absent one draws, since an absent one means "the
+    /// foreground color". Nothing else is folded — a value is dropped only when
+    /// doing so cannot change the output whatever the terminal does, which is
+    /// why reversed video, whose equivalence assumes how a terminal implements
+    /// `dim`, stays as written.
+    ///
+    /// Call this once the style is final. A `TextStyle` is an immutable value
+    /// built by consuming builders, so any earlier fold is undone by the next
+    /// call that changes the foreground:
+    ///
+    /// ```
+    /// use urushi::{Color, TextStyle};
+    ///
+    /// let style = TextStyle::new().underline_color(Color::RED).foreground(Color::RED);
+    ///
+    /// assert!(style.clone().canonical().underline_value().unwrap().color.is_none());
+    /// assert!(style.underline_value().unwrap().color.is_some());
+    /// ```
+    ///
+    /// One residue is not closable: when the foreground is absent its concrete
+    /// color is the terminal's default and unknown here, so an underline color
+    /// equal to it cannot be recognized.
+    pub fn canonical(mut self) -> Self {
+        if let Some(underline) = self.underline
+            && underline.color.is_some()
+            && underline.color == self.fg
+        {
+            self.underline = Some(Underline {
+                color: None,
+                ..underline
+            });
+        }
+        self
     }
 
     /// Wraps `text` in this style's SGR scope.
@@ -145,13 +220,24 @@ impl TextStyle {
     pub(crate) fn map_colors(mut self, map: impl Fn(Color) -> Color) -> Self {
         self.fg = self.fg.map(&map);
         self.bg = self.bg.map(&map);
+        self.underline = self.underline.map(|underline| Underline {
+            color: underline.color.map(&map),
+            ..underline
+        });
         self
     }
 
-    /// Removes foreground and background colors while preserving modifiers.
+    /// Removes every color while preserving modifiers and the underline shape.
+    ///
+    /// An underline survives a colorless profile — it is a shape, not a color —
+    /// but its color does not, exactly as a foreground does not.
     pub(crate) fn without_colors(mut self) -> Self {
         self.fg = None;
         self.bg = None;
+        self.underline = self.underline.map(|underline| Underline {
+            color: None,
+            ..underline
+        });
         self
     }
 
@@ -159,13 +245,19 @@ impl TextStyle {
     /// empty string when the style sets none of them.
     pub(crate) fn sgr_prefix(&self) -> String {
         let mut params: Vec<String> = Vec::new();
+        // Attribute parameters are emitted in SGR order, the underline in the
+        // slot its code occupies, so one style always spells one sequence.
         for (added, code) in [
             (self.modifiers.contains(Modifier::BOLD), "1"),
             (self.modifiers.contains(Modifier::DIM), "2"),
             (self.modifiers.contains(Modifier::ITALIC), "3"),
-            (self.modifiers.contains(Modifier::UNDERLINED), "4"),
+            (
+                self.underline.is_some(),
+                self.underline.unwrap_or_default().style.sgr_params(),
+            ),
             (self.modifiers.contains(Modifier::SLOW_BLINK), "5"),
             (self.modifiers.contains(Modifier::REVERSED), "7"),
+            (self.modifiers.contains(Modifier::HIDDEN), "8"),
             (self.modifiers.contains(Modifier::CROSSED_OUT), "9"),
         ] {
             if added {
@@ -177,6 +269,12 @@ impl TextStyle {
         }
         if let Some(c) = self.bg {
             params.push(c.sgr_params(true));
+        }
+        // An absent underline color is the terminal's default, which a style of
+        // effective values expresses by emitting nothing: the reset that closes
+        // every painted scope already restores it, so there is no SGR 59 here.
+        if let Some(c) = self.underline.and_then(|underline| underline.color) {
+            params.push(c.sgr_underline_params());
         }
         if params.is_empty() {
             String::new()
@@ -224,5 +322,162 @@ mod tests {
 
         assert_eq!(style.foreground_color(), Some(Color::BLUE));
         assert_eq!(style.background_color(), None);
+    }
+
+    #[test]
+    fn every_underline_shape_paints_its_own_sgr_parameter() {
+        let painted = [
+            UnderlineStyle::Single,
+            UnderlineStyle::Double,
+            UnderlineStyle::Curly,
+            UnderlineStyle::Dotted,
+            UnderlineStyle::Dashed,
+        ]
+        .map(|style| TextStyle::new().underline_style(style).paint("t"));
+
+        assert_eq!(
+            painted,
+            [
+                "\x1b[4mt\x1b[0m",
+                "\x1b[4:2mt\x1b[0m",
+                "\x1b[4:3mt\x1b[0m",
+                "\x1b[4:4mt\x1b[0m",
+                "\x1b[4:5mt\x1b[0m",
+            ]
+        );
+    }
+
+    #[test]
+    fn an_underline_color_paints_sgr_fifty_eight_in_its_indexed_or_rgb_form() {
+        assert_eq!(
+            TextStyle::new().underline_color(Color::RED).paint("t"),
+            "\x1b[4;58;5;1mt\x1b[0m"
+        );
+        assert_eq!(
+            TextStyle::new()
+                .underline_color(Color::Ansi256(212))
+                .paint("t"),
+            "\x1b[4;58;5;212mt\x1b[0m"
+        );
+        assert_eq!(
+            TextStyle::new()
+                .underline_style(UnderlineStyle::Curly)
+                .underline_color(Color::Rgb(1, 2, 3))
+                .paint("t"),
+            "\x1b[4:3;58;2;1;2;3mt\x1b[0m"
+        );
+    }
+
+    #[test]
+    fn an_absent_underline_color_paints_no_underline_color_parameter() {
+        // A style holds effective values and `paint` closes with a reset, so
+        // the terminal default is expressed by emitting nothing — there is no
+        // SGR 59 to restore it, and no color to spell it with.
+        let painted = TextStyle::new()
+            .foreground(Color::RED)
+            .underline_style(UnderlineStyle::Double)
+            .paint("t");
+
+        assert_eq!(painted, "\x1b[4:2;31mt\x1b[0m");
+        assert!(!painted.contains("58"));
+        assert!(!painted.contains("59"));
+    }
+
+    #[test]
+    fn hidden_paints_sgr_eight() {
+        assert_eq!(TextStyle::new().hide().paint("t"), "\x1b[8mt\x1b[0m");
+        assert_eq!(
+            TextStyle::new().hide().add(Modifier::REVERSED).paint("t"),
+            "\x1b[7;8mt\x1b[0m"
+        );
+    }
+
+    #[test]
+    fn an_underline_color_is_only_reachable_through_an_underline() {
+        // Setting a color on a style with no underline adds the underline that
+        // draws it, so "invisible underline color" is not a value that exists.
+        let style = TextStyle::new().underline_color(Color::RED);
+
+        assert_eq!(
+            style.underline_value(),
+            Some(Underline {
+                style: UnderlineStyle::Single,
+                color: Some(Color::RED),
+            })
+        );
+        assert_eq!(
+            TextStyle::new()
+                .underline_color(Color::RED)
+                .remove(TextStylePropertyKey::Underline)
+                .paint("t"),
+            "t"
+        );
+    }
+
+    #[test]
+    fn setting_a_shape_keeps_the_color_and_setting_a_color_keeps_the_shape() {
+        let expected = Some(Underline {
+            style: UnderlineStyle::Dotted,
+            color: Some(Color::GREEN),
+        });
+
+        assert_eq!(
+            TextStyle::new()
+                .underline_color(Color::GREEN)
+                .underline_style(UnderlineStyle::Dotted)
+                .underline_value(),
+            expected
+        );
+        assert_eq!(
+            TextStyle::new()
+                .underline_style(UnderlineStyle::Dotted)
+                .underline_color(Color::GREEN)
+                .underline_value(),
+            expected
+        );
+    }
+
+    #[test]
+    fn canonical_folds_an_underline_color_equal_to_the_foreground() {
+        let folded = TextStyle::new()
+            .foreground(Color::RED)
+            .underline_style(UnderlineStyle::Curly)
+            .underline_color(Color::RED)
+            .canonical();
+
+        assert_eq!(
+            folded,
+            TextStyle::new()
+                .foreground(Color::RED)
+                .underline_style(UnderlineStyle::Curly)
+        );
+        assert_eq!(folded.paint("t"), "\x1b[4:3;31mt\x1b[0m");
+    }
+
+    #[test]
+    fn canonical_folds_only_what_the_terminal_cannot_draw_differently() {
+        // Equal appearance is not the admission rule: a color the terminal
+        // resolves separately is not folded, and neither is reversed video,
+        // whose equivalence assumes how a terminal implements `dim`.
+        let distinct_spellings = TextStyle::new()
+            .foreground(Color::Ansi(1))
+            .underline_color(Color::Rgb(255, 0, 0));
+        let reversed = TextStyle::new()
+            .foreground(Color::RED)
+            .background(Color::BLUE)
+            .reverse();
+
+        assert_eq!(
+            distinct_spellings.clone().canonical(),
+            distinct_spellings.clone()
+        );
+        assert_eq!(reversed.clone().canonical(), reversed);
+        // An absent foreground is the terminal's default, whose concrete color
+        // is unknown here, so a matching underline color cannot be recognized.
+        let default_foreground = TextStyle::new().underline_color(Color::RED);
+        assert_eq!(
+            default_foreground.clone().canonical(),
+            default_foreground.clone()
+        );
     }
 }

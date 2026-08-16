@@ -51,6 +51,11 @@ impl TerminalProfile {
     }
 
     /// Degrades one text style to this terminal's capabilities.
+    ///
+    /// The result is canonical: degradation is the last stage that can change a
+    /// color, and it is what makes two logical colors equal — a truecolor red
+    /// and an indexed red both become `Ansi(1)` on a sixteen-color terminal —
+    /// so folding before it would miss exactly the duplicates it creates.
     pub fn resolve_text_style(&self, style: &TextStyle) -> TextStyle {
         if self.ansi_policy == AnsiPolicy::Disabled {
             return TextStyle::new();
@@ -61,6 +66,7 @@ impl TerminalProfile {
             ColorProfile::Ansi16 => style.clone().map_colors(quantize_to_ansi16),
             ColorProfile::Monochrome => style.clone().without_colors(),
         }
+        .canonical()
     }
 
     /// Degrades one block style to this terminal's capabilities, preserving its
@@ -75,6 +81,7 @@ impl TerminalProfile {
             ColorProfile::Ansi16 => style.clone().map_colors(quantize_to_ansi16),
             ColorProfile::Monochrome => style.clone().without_colors(),
         }
+        .canonical()
     }
 }
 
@@ -107,7 +114,7 @@ fn detect(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{Align, Border, Color, Length, Sides, VerticalAlign};
+    use crate::{Align, Border, Color, Length, Sides, Underline, UnderlineStyle, VerticalAlign};
 
     #[test]
     fn detection_obeys_precedence_and_empty_no_color() {
@@ -191,9 +198,11 @@ mod tests {
             .bold()
             .dim()
             .italic()
-            .underline()
+            .underline_style(UnderlineStyle::Curly)
+            .underline_color(Color::MAGENTA)
             .blink()
             .reverse()
+            .hide()
             .strikethrough()
             .border(Border::ROUNDED)
             .padding((0, 1))
@@ -209,7 +218,7 @@ mod tests {
             .into_string();
         assert_eq!(
             monochrome,
-            "╭────────╮\n│\x1b[1;2;3;4;5;7;9m  日本  \x1b[0m│\n╰────────╯"
+            "╭────────╮\n│\x1b[1;2;3;4:3;5;7;8;9m  日本  \x1b[0m│\n╰────────╯"
         );
         assert_eq!(
             TerminalProfile::new(ColorProfile::Monochrome, AnsiPolicy::Enabled)
@@ -234,6 +243,53 @@ mod tests {
                 .height_length(),
             Some(Length::Cells(3))
         );
+    }
+
+    #[test]
+    fn degradation_maps_and_drops_the_underline_color_with_the_others() {
+        let style = TextStyle::new()
+            .foreground(Color::Rgb(0, 0, 255))
+            .underline_style(UnderlineStyle::Curly)
+            .underline_color(Color::Rgb(255, 0, 0));
+
+        // A quantized underline color must be quantized too: leaving a
+        // truecolor underline on a sixteen-color terminal emits a sequence the
+        // rest of the style no longer matches.
+        let quantized = TerminalProfile::new(ColorProfile::Ansi16, AnsiPolicy::Enabled)
+            .resolve_text_style(&style);
+        assert_eq!(
+            quantized.underline_value(),
+            Some(Underline {
+                style: UnderlineStyle::Curly,
+                color: Some(Color::BRIGHT_RED),
+            })
+        );
+        assert_eq!(quantized.paint("t"), "\x1b[4:3;94;58;5;9mt\x1b[0m");
+
+        // Monochrome keeps the underline, which is a shape, and drops its
+        // color, which is not.
+        let monochrome = TerminalProfile::new(ColorProfile::Monochrome, AnsiPolicy::Enabled)
+            .resolve_text_style(&style);
+        assert_eq!(
+            monochrome.underline_value(),
+            Some(Underline::new(UnderlineStyle::Curly))
+        );
+        assert_eq!(monochrome.paint("t"), "\x1b[4:3mt\x1b[0m");
+    }
+
+    #[test]
+    fn degradation_folds_the_underline_color_it_makes_equal_to_the_foreground() {
+        // Two distinct logical colors collapse onto `Ansi(1)` here, so the
+        // duplicate only exists after degradation — folding earlier misses it.
+        let style = TextStyle::new()
+            .foreground(Color::Rgb(255, 0, 0))
+            .underline_color(Color::Ansi256(196));
+
+        let resolved = TerminalProfile::new(ColorProfile::Ansi16, AnsiPolicy::Enabled)
+            .resolve_text_style(&style);
+
+        assert_eq!(resolved.underline_value(), Some(Underline::default()));
+        assert_eq!(resolved.paint("t"), "\x1b[4;91mt\x1b[0m");
     }
 
     #[test]

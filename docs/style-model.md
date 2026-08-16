@@ -53,12 +53,14 @@ The generic API uses one closed enum pair per type. The text vocabulary:
 enum TextStyleProperty {
     Foreground(Color),
     Background(Color),
+    Underline(Underline),
     Modifier(Modifier),
 }
 
 enum TextStylePropertyKey {
     Foreground,
     Background,
+    Underline,
     Modifier(Modifier),
 }
 ```
@@ -121,6 +123,48 @@ The enums make the complete property vocabulary discoverable and give generic
 code an exhaustive match. Both types may store the values in typed fields rather
 than allocating an enum collection; all mutation still passes through the
 closed `add` and `remove` operations.
+
+## The underline is one value
+
+An underline carries a shape and a color, and both live in a single property:
+
+```rust
+enum UnderlineStyle { Single, Double, Curly, Dotted, Dashed }
+
+struct Underline {
+    style: UnderlineStyle,
+    color: Option<Color>,   // None: drawn in the foreground color
+}
+```
+
+`TextStyle::underline` is `Option<Underline>`; `None` is no underline. There is
+no `Modifier::UNDERLINED` flag and no free-standing underline color property,
+because either would give one appearance two values — SGR `4` and SGR `4:1` are
+the same single underline, and an underline color paints nothing on a run with
+no underline. `design/style-value-model.md` records why that matters.
+
+```rust
+TextStyle::new().underline();                              // single, foreground color
+TextStyle::new().underline_style(UnderlineStyle::Curly);   // keeps any color already set
+TextStyle::new().underline_color(Color::RED);              // adds a single underline if absent
+```
+
+No builder produces a color nothing draws. `underline_value` returns the whole
+`Option<Underline>` and `remove(TextStylePropertyKey::Underline)` removes the
+underline and its color together. `BlockStyle` mirrors all of these for its fill
+text.
+
+SGR 6 (rapid blink) is deliberately absent: xterm-family terminals draw it
+exactly as SGR 5, so it would be distinguishable as a value and
+indistinguishable on screen.
+
+`TextStyle::canonical` folds the one duplication the type cannot rule out — an
+underline color equal to the foreground — under the rule
+[`inline-prompt-rendering.md`](inline-prompt-rendering.md) defines. Call it once
+the style is final: the builders are immutable, so an earlier fold is undone by
+the next call that changes the foreground. `TerminalProfile` calls it at its
+last step, after degradation, because degradation is what makes two logical
+colors equal.
 
 ## Public API
 
@@ -303,16 +347,26 @@ complete value, so a theme role resolves to the whole style its position uses.
 
 Renderers consume the values present in one `TextStyle`.
 
-- ANSI rendering emits the active colors and modifiers.
+- ANSI rendering emits the active colors, modifiers, and underline, in SGR
+  parameter order so that one style always spells one sequence. A single
+  underline is spelled `4` rather than the equivalent `4:1`, which a terminal
+  that does not parse subparameters still understands. An absent underline
+  color emits nothing rather than SGR 59: `Color` has no reset spelling, and
+  the reset closing every painted scope already restores the default.
 - The `urushi-tui` adapter maps the active modifier set to Ratatui's
-  `add_modifier`; it does not populate `sub_modifier`.
+  `add_modifier`; it does not populate `sub_modifier`. Ratatui has no underline
+  shape, so every underline degrades to `Modifier::UNDERLINED` there and the
+  underline color is dropped — reaching it would require the `underline-color`
+  feature, which pulls in a backend the adapter does not depend on.
 - Removing a modifier from an immutable `TextStyle` removes the value. It does not
   preserve an ANSI off-code instruction.
 - A renderer that maintains prior terminal state is responsible for diffing
   previous and next effective styles and emitting any required reset codes.
 - `TerminalProfile::resolve_text_style` maps or removes the effective text values;
   `TerminalProfile::resolve_block_style` does the same for a block's fill and
-  border colors while preserving its geometry.
+  border colors while preserving its geometry. An underline survives a
+  colorless profile — it is a shape — while its color degrades with the
+  foreground and background. Both return a canonical style.
 
 `TextStyle::paint` and `BlockStyle::render` surround emitted styling with a final
 ANSI reset, so neither requires a stored removal instruction. Both take plain
@@ -346,6 +400,9 @@ Changes to this model must test:
 - a geometry property cannot be attached to a `TextStyle`, checked at compile time;
 - singleton properties replace their prior value;
 - modifier sets union and subtract correctly;
+- each underline shape and color emits its own SGR parameters, degradation maps
+  and drops the underline color with the others, and `canonical` folds an
+  underline color equal to the foreground and nothing else;
 - removing every property restores the documented default;
 - every property enum variant is handled by ANSI and Ratatui boundaries where
   applicable;

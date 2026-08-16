@@ -1,7 +1,7 @@
 //! Closed property types used by [`TextStyle`](crate::TextStyle) and
 //! [`BlockStyle`](crate::BlockStyle).
 
-use crate::{Align, Border, Color, Length, Modifier, Overflow, Sides, VerticalAlign};
+use crate::{Align, Border, Color, Length, Modifier, Overflow, Sides, Underline, VerticalAlign};
 
 /// A value that can be added to a [`TextStyle`](crate::TextStyle).
 ///
@@ -13,6 +13,7 @@ use crate::{Align, Border, Color, Length, Modifier, Overflow, Sides, VerticalAli
 pub enum TextStyleProperty {
     Foreground(Color),
     Background(Color),
+    Underline(Underline),
     Modifier(Modifier),
 }
 
@@ -21,12 +22,19 @@ pub enum TextStyleProperty {
 pub enum TextStylePropertyKey {
     Foreground,
     Background,
+    Underline,
     Modifier(Modifier),
 }
 
 impl From<Modifier> for TextStyleProperty {
     fn from(value: Modifier) -> Self {
         Self::Modifier(value)
+    }
+}
+
+impl From<Underline> for TextStyleProperty {
+    fn from(value: Underline) -> Self {
+        Self::Underline(value)
     }
 }
 
@@ -105,6 +113,12 @@ impl From<TextStylePropertyKey> for BlockStylePropertyKey {
 impl From<Modifier> for BlockStyleProperty {
     fn from(value: Modifier) -> Self {
         Self::Text(TextStyleProperty::Modifier(value))
+    }
+}
+
+impl From<Underline> for BlockStyleProperty {
+    fn from(value: Underline) -> Self {
+        Self::Text(TextStyleProperty::Underline(value))
     }
 }
 

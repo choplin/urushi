@@ -33,6 +33,14 @@ impl From<&TextStyle> for RatatuiStyle {
         if let Some(color) = value.background_color() {
             style = style.bg(convert_color(color));
         }
+        // Ratatui has no underline shape, and its underline color lives behind
+        // a feature that pulls in a backend this adapter does not depend on, so
+        // every underline degrades to the plain `UNDERLINED` modifier. The
+        // degradation is deterministic: two styles differing only in underline
+        // shape or color reach Ratatui as the same style.
+        if value.underline_value().is_some() {
+            style = style.add_modifier(RatatuiModifier::UNDERLINED);
+        }
         Self {
             content: style.add_modifier(convert_modifier(value.modifiers())),
         }
@@ -50,14 +58,14 @@ const fn convert_modifier(modifier: Modifier) -> RatatuiModifier {
     if modifier.contains(Modifier::ITALIC) {
         converted = converted.union(RatatuiModifier::ITALIC);
     }
-    if modifier.contains(Modifier::UNDERLINED) {
-        converted = converted.union(RatatuiModifier::UNDERLINED);
-    }
     if modifier.contains(Modifier::SLOW_BLINK) {
         converted = converted.union(RatatuiModifier::SLOW_BLINK);
     }
     if modifier.contains(Modifier::REVERSED) {
         converted = converted.union(RatatuiModifier::REVERSED);
+    }
+    if modifier.contains(Modifier::HIDDEN) {
+        converted = converted.union(RatatuiModifier::HIDDEN);
     }
     if modifier.contains(Modifier::CROSSED_OUT) {
         converted = converted.union(RatatuiModifier::CROSSED_OUT);
@@ -96,6 +104,8 @@ const fn convert_color(color: Color) -> RatatuiColor {
 
 #[cfg(test)]
 mod tests {
+    use urushi::UnderlineStyle;
+
     use super::*;
 
     #[test]
@@ -109,5 +119,34 @@ mod tests {
 
         assert_eq!(converted.add_modifier, RatatuiModifier::BOLD);
         assert!(converted.sub_modifier.is_empty());
+    }
+
+    #[test]
+    fn every_underline_degrades_to_the_plain_underlined_modifier() {
+        // Ratatui has no underline shape, so the five shapes and any underline
+        // color arrive as one modifier. Fixing the degradation here is what
+        // keeps it from silently becoming something else.
+        let styles = [
+            TextStyle::new().underline(),
+            TextStyle::new().underline_style(UnderlineStyle::Double),
+            TextStyle::new().underline_style(UnderlineStyle::Curly),
+            TextStyle::new().underline_style(UnderlineStyle::Dotted),
+            TextStyle::new().underline_style(UnderlineStyle::Dashed),
+            TextStyle::new().underline_color(Color::RED),
+        ];
+
+        for style in styles {
+            let converted = RatatuiStyle::from(&style).into_inner();
+
+            assert_eq!(converted.add_modifier, RatatuiModifier::UNDERLINED);
+            assert_eq!(converted.fg, None);
+        }
+
+        assert!(
+            RatatuiStyle::from(&TextStyle::new())
+                .into_inner()
+                .add_modifier
+                .is_empty()
+        );
     }
 }

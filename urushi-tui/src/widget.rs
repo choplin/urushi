@@ -190,6 +190,7 @@ mod tests {
                 .underline()
                 .blink()
                 .reverse()
+                .hide()
                 .strikethrough(),
         )
         .into_inner();
@@ -204,6 +205,7 @@ mod tests {
                 | Modifier::UNDERLINED
                 | Modifier::SLOW_BLINK
                 | Modifier::REVERSED
+                | Modifier::HIDDEN
                 | Modifier::CROSSED_OUT
         );
     }

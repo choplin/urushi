@@ -29,6 +29,26 @@ parallel family of `Unset*` methods. The named builders are thin wrappers over
 `add` for the same reason: two entry points defining two behaviors is the
 failure mode being avoided.
 
+## Why an underline is a value rather than a flag and a color
+
+The property vocabulary is not merely a list of what a terminal can express; it
+decides whether two styles with the same appearance are the same value. A run's
+style is the unit a redraw compares, so a vocabulary admitting two spellings of
+one appearance makes every frame redraw rows that did not change.
+
+An underline is where the naive vocabulary fails twice. A `UNDERLINED` modifier
+flag spells SGR `4`, which is SGR `4:1`, so a separate shape property would give
+a single underline two spellings; and an underline color paints nothing on a run
+with no underline, so a free-standing color property would be invisible in the
+output while still making two values unequal. Both are closed by making the
+underline one optional value that owns its shape and its color — which is why
+`Modifier` lost its flag rather than gaining company.
+
+What a single field cannot decide — an underline color equal to the foreground —
+is left to `TextStyle::canonical`. The division is the general rule here:
+unrepresentability wherever one field decides, normalization only where a
+comparison between fields is required.
+
 ## Why no patch operation
 
 This deliberately differs from noctui's incremental add/sub modifier sets and
