@@ -4,7 +4,7 @@
 //! Keeping it free of renderer state lets the inline draw path be reasoned
 //! about — and tested — without a terminal.
 
-use urushi::{TextStyle, visible_width};
+use urushi::{PrintableText, TextStyle};
 
 use super::{LineKind, PromptView, ViewCursor, ViewLine};
 
@@ -216,7 +216,7 @@ pub(crate) fn wrap_line(line: &ViewLine, width: usize) -> Vec<RenderedLine> {
                 used = 0;
                 continue;
             }
-            let character_width = visible_width(&character.to_string());
+            let character_width = PrintableText::new(character.to_string().as_str()).width();
             if character_width > width {
                 continue;
             }
@@ -241,7 +241,7 @@ pub(crate) fn clip_line(line: &ViewLine, offset: usize, width: usize) -> (Render
     let mut used = 0;
     for span in &line.spans {
         for character in span.text.chars() {
-            let character_width = visible_width(&character.to_string());
+            let character_width = PrintableText::new(character.to_string().as_str()).width();
             if seen + character_width <= offset {
                 seen += character_width;
                 continue;

@@ -142,6 +142,8 @@ pub struct ListItem {
 
 impl ListItem {
     /// Creates a visible leaf item.
+    /// `value` is plain text: escape sequences and cursor movement in it break
+    /// that contract, and debug builds panic on them.
     pub fn new(value: impl Into<String>) -> Self {
         Self {
             value: value.into(),

@@ -497,9 +497,10 @@ impl BlockStyle {
     /// `Block(self, Text(content, self.text))` with an unbounded area. The
     /// returned block contains no trailing newline; rows are joined with `\n`.
     ///
-    /// `content` is plain text. Escape sequences in it are measured as ordinary
-    /// graphemes, so a block containing them comes out deterministically too
-    /// wide; adopt already-rendered output with
+    /// `content` is plain text. Escape sequences and cursor movement in it break that contract:
+    /// debug builds panic, and release builds measure them as ordinary
+    /// characters and may split them when wrapping or truncating. Adopt
+    /// already-rendered output with
     /// [`RenderedBlock::from_ansi`](crate::RenderedBlock::from_ansi) instead.
     pub fn render(&self, content: &str) -> RenderedBlock {
         let view = View::block(self.clone(), View::text(content, self.text.clone()));

@@ -7,8 +7,8 @@
 //!
 //! The widgets compute no geometry. The box model lives in `urushi`'s layout
 //! pass, and this crate only translates a Ratatui `Rect` into
-//! [`Limits`](urushi::Limits), calls [`resolve`](urushi::resolve), and converts
-//! the resulting graphemes and logical styles into cells.
+//! [`Available`](urushi::Available), calls [`resolve`](urushi::resolve), and
+//! converts the resulting graphemes and logical styles into cells.
 
 mod style;
 mod widget;

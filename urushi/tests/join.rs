@@ -1,7 +1,14 @@
 use urushi::{
     Align, BlockStyle, Border, Color, RenderedBlock, VerticalAlign, join_horizontal, join_vertical,
-    visible_width,
 };
+
+/// The cells one rendered row occupies.
+///
+/// Rendered output is measured through the crate's one ANSI-aware entry point;
+/// there is no free function that takes a string and guesses at its domain.
+fn row_width(line: &str) -> usize {
+    RenderedBlock::from_ansi(line).size().width()
+}
 
 fn adopted(text: &str) -> RenderedBlock {
     RenderedBlock::from_ansi(text)
@@ -41,12 +48,7 @@ fn horizontal_join_keeps_cjk_borders_aligned() {
         )
     );
     assert_eq!(joined.size().width(), 11);
-    assert!(
-        joined
-            .as_str()
-            .lines()
-            .all(|line| visible_width(line) == 11)
-    );
+    assert!(joined.as_str().lines().all(|line| row_width(line) == 11));
 }
 
 #[test]
@@ -55,7 +57,7 @@ fn horizontal_join_preserves_ansi_and_visible_alignment() {
     let joined = join_horizontal(VerticalAlign::Top, &[red, adopted("A\nBB")]);
 
     assert_eq!(joined.as_str(), "\x1b[31m赤\x1b[0mA \n\x1b[31mx \x1b[0mBB");
-    assert!(joined.as_str().lines().all(|line| visible_width(line) == 4));
+    assert!(joined.as_str().lines().all(|line| row_width(line) == 4));
 }
 
 #[test]
@@ -84,7 +86,7 @@ fn vertical_join_preserves_ansi_and_visible_alignment() {
     let joined = join_vertical(Align::Right, &[red, adopted("x")]);
 
     assert_eq!(joined.as_str(), "\x1b[31m赤\x1b[0m\n x");
-    assert!(joined.as_str().lines().all(|line| visible_width(line) == 2));
+    assert!(joined.as_str().lines().all(|line| row_width(line) == 2));
 }
 
 #[test]

@@ -97,7 +97,7 @@ The contracts shared across surfaces are:
   [`ComponentRole`](../urushi/src/theme/role.rs), which give presentation a
   reusable semantic vocabulary;
 - the [`text`](../urushi/src/text/) implementation, which supplies one
-  ANSI-aware, cell-aware definition of visible width and wrapping; and
+  cell-aware definition of plain-text display width and wrapping; and
 - [`TerminalProfile`](../urushi/src/terminal/profile.rs), which resolves the
   same logical styles for the capabilities of the actual output surface.
 
@@ -199,7 +199,7 @@ to share styling.
 | Module | Responsibility | Internal dependencies |
 | --- | --- | --- |
 | [`style`](../urushi/src/style/) | Colors, border glyphs, box spacing and alignment, the text `TextStyle` and the geometry-bearing `BlockStyle`, and the direct block render entry point. | `text`, `view` |
-| [`text`](../urushi/src/text/) | ANSI-aware visible-width measurement and cell-aware word/CJK wrapping. | None |
+| [`text`](../urushi/src/text/) | Plain-text display-width measurement and cell-aware word/CJK wrapping, over the `PrintableText` / `PrintableLines` types that carry the plain-text domain. | None |
 | [`theme`](../urushi/src/theme/) | Semantic color tokens, reusable component roles and styles, application role resolution, and explicit light/dark selection. | `style` |
 | [`view`](../urushi/src/view/) | The renderer-neutral `View` tree, the one layout pass (`measure` / `resolve`, `Size`, `Available`, `StyledGrapheme`, `ResolvedView`), and composition of already-rendered `RenderedBlock` values. | `style`, `text` |
 | [`component`](../urushi/src/component/) | Reusable semantic components that return `View`; currently summaries, warnings, owned lists, owned trees, and owned tables. | `theme`, `view`, `text` |
@@ -240,8 +240,11 @@ crate boundaries.
   property vocabulary used by `TextStyle::add` and `TextStyle::remove`.
 - [`style/text.rs`](../urushi/src/style/text.rs) owns the `TextStyle` builder,
   box-model rules, and direct string rendering.
-- [`text/width.rs`](../urushi/src/text/width.rs) owns visible cell measurement
-  and ANSI/grapheme-safe row truncation.
+- [`text/printable.rs`](../urushi/src/text/printable.rs) owns the plain-text
+  domain: `PrintableLines` for text that spans rows, `PrintableText` for one
+  row, and display-width measurement and grapheme-safe truncation on the
+  latter. Neither type can hold an escape sequence, so nothing here scans for
+  one.
 - [`text/wrap.rs`](../urushi/src/text/wrap.rs) owns word and hard wrapping.
 
 Width and wrapping policy must remain shared. A component or renderer should
@@ -275,6 +278,10 @@ ANSI, or retain an output writer.
   composition, overflow, and the degenerate safety net.
 - [`view/rendered.rs`](../urushi/src/view/rendered.rs) owns `RenderedBlock`, the
   one place ANSI-aware measurement happens.
+- [`view/ansi.rs`](../urushi/src/view/ansi.rs) owns that measurement: row
+  splitting, resolving cursor movement to cells, and width. It is reachable
+  only through `RenderedBlock::from_ansi`, which is where a caller declares a
+  string to be rendered output.
 - [`view/join.rs`](../urushi/src/view/join.rs) composes blocks that have already
   been rendered.
 - each file under [`component`](../urushi/src/component/) owns one reusable
@@ -441,7 +448,8 @@ changed deliberately and this document is updated in the same change:
 2. Themes contain semantic choices but no terminal detection or writer state.
 3. A reusable component returns `View` and performs no output.
 4. `AnsiRenderer` applies `TerminalProfile` at the output boundary.
-5. Visible width and wrapping use the shared `text` implementation.
+5. Display width and wrapping use the shared `text` implementation; rendered
+   output is measured only by `RenderedBlock::from_ansi`.
 6. Stderr lifecycle and live/plain selection have one owner:
    `StderrTerminal`.
 7. Public progress APIs do not expose Indicatif representations or controls.

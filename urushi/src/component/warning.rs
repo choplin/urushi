@@ -1,6 +1,7 @@
 //! Titled warning messages with a rail-aligned body.
 
-use crate::{Align, ComponentRole, ComponentStyles, VerticalAlign, View, text::wrap_text};
+use crate::text::{PrintableLines, wrap_text};
+use crate::{Align, ComponentRole, ComponentStyles, VerticalAlign, View};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Warning {
@@ -9,6 +10,16 @@ pub struct Warning {
 }
 
 impl Warning {
+    /// Creates a warning from its title and message.
+    ///
+    /// `title` and `message` are plain text. Escape sequences and cursor movement in it break that contract:
+    /// debug builds panic, and release builds measure them as ordinary
+    /// characters and may split them when wrapping or truncating. Adopt
+    /// already-rendered output with
+    /// [`RenderedBlock::from_ansi`](crate::RenderedBlock::from_ansi) instead.
+    ///
+    /// Style the component through its [`ComponentStyles`](crate::ComponentStyles)
+    /// rather than by pre-rendering its content.
     pub fn new(title: impl Into<String>, message: impl Into<String>) -> Self {
         Self {
             title: title.into(),
@@ -31,7 +42,10 @@ impl Warning {
                 ],
             ),
         ];
-        for line in wrap_text(&self.message, width.saturating_sub(3).max(1)) {
+        for line in wrap_text(
+            PrintableLines::new(&self.message),
+            width.saturating_sub(3).max(1),
+        ) {
             rows.push(View::row(
                 VerticalAlign::Top,
                 [

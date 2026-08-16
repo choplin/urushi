@@ -174,7 +174,7 @@ fn offset(origin: u16, cells: usize) -> Option<u16> {
 #[cfg(test)]
 mod tests {
     use ratatui::style::{Color as RatatuiColor, Modifier};
-    use urushi::{Align, Border, Color, TextStyle, VerticalAlign, visible_width};
+    use urushi::{Align, Border, Color, TextStyle, VerticalAlign};
 
     use super::*;
 
@@ -621,7 +621,10 @@ mod tests {
         while x < buffer.area.right() {
             let symbol = buffer.cell((x, y)).expect("cell").symbol();
             line.push_str(symbol);
-            let width = visible_width(symbol).max(1).min(usize::from(u16::MAX)) as u16;
+            let width = urushi::PrintableText::new(symbol)
+                .width()
+                .max(1)
+                .min(usize::from(u16::MAX)) as u16;
             x = x.saturating_add(width);
         }
         line

@@ -1,4 +1,24 @@
-use urushi::{Align, BlockStyle, Border, Color, Modifier, Overflow, VerticalAlign, visible_width};
+use urushi::{Align, BlockStyle, Border, Color, Modifier, Overflow, RenderedBlock, VerticalAlign};
+
+/// The cells one rendered row occupies.
+///
+/// Rendered output is measured through the crate's one ANSI-aware entry point,
+/// so a test asserting that a block really is a rectangle measures its rows the
+/// same way the block itself was measured.
+fn row_width(line: &str) -> usize {
+    RenderedBlock::from_ansi(line).size().width()
+}
+
+/// The cells an expected-output literal occupies.
+///
+/// The fixtures compared this way are ASCII or box-drawing text with no escape
+/// sequences, so counting characters is counting cells.
+fn literal_width(text: &str) -> usize {
+    text.lines()
+        .map(|line| line.chars().count())
+        .max()
+        .unwrap_or(0)
+}
 
 #[test]
 fn plain_text_passes_through() {
@@ -181,7 +201,7 @@ fn border_edges_are_inside_the_size_and_margin_is_outside_it() {
 
 #[test]
 fn maximum_dimensions_bound_the_box_without_cutting_its_frame() {
-    let out = BlockStyle::new()
+    let out_block = BlockStyle::new()
         .width(8)
         .height(8)
         .padding((1, 1))
@@ -189,8 +209,8 @@ fn maximum_dimensions_bound_the_box_without_cutting_its_frame() {
         .margin(1)
         .max_width(6)
         .max_height(6)
-        .render("ab")
-        .into_string();
+        .render("ab");
+    let out = out_block.as_str();
 
     // The maxima won over the stated size, and the frame still closes: a 6x6
     // box inside a one-cell margin.
@@ -205,7 +225,7 @@ fn maximum_dimensions_bound_the_box_without_cutting_its_frame() {
          \x20+----+ \n\
          \x20       "
     );
-    assert!(out.lines().all(|line| visible_width(line) == 8));
+    assert_eq!(out_block.size().width(), 8);
 }
 
 #[test]
@@ -277,27 +297,24 @@ fn a_zero_bound_is_a_bound_not_a_disabled_flag() {
 
 #[test]
 fn a_maximum_width_wins_over_a_stated_width_and_the_content_wraps_to_it() {
-    let out = BlockStyle::new()
+    let out_block = BlockStyle::new()
         .foreground(Color::RED)
         .width(4)
         .max_width(3)
-        .render("abcdef")
-        .into_string();
+        .render("abcdef");
+    let out = out_block.as_str();
 
     assert_eq!(out, "\x1b[31mabc\x1b[0m\n\x1b[31mdef\x1b[0m");
-    assert!(out.lines().all(|line| visible_width(line) == 3));
+    assert_eq!(out_block.size().width(), 3);
 }
 
 #[test]
 fn a_bounded_width_uses_grapheme_width_for_zwj_emoji() {
-    let out = BlockStyle::new()
-        .width(3)
-        .max_width(2)
-        .render("👩‍💻x")
-        .into_string();
+    let out_block = BlockStyle::new().width(3).max_width(2).render("👩‍💻x");
+    let out = out_block.as_str();
 
     assert_eq!(out, "👩‍💻\nx ");
-    assert!(out.lines().all(|line| visible_width(line) == 2));
+    assert_eq!(out_block.size().width(), 2);
 }
 
 #[test]
@@ -434,13 +451,9 @@ fn border_sides_render_independently_with_geometric_corners() {
     ];
 
     for (style, expected, case) in cases {
-        let actual = style.render("x").into_string();
-        assert_eq!(actual, expected, "{case}");
-        let widths: Vec<_> = actual.lines().map(visible_width).collect();
-        assert!(
-            widths.iter().all(|width| *width == widths[0]),
-            "inconsistent widths for {case}: {widths:?}"
-        );
+        let block = style.render("x");
+        assert_eq!(block.as_str(), expected, "{case}");
+        assert_eq!(block.size().width(), literal_width(expected), "{case}");
     }
 }
 
@@ -461,21 +474,19 @@ fn enabled_edges_are_the_only_border_cells_styled() {
 
 #[test]
 fn empty_content_keeps_degenerate_border_geometry_consistent() {
-    let all_sides = BlockStyle::new()
-        .border(Border::ASCII)
-        .render("")
-        .into_string();
+    let all_sides_block = BlockStyle::new().border(Border::ASCII).render("");
+    let all_sides = all_sides_block.as_str();
     assert_eq!(all_sides, "++\n||\n++");
-    assert!(all_sides.lines().all(|line| visible_width(line) == 2));
+    assert_eq!(all_sides_block.size().width(), 2);
 
-    let adjacent = BlockStyle::new()
+    let adjacent_block = BlockStyle::new()
         .border(Border::ASCII)
         .border_right(false)
         .border_bottom(false)
-        .render("")
-        .into_string();
+        .render("");
+    let adjacent = adjacent_block.as_str();
     assert_eq!(adjacent, "+\n|");
-    assert!(adjacent.lines().all(|line| visible_width(line) == 1));
+    assert_eq!(adjacent_block.size().width(), 1);
 }
 
 #[test]
@@ -498,41 +509,21 @@ fn margin_is_unstyled() {
 }
 
 #[test]
-fn block_content_is_plain_text() {
-    // The layout pass never inspects text for escape sequences: rendered output
-    // handed back as content is measured as ordinary graphemes, so the block
-    // comes out deterministically too wide instead of guessing.
-    let inner = BlockStyle::new()
-        .foreground(Color::RED)
-        .render("hi")
-        .into_string();
-    let out = BlockStyle::new().border(Border::NORMAL).render(&inner);
-
-    assert!(out.size().width() > 4);
-    assert_eq!(
-        BlockStyle::new()
-            .border(Border::NORMAL)
-            .render("hi")
-            .size()
-            .width(),
-        4
-    );
-}
-
-#[test]
 fn rendered_block_width_is_consistent() {
     let style = BlockStyle::new()
         .padding(1)
         .margin(1)
         .border(Border::DOUBLE)
         .width(10);
-    let out = style
-        .render("wrap して しまう ながい ぶんしょう")
-        .into_string();
-    let widths: Vec<usize> = out.lines().map(visible_width).collect();
+    let block = style.render("wrap して しまう ながい ぶんしょう");
+    assert_eq!(block.size().width(), 12);
     assert!(
-        widths.iter().all(|&w| w == widths[0]),
-        "all lines should have equal width, got {widths:?}\n{out}"
+        block
+            .as_str()
+            .lines()
+            .all(|line| row_width(line) == block.size().width()),
+        "every row should fill the measured width\n{}",
+        block.as_str()
     );
 }
 
@@ -541,14 +532,14 @@ fn rendered_block_width_is_consistent() {
 #[test]
 fn every_sizing_property_measures_the_same_box() {
     // A bordered box "of width 6" is six visible cells wide.
-    let out = BlockStyle::new()
+    let out_block = BlockStyle::new()
         .width(6)
         .border(Border::NORMAL)
-        .render("abcdefgh")
-        .into_string();
+        .render("abcdefgh");
+    let out = out_block.as_str();
 
     assert_eq!(out, "┌────┐\n│abcd│\n│efgh│\n└────┘");
-    assert!(out.lines().all(|line| visible_width(line) == 6));
+    assert_eq!(out_block.size().width(), 6);
 
     // The bounds measure that same box, so a maximum of six leaves the same
     // rectangle as a width of six.
@@ -605,12 +596,12 @@ fn the_frame_closes_at_every_combination_of_bound_and_content_length() {
     for content in contents {
         for width in 3..=12u16 {
             for height in 3..=6u16 {
-                let out = BlockStyle::new()
+                let block = BlockStyle::new()
                     .border(Border::ASCII)
                     .width(width)
                     .height(height)
-                    .render(content)
-                    .into_string();
+                    .render(content);
+                let out = block.as_str();
                 let lines: Vec<&str> = out.lines().collect();
 
                 assert_eq!(
@@ -620,14 +611,14 @@ fn the_frame_closes_at_every_combination_of_bound_and_content_length() {
                 );
                 // The width is the requested one, except where an
                 // unsplittable grapheme floors the box wider.
-                let resolved = visible_width(lines[0]);
+                let resolved = block.size().width();
                 assert!(
                     resolved >= usize::from(width),
                     "{content:?} at {width}x{height}: {out}"
                 );
                 for line in &lines {
                     assert_eq!(
-                        visible_width(line),
+                        row_width(line),
                         resolved,
                         "{content:?} at {width}x{height}: {out}"
                     );
@@ -718,18 +709,15 @@ fn overflow_never_opens_the_frame() {
         Overflow::ellipsis(),
         Overflow::clip_with("..."),
     ] {
-        let out = BlockStyle::new()
+        let block = BlockStyle::new()
             .border(Border::ASCII)
             .padding((0, 1))
             .width(8)
             .overflow(overflow.clone())
-            .render("abcdefghij")
-            .into_string();
+            .render("abcdefghij");
+        let out = block.as_str();
 
-        assert!(
-            out.lines().all(|line| visible_width(line) == 8),
-            "{overflow:?}: {out}"
-        );
+        assert_eq!(block.size().width(), 8, "{overflow:?}: {out}");
         assert!(out.starts_with("+------+"), "{overflow:?}: {out}");
         assert!(out.ends_with("+------+"), "{overflow:?}: {out}");
     }

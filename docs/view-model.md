@@ -395,10 +395,38 @@ impl RenderedBlock {
 - A `RenderedBlock` does not re-enter the view tree. Content that participates
   in layout is expressed as a tree.
 
-Passing escape sequences to a `Text` node has a defined consequence rather than
-an undefined one: their graphemes are measured as ordinary text, so the block
-comes out deterministically too wide. Runtime detection is not part of the
-contract.
+The plain side of the boundary is carried by types too, inside the crate:
+`PrintableLines` for text that spans rows and `PrintableText` for one row.
+Display width belongs to the second of these, because a width is a property of
+a row of cells; measuring across a line break would sum cells that never share
+one. Neither type inspects the string it adopts, exactly as `from_ansi` does
+not: the domain is declared, never detected.
+
+Passing escape sequences to a `Text` node is therefore a contract violation,
+not a supported call with a degraded result. Debug builds assert at the
+boundary where the domain is declared; release builds do not check, and measure
+the escapes as ordinary characters while wrapping or truncation may split them.
+Detection is a development aid, never a runtime behavior the model promises.
+
+`from_ansi` measures what a terminal would show rather than what the byte
+stream contains, because a row of rendered output may be a sequence of
+operations rather than a sequence of cells. It is resolved once, at that
+boundary:
+
+- `\n` and `\r\n` end a row; the `\r` of a `\r\n` pair is not part of the row
+  it ends, a lone `\r` does not end one, a trailing newline leaves one empty
+  row, and empty text has no rows at all.
+- `\r` returns to column 0, backspace steps back one column and stops there,
+  and a tab advances to the next tab stop; text written afterwards lands on top
+  of text written earlier, and overwriting either half of a wide character
+  erases all of it.
+- Each cell keeps the escape scope that was open when it was written, and the
+  row re-emits only the transitions between them, so a scope closed before a
+  carriage return still covers the cells it wrapped.
+
+What comes out is a rectangle of cells that contains no cursor movement. That
+invariant is what lets a block be placed at any column of a join without its
+content sliding.
 
 This is what lets the two backends agree: both consume a `ResolvedView` whose
 contents are graphemes with known widths and logical styles, containing no
@@ -426,6 +454,14 @@ Display width is decided once, in the layout pass, using the shared `text`
 implementation, and carried per grapheme in the `ResolvedView`. No component and
 no renderer defines its own notion of display width, and none re-measures one
 the layout pass already decided.
+
+There are exactly two measurement paths, and which one applies is decided by a
+type rather than by inspecting a string: `PrintableText::width` for plain text,
+and `RenderedBlock::from_ansi` for rendered output. The crate exposes no free
+function taking a `&str` and returning a width, because such a function has to
+guess which of the two it was handed. An application asks the model instead —
+`measure`, `resolve(…).size()`, `RenderedBlock::size`, and
+`BlockStyle::frame_size` are the computable breakpoints it is owed.
 
 ## Required verification
 

@@ -1,7 +1,5 @@
 use std::any::Any;
 
-use urushi::visible_width;
-
 use crate::{
     FieldConfigError, FieldKey,
     runtime::{
@@ -9,6 +7,7 @@ use crate::{
         RuntimeField, ViewLine, ViewSpan,
     },
 };
+use urushi::PrintableText;
 
 /// The provenance of a submitted confirmation value.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -71,6 +70,9 @@ impl Confirm {
     }
 
     /// Sets the labels shown for yes and no.
+    /// `yes` and `no` is plain text. Escape sequences in it are counted as ordinary
+    /// characters when the prompt measures its cells, so a pre-styled string
+    /// mis-aligns the field; style it through the prompt's theme instead.
     #[must_use]
     pub fn labels(mut self, yes: impl Into<String>, no: impl Into<String>) -> Self {
         self.yes_label = yes.into();
@@ -79,6 +81,9 @@ impl Confirm {
     }
 
     /// Sets supporting text shown below the question.
+    /// `description` is plain text. Escape sequences in it are counted as ordinary
+    /// characters when the prompt measures its cells, so a pre-styled string
+    /// mis-aligns the field; style it through the prompt's theme instead.
     #[must_use]
     pub fn description(mut self, description: impl Into<String>) -> Self {
         self.description = Some(description.into());
@@ -86,6 +91,9 @@ impl Confirm {
     }
 
     /// Sets the navigation hint shown beneath the choices.
+    /// `help` is plain text. Escape sequences in it are counted as ordinary
+    /// characters when the prompt measures its cells, so a pre-styled string
+    /// mis-aligns the field; style it through the prompt's theme instead.
     #[must_use]
     pub fn help(mut self, help: impl Into<String>) -> Self {
         self.help = help.into();
@@ -181,15 +189,19 @@ impl RuntimeField for Confirm {
                 &styles.muted,
             )]));
         }
-        let button_width = visible_width(&self.yes_label)
+        let button_width = PrintableText::new(self.yes_label.as_str())
+            .width()
             .saturating_add(4)
             .saturating_add(1)
-            .saturating_add(visible_width(&self.no_label))
+            .saturating_add(PrintableText::new(self.no_label.as_str()).width())
             .saturating_add(4);
-        let header_width = self.description.as_deref().map_or_else(
-            || visible_width(&self.question),
-            |description| visible_width(&self.question).max(visible_width(description)),
-        );
+        let question_width = PrintableText::new(self.question.as_str()).width();
+        let header_width = self
+            .description
+            .as_deref()
+            .map_or(question_width, |description| {
+                question_width.max(PrintableText::new(description).width())
+            });
         let left_padding = header_width.saturating_sub(button_width) / 2;
         lines.push(ViewLine::blank());
         let mut buttons = ViewLine::blank();

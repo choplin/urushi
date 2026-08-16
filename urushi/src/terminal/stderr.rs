@@ -109,7 +109,7 @@ fn detect_output_mode(stderr_is_terminal: bool, term: Option<&str>) -> OutputMod
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{AnsiPolicy, BlockStyle, Border, ColorProfile, TextStyle, measure, visible_width};
+    use crate::{AnsiPolicy, BlockStyle, Border, ColorProfile, RenderedBlock, TextStyle, measure};
 
     const SENTENCE: &str = "the quick brown fox jumps over the lazy dog";
 
@@ -168,7 +168,11 @@ mod tests {
         );
         let lines = rendered.into_string();
         for line in lines.lines() {
-            assert_eq!(visible_width(line), 20, "every line closes at the area");
+            assert_eq!(
+                RenderedBlock::from_ansi(line).size().width(),
+                20,
+                "every line closes at the area"
+            );
         }
     }
 

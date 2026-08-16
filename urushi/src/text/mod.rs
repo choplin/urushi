@@ -1,8 +1,13 @@
-//! ANSI-aware text measurement and wrapping.
+//! Plain-text measurement and wrapping.
+//!
+//! Everything here works on [`PrintableText`] and [`PrintableLines`]: text
+//! that carries no escape sequences and no cursor movement. Rendered output is measured by
+//! [`RenderedBlock::from_ansi`](crate::RenderedBlock::from_ansi) instead, which
+//! is the crate's only ANSI-aware path.
 
-mod width;
+mod printable;
+pub(crate) mod width;
 mod wrap;
 
-pub(crate) use width::truncate_visible_width;
-pub use width::visible_width;
-pub use wrap::wrap_text;
+pub use printable::{PrintableLines, PrintableText};
+pub(crate) use wrap::wrap_text;

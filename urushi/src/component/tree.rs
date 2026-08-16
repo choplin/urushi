@@ -84,7 +84,16 @@ pub struct TreeNode {
 }
 
 impl TreeNode {
-    /// Creates a visible leaf node.
+    /// Creates a visible leaf node from plain text.
+    ///
+    /// `value` is plain text. Escape sequences and cursor movement in it break that contract:
+    /// debug builds panic, and release builds measure them as ordinary
+    /// characters and may split them when wrapping or truncating. Adopt
+    /// already-rendered output with
+    /// [`RenderedBlock::from_ansi`](crate::RenderedBlock::from_ansi) instead.
+    ///
+    /// Style the component through its [`ComponentStyles`](crate::ComponentStyles)
+    /// rather than by pre-rendering its content.
     pub fn new(value: impl Into<String>) -> Self {
         Self {
             value: value.into(),
@@ -317,6 +326,8 @@ impl Tree {
     }
 
     /// Sets the optional root text.
+    /// `root` is plain text: escape sequences and cursor movement in it break
+    /// that contract, and debug builds panic on them.
     #[must_use]
     pub fn root(mut self, root: impl Into<String>) -> Self {
         self.root = Some(root.into());
@@ -381,7 +392,8 @@ fn visible_children(children: &[TreeNode], offset: ChildOffset) -> Vec<&TreeNode
 mod tests {
     use super::*;
     use crate::test_support::{plain, plain_rows, style_at};
-    use crate::{Color, ComponentStyles, SemanticTokens, measure, visible_width};
+    use crate::text::PrintableText;
+    use crate::{Color, ComponentStyles, SemanticTokens, measure};
 
     fn styles() -> ComponentStyles {
         ComponentStyles::from_tokens(&SemanticTokens {
@@ -543,8 +555,8 @@ mod tests {
         assert_eq!(plain(&view), "  界one\n   .two");
         let rows = plain_rows(&view);
         assert_eq!(
-            visible_width(&rows[0][..rows[0].find("one").unwrap()]),
-            visible_width(&rows[1][..rows[1].find("two").unwrap()]),
+            PrintableText::new(&rows[0][..rows[0].find("one").unwrap()]).width(),
+            PrintableText::new(&rows[1][..rows[1].find("two").unwrap()]).width(),
             "markers of different cell widths still start the values in one column"
         );
     }

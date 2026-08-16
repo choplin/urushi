@@ -8,8 +8,8 @@ use ratatui::{
 };
 use urushi::{
     Align, AnsiPolicy, AnsiRenderer, Available, BlockStyle, Border, Color, ColorProfile, Length,
-    Modifier as UrushiModifier, Overflow, PanelRole, SemanticTokens, TerminalProfile, TextStyle,
-    Theme, VerticalAlign, View, measure, visible_width,
+    Modifier as UrushiModifier, Overflow, PanelRole, PrintableText, SemanticTokens,
+    TerminalProfile, TextStyle, Theme, VerticalAlign, View, measure,
 };
 use urushi_tui::{RatatuiStyle, RatatuiStyleExt as _, ViewWidget};
 
@@ -19,9 +19,10 @@ fn one_theme_component_renders_to_plain_cli_and_ratatui() {
     let profile = TerminalProfile::new(ColorProfile::TrueColor, AnsiPolicy::Enabled);
     let panel = profile.resolve_block_style(&theme.block_style(PanelRole::PanelFocused));
 
-    let plain = panel.render("保存しました").into_string();
+    let block = panel.render("保存しました");
+    assert_eq!(block.size().width(), 16);
+    let plain = block.into_string();
     assert!(plain.contains("保存しました"));
-    assert!(plain.lines().all(|line| visible_width(line) == 16));
     assert!(plain.contains("38;2;80;160;255"));
 
     let backend = TestBackend::new(16, 3);
@@ -462,7 +463,10 @@ fn visual_row(buffer: &ratatui::buffer::Buffer, y: u16, width: u16) -> String {
     while x < right {
         let symbol = buffer.cell((x, y)).expect("cell").symbol();
         line.push_str(symbol);
-        let width = visible_width(symbol).max(1).min(usize::from(u16::MAX)) as u16;
+        let width = PrintableText::new(symbol)
+            .width()
+            .max(1)
+            .min(usize::from(u16::MAX)) as u16;
         x = x.saturating_add(width);
     }
     line

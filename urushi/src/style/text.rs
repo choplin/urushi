@@ -203,11 +203,14 @@ impl TextStyle {
         self
     }
 
-    /// Wraps `text` in this style's SGR scope.
+    /// Wraps plain `text` in this style's SGR scope.
     ///
     /// A style that emits no sequence returns `text` unchanged. This produces
     /// no rectangle: padding, borders, and dimensions belong to
     /// [`BlockStyle`](crate::BlockStyle).
+    ///
+    /// `text` is plain. Painting already-rendered output nests SGR scopes, and
+    /// the inner scope's reset ends this one early.
     pub fn paint(&self, text: &str) -> String {
         let sgr = self.sgr_prefix();
         if sgr.is_empty() {

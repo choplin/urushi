@@ -1,9 +1,8 @@
 //! Renderer-neutral tables with an independent public model.
 
-use crate::text::truncate_visible_width;
+use crate::text::{PrintableLines, PrintableText, wrap_text};
 use crate::{
     Align, BlockStyle, BlockStylePropertyKey, Border, TableRole, TextStyle, VerticalAlign, View,
-    visible_width, wrap_text,
 };
 
 /// Which row of a table a cell belongs to.
@@ -137,9 +136,14 @@ impl Table {
         Self::default()
     }
 
-    /// Replaces the header cells.
+    /// Replaces the header cells, each of which is plain text.
     ///
-    /// A table without headers composes its body rows only.
+    /// A table without headers composes its body rows only. Each cell is plain
+    /// text. Escape sequences and cursor movement in it break that contract:
+    /// debug builds panic, and release builds measure them as ordinary
+    /// characters and may split them when wrapping or truncating. Adopt
+    /// already-rendered output with
+    /// [`RenderedBlock::from_ansi`](crate::RenderedBlock::from_ansi) instead.
     #[must_use]
     pub fn headers<I, S>(mut self, headers: I) -> Self
     where
@@ -161,7 +165,13 @@ impl Table {
         self
     }
 
-    /// Appends body rows in iteration order.
+    /// Appends body rows in iteration order, each cell being plain text.
+    ///
+    /// Escape sequences and cursor movement in it break that contract:
+    /// debug builds panic, and release builds measure them as ordinary
+    /// characters and may split them when wrapping or truncating. Adopt
+    /// already-rendered output with
+    /// [`RenderedBlock::from_ansi`](crate::RenderedBlock::from_ansi) instead.
     #[must_use]
     pub fn rows<I, R, S>(mut self, rows: I) -> Self
     where
@@ -574,9 +584,9 @@ impl TableStyle {
     /// composed line the same width; placing the fitted text is the block's job.
     fn cell_lines(&self, text: &str, width: usize) -> Vec<String> {
         let inner = self.content_width(width);
-        wrap_text(text, inner)
+        wrap_text(PrintableLines::new(text), inner)
             .iter()
-            .map(|line| truncate_visible_width(line, inner))
+            .map(|line| PrintableText::new(line).truncate(inner).as_str().to_owned())
             .collect()
     }
 
@@ -675,7 +685,10 @@ fn column_count(rows: &[Vec<String>], headers: usize) -> usize {
 
 /// Returns the widest line of a possibly multi-line cell.
 fn natural_width(cell: &str) -> usize {
-    cell.lines().map(visible_width).max().unwrap_or_default()
+    cell.lines()
+        .map(|line| PrintableText::new(line).width())
+        .max()
+        .unwrap_or_default()
 }
 
 /// Returns the index of the narrowest column, preferring the leftmost.
@@ -819,31 +832,9 @@ mod tests {
         );
         let widths: Vec<usize> = plain_rows(&view)
             .iter()
-            .map(|row| visible_width(row))
+            .map(|row| PrintableText::new(row).width())
             .collect();
         assert!(widths.iter().all(|width| *width == widths[0]));
-    }
-
-    #[test]
-    fn cell_text_is_plain_text() {
-        // The layout pass never inspects text for escape sequences, so a cell
-        // carrying them is measured as ordinary graphemes and comes out
-        // deterministically too wide. Cell styling belongs to the style hook.
-        let plain_table = Table::new().headers(["Name"]).row(["red"]).row(["plain"]);
-        let pre_styled = Table::new()
-            .headers(["Name"])
-            .row(["\x1b[31mred\x1b[0m"])
-            .row(["plain"]);
-        let plain_view = styles().table().view(&plain_table);
-        let pre_styled_view = styles().table().view(&pre_styled);
-
-        for row in plain_rows(&plain_view) {
-            assert_eq!(visible_width(&row), 9);
-        }
-        assert!(
-            measure(&pre_styled_view).width() > measure(&plain_view).width(),
-            "escape sequences in cell data occupy cells like any other text"
-        );
     }
 
     #[test]
@@ -870,7 +861,7 @@ mod tests {
         let wide = table_style.clone().width(28);
         let view = wide.view(&sample());
         for row in plain_rows(&view) {
-            assert_eq!(visible_width(&row), 28);
+            assert_eq!(PrintableText::new(&row).width(), 28);
         }
 
         let narrow = table_style.width(16);
@@ -898,7 +889,7 @@ mod tests {
         let view = narrow.view(&table);
 
         for row in plain_rows(&view) {
-            assert_eq!(visible_width(&row), 9);
+            assert_eq!(PrintableText::new(&row).width(), 9);
         }
         assert_eq!(
             plain_rows(&view)[3],
@@ -913,7 +904,7 @@ mod tests {
             .width(5)
             .view(&Table::new().row(["日本", "ab"]));
         for row in plain_rows(&padded) {
-            assert_eq!(visible_width(&row), 5);
+            assert_eq!(PrintableText::new(&row).width(), 5);
         }
     }
 
@@ -921,7 +912,7 @@ mod tests {
     fn width_below_the_column_minimum_overflows() {
         let narrow = styles().table().clone().width(4);
         let view = narrow.view(&sample());
-        let width = visible_width(&plain_rows(&view)[0]);
+        let width = PrintableText::new(&plain_rows(&view)[0]).width();
 
         assert!(
             width > 4,

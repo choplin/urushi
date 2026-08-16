@@ -68,6 +68,35 @@ from the string, so no engine that accepts one can decide it; any attempt is a
 heuristic. The property is therefore carried by the type — `RenderedBlock` —
 and measured once, where it is declared.
 
+## Why there is one width measure, and why it is the per-grapheme sum
+
+Width is measured in exactly one way: the sum of the display widths of a
+line's grapheme clusters. Not `unicode-width`'s measure of the whole string,
+and not a measure that skips escape sequences — that third one is what
+`RenderedBlock::from_ansi` does, on the other side of the domain boundary.
+
+The two plain-text measures are not interchangeable. `unicode-width` applied to
+a whole string honors ligatures that span a cluster boundary: LAM followed by
+ALEF renders as one glyph in one cell, and the whole-string measure says one,
+while the sum says two. Over every RTL block, those are the only disagreements
+— 80 pairs, all LAM-class plus ALEF-class; outside RTL the two never differ.
+
+The sum is the one the model must use, for an ordering reason rather than a
+tidiness one. A box fixes its width before its content is wrapped into it,
+because wrapping needs a width to wrap to. That only works if "text wrapped to
+`w` occupies at most `w`" holds, which in turn requires the wrap decision and
+the width total to be the same measure. And the total has to be the sum,
+because a `ResolvedView` row *is* a sequence of per-grapheme tokens whose
+widths add to the rectangle's width — any other measure produces a number no
+row can satisfy.
+
+The cost is that a LAM+ALEF pair is measured one cell wider than a terminal
+draws it. Merging the pair into a single token is representable — a token's
+symbol is a `String` — but matching the terminal exactly makes the measure
+terminal-dependent, which is the same move as ambiguous East Asian width and
+belongs with it: an input to `measure` and `resolve`, not a constant. Until
+that exists, this is a defined deviation rather than an unknown one.
+
 ## Why the area is an input to layout
 
 The previous model applied bounds after assembly: `max_width` and the outer

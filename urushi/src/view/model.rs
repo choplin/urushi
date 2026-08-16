@@ -26,7 +26,9 @@ use crate::{Align, BlockStyle, TextStyle, VerticalAlign};
 /// ```
 #[derive(Debug, Clone, PartialEq)]
 pub enum View {
-    /// Plain text and the style applied to it.
+    /// Plain text and the style applied to it. Never holds escape sequences or
+    /// cursor movement: the layout pass measures its graphemes without
+    /// scanning for them.
     Text(String, TextStyle),
     /// One [`BlockStyle`] around exactly one child.
     Block(BlockStyle, Box<View>),
@@ -45,8 +47,10 @@ impl Default for View {
 impl View {
     /// Creates a text leaf.
     ///
-    /// The text is plain: escape sequences in it are measured as ordinary
-    /// graphemes rather than detected. Adopt already-rendered output with
+    /// The text is plain. Escape sequences and cursor movement in it break that contract:
+    /// debug builds panic, and release builds measure them as ordinary
+    /// characters and may split them when wrapping or truncating. Adopt
+    /// already-rendered output with
     /// [`RenderedBlock::from_ansi`](crate::RenderedBlock::from_ansi) instead.
     pub fn text(text: impl Into<String>, style: TextStyle) -> Self {
         Self::Text(text.into(), style)

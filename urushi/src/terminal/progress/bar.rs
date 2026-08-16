@@ -92,6 +92,8 @@ impl ProgressBar {
         }
     }
 
+    /// `message` is plain text: escape sequences and cursor movement in it break
+    /// that contract, and debug builds panic on them.
     pub fn set_message(&mut self, message: impl Into<String>) -> io::Result<()> {
         self.message = message.into();
         if let Some(live) = &self.live {

@@ -7,9 +7,7 @@
 //! out. The assembly that consumes these numbers lives in
 //! [`resolve`](super::resolve).
 
-use unicode_segmentation::UnicodeSegmentation;
-use unicode_width::UnicodeWidthStr;
-
+use crate::text::{PrintableLines, PrintableText};
 use crate::{BlockStyle, Length, Sides, View};
 
 use super::geometry::Size;
@@ -325,7 +323,7 @@ pub(super) fn max_content_width(view: &View) -> usize {
     match view {
         View::Text(text, _) => text_lines(text)
             .iter()
-            .map(|line| UnicodeWidthStr::width(line.as_str()))
+            .map(|line| line.width())
             .max()
             .unwrap_or(0),
         View::Block(style, child) => {
@@ -344,8 +342,8 @@ pub(super) fn min_content_width(view: &View) -> usize {
         View::Text(text, _) => text_lines(text)
             .iter()
             .flat_map(|line| {
-                line.graphemes(true)
-                    .map(UnicodeWidthStr::width)
+                line.graphemes()
+                    .map(PrintableText::width)
                     .collect::<Vec<_>>()
             })
             .max()
@@ -404,15 +402,13 @@ pub(super) fn height_axis(style: &BlockStyle, frame: usize) -> Axis {
     }
 }
 
-/// Splits text into lines, keeping one empty line for empty text so a box
-/// always has a content row to place.
-pub(super) fn text_lines(text: &str) -> Vec<String> {
-    let lines: Vec<String> = text.lines().map(str::to_owned).collect();
-    if lines.is_empty() {
-        vec![String::new()]
-    } else {
-        lines
-    }
+/// Splits a view's text into lines, keeping one empty line for empty text so a
+/// box always has a content row to place.
+///
+/// The argument is plain text: a [`View::Text`] node never holds escape
+/// sequences, which is what lets the layout pass measure without scanning.
+pub(super) fn text_lines(text: &str) -> Vec<&PrintableText> {
+    PrintableLines::new(text).lines()
 }
 
 #[cfg(test)]

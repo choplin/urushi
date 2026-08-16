@@ -1,6 +1,7 @@
 //! Shared traversal and layout for hierarchical components.
 
-use crate::{Align, TextStyle, VerticalAlign, View, visible_width};
+use crate::text::PrintableText;
+use crate::{Align, TextStyle, VerticalAlign, View};
 
 /// The private recursive boundary shared by hierarchical component models.
 pub(super) trait Traversable {
@@ -63,7 +64,12 @@ where
         .collect::<Vec<_>>();
     let segment_width = markers
         .iter()
-        .flat_map(|(enumerator, indenter)| [visible_width(enumerator), visible_width(indenter)])
+        .flat_map(|(enumerator, indenter)| {
+            [
+                PrintableText::new(enumerator).width(),
+                PrintableText::new(indenter).width(),
+            ]
+        })
         .max()
         .unwrap_or(0);
 
@@ -114,12 +120,13 @@ fn prefix_cells(prefix: &[PrefixPart]) -> Vec<View> {
 }
 
 fn align_right(text: String, width: usize) -> String {
-    let padding = width.saturating_sub(visible_width(&text));
+    let padding = width.saturating_sub(PrintableText::new(&text).width());
     format!("{}{text}", " ".repeat(padding))
 }
 
 fn align_left(mut text: String, width: usize) -> String {
-    text.push_str(&" ".repeat(width.saturating_sub(visible_width(&text))));
+    let padding = width.saturating_sub(PrintableText::new(&text).width());
+    text.push_str(&" ".repeat(padding));
     text
 }
 

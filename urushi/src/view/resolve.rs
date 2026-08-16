@@ -10,10 +10,8 @@
 //! rectangle they describe. The procedure is specified in
 //! `docs/view-model.md`.
 
-use unicode_segmentation::UnicodeSegmentation;
-use unicode_width::UnicodeWidthStr;
-
-use crate::{Align, BlockStyle, Overflow, Sides, TextStyle, VerticalAlign, View, wrap_text};
+use crate::text::{PrintableLines, PrintableText, wrap_text};
+use crate::{Align, BlockStyle, Overflow, Sides, TextStyle, VerticalAlign, View};
 
 use super::geometry::{Available, Size};
 use super::rendered::RenderedBlock;
@@ -36,6 +34,11 @@ pub struct StyledGrapheme {
 }
 
 impl StyledGrapheme {
+    /// Creates one styled grapheme.
+    ///
+    /// `symbol` is one plain-text grapheme cluster and `width` the cells it
+    /// occupies. A `ResolvedView` holds no escape sequences, so a symbol
+    /// carrying one would reach the backend as ordinary characters.
     pub fn new(symbol: impl Into<String>, width: usize, style: TextStyle) -> Self {
         Self {
             symbol: symbol.into(),
@@ -222,10 +225,9 @@ fn blank(width: usize, style: &TextStyle) -> Vec<StyledGrapheme> {
 
 /// Splits plain text into styled graphemes with their display widths.
 fn graphemes(text: &str, style: &TextStyle) -> Vec<StyledGrapheme> {
-    text.graphemes(true)
-        .map(|grapheme| {
-            StyledGrapheme::new(grapheme, UnicodeWidthStr::width(grapheme), style.clone())
-        })
+    PrintableText::new(text)
+        .graphemes()
+        .map(|grapheme| StyledGrapheme::new(grapheme.as_str(), grapheme.width(), style.clone()))
         .collect()
 }
 
@@ -286,7 +288,7 @@ fn layout_text(
     overflow: &Overflow,
 ) -> Rect {
     let mut lines: Vec<String> = match (target, overflow) {
-        (Some(width), Overflow::Wrap) => wrap_text(text, width),
+        (Some(width), Overflow::Wrap) => wrap_text(PrintableLines::new(text), width),
         (Some(width), Overflow::Clip(marker)) => text_lines(text)
             .iter()
             .map(|line| clip_line(line, width, marker))
@@ -320,28 +322,32 @@ fn layout_text(
 /// The marker occupies cells of its own, so the text keeps the width less the
 /// marker's own. A marker the box cannot hold is dropped: a silent cut is
 /// closer to the request than a box filled with the marker alone.
-fn clip_line(line: &str, width: usize, marker: &str) -> String {
-    if UnicodeWidthStr::width(line) <= width {
-        return line.to_owned();
+fn clip_line(line: &PrintableText, width: usize, marker: &str) -> String {
+    if line.width() <= width {
+        return line.as_str().to_owned();
     }
     if width == 0 {
         return String::new();
     }
-    let marker_width = UnicodeWidthStr::width(marker);
-    let marker = if marker_width < width { marker } else { "" };
-    let budget = width - UnicodeWidthStr::width(marker);
+    let marker = PrintableText::new(marker);
+    let marker = if marker.width() < width {
+        marker
+    } else {
+        PrintableText::new("")
+    };
+    let budget = width - marker.width();
 
     let mut output = String::new();
     let mut consumed = 0;
-    for grapheme in line.graphemes(true) {
-        let grapheme_width = UnicodeWidthStr::width(grapheme);
+    for grapheme in line.graphemes() {
+        let grapheme_width = grapheme.width();
         if consumed + grapheme_width > budget {
             break;
         }
         consumed += grapheme_width;
-        output.push_str(grapheme);
+        output.push_str(grapheme.as_str());
     }
-    output.push_str(marker);
+    output.push_str(marker.as_str());
     output
 }
 
@@ -749,11 +755,17 @@ mod tests {
 
     #[test]
     fn a_clip_keeps_the_marker_inside_the_width() {
-        assert_eq!(clip_line("hello world", 5, ""), "hello");
-        assert_eq!(clip_line("hello world", 5, "…"), "hell…");
-        assert_eq!(clip_line("hello world", 5, "..."), "he...");
+        assert_eq!(clip_line(PrintableText::new("hello world"), 5, ""), "hello");
         assert_eq!(
-            clip_line("hello", 9, "…"),
+            clip_line(PrintableText::new("hello world"), 5, "…"),
+            "hell…"
+        );
+        assert_eq!(
+            clip_line(PrintableText::new("hello world"), 5, "..."),
+            "he..."
+        );
+        assert_eq!(
+            clip_line(PrintableText::new("hello"), 9, "…"),
             "hello",
             "a line that fits is untouched"
         );
@@ -762,23 +774,38 @@ mod tests {
     #[test]
     fn a_clip_never_splits_a_grapheme_and_measures_the_marker_in_cells() {
         assert_eq!(
-            clip_line("日本語", 5, ""),
+            clip_line(PrintableText::new("日本語"), 5, ""),
             "日本",
             "the third would straddle"
         );
         assert_eq!(
-            clip_line("日本語", 4, "→"),
+            clip_line(PrintableText::new("日本語"), 4, "→"),
             "日→",
             "a wide marker costs two"
         );
-        assert_eq!(clip_line("e\u{301}xyz", 2, ""), "e\u{301}x");
+        assert_eq!(
+            clip_line(PrintableText::new("e\u{301}xyz"), 2, ""),
+            "e\u{301}x"
+        );
     }
 
     #[test]
     fn a_marker_that_cannot_fit_is_dropped() {
-        assert_eq!(clip_line("hello", 3, "..."), "hel", "no room for content");
-        assert_eq!(clip_line("hello", 1, "…"), "h", "the marker fills the box");
-        assert_eq!(clip_line("hello", 0, "…"), "", "nothing fits at all");
+        assert_eq!(
+            clip_line(PrintableText::new("hello"), 3, "..."),
+            "hel",
+            "no room for content"
+        );
+        assert_eq!(
+            clip_line(PrintableText::new("hello"), 1, "…"),
+            "h",
+            "the marker fills the box"
+        );
+        assert_eq!(
+            clip_line(PrintableText::new("hello"), 0, "…"),
+            "",
+            "nothing fits at all"
+        );
     }
 
     #[test]

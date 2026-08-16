@@ -1,12 +1,20 @@
 #[path = "../examples/cjk_showcase.rs"]
 mod cjk_showcase;
 
-use urushi::visible_width;
+use urushi::RenderedBlock;
+
+/// The cells one rendered row occupies.
+///
+/// Rendered output is measured through the crate's one ANSI-aware entry point;
+/// there is no free function that takes a string and guesses at its domain.
+fn row_width(line: &str) -> usize {
+    RenderedBlock::from_ansi(line).size().width()
+}
 
 #[test]
 fn cjk_showcase_preserves_width_and_japanese_content() {
     let output = cjk_showcase::render_cjk_showcase();
-    let widths: Vec<usize> = output.lines().map(visible_width).collect();
+    let widths: Vec<usize> = output.lines().map(row_width).collect();
 
     assert!(
         widths.iter().all(|width| *width == 49),

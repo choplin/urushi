@@ -1,7 +1,7 @@
 use std::any::Any;
 
 use unicode_segmentation::UnicodeSegmentation;
-use urushi::visible_width;
+use urushi::PrintableText;
 
 use crate::{
     FieldConfigError, FieldKey,
@@ -20,6 +20,9 @@ pub struct ValidationError {
 
 impl ValidationError {
     /// Creates a validation error with a displayable message.
+    /// `message` is plain text. Escape sequences in it are counted as ordinary
+    /// characters when the prompt measures its cells, so a pre-styled string
+    /// mis-aligns the field; style it through the prompt's theme instead.
     pub fn new(message: impl Into<String>) -> Self {
         Self {
             message: message.into(),
@@ -74,6 +77,9 @@ impl Input {
     }
 
     /// Sets text shown when the current value is empty.
+    /// `placeholder` is plain text. Escape sequences in it are counted as ordinary
+    /// characters when the prompt measures its cells, so a pre-styled string
+    /// mis-aligns the field; style it through the prompt's theme instead.
     #[must_use]
     pub fn placeholder(mut self, placeholder: impl Into<String>) -> Self {
         self.placeholder = Some(placeholder.into());
@@ -81,6 +87,9 @@ impl Input {
     }
 
     /// Sets supporting text shown below the question.
+    /// `description` is plain text. Escape sequences in it are counted as ordinary
+    /// characters when the prompt measures its cells, so a pre-styled string
+    /// mis-aligns the field; style it through the prompt's theme instead.
     #[must_use]
     pub fn description(mut self, description: impl Into<String>) -> Self {
         self.description = Some(description.into());
@@ -88,6 +97,9 @@ impl Input {
     }
 
     /// Sets the navigation hint shown beneath the field.
+    /// `help` is plain text. Escape sequences in it are counted as ordinary
+    /// characters when the prompt measures its cells, so a pre-styled string
+    /// mis-aligns the field; style it through the prompt's theme instead.
     #[must_use]
     pub fn help(mut self, help: impl Into<String>) -> Self {
         self.help = help.into();
@@ -297,7 +309,7 @@ impl RuntimeField for Input {
     fn view(&self, styles: &PromptStyles, focused: bool) -> PromptView {
         let answer_start = 2_usize;
         let cursor_prefix = &self.value[..self.byte_index(self.cursor)];
-        let cursor_column = answer_start.saturating_add(visible_width(cursor_prefix));
+        let cursor_column = answer_start.saturating_add(PrintableText::new(cursor_prefix).width());
         let mut answer = ViewLine::new(vec![ViewSpan::new("› ", &styles.answer)]);
         answer.spans.extend(self.answer_spans(styles, focused));
         let mut lines = vec![ViewLine::new(vec![ViewSpan::new(

@@ -1,6 +1,7 @@
 use std::any::Any;
 
 use unicode_segmentation::UnicodeSegmentation;
+use urushi::PrintableText;
 
 use crate::{
     FieldConfigError, FieldKey,
@@ -20,6 +21,9 @@ pub struct SelectOption<T> {
 
 impl<T> SelectOption<T> {
     /// Creates a selectable typed value with a display label.
+    /// `label` is plain text. Escape sequences in it are counted as ordinary
+    /// characters when the prompt measures its cells, so a pre-styled string
+    /// mis-aligns the field; style it through the prompt's theme instead.
     pub fn new(label: impl Into<String>, value: T) -> Self {
         Self {
             label: label.into(),
@@ -78,6 +82,9 @@ impl<T> Select<T> {
     }
 
     /// Sets the navigation hint shown beneath the options.
+    /// `help` is plain text. Escape sequences in it are counted as ordinary
+    /// characters when the prompt measures its cells, so a pre-styled string
+    /// mis-aligns the field; style it through the prompt's theme instead.
     #[must_use]
     pub fn help(mut self, help: impl Into<String>) -> Self {
         self.help = help.into();
@@ -85,6 +92,9 @@ impl<T> Select<T> {
     }
 
     /// Sets supporting text shown below the question.
+    /// `description` is plain text. Escape sequences in it are counted as ordinary
+    /// characters when the prompt measures its cells, so a pre-styled string
+    /// mis-aligns the field; style it through the prompt's theme instead.
     #[must_use]
     pub fn description(mut self, description: impl Into<String>) -> Self {
         self.description = Some(description.into());
@@ -304,10 +314,10 @@ impl<T: 'static> RuntimeField for Select<T> {
                     title.spans.push(ViewSpan::new(" ", &styles.cursor));
                     cursor = Some(crate::runtime::ViewCursor {
                         row: 0,
-                        column: urushi::visible_width(&format!(
-                            "{}  / {}",
-                            self.question, self.filter
-                        ))
+                        column: PrintableText::new(
+                            format!("{}  / {}", self.question, self.filter).as_str(),
+                        )
+                        .width()
                         .min(usize::from(u16::MAX)) as u16,
                     });
                 }

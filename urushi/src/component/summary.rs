@@ -1,7 +1,8 @@
 //! Titled, aligned result summaries.
 
 use crate::{
-    Align, ComponentRole, ComponentStyles, VerticalAlign, View, text::wrap_text, visible_width,
+    Align, ComponentRole, ComponentStyles, VerticalAlign, View,
+    text::{PrintableLines, PrintableText, wrap_text},
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -11,6 +12,16 @@ pub struct SummaryField {
 }
 
 impl SummaryField {
+    /// Creates one labelled field.
+    ///
+    /// `label` and `value` are plain text. Escape sequences and cursor movement in it break that contract:
+    /// debug builds panic, and release builds measure them as ordinary
+    /// characters and may split them when wrapping or truncating. Adopt
+    /// already-rendered output with
+    /// [`RenderedBlock::from_ansi`](crate::RenderedBlock::from_ansi) instead.
+    ///
+    /// Style the component through its [`ComponentStyles`](crate::ComponentStyles)
+    /// rather than by pre-rendering its content.
     pub fn new(label: impl Into<String>, value: impl Into<String>) -> Self {
         Self {
             label: label.into(),
@@ -33,6 +44,8 @@ pub struct Summary {
 }
 
 impl Summary {
+    /// `title` is plain text: escape sequences and cursor movement in it break
+    /// that contract, and debug builds panic on them.
     pub fn new(title: impl Into<String>) -> Self {
         Self {
             title: title.into(),
@@ -40,6 +53,7 @@ impl Summary {
         }
     }
 
+    /// Appends one labelled field, whose label and value are plain text.
     #[must_use]
     pub fn field(mut self, label: impl Into<String>, value: impl Into<String>) -> Self {
         self.fields.push(SummaryField::new(label, value));
@@ -58,7 +72,7 @@ impl Summary {
         let natural_label_width = self
             .fields
             .iter()
-            .map(|field| visible_width(field.label()))
+            .map(|field| PrintableText::new(field.label()).width())
             .max()
             .unwrap_or(0);
         let label_width = natural_label_width.min(width.saturating_sub(8) / 2);
@@ -78,9 +92,13 @@ impl Summary {
         ];
         for field in &self.fields {
             let value_width = width.saturating_sub(label_width + 5).max(1);
-            for (index, value) in wrap_text(field.value(), value_width).iter().enumerate() {
+            for (index, value) in wrap_text(PrintableLines::new(field.value()), value_width)
+                .iter()
+                .enumerate()
+            {
                 let label = if index == 0 { field.label() } else { "" };
-                let padding = " ".repeat(label_width.saturating_sub(visible_width(label)));
+                let padding =
+                    " ".repeat(label_width.saturating_sub(PrintableText::new(label).width()));
                 rows.push(View::row(
                     VerticalAlign::Top,
                     [

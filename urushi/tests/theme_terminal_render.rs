@@ -2,7 +2,7 @@ use std::fs::File;
 
 use urushi::{
     Align, AnsiPolicy, BlockStyle, Border, Color, ColorProfile, ColorScheme, ComponentRole,
-    ComponentStyles, PanelRole, SemanticTokens, TerminalProfile, Theme, ThemeSet, visible_width,
+    ComponentStyles, PanelRole, RenderedBlock, SemanticTokens, TerminalProfile, Theme, ThemeSet,
 };
 
 fn light_tokens() -> SemanticTokens {
@@ -77,6 +77,14 @@ fn strip_csi(input: &str) -> String {
     output
 }
 
+/// The cells one rendered row occupies.
+///
+/// Rendered output is measured through the crate's one ANSI-aware entry point;
+/// there is no free function that takes a string and guesses at its domain.
+fn row_width(line: &str) -> usize {
+    RenderedBlock::from_ansi(line).size().width()
+}
+
 #[test]
 fn theme_set_resolves_roles_for_each_terminal_profile() {
     let themes = themes();
@@ -124,7 +132,7 @@ fn theme_set_resolves_roles_for_each_terminal_profile() {
             .into_string();
         assert!(panel.starts_with(expected_panel_border));
         assert_eq!(strip_csi(&panel), expected_panel);
-        assert!(panel.lines().all(|line| visible_width(line) == 14));
+        assert!(panel.lines().all(|line| row_width(line) == 14));
     }
 }
 
@@ -166,5 +174,5 @@ fn non_tty_file_disables_ansi_without_changing_theme_layout() {
 
     assert!(!rendered.contains("\x1b["));
     assert_eq!(rendered, "╭────────────╮\n│    名前    │\n╰────────────╯");
-    assert!(rendered.lines().all(|line| visible_width(line) == 14));
+    assert!(rendered.lines().all(|line| row_width(line) == 14));
 }

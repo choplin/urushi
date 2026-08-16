@@ -1,6 +1,7 @@
 //! The view tree, the layout pass that resolves it, and rendered-block
 //! composition.
 
+mod ansi;
 mod geometry;
 mod join;
 mod model;

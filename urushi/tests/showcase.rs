@@ -1,7 +1,15 @@
 #[path = "../examples/showcase.rs"]
 mod showcase;
 
-use urushi::visible_width;
+use urushi::RenderedBlock;
+
+/// The cells one rendered row occupies.
+///
+/// Rendered output is measured through the crate's one ANSI-aware entry point;
+/// there is no free function that takes a string and guesses at its domain.
+fn row_width(line: &str) -> usize {
+    RenderedBlock::from_ansi(line).size().width()
+}
 
 fn strip_csi(input: &str) -> String {
     let mut output = String::new();
@@ -25,7 +33,7 @@ fn strip_csi(input: &str) -> String {
 fn showcase_has_a_consistent_visible_width() {
     let output = showcase::render_showcase();
     let plain_output = strip_csi(&output);
-    let widths: Vec<usize> = output.lines().map(visible_width).collect();
+    let widths: Vec<usize> = output.lines().map(row_width).collect();
 
     assert!(
         widths.iter().all(|width| *width == 49),
