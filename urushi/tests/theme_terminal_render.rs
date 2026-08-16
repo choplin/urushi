@@ -44,7 +44,9 @@ fn theme(tokens: SemanticTokens) -> Theme {
             .border(Border::ROUNDED)
             .border_foreground(tokens.accent)
             .padding((0, 1))
-            .width(12)
+            // The width measures the outer box: two border columns, two
+            // padding columns, and ten cells of content.
+            .width(14)
             .align(Align::Center),
     );
 

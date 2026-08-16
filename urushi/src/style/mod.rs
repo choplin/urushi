@@ -11,7 +11,7 @@ mod text;
 pub use block::BlockStyle;
 pub use border::Border;
 pub use color::Color;
-pub use layout::{Align, Sides, VerticalAlign};
+pub use layout::{Align, Length, Overflow, Sides, VerticalAlign};
 pub use modifier::Modifier;
 pub use property::{
     BlockStyleProperty, BlockStylePropertyKey, TextStyleProperty, TextStylePropertyKey,

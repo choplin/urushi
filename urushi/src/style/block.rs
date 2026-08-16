@@ -1,10 +1,10 @@
 //! The [`BlockStyle`] builder: a rectangle, and the style filling the geometry
 //! it creates.
 
-use crate::view::{Limits, RenderedBlock, View, resolve};
+use crate::view::{Available, RenderedBlock, Size, View, resolve};
 use crate::{
-    Align, BlockStyleProperty, BlockStylePropertyKey, Border, Color, Modifier, Sides, TextStyle,
-    TextStyleProperty, VerticalAlign,
+    Align, BlockStyleProperty, BlockStylePropertyKey, Border, Color, Length, Modifier, Overflow,
+    Sides, TextStyle, TextStyleProperty, VerticalAlign,
 };
 
 /// A rectangle: padding, margin, border, dimensions, alignment, and the
@@ -39,10 +39,13 @@ pub struct BlockStyle {
     border_left: bool,
     border_fg: Option<Color>,
     border_bg: Option<Color>,
-    width: Option<u16>,
-    height: Option<u16>,
+    width: Option<Length>,
+    height: Option<Length>,
+    min_width: Option<u16>,
+    min_height: Option<u16>,
     max_width: Option<u16>,
     max_height: Option<u16>,
+    overflow: Overflow,
     align: Align,
     vertical_align: VerticalAlign,
 }
@@ -62,8 +65,11 @@ impl Default for BlockStyle {
             border_bg: None,
             width: None,
             height: None,
+            min_width: None,
+            min_height: None,
             max_width: None,
             max_height: None,
+            overflow: Overflow::default(),
             align: Align::default(),
             vertical_align: VerticalAlign::default(),
         }
@@ -100,8 +106,11 @@ impl BlockStyle {
             BlockStyleProperty::BorderBackground(color) => self.border_bg = Some(color),
             BlockStyleProperty::Width(width) => self.width = Some(width),
             BlockStyleProperty::Height(height) => self.height = Some(height),
+            BlockStyleProperty::MinWidth(width) => self.min_width = Some(width),
+            BlockStyleProperty::MinHeight(height) => self.min_height = Some(height),
             BlockStyleProperty::MaxWidth(width) => self.max_width = Some(width),
             BlockStyleProperty::MaxHeight(height) => self.max_height = Some(height),
+            BlockStyleProperty::Overflow(overflow) => self.overflow = overflow,
             BlockStyleProperty::Align(align) => self.align = align,
             BlockStyleProperty::VerticalAlign(align) => self.vertical_align = align,
         }
@@ -123,8 +132,11 @@ impl BlockStyle {
             BlockStylePropertyKey::BorderBackground => self.border_bg = None,
             BlockStylePropertyKey::Width => self.width = None,
             BlockStylePropertyKey::Height => self.height = None,
+            BlockStylePropertyKey::MinWidth => self.min_width = None,
+            BlockStylePropertyKey::MinHeight => self.min_height = None,
             BlockStylePropertyKey::MaxWidth => self.max_width = None,
             BlockStylePropertyKey::MaxHeight => self.max_height = None,
+            BlockStylePropertyKey::Overflow => self.overflow = Overflow::default(),
             BlockStylePropertyKey::Align => self.align = Align::default(),
             BlockStylePropertyKey::VerticalAlign => self.vertical_align = VerticalAlign::default(),
         }
@@ -228,29 +240,50 @@ impl BlockStyle {
         self.add(BlockStyleProperty::BorderBackground(color.into()))
     }
 
-    /// Fixes the width of the padded content box (excluding border and
-    /// margin). Text content is word-wrapped to fit.
-    pub fn width(self, width: u16) -> Self {
-        self.add(BlockStyleProperty::Width(width))
+    /// Sets the width of the box: content plus padding plus enabled border
+    /// edges, with margin outside it.
+    ///
+    /// The absence of a width means auto — the content's own width. Content
+    /// wider than the resolved box is absorbed by [`BlockStyle::overflow`];
+    /// the frame closes at the resolved width either way.
+    pub fn width(self, width: impl Into<Length>) -> Self {
+        self.add(BlockStyleProperty::Width(width.into()))
     }
 
-    /// Sets the minimum height of the padded content box (excluding border and
-    /// margin). Taller content expands the box instead of being truncated.
-    pub fn height(self, height: u16) -> Self {
-        self.add(BlockStyleProperty::Height(height))
+    /// Sets the height of the box: content plus padding plus enabled border
+    /// edges, with margin outside it.
+    ///
+    /// This is a size, not a minimum: taller content is clipped inside the
+    /// frame rather than growing the box. The absence of a height means auto.
+    pub fn height(self, height: impl Into<Length>) -> Self {
+        self.add(BlockStyleProperty::Height(height.into()))
     }
 
-    /// Limits the final block width, including padding, border, and margin.
-    /// Positive values crop without rewrapping; zero disables the constraint.
+    /// Sets the width below which the box does not shrink.
+    pub fn min_width(self, width: u16) -> Self {
+        self.add(BlockStyleProperty::MinWidth(width))
+    }
+
+    /// Sets the height below which the box does not shrink.
+    pub fn min_height(self, height: u16) -> Self {
+        self.add(BlockStyleProperty::MinHeight(height))
+    }
+
+    /// Bounds the box's width. The box shrinks to fit its content and never
+    /// exceeds this bound; the bound never cuts the frame.
     pub fn max_width(self, width: u16) -> Self {
         self.add(BlockStyleProperty::MaxWidth(width))
     }
 
-    /// Limits the final block height, including padding, border, and margin.
-    /// Positive values remove rows from the bottom; zero disables the
-    /// constraint.
+    /// Bounds the box's height. The box shrinks to fit its content and never
+    /// exceeds this bound; the bound never cuts the frame.
     pub fn max_height(self, height: u16) -> Self {
         self.add(BlockStyleProperty::MaxHeight(height))
+    }
+
+    /// Sets how content wider than the box is absorbed.
+    pub fn overflow(self, overflow: Overflow) -> Self {
+        self.add(BlockStyleProperty::Overflow(overflow))
     }
 
     /// Sets the horizontal alignment of content within the box.
@@ -323,24 +356,61 @@ impl BlockStyle {
         self.border_bg
     }
 
-    /// Returns the fixed content-box width, if one is set.
-    pub const fn fixed_width(&self) -> Option<u16> {
+    /// Returns the box's width, if one is set.
+    pub const fn width_length(&self) -> Option<Length> {
         self.width
     }
 
-    /// Returns the minimum padded content-box height, if one is set.
-    pub const fn fixed_height(&self) -> Option<u16> {
+    /// Returns the box's height, if one is set.
+    pub const fn height_length(&self) -> Option<Length> {
         self.height
     }
 
-    /// Returns the maximum final block width, if one is set.
+    /// Returns the box's minimum width, if one is set.
+    pub const fn minimum_width(&self) -> Option<u16> {
+        self.min_width
+    }
+
+    /// Returns the box's minimum height, if one is set.
+    pub const fn minimum_height(&self) -> Option<u16> {
+        self.min_height
+    }
+
+    /// Returns the box's maximum width, if one is set.
     pub const fn maximum_width(&self) -> Option<u16> {
         self.max_width
     }
 
-    /// Returns the maximum final block height, if one is set.
+    /// Returns the box's maximum height, if one is set.
     pub const fn maximum_height(&self) -> Option<u16> {
         self.max_height
+    }
+
+    /// Returns how content wider than the box is absorbed.
+    pub const fn overflow_policy(&self) -> &Overflow {
+        &self.overflow
+    }
+
+    /// Returns the per-axis overhead of enabled border edges plus padding.
+    ///
+    /// This is the conversion between the box a dimension measures and the
+    /// content area inside it: outer minus `frame_size()` is the content area.
+    /// Margin lies outside the box and keeps [`BlockStyle::margin_sides`].
+    pub fn frame_size(&self) -> Size {
+        let padding = self.padding;
+        let (left, right, top, bottom) = match self.border {
+            Some(_) => (
+                usize::from(self.border_left),
+                usize::from(self.border_right),
+                usize::from(self.border_top),
+                usize::from(self.border_bottom),
+            ),
+            None => (0, 0, 0, 0),
+        };
+        Size::new(
+            left + right + usize::from(padding.left) + usize::from(padding.right),
+            top + bottom + usize::from(padding.top) + usize::from(padding.bottom),
+        )
     }
 
     /// Returns the horizontal alignment within the content box.
@@ -393,7 +463,7 @@ impl BlockStyle {
     /// Renders plain-text `content` as a rectangle.
     ///
     /// This is the single-block case of the one layout pass: it resolves
-    /// `Block(self, Text(content, self.text))` with unbounded limits. The
+    /// `Block(self, Text(content, self.text))` with an unbounded area. The
     /// returned block contains no trailing newline; rows are joined with `\n`.
     ///
     /// `content` is plain text. Escape sequences in it are measured as ordinary
@@ -402,6 +472,6 @@ impl BlockStyle {
     /// [`RenderedBlock::from_ansi`](crate::RenderedBlock::from_ansi) instead.
     pub fn render(&self, content: &str) -> RenderedBlock {
         let view = View::block(self.clone(), View::text(content, self.text.clone()));
-        resolve(&view, Limits::NONE).into_rendered_block()
+        resolve(&view, Available::NONE).into_rendered_block()
     }
 }

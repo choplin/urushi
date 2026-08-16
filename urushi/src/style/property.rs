@@ -1,7 +1,7 @@
 //! Closed property types used by [`TextStyle`](crate::TextStyle) and
 //! [`BlockStyle`](crate::BlockStyle).
 
-use crate::{Align, Border, Color, Modifier, Sides, VerticalAlign};
+use crate::{Align, Border, Color, Length, Modifier, Overflow, Sides, VerticalAlign};
 
 /// A value that can be added to a [`TextStyle`](crate::TextStyle).
 ///
@@ -40,7 +40,10 @@ impl From<Modifier> for TextStylePropertyKey {
 ///
 /// The geometry of a block, plus — through [`BlockStyleProperty::Text`] — every
 /// property of the [`TextStyle`](crate::TextStyle) that fills it.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+///
+/// This is not `Copy`: [`BlockStyleProperty::Overflow`] carries the marker a
+/// clipped line ends with.
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum BlockStyleProperty {
     Text(TextStyleProperty),
     Padding(Sides),
@@ -52,10 +55,13 @@ pub enum BlockStyleProperty {
     BorderLeft(bool),
     BorderForeground(Color),
     BorderBackground(Color),
-    Width(u16),
-    Height(u16),
+    Width(Length),
+    Height(Length),
+    MinWidth(u16),
+    MinHeight(u16),
     MaxWidth(u16),
     MaxHeight(u16),
+    Overflow(Overflow),
     Align(Align),
     VerticalAlign(VerticalAlign),
 }
@@ -75,8 +81,11 @@ pub enum BlockStylePropertyKey {
     BorderBackground,
     Width,
     Height,
+    MinWidth,
+    MinHeight,
     MaxWidth,
     MaxHeight,
+    Overflow,
     Align,
     VerticalAlign,
 }

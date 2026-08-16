@@ -100,8 +100,9 @@ ANSI strings and ratatui. Detect the profile for the writer owned by your
 terminal setup, or construct an explicit profile when the application already
 knows the backend capability.
 
-`urushi_tui::RatatuiStyleExt::widget` carries margin, border, padding, fixed width, and alignment
-into the ratatui `Buffer`, including CJK-aware clipping. It is stateless and
+`urushi_tui::RatatuiStyleExt::widget` carries margin, border, padding, dimensions, and alignment
+into the ratatui `Buffer`: the target `Rect` is the area the box resolves under, so the frame
+closes inside it and wide graphemes are never split. It is stateless and
 does not initialize or restore the terminal. `RatatuiStyle::from(&style)` converts a
 `TextStyle` when only foreground, background, and text modifiers are needed;
 that conversion carries no geometry, because a `TextStyle` has none.

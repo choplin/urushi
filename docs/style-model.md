@@ -147,7 +147,7 @@ let style = BlockStyle::new()
     .height(Length::Fill(1))
     .min_width(12)
     .max_width(60)
-    .overflow(Overflow::Ellipsis)
+    .overflow(Overflow::ellipsis())
     .align(Align::Center)
     .align_vertical(VerticalAlign::Center);
 ```
@@ -245,11 +245,13 @@ padding-out; a minimum states the size below which the application's layout
 stops making sense, which also fixes the box's floor when siblings compete
 for a too-small area.
 
-Below every explicit minimum lies the implicit one: the layout pass never
-splits a grapheme cluster or a wide character, so a box never resolves
-narrower than its widest unsplittable token without entering the degenerate
-rules. Bounds are absent by default; use generic `remove` to delete one, not
-a zero value.
+Below every explicit minimum lies the implicit one, on the width axis: the
+layout pass never splits a grapheme cluster or a wide character, so a box
+never resolves narrower than its widest unsplittable token without entering
+the degenerate rules. The height axis has no counterpart — a row is either
+drawn or not — so a box's implicit height floor is its frame, and a height
+that leaves no content row is a closed frame around nothing. Bounds are
+absent by default; use generic `remove` to delete one, not a zero value.
 
 ## Overflow
 
@@ -258,14 +260,26 @@ policy the application chooses per block:
 
 ```rust
 pub enum Overflow {
-    Wrap,      // reflow to the content width — the default
-    Clip,      // cut inside the frame; the frame stays closed
-    Ellipsis,  // clip, with a trailing … marking the cut
+    Wrap,                     // reflow to the content width — the default
+    Clip(Cow<'static, str>),  // cut inside the frame, ending the line with a marker
 }
 ```
 
-`overflow` governs the width axis; height always clips inside the frame. No
-policy opens the frame: a border is never cut by sizing, only by the
+Marking a cut is a property of the cut, so there is one clipping policy
+carrying the marker it ends with: `Overflow::clip()` cuts silently,
+`Overflow::ellipsis()` is `Clip("…")`, and `Overflow::clip_with("...")` states
+the marker an ASCII-only terminal can show — the same choice
+`Border::ASCII` answers for box glyphs. Which glyphs a terminal can
+render is the application's knowledge, so the library fixes no marker.
+
+The marker is measured in cells like any other content: the text keeps the
+content width less the marker's display width, and a marker that leaves no
+room for content at all is dropped rather than shown alone.
+
+`overflow` governs the width axis; height always clips inside the frame. The
+order the two axes resolve in — width before the content is laid out, height
+after — is defined in [`view-model.md`](view-model.md). No policy opens the
+frame: a border is never cut by sizing, only by the
 degenerate safety net. Cutting an already-rendered string at a column is a
 text-layer utility, not a style property.
 

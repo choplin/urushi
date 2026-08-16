@@ -2,12 +2,12 @@
 //! and what one layout pass hands a renderer.
 
 use urushi::{
-    Align, AnsiPolicy, AnsiRenderer, BlockStyle, Border, Color, ColorProfile, Limits,
+    Align, AnsiPolicy, AnsiRenderer, Available, BlockStyle, Border, Color, ColorProfile, Length,
     StyledGrapheme, TerminalProfile, TextStyle, VerticalAlign, View, measure, resolve,
 };
 
 fn plain_rows(view: &View) -> Vec<String> {
-    resolve(view, Limits::NONE)
+    resolve(view, Available::NONE)
         .rows()
         .iter()
         .map(|row| row.iter().map(StyledGrapheme::symbol).collect())
@@ -80,7 +80,7 @@ fn a_row_mixing_cjk_text_and_a_block_keeps_its_columns() {
             View::text(" です", TextStyle::new()),
         ],
     );
-    let resolved = resolve(&view, Limits::NONE);
+    let resolved = resolve(&view, Available::NONE);
 
     // Width is decided once, by the layout pass, and carried per grapheme.
     for row in resolved.rows() {
@@ -151,7 +151,7 @@ fn a_resolved_view_carries_logical_styles_and_grapheme_widths() {
             View::text("a", TextStyle::new()),
         ],
     );
-    let resolved = resolve(&view, Limits::NONE);
+    let resolved = resolve(&view, Available::NONE);
     let row = &resolved.rows()[0];
 
     assert_eq!(row[0].symbol(), "日");
@@ -161,18 +161,18 @@ fn a_resolved_view_carries_logical_styles_and_grapheme_widths() {
 }
 
 #[test]
-fn limits_are_applied_after_a_blocks_own_maximums() {
+fn the_area_and_a_blocks_own_maximum_are_one_cap() {
     let view = View::block(
         BlockStyle::new().width(10).max_width(8),
         View::text("abcdefghij", TextStyle::new()),
     );
 
-    // A BlockStyle's own maximum crops during resolution, so it is already in
-    // the intrinsic size; Limits are applied last, and the smaller bound wins.
+    // Both bound the same box, and the tighter one wins: the maximum shapes
+    // the intrinsic size, and a narrower area tightens it further.
     assert_eq!(measure(&view).width(), 8);
-    assert_eq!(resolve(&view, Limits::NONE).size().width(), 8);
-    assert_eq!(resolve(&view, Limits::width(4)).size().width(), 4);
-    assert_eq!(resolve(&view, Limits::size(4, 1)).size().height(), 1);
+    assert_eq!(resolve(&view, Available::NONE).size().width(), 8);
+    assert_eq!(resolve(&view, Available::columns(4)).size().width(), 4);
+    assert_eq!(resolve(&view, Available::size(4, 1)).size().height(), 1);
 }
 
 #[test]
@@ -209,4 +209,148 @@ fn a_style_renders_the_single_block_case_of_the_same_pass() {
 
     assert_eq!(direct.as_str(), through_the_tree.as_str());
     assert_eq!(direct.size(), through_the_tree.size());
+}
+
+// --- The area as an input to layout.
+
+#[test]
+fn a_bounded_area_closes_the_frame_instead_of_cutting_it() {
+    let view = View::block(
+        BlockStyle::new().border(Border::NORMAL).padding((0, 1)),
+        View::text("hello world", TextStyle::new()),
+    );
+
+    let resolved = resolve(&view, Available::columns(7));
+    assert_eq!(resolved.size().width(), 7);
+    assert_eq!(
+        view_rows(&view, Available::columns(7)),
+        // Two border columns and two padding columns leave three cells of
+        // content, and the text reflows into them.
+        vec![
+            "┌─────┐",
+            "│ hel │",
+            "│ lo  │",
+            "│ wor │",
+            "│ ld  │",
+            "└─────┘"
+        ]
+    );
+}
+
+/// Resolving a view under an area, as rows of symbols.
+fn view_rows(view: &View, available: Available) -> Vec<String> {
+    resolve(view, available)
+        .rows()
+        .iter()
+        .map(|row| row.iter().map(StyledGrapheme::symbol).collect())
+        .collect()
+}
+
+#[test]
+fn a_fill_length_resolves_against_the_area_and_falls_back_to_the_intrinsic_size() {
+    let view = View::block(
+        BlockStyle::new()
+            .border(Border::NORMAL)
+            .width(Length::Fill(1)),
+        View::text("ab", TextStyle::new()),
+    );
+
+    assert_eq!(resolve(&view, Available::columns(10)).size().width(), 10);
+    // Under no area a Fill length has nothing to divide, so it contributes the
+    // intrinsic size.
+    assert_eq!(measure(&view).width(), 4);
+}
+
+#[test]
+fn a_narrow_area_degrades_margin_then_padding_then_content() {
+    let view = || {
+        View::block(
+            BlockStyle::new()
+                .border(Border::NORMAL)
+                .padding((0, 1))
+                .margin((0, 2)),
+            View::text("x", TextStyle::new()),
+        )
+    };
+
+    // The box is five cells wide inside a four-cell margin.
+    assert_eq!(measure(&view()).width(), 9);
+    // The margin collapses first, and the box itself is untouched.
+    assert_eq!(
+        view_rows(&view(), Available::columns(7)),
+        vec!["┌───┐", "│ x │", "└───┘"]
+    );
+    // Then the padding.
+    assert_eq!(
+        view_rows(&view(), Available::columns(4)),
+        vec!["┌─┐", "│x│", "└─┘"]
+    );
+    // Only an area that cannot hold the frame itself reaches the safety net,
+    // and that is the one place a border edge is ever cut.
+    assert_eq!(
+        view_rows(&view(), Available::columns(2)),
+        vec!["┌─", "│x", "└─"]
+    );
+}
+
+#[test]
+fn an_area_bounds_the_height_by_closing_the_frame_lower() {
+    let view = View::block(
+        BlockStyle::new().border(Border::NORMAL),
+        View::text("one\ntwo\nthree", TextStyle::new()),
+    );
+
+    assert_eq!(measure(&view).height(), 5);
+    assert_eq!(
+        view_rows(&view, Available::size(7, 3)),
+        vec!["┌─────┐", "│one  │", "└─────┘"]
+    );
+}
+
+#[test]
+fn a_wide_grapheme_survives_a_narrow_area() {
+    let view = View::block(
+        BlockStyle::new().border(Border::NORMAL),
+        View::text("日本", TextStyle::new()),
+    );
+
+    // The box cannot go below one wide grapheme plus its frame, so it stays
+    // four cells wide and the content reflows.
+    assert_eq!(
+        view_rows(&view, Available::columns(4)),
+        vec!["┌──┐", "│日│", "│本│", "└──┘"]
+    );
+}
+
+#[test]
+fn an_empty_content_box_is_a_closed_frame_of_no_content() {
+    let view = View::block(
+        BlockStyle::new().border(Border::NORMAL).width(2),
+        View::text("", TextStyle::new()),
+    );
+
+    // The width leaves no content column, and the empty text still occupies
+    // one row, so the frame closes around a zero-width content box.
+    assert_eq!(view_rows(&view, Available::NONE), vec!["┌┐", "││", "└┘"]);
+}
+
+#[test]
+fn a_column_passes_its_cross_axis_area_to_every_child() {
+    let view = View::column(
+        Align::Left,
+        [
+            View::text("hello world", TextStyle::new()),
+            View::block(
+                BlockStyle::new().border(Border::NORMAL),
+                View::text("abcdef", TextStyle::new()),
+            ),
+        ],
+    );
+
+    // The width flows down: the bare text wraps and the block's frame closes
+    // inside the same area.
+    assert_eq!(
+        view_rows(&view, Available::columns(6)),
+        vec!["hello ", "world ", "┌────┐", "│abcd│", "│ef  │", "└────┘"]
+    );
 }

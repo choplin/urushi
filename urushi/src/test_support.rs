@@ -1,10 +1,10 @@
 //! Shared helpers for unit tests that inspect resolved views.
 
-use crate::{Limits, StyledGrapheme, View, resolve};
+use crate::{Available, StyledGrapheme, View, resolve};
 
 /// Resolves `view` and returns its rows, exactly as laid out.
 pub(crate) fn plain_rows(view: &View) -> Vec<String> {
-    resolve(view, Limits::NONE)
+    resolve(view, Available::NONE)
         .rows()
         .iter()
         .map(|row| row.iter().map(StyledGrapheme::symbol).collect())
@@ -28,7 +28,7 @@ pub(crate) fn plain(view: &View) -> String {
 
 /// Resolves `view` and returns the logical style of one grapheme.
 pub(crate) fn style_at(view: &View, row: usize, column: usize) -> crate::TextStyle {
-    resolve(view, Limits::NONE).rows()[row][column]
+    resolve(view, Available::NONE).rows()[row][column]
         .style()
         .clone()
 }

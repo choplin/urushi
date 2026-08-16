@@ -113,8 +113,8 @@ pub fn resolve(view: &View, available: Available) -> ResolvedView;
 from the start: it flows down the tree, each node's resolved size flows back
 up, and each node is visited once in each direction. It is not a clip applied
 to a finished rectangle. The Sizing section defines how a bound reshapes a
-box; a raw crop survives only as the degenerate-case safety net defined
-there.
+box, node by node, and closes with the order those rules apply in; a raw crop
+survives only as the degenerate-case safety net defined there.
 
 Every row's widths sum to `size.width`, and the row count equals `size.height`.
 Styles in a `ResolvedView` are logical: a `TerminalProfile` is applied when a
@@ -166,9 +166,14 @@ used = base
 ```
 
 *min-content* is the size below which the box cannot go without splitting a
-grapheme: the widest unsplittable token for width, one row per line for
-height. `measure` returns the *max-content* size. When the floor exceeds the
-cap, the floor wins and the degenerate rules below apply.
+grapheme: the widest unsplittable token for width. The two axes are not
+symmetric here. A grapheme cannot be cut down the middle, so the width axis
+has a content floor; a row can simply be absent, so the height axis has none
+and a box's height floor is its frame alone — a bordered `height(2)` box is
+two border rows and no content. This is what makes `height` a size rather
+than a minimum: content beyond it clips inside the frame. `measure` returns
+the *max-content* size. When the floor exceeds the cap, the floor wins and the
+degenerate rules below apply.
 
 There is no property that sizes the content box from inside a frame. A box
 with no size takes its content's size plus frame; an exact content dimension
@@ -201,7 +206,7 @@ View::row([sidebar.width(20), main.width(Fill(1))])
 View::row([a.width(Fill(1)), b.width(Fill(1))])
 View::row([a.width(Fill(1)), b.width(Fill(2))])
 // A status bar: ends sized to content, the middle absorbs the slack.
-View::row([mode, path.width(Fill(1)).overflow(Overflow::Ellipsis), pos])
+View::row([mode, path.width(Fill(1)).overflow(Overflow::ellipsis()), pos])
 ```
 
 On the cross axis — height in a `Row`, width in a `Column` — there is nothing
@@ -244,15 +249,29 @@ content, under a policy the application chooses per block:
 
 ```rust
 pub enum Overflow {
-    Wrap,      // width default: reflow to the content width
-    Clip,      // cut inside the frame; the frame stays closed
-    Ellipsis,  // clip, with a trailing … marking the cut
+    Wrap,                     // the default: reflow to the content width
+    Clip(Cow<'static, str>),  // cut inside the frame, ending the line with a marker
 }
+
+Overflow::clip()             // cut silently
+Overflow::ellipsis()         // Clip("…")
+Overflow::clip_with("...")   // where an ASCII border would be chosen too
 ```
+
+There are two policies, not three: marking the cut is a property of the cut,
+not a different way of absorbing overflow. The marker occupies cells of its
+own, so the content keeps the content width less the marker's display width —
+a three-cell `...` costs three. A marker the box cannot hold beside any
+content is dropped, leaving a silent cut rather than a box filled with the
+marker.
 
 `overflow` governs the width axis. Height always clips inside the frame;
 clipping inside a closed frame is a viewport's behavior, so scrolling composes
-on top of this rule. A bare `Text` resolved in a narrow area wraps — the same
+on top of this rule.
+
+The policy fits the text a block directly contains. A child that is itself a
+view absorbs its own overflow when it resolves under the area this box leaves
+it, so the policy does not reach past one node. A bare `Text` resolved in a narrow area wraps — the same
 default a block's content gets; choosing another policy requires a block,
 because the policy is a box property. Cutting an already-rendered string at a
 column is a text-layer utility, not part of the box model.
@@ -265,6 +284,71 @@ the frame itself — two border columns in a width of one — does the final
 safety net crop the assembled rectangle, grapheme-atomically, blank-filling a
 dropped wide character's cells. This crop is the single way a frame is ever
 cut, and it is unreachable while the frame fits.
+
+### The order the rules apply
+
+The sections above define the rules; this one is the procedure that applies
+them, and it is the whole of resolution. Every node receives an area and
+returns the rectangle it resolved to: the area flows down, the resolved size
+flows back up, and no node is laid out twice. What each node does with the
+area it receives — and what it hands its own children — is fixed.
+
+Sizing a box does ask its content two questions before laying it out — its
+max-content and min-content widths, which the clamp needs — but those are
+measurements, not layouts: they return a number, produce no rectangle, and
+nothing is resolved and then resolved again against a different size. That
+distinction is the boundary against a constraint solver, and
+[`design/view-block-model.md`](design/view-block-model.md) records why it is
+drawn there.
+
+**`Text`** fits its lines to the width it was given, under the overflow policy
+of the block containing it, and returns however many rows that produced. Its
+width is the width it was given, except where a grapheme it cannot split is
+wider than that.
+
+**`Block`** applies the rules in this order:
+
+1. **Degrade the frame to the area** — margin collapses first, then padding,
+   and only by what the area cannot hold.
+2. **Resolve the width** by the clamp. The content has not been laid out yet:
+   the width comes from the intrinsic width, the bounds, and the area, never
+   from what wrapping is about to do.
+3. **Resolve the child** under an area of the used width less the frame, which
+   is where a directly contained `Text` meets `overflow`.
+4. **Resolve the height** by the same clamp — now the content's rows are
+   known, because step 3 is what decided how many there are.
+5. **Clip the content** to that height, from the bottom. `vertical_align`
+   places slack; it has nothing to say when there is none.
+6. **Draw the frame** at the used size, and the margin outside it.
+
+**`Row`** gives each child its width by the distribution rule — stated sizes,
+intrinsic sizes, then `Fill` weights over what remains — and passes its own
+height to every child unchanged. **`Column`** does the same with the axes
+swapped. Neither renegotiates: a child that resolves smaller than its
+assignment leaves the remainder unused, and the container resolves smaller
+than its area.
+
+`resolve` applies the degenerate safety net once, to the finished rectangle;
+`measure` runs this same pass with no area at all, which is what makes an
+intrinsic size the same computation as a bounded one rather than a second
+rule.
+
+The axes are asymmetric on purpose. Width is decided before the content
+because wrapping needs a width to wrap to; height is decided after it because
+wrapping is what determines the row count. This is why a narrower box can be a
+taller one, and why a `height` cannot be met by reflowing: the rows already
+exist when the height applies, so the excess clips.
+
+It also means a box does not shrink to the longest line its own wrapping
+produced. A `max_width(9)` box whose content reflows to seven cells stays nine
+wide: narrowing it to seven would be a second width decision derived from the
+content the first one produced, and sizes flow down only once. CSS's
+shrink-to-fit resolves the same way, for the same reason.
+
+The order settles two more questions that would otherwise be ambiguous. A
+`max_height` bounds the box *before* `vertical_align` places content inside
+it, not after. And no bound ever reaches the frame, because steps 2 and 4
+closed it at the used size before there was anything to cut.
 
 ### What stays outside layout
 
@@ -353,8 +437,13 @@ Changes to this model must test:
   enclosing `max_width`-block idiom;
 - deficit shrinking order and floors, including a binding floor freezing a
   child;
-- each `Overflow` value on the width axis, and height clipping inside the
-  frame;
+- each `Overflow` policy on the width axis, including a multi-cell and a wide
+  marker, a marker the box cannot hold, and height clipping inside the frame;
+- the resolution order at each node: a bound applied before alignment places
+  content, a reflow that changes the row count the height is then clamped
+  against, and a box that does not shrink to its own wrapped width;
+- the asymmetric floors: a width that cannot go below one unsplittable token,
+  and a height that floors at the frame and leaves no content row;
 - degenerate degradation order, and the safety-net crop only when the frame
   itself cannot fit;
 - `BlockStyle::render` results for border side combinations, `Length` and

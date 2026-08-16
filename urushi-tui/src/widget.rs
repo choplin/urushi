@@ -1,6 +1,7 @@
 //! Ratatui widgets that draw a resolved Urushi view into a caller-owned buffer.
 //!
-//! These widgets compute no geometry. A target [`Rect`] becomes [`Limits`], the
+//! These widgets compute no geometry. A target [`Rect`] becomes an
+//! [`Available`] area, the
 //! core layout pass resolves the view once, and each resulting
 //! [`StyledGrapheme`] is written to a cell. Border reservation, padding,
 //! alignment, and dimension resolution live in `urushi` alone, so the Ratatui
@@ -9,7 +10,7 @@
 use ratatui::{buffer::Buffer, layout::Rect, widgets::Widget};
 
 use super::RatatuiStyle;
-use urushi::{BlockStyle, Limits, ResolvedView, StyledGrapheme, View, resolve};
+use urushi::{Available, BlockStyle, ResolvedView, StyledGrapheme, View, resolve};
 
 /// A stateless Ratatui widget that draws an Urushi [`View`].
 ///
@@ -102,12 +103,12 @@ fn draw(view: &View, area: Rect, buffer: &mut Buffer) {
     if clip.is_empty() {
         return;
     }
-    write_cells(&resolve(view, limits(area)), area, clip, buffer);
+    write_cells(&resolve(view, available(area)), area, clip, buffer);
 }
 
-/// Translates a target rectangle into the outer clip the layout pass applies.
-fn limits(area: Rect) -> Limits {
-    Limits::size(usize::from(area.width), usize::from(area.height))
+/// Translates a target rectangle into the area the layout pass resolves under.
+fn available(area: Rect) -> Available {
+    Available::size(usize::from(area.width), usize::from(area.height))
 }
 
 /// Writes a resolved rectangle, anchored at `area`'s origin.
@@ -268,7 +269,9 @@ mod tests {
             .margin((1, 2))
             .border(Border::ROUNDED)
             .border_foreground(Color::RED)
-            .width(8)
+            // The width measures the outer box: two border columns, two
+            // padding columns, and six cells of content.
+            .width(10)
             .align(Align::Center);
         let area = Rect::new(0, 0, 14, 6);
         let mut buffer = Buffer::empty(area);
@@ -286,11 +289,11 @@ mod tests {
         assert_eq!(border.fg, RatatuiColor::Red);
     }
 
-    /// A `Rect` narrower than the block crops it from the right. The crop drops
-    /// a grapheme that would straddle the bound rather than splitting it, so
-    /// `本` survives at cells 3–4 while the right border falls outside.
+    /// A `Rect` narrower than the block is an area the box resolves under, so
+    /// the frame closes inside it and the wide content reflows. Only one
+    /// content row fits the three-row area, so `本語` falls outside the box.
     #[test]
-    fn a_narrow_rect_crops_wide_content_without_splitting_a_grapheme() {
+    fn a_narrow_rect_refits_wide_content_and_the_frame_stays_closed() {
         let area = Rect::new(0, 0, 5, 3);
         let mut buffer = Buffer::empty(area);
 
@@ -299,9 +302,9 @@ mod tests {
             .widget("日本語")
             .render(area, &mut buffer);
 
-        assert_eq!(buffer_line(&buffer, 0), "┌────");
-        assert_eq!(buffer_line(&buffer, 1), "│日本");
-        assert_eq!(buffer_line(&buffer, 2), "└────");
+        assert_eq!(buffer_line(&buffer, 0), "┌───┐");
+        assert_eq!(buffer_line(&buffer, 1), "│日 │");
+        assert_eq!(buffer_line(&buffer, 2), "└───┘");
     }
 
     #[test]
@@ -343,16 +346,18 @@ mod tests {
         );
     }
 
-    /// A one-cell area keeps the block's top-left cell. A leading edge lands
-    /// there; a trailing edge is cropped away, because the crop never pulls a
-    /// far edge inwards to fit.
+    /// A one-cell area is a degenerate case, and the axes degrade differently:
+    /// the content may vanish vertically, so a horizontal edge takes the cell,
+    /// while the width cannot go below one unsplittable grapheme, so a
+    /// vertical edge leaves the box two cells wide and the safety net keeps
+    /// its left cell.
     #[test]
-    fn a_one_cell_area_keeps_the_top_left_of_the_resolved_block() {
+    fn a_one_cell_area_degrades_to_the_frame_or_the_leading_cell() {
         // (case, the one enabled edge as (top, right, bottom, left), expected)
         let cases = [
             ("top edge", (true, false, false, false), "-"),
             ("left edge", (false, false, false, true), "|"),
-            ("bottom edge", (false, false, true, false), "x"),
+            ("bottom edge", (false, false, true, false), "-"),
             ("right edge", (false, true, false, false), "x"),
         ];
 
@@ -492,16 +497,17 @@ mod tests {
         );
     }
 
-    /// A `Rect` smaller than the block crops it; it does not lay the block out
-    /// again inside the smaller area.
+    /// A `Rect` smaller than the block is the area it resolves under, so the
+    /// box takes the area's height and the alignment places the content inside
+    /// what actually fits.
     #[test]
-    fn rect_crops_the_resolved_block_instead_of_relaying_it_out() {
+    fn a_rect_smaller_than_the_block_resizes_it() {
         let style = BlockStyle::new().width(4).height(6);
         let area = Rect::new(0, 0, 4, 4);
 
         for (align, expected_row) in [
-            (VerticalAlign::Center, Some(2)),
-            (VerticalAlign::Bottom, None),
+            (VerticalAlign::Center, Some(1)),
+            (VerticalAlign::Bottom, Some(3)),
         ] {
             let style = style.clone().align_vertical(align);
             let mut buffer = Buffer::empty(area);
@@ -520,19 +526,19 @@ mod tests {
     }
 
     #[test]
-    fn widget_clips_fixed_height_to_the_available_area() {
+    fn a_shorter_area_closes_the_frame_instead_of_dropping_its_bottom_edge() {
         let style = BlockStyle::new().width(4).height(6).border(Border::ASCII);
         let area = Rect::new(0, 0, 6, 4);
         let mut buffer = Buffer::empty(area);
 
         style.widget("x").render(area, &mut buffer);
 
-        // The bottom border belongs to row 7 of the resolved block, so the
-        // crop removes it rather than pulling it up into the area.
-        assert_eq!(buffer_line(&buffer, 0), "+----+");
-        assert_eq!(buffer_line(&buffer, 1), "|x   |");
-        assert_eq!(buffer_line(&buffer, 2), "|    |");
-        assert_eq!(buffer_line(&buffer, 3), "|    |");
+        // The box resolves to 4x4 under the area, so the bottom edge is drawn
+        // at the fourth row instead of falling outside it.
+        assert_eq!(buffer_line(&buffer, 0), "+--+  ");
+        assert_eq!(buffer_line(&buffer, 1), "|x |  ");
+        assert_eq!(buffer_line(&buffer, 2), "|  |  ");
+        assert_eq!(buffer_line(&buffer, 3), "+--+  ");
     }
 
     /// A buffer covering only part of the target `Rect` masks which cells are

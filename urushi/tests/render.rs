@@ -1,4 +1,4 @@
-use urushi::{Align, BlockStyle, Border, Color, Modifier, VerticalAlign, visible_width};
+use urushi::{Align, BlockStyle, Border, Color, Modifier, Overflow, VerticalAlign, visible_width};
 
 #[test]
 fn plain_text_passes_through() {
@@ -64,7 +64,9 @@ fn align_right_with_fixed_width() {
 }
 
 #[test]
-fn fixed_height_expands_the_padded_content_box() {
+fn a_size_measures_the_box_the_terminal_shows() {
+    // Border edges and padding lie inside the size: a 5x5 box is five visible
+    // cells wide and five rows tall, one of each being content.
     let style = BlockStyle::new()
         .width(5)
         .height(5)
@@ -73,13 +75,11 @@ fn fixed_height_expands_the_padded_content_box() {
 
     assert_eq!(
         style.render("x").into_string(),
-        "+-----+\n\
-         |     |\n\
-         | x   |\n\
-         |     |\n\
-         |     |\n\
-         |     |\n\
-         +-----+"
+        "+---+\n\
+         |   |\n\
+         | x |\n\
+         |   |\n\
+         +---+"
     );
 }
 
@@ -153,18 +153,18 @@ fn right_and_center_alignment_combine_for_cjk_content() {
 }
 
 #[test]
-fn content_taller_than_fixed_height_expands_instead_of_truncating() {
+fn content_taller_than_the_height_clips_inside_the_frame() {
     let out = BlockStyle::new()
         .width(3)
         .height(2)
         .render("one\ntwo\n三")
         .into_string();
 
-    assert_eq!(out, "one\ntwo\n三 ");
+    assert_eq!(out, "one\ntwo");
 }
 
 #[test]
-fn enabled_border_rows_and_margin_are_outside_fixed_height() {
+fn border_edges_are_inside_the_size_and_margin_is_outside_it() {
     let out = BlockStyle::new()
         .width(3)
         .height(2)
@@ -174,29 +174,42 @@ fn enabled_border_rows_and_margin_are_outside_fixed_height() {
         .render("x")
         .into_string();
 
-    assert_eq!(out, "     \n|x  |\n|   |\n+---+");
+    // The box is 3x2: one content cell, the left and right edges, and the
+    // bottom edge. The margin row sits outside it.
+    assert_eq!(out, "   \n|x|\n+-+");
 }
 
 #[test]
-fn maximum_dimensions_crop_the_final_outer_block() {
+fn maximum_dimensions_bound_the_box_without_cutting_its_frame() {
     let out = BlockStyle::new()
-        .width(4)
-        .height(3)
+        .width(8)
+        .height(8)
         .padding((1, 1))
         .border(Border::ASCII)
         .margin(1)
         .max_width(6)
-        .max_height(4)
+        .max_height(6)
         .render("ab")
         .into_string();
 
-    assert_eq!(out, "      \n +----\n |    \n | ab ");
-    assert_eq!(out.lines().count(), 4);
-    assert!(out.lines().all(|line| visible_width(line) <= 6));
+    // The maxima won over the stated size, and the frame still closes: a 6x6
+    // box inside a one-cell margin.
+    assert_eq!(
+        out,
+        "        \n\
+         \x20+----+ \n\
+         \x20|    | \n\
+         \x20| ab | \n\
+         \x20|    | \n\
+         \x20|    | \n\
+         \x20+----+ \n\
+         \x20       "
+    );
+    assert!(out.lines().all(|line| visible_width(line) == 8));
 }
 
 #[test]
-fn maximum_width_truncates_after_fixed_width_without_rewrapping() {
+fn a_maximum_width_bounds_the_box_and_the_content_reflows_into_it() {
     let out = BlockStyle::new()
         .width(6)
         .max_width(4)
@@ -204,15 +217,17 @@ fn maximum_width_truncates_after_fixed_width_without_rewrapping() {
         .into_string();
     assert_eq!(out, "ab  ");
 
+    // A maximum with no width is shrink-to-fit with a cap, and the content
+    // wraps to the capped width instead of being cut.
     let max_only = BlockStyle::new()
         .max_width(5)
         .render("hello world")
         .into_string();
-    assert_eq!(max_only, "hello");
+    assert_eq!(max_only, "hello\nworld");
 }
 
 #[test]
-fn maximum_height_truncates_after_fixed_height_and_vertical_alignment() {
+fn a_maximum_height_bounds_the_box_before_vertical_alignment_places_content() {
     let out = BlockStyle::new()
         .width(3)
         .height(5)
@@ -221,40 +236,47 @@ fn maximum_height_truncates_after_fixed_height_and_vertical_alignment() {
         .render("x")
         .into_string();
 
-    assert_eq!(out, "   \n   \n   ");
+    // The bound wins over the stated height, and the content is then placed
+    // at the bottom of what is left.
+    assert_eq!(out, "   \n   \nx  ");
 }
 
 #[test]
-fn maximum_width_crops_between_graphemes_and_keeps_the_block_rectangular() {
-    // A wide grapheme that would straddle the bound is dropped rather than
-    // split, and the freed cell keeps the row at the cropped width.
+fn a_bounded_width_wraps_wide_graphemes_and_keeps_the_block_rectangular() {
+    // A wide grapheme cannot be split, so it moves to the next row rather
+    // than being cut, and every row keeps the box's width.
     let styled = BlockStyle::new()
         .foreground(Color::RED)
         .max_width(3)
         .render("日本語");
-    assert_eq!(styled.as_str(), "\x1b[31m日\x1b[0m ");
+    assert_eq!(
+        styled.as_str(),
+        "\x1b[31m日 \x1b[0m\n\x1b[31m本 \x1b[0m\n\x1b[31m語 \x1b[0m"
+    );
     assert_eq!(styled.size().width(), 3);
 
     assert_eq!(
         BlockStyle::new().max_width(1).render("e\u{301}x").as_str(),
-        "e\u{301}"
+        "e\u{301}\nx"
     );
 }
 
 #[test]
-fn zero_maximum_dimensions_are_disabled_like_lip_gloss() {
+fn a_zero_bound_is_a_bound_not_a_disabled_flag() {
+    // Zero is a real maximum. On the width axis the grapheme floor stops the
+    // box at one cell; the height axis has no such floor, so it empties.
     assert_eq!(
         BlockStyle::new().max_width(0).render("x").into_string(),
         "x"
     );
     assert_eq!(
         BlockStyle::new().max_height(0).render("x").into_string(),
-        "x"
+        ""
     );
 }
 
 #[test]
-fn a_fixed_width_wraps_before_a_maximum_width_crops() {
+fn a_maximum_width_wins_over_a_stated_width_and_the_content_wraps_to_it() {
     let out = BlockStyle::new()
         .foreground(Color::RED)
         .width(4)
@@ -262,20 +284,20 @@ fn a_fixed_width_wraps_before_a_maximum_width_crops() {
         .render("abcdef")
         .into_string();
 
-    assert_eq!(out, "\x1b[31mabc\x1b[0m\n\x1b[31mef \x1b[0m");
+    assert_eq!(out, "\x1b[31mabc\x1b[0m\n\x1b[31mdef\x1b[0m");
     assert!(out.lines().all(|line| visible_width(line) == 3));
 }
 
 #[test]
-fn maximum_width_uses_grapheme_width_for_zwj_emoji() {
+fn a_bounded_width_uses_grapheme_width_for_zwj_emoji() {
     let out = BlockStyle::new()
         .width(3)
         .max_width(2)
         .render("👩‍💻x")
         .into_string();
 
-    assert_eq!(out, "👩‍💻");
-    assert_eq!(visible_width(&out), 2);
+    assert_eq!(out, "👩‍💻\nx ");
+    assert!(out.lines().all(|line| visible_width(line) == 2));
 }
 
 #[test]
@@ -511,5 +533,321 @@ fn rendered_block_width_is_consistent() {
     assert!(
         widths.iter().all(|&w| w == widths[0]),
         "all lines should have equal width, got {widths:?}\n{out}"
+    );
+}
+
+// --- The sizing model: one box, bounds that reshape it, a frame that closes.
+
+#[test]
+fn every_sizing_property_measures_the_same_box() {
+    // A bordered box "of width 6" is six visible cells wide.
+    let out = BlockStyle::new()
+        .width(6)
+        .border(Border::NORMAL)
+        .render("abcdefgh")
+        .into_string();
+
+    assert_eq!(out, "┌────┐\n│abcd│\n│efgh│\n└────┘");
+    assert!(out.lines().all(|line| visible_width(line) == 6));
+
+    // The bounds measure that same box, so a maximum of six leaves the same
+    // rectangle as a width of six.
+    assert_eq!(
+        BlockStyle::new()
+            .max_width(6)
+            .border(Border::NORMAL)
+            .render("abcdefgh")
+            .into_string(),
+        out
+    );
+    // As does a minimum, when the content is narrower than it.
+    assert_eq!(
+        BlockStyle::new()
+            .min_width(6)
+            .border(Border::NORMAL)
+            .render("ab")
+            .into_string(),
+        "┌────┐\n│ab  │\n└────┘"
+    );
+}
+
+#[test]
+fn frame_size_reports_border_edges_and_padding_per_axis() {
+    let style = BlockStyle::new()
+        .border(Border::NORMAL)
+        .border_top(false)
+        .padding((1, 2));
+
+    // Two side columns plus two padding columns each side; one bottom row
+    // plus one padding row each side.
+    assert_eq!(style.frame_size().width(), 6);
+    assert_eq!(style.frame_size().height(), 3);
+
+    assert_eq!(BlockStyle::new().frame_size().width(), 0);
+    // A border glyph set with every edge disabled contributes nothing.
+    assert_eq!(
+        BlockStyle::new()
+            .border(Border::NORMAL)
+            .border_top(false)
+            .border_right(false)
+            .border_bottom(false)
+            .border_left(false)
+            .frame_size()
+            .height(),
+        0
+    );
+}
+
+#[test]
+fn the_frame_closes_at_every_combination_of_bound_and_content_length() {
+    let contents = ["", "a", "hello world", "日本語テキスト", "a\nbb\nccc"];
+
+    for content in contents {
+        for width in 3..=12u16 {
+            for height in 3..=6u16 {
+                let out = BlockStyle::new()
+                    .border(Border::ASCII)
+                    .width(width)
+                    .height(height)
+                    .render(content)
+                    .into_string();
+                let lines: Vec<&str> = out.lines().collect();
+
+                assert_eq!(
+                    lines.len(),
+                    usize::from(height),
+                    "{content:?} at {width}x{height}"
+                );
+                // The width is the requested one, except where an
+                // unsplittable grapheme floors the box wider.
+                let resolved = visible_width(lines[0]);
+                assert!(
+                    resolved >= usize::from(width),
+                    "{content:?} at {width}x{height}: {out}"
+                );
+                for line in &lines {
+                    assert_eq!(
+                        visible_width(line),
+                        resolved,
+                        "{content:?} at {width}x{height}: {out}"
+                    );
+                }
+                let closed = |line: &str| {
+                    line.starts_with('+') && line.ends_with('+')
+                        || line.starts_with('|') && line.ends_with('|')
+                };
+                assert!(
+                    lines.iter().all(|line| closed(line)),
+                    "{content:?} at {width}x{height} left the frame open:\n{out}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn overflow_absorbs_the_width_under_the_policy_the_block_chose() {
+    let base = BlockStyle::new().max_width(5);
+
+    assert_eq!(
+        base.clone().render("hello world").into_string(),
+        "hello\nworld",
+        "Wrap is the default"
+    );
+    assert_eq!(
+        base.clone()
+            .overflow(Overflow::clip())
+            .render("hello world")
+            .into_string(),
+        "hello"
+    );
+    assert_eq!(
+        base.clone()
+            .overflow(Overflow::ellipsis())
+            .render("hello world")
+            .into_string(),
+        "hell…"
+    );
+    // The marker is not one cell by decree: an ASCII marker takes three, and
+    // the content keeps what is left.
+    assert_eq!(
+        base.overflow(Overflow::clip_with("..."))
+            .render("hello world")
+            .into_string(),
+        "he..."
+    );
+}
+
+#[test]
+fn a_marker_the_box_cannot_hold_is_dropped_rather_than_filling_it() {
+    // Three cells cannot show a three-cell marker and any content, so the cut
+    // goes silent instead.
+    assert_eq!(
+        BlockStyle::new()
+            .max_width(3)
+            .overflow(Overflow::clip_with("..."))
+            .render("hello")
+            .into_string(),
+        "hel"
+    );
+    // A marker exactly as wide as the box is dropped for the same reason.
+    assert_eq!(
+        BlockStyle::new()
+            .max_width(1)
+            .overflow(Overflow::ellipsis())
+            .render("hello")
+            .into_string(),
+        "h"
+    );
+    // A wide marker is measured by its display width, not its length.
+    assert_eq!(
+        BlockStyle::new()
+            .max_width(4)
+            .overflow(Overflow::clip_with("→"))
+            .render("hello")
+            .into_string(),
+        "hel→"
+    );
+}
+
+#[test]
+fn overflow_never_opens_the_frame() {
+    for overflow in [
+        Overflow::Wrap,
+        Overflow::clip(),
+        Overflow::ellipsis(),
+        Overflow::clip_with("..."),
+    ] {
+        let out = BlockStyle::new()
+            .border(Border::ASCII)
+            .padding((0, 1))
+            .width(8)
+            .overflow(overflow.clone())
+            .render("abcdefghij")
+            .into_string();
+
+        assert!(
+            out.lines().all(|line| visible_width(line) == 8),
+            "{overflow:?}: {out}"
+        );
+        assert!(out.starts_with("+------+"), "{overflow:?}: {out}");
+        assert!(out.ends_with("+------+"), "{overflow:?}: {out}");
+    }
+}
+
+#[test]
+fn a_height_clips_its_content_inside_the_frame() {
+    let out = BlockStyle::new()
+        .border(Border::ASCII)
+        .height(3)
+        .width(5)
+        .render("one\ntwo\nthree")
+        .into_string();
+
+    // Three rows: two border edges and one content row.
+    assert_eq!(out, "+---+\n|one|\n+---+");
+}
+
+#[test]
+fn minimum_dimensions_floor_the_box_below_its_content() {
+    let out = BlockStyle::new()
+        .min_width(6)
+        .min_height(3)
+        .max_width(2)
+        .max_height(1)
+        .render("x")
+        .into_string();
+
+    // A floor that binds wins over the cap above it.
+    assert_eq!(out, "x     \n      \n      ");
+}
+
+#[test]
+fn wide_graphemes_and_clusters_survive_the_clamp_and_the_clip() {
+    // Wrapping never splits a wide character.
+    assert_eq!(
+        BlockStyle::new()
+            .max_width(3)
+            .render("日本語")
+            .into_string(),
+        "日 \n本 \n語 "
+    );
+    // Clipping stops before one that would straddle the bound.
+    assert_eq!(
+        BlockStyle::new()
+            .max_width(3)
+            .overflow(Overflow::clip())
+            .render("日本語")
+            .into_string(),
+        "日 "
+    );
+    // A cluster is one grapheme on either policy.
+    assert_eq!(
+        BlockStyle::new()
+            .max_width(2)
+            .overflow(Overflow::clip())
+            .render("👩‍💻x")
+            .into_string(),
+        "👩‍💻"
+    );
+    assert_eq!(
+        BlockStyle::new()
+            .max_width(1)
+            .overflow(Overflow::clip())
+            .render("e\u{301}x")
+            .into_string(),
+        "e\u{301}"
+    );
+}
+
+#[test]
+fn the_width_floor_is_the_content_and_the_height_floor_is_the_frame() {
+    // A grapheme cannot be cut in half, so the width floors at the frame plus
+    // one unsplittable token however small the stated width.
+    assert_eq!(
+        BlockStyle::new()
+            .border(Border::ASCII)
+            .width(1)
+            .height(3)
+            .render("x")
+            .into_string(),
+        "+-+\n|x|\n+-+"
+    );
+    // A row can simply be absent, so the height floors at the frame alone: a
+    // closed frame around nothing.
+    assert_eq!(
+        BlockStyle::new()
+            .border(Border::ASCII)
+            .width(3)
+            .height(1)
+            .render("x")
+            .into_string(),
+        "+-+\n+-+"
+    );
+}
+
+#[test]
+fn the_width_is_resolved_before_the_content_and_the_height_after_it() {
+    let text = "one two three four";
+
+    // A narrower box is a taller one: the width is settled first, and the
+    // reflow it causes is what decides the row count.
+    // The box stays at the cap rather than shrinking to the longest wrapped
+    // line: that would be a second width decision derived from the content
+    // this one produced, and sizes flow down only once.
+    let wide = BlockStyle::new().max_width(9).render(text).into_string();
+    let narrow = BlockStyle::new().max_width(5).render(text).into_string();
+    assert_eq!(wide, "one two  \nthree    \nfour     ");
+    assert_eq!(narrow, "one  \ntwo  \nthree\nfour ");
+
+    // The height then clamps against that reflowed count, not the original
+    // line count.
+    assert_eq!(
+        BlockStyle::new()
+            .max_width(5)
+            .max_height(2)
+            .render(text)
+            .into_string(),
+        "one  \ntwo  "
     );
 }

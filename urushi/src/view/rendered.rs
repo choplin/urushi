@@ -4,7 +4,7 @@ use std::fmt;
 
 use crate::visible_width;
 
-use super::layout::Size;
+use super::geometry::Size;
 
 /// A rectangle of rendered terminal output, and the size it was measured at.
 ///

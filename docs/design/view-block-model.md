@@ -102,7 +102,7 @@ implementation:
 | auto (absent `width`) | `max-content` sizing | |
 | `Fill(n)` | Grid's `fr` track | named after Ratatui's `Constraint::Fill` |
 | `Available` | the containing block | |
-| `Overflow::Wrap`/`Clip`/`Ellipsis` | `white-space`, `overflow`, `text-overflow` | one enum: a terminal needs no finer split |
+| `Overflow::Wrap`/`Clip(marker)` | `white-space`, `overflow`, `text-overflow` | one enum: a terminal has no paint layer to make `overflow` its own axis |
 | min-content floor | `min-content` | grapheme atomicity, not word atomicity |
 | — | `overflow: visible` | impossible: no paint layer; a resolved rectangle is the output |
 | — | percentages | ratios are `Fill` weights; a percentage length is a possible `Length` extension |
@@ -153,8 +153,18 @@ the three real cases — prose wraps, a viewport clips, a status-bar path
 ellipsizes. What the library fixes is the invariant underneath the choice:
 the frame closes at the used size, and no overflow policy can cut it. Height
 has no wrap analogue, and clipping inside a closed frame is a viewport's
-behavior, so height clips and scrolling composes on top; a vertical
-`Ellipsis` is a possible extension. Cutting an already-*rendered* string at a
+behavior, so height clips and scrolling composes on top; a vertical marker is
+a possible extension.
+
+The marker a cut ends with is a parameter of clipping, not a third policy.
+Marking a cut does not absorb overflow differently — it is the same cut, said
+out loud — and fixing the glyph would fix `…` for terminals that cannot show
+it, which is the problem `Border::ASCII` already exists to solve on the same
+axis. Lip Gloss draws the same line: `ansi.Truncate(s, width, tail)` takes the
+tail as a string and passes `""` for a silent cut. Because the marker is
+measured in cells like any other content, parameterizing it also removes a
+hidden assumption from the budget — a three-cell `...` costs three, where a
+fixed `…` had let the implementation subtract one. Cutting an already-*rendered* string at a
 column stays a text-layer utility so that "frames close" remains an
 invariant of the box model rather than a default.
 
@@ -215,6 +225,11 @@ box model lands, it starts from this vocabulary rather than migrating to it.
   would have preserved the open-frame artifact as an opt-in. Cutting rendered
   output is a text-utility concern; keeping it out of the box model keeps
   "frames close" an invariant rather than a default.
+- **A fixed ellipsis glyph, with `Clip` and `Ellipsis` as sibling policies.**
+  Recorded above: the marker is what varies, not the absorption rule, so the
+  taxonomy put a terminal-capability choice out of the application's reach and
+  hard-coded a one-cell budget. The cost of carrying it is that `Overflow` and
+  `BlockStyleProperty` are no longer `Copy`.
 - **Content-box sizing, or a second `content_width` property.** Recorded
   above: two boxes in one vocabulary, or two width properties needing a
   precedence rule; the unframed-inner-block idiom expresses the intent

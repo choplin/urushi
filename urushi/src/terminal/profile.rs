@@ -107,7 +107,7 @@ fn detect(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{Align, Border, Color, Sides, VerticalAlign};
+    use crate::{Align, Border, Color, Length, Sides, VerticalAlign};
 
     #[test]
     fn detection_obeys_precedence_and_empty_no_color() {
@@ -197,8 +197,10 @@ mod tests {
             .strikethrough()
             .border(Border::ROUNDED)
             .padding((0, 1))
-            .width(8)
-            .height(1)
+            // Both dimensions measure the outer box, so the border rows and
+            // columns are inside them: a 10x3 box holds one 6-cell content row.
+            .width(10)
+            .height(3)
             .align(Align::Center)
             .align_vertical(VerticalAlign::Bottom);
         let monochrome = TerminalProfile::new(ColorProfile::Monochrome, AnsiPolicy::Enabled)
@@ -212,8 +214,8 @@ mod tests {
         assert_eq!(
             TerminalProfile::new(ColorProfile::Monochrome, AnsiPolicy::Enabled)
                 .resolve_block_style(&style)
-                .fixed_height(),
-            Some(1)
+                .height_length(),
+            Some(Length::Cells(3))
         );
         assert_eq!(
             TerminalProfile::new(ColorProfile::Monochrome, AnsiPolicy::Enabled)
@@ -229,8 +231,8 @@ mod tests {
         assert_eq!(
             TerminalProfile::new(ColorProfile::TrueColor, AnsiPolicy::Disabled)
                 .resolve_block_style(&style)
-                .fixed_height(),
-            Some(1)
+                .height_length(),
+            Some(Length::Cells(3))
         );
     }
 
@@ -265,8 +267,8 @@ mod tests {
             assert!(!resolved.is_border_left_enabled());
             assert_eq!(resolved.padding_sides(), Sides::from((1, 2, 3, 4)));
             assert_eq!(resolved.margin_sides(), Sides::from((4, 3, 2, 1)));
-            assert_eq!(resolved.fixed_width(), Some(12));
-            assert_eq!(resolved.fixed_height(), Some(9));
+            assert_eq!(resolved.width_length(), Some(Length::Cells(12)));
+            assert_eq!(resolved.height_length(), Some(Length::Cells(9)));
             assert_eq!(resolved.maximum_width(), Some(10));
             assert_eq!(resolved.maximum_height(), Some(7));
             assert_eq!(resolved.horizontal_alignment(), Align::Right);

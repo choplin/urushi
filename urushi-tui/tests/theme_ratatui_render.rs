@@ -7,9 +7,9 @@ use ratatui::{
     widgets::Widget as _,
 };
 use urushi::{
-    Align, AnsiPolicy, AnsiRenderer, BlockStyle, Border, Color, ColorProfile, Limits,
-    Modifier as UrushiModifier, PanelRole, SemanticTokens, TerminalProfile, TextStyle, Theme,
-    VerticalAlign, View, measure, visible_width,
+    Align, AnsiPolicy, AnsiRenderer, Available, BlockStyle, Border, Color, ColorProfile, Length,
+    Modifier as UrushiModifier, Overflow, PanelRole, SemanticTokens, TerminalProfile, TextStyle,
+    Theme, VerticalAlign, View, measure, visible_width,
 };
 use urushi_tui::{RatatuiStyle, RatatuiStyleExt as _, ViewWidget};
 
@@ -44,7 +44,7 @@ fn one_theme_component_renders_to_plain_cli_and_ratatui() {
 }
 
 #[test]
-fn theme_widget_clips_safely_at_a_boundary_size() {
+fn theme_widget_refits_safely_at_a_boundary_size() {
     let theme = Theme::from_tokens(tokens());
     let profile = TerminalProfile::new(ColorProfile::TrueColor, AnsiPolicy::Enabled);
     let panel = profile.resolve_block_style(&theme.block_style(PanelRole::PanelFocused));
@@ -55,23 +55,23 @@ fn theme_widget_clips_safely_at_a_boundary_size() {
         .draw(|frame| frame.render_widget(panel.widget("日本語"), frame.area()))
         .expect("draw frame");
 
-    // The area is narrower than the panel, so the crop removes the right
-    // border rather than refitting the box: `Limits` is an outer clip, and the
-    // ANSI backend at the same limits produces the same rectangle.
+    // The area is narrower than the panel, so the box resolves under it and
+    // the frame closes inside the area; the ANSI backend given the same area
+    // produces the same rectangle.
     let buffer = terminal.backend().buffer();
-    assert_eq!(visual_line(buffer, 0), "╭─────");
-    assert_eq!(visual_line(buffer, 1), "│ 日本");
-    assert_eq!(visual_line(buffer, 2), "╰─────");
+    assert_eq!(visual_line(buffer, 0), "╭────╮");
+    assert_eq!(visual_line(buffer, 1), "│ 日 │");
+    assert_eq!(visual_line(buffer, 2), "╰────╯");
 }
 
 /// The two backends consume the same `ResolvedView`, so a shared corpus must
 /// come out as the same rectangle in both. Each case is drawn into a `Rect` and
-/// compared with the ANSI renderer given the `Limits` that `Rect` implies, so
-/// any divergence other than the crop shows up here.
+/// compared with the ANSI renderer given the `Available` area that `Rect`
+/// implies, so any divergence shows up here.
 #[test]
 fn both_backends_render_the_shared_view_corpus_identically() {
     for (case, view, area) in corpus() {
-        let rendered = plain_renderer().render_within(&view, limits_of(area));
+        let rendered = plain_renderer().render_within(&view, area_of(area));
         // Cells beyond the resolved rectangle belong to the caller's buffer,
         // not to the view, so the comparison is bounded by the resolved size.
         let width = u16::try_from(rendered.size().width()).expect("resolved width");
@@ -218,15 +218,15 @@ fn corpus() -> Vec<(&'static str, View, Rect)> {
             Rect::new(0, 0, 6, 4),
         ),
         (
-            "maximum width crops a wide grapheme",
+            "a maximum width reflows a wide grapheme",
             View::block(
                 BlockStyle::new().max_width(3),
                 View::text("日本語", plain.clone()),
             ),
-            Rect::new(0, 0, 6, 1),
+            Rect::new(0, 0, 6, 3),
         ),
         (
-            "a narrow rect crops the block",
+            "a narrow rect refits the block",
             View::block(
                 BlockStyle::new().border(Border::NORMAL),
                 View::text("日本語", plain.clone()),
@@ -234,18 +234,66 @@ fn corpus() -> Vec<(&'static str, View, Rect)> {
             Rect::new(0, 0, 5, 3),
         ),
         (
-            "a short rect crops trailing rows",
+            "a short rect closes the frame lower",
             View::block(
                 BlockStyle::new().border(Border::NORMAL),
-                View::text("one\ntwo\nthree", plain),
+                View::text("one\ntwo\nthree", plain.clone()),
             ),
             Rect::new(0, 0, 7, 3),
+        ),
+        (
+            "an ellipsis marks a clipped width",
+            View::block(
+                BlockStyle::new()
+                    .border(Border::NORMAL)
+                    .max_width(8)
+                    .overflow(Overflow::ellipsis()),
+                View::text("hello world", plain.clone()),
+            ),
+            Rect::new(0, 0, 8, 3),
+        ),
+        (
+            "a clipped width keeps the frame closed",
+            View::block(
+                BlockStyle::new()
+                    .border(Border::NORMAL)
+                    .overflow(Overflow::clip()),
+                View::text("hello world", plain.clone()),
+            ),
+            Rect::new(0, 0, 6, 3),
+        ),
+        (
+            "a fill width takes the area",
+            View::block(
+                BlockStyle::new()
+                    .border(Border::NORMAL)
+                    .width(Length::Fill(1))
+                    .align(Align::Center),
+                View::text("ab", plain.clone()),
+            ),
+            Rect::new(0, 0, 10, 3),
+        ),
+        (
+            "a minimum width floors the box",
+            View::block(
+                BlockStyle::new().border(Border::NORMAL).min_width(8),
+                View::text("ab", plain.clone()),
+            ),
+            Rect::new(0, 0, 10, 3),
+        ),
+        (
+            "a degenerate area cuts the frame only as a last resort",
+            View::block(
+                BlockStyle::new().border(Border::NORMAL).padding(1),
+                View::text("x", plain),
+            ),
+            Rect::new(0, 0, 2, 3),
         ),
     ]
 }
 
-fn limits_of(area: Rect) -> Limits {
-    Limits::size(usize::from(area.width), usize::from(area.height))
+fn area_of(area: Rect) -> Available {
+    Available::size(usize::from(area.width), usize::from(area.height))
 }
 
 fn plain_renderer() -> AnsiRenderer {

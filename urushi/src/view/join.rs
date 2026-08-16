@@ -7,7 +7,7 @@
 
 use crate::{Align, VerticalAlign};
 
-use super::layout::Size;
+use super::geometry::Size;
 use super::rendered::RenderedBlock;
 
 /// Joins rendered blocks side by side.

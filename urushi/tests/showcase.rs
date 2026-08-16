@@ -174,11 +174,14 @@ fn showcase_has_a_consistent_visible_width() {
     let max_height = feature_position("MAX HEIGHT");
     assert_eq!(fixed_height - fixed_width, 2);
     assert_eq!(max_width - fixed_height, 4);
-    assert_eq!(max_height - max_width, 5);
+    // The bounded box reflows into two rows instead of cutting the content,
+    // so the MAX WIDTH sample is one line taller than the unbounded one.
+    assert_eq!(max_height - max_width, 6);
 
     assert!(plain_lines[max_width + 1].contains("abcdefghijklmnopqrst"));
     assert!(plain_lines[max_width + 3].contains("abcdefghijkl"));
     assert!(!plain_lines[max_width + 3].contains('m'));
+    assert!(plain_lines[max_width + 4].contains("mnopqrst"));
     for offset in 1..=3 {
         let letter = char::from(b'a' + (offset - 1) as u8);
         assert_eq!(

@@ -1,6 +1,6 @@
 //! Output adapters for renderer-neutral views.
 
-use crate::{Limits, RenderedBlock, TerminalProfile, View, resolve};
+use crate::{Available, RenderedBlock, TerminalProfile, View, resolve};
 
 /// Renders a [`View`] as ANSI-capable text for one terminal profile.
 ///
@@ -25,12 +25,13 @@ impl AnsiRenderer {
 
     /// Renders at the view's intrinsic size, without a trailing newline.
     pub fn render(&self, view: &View) -> RenderedBlock {
-        self.render_within(view, Limits::NONE)
+        self.render_within(view, Available::NONE)
     }
 
-    /// Renders cropped to `limits` — a terminal width, for instance.
-    pub fn render_within(&self, view: &View, limits: Limits) -> RenderedBlock {
-        resolve(view, limits)
+    /// Renders the view resolved under `available` — a terminal width, for
+    /// instance.
+    pub fn render_within(&self, view: &View, available: Available) -> RenderedBlock {
+        resolve(view, available)
             .map_styles(|style| self.profile.resolve_text_style(style))
             .into_rendered_block()
     }
@@ -53,14 +54,14 @@ mod tests {
 
         assert_eq!(plain.render(&view).as_str(), "result");
         assert_eq!(
-            resolve(&view, Limits::NONE).rows()[0][0].style(),
+            resolve(&view, Available::NONE).rows()[0][0].style(),
             &style,
             "the resolved view keeps logical styles"
         );
     }
 
     #[test]
-    fn limits_crop_the_resolved_rectangle() {
+    fn a_bare_text_leaf_wraps_under_a_width_bound() {
         let renderer = AnsiRenderer::new(TerminalProfile::new(
             ColorProfile::TrueColor,
             AnsiPolicy::Disabled,
@@ -68,8 +69,10 @@ mod tests {
         let view = View::text("abcdef", TextStyle::new());
 
         assert_eq!(
-            renderer.render_within(&view, Limits::width(3)).as_str(),
-            "abc"
+            renderer
+                .render_within(&view, Available::columns(3))
+                .as_str(),
+            "abc\ndef"
         );
     }
 }

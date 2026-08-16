@@ -40,7 +40,7 @@ The core [`View`](../urushi/src/view/model.rs) is a tree of four nodes — `Text
 [`TextStyle`](../urushi/src/style/text.rs) and
 [`BlockStyle`](../urushi/src/style/block.rs) values rather than
 terminal-resolved ANSI strings. Components stop at this boundary.
-[`resolve`](../urushi/src/view/layout.rs) turns the tree into one `ResolvedView`
+[`resolve`](../urushi/src/view/resolve.rs) turns the tree into one `ResolvedView`
 rectangle of styled graphemes, and
 [`AnsiRenderer`](../urushi/src/render/ansi.rs) applies a
 [`TerminalProfile`](../urushi/src/terminal/profile.rs) to it and serializes the
@@ -262,8 +262,16 @@ ANSI, or retain an output writer.
 ### View and components
 
 - [`view/model.rs`](../urushi/src/view/model.rs) owns the four-node `View` tree.
-- [`view/layout.rs`](../urushi/src/view/layout.rs) owns the one layout pass: the
-  box model, row and column composition, and the resulting `ResolvedView`.
+- [`view/geometry.rs`](../urushi/src/view/geometry.rs) owns `Available` and
+  `Size`: the area resolution takes in and the size it returns.
+- [`view/sizing.rs`](../urushi/src/view/sizing.rs) owns the numeric half of the
+  pass — the clamp, the degenerate degradation, and max/min-content
+  measurement. It builds no rectangle, so these rules are unit-tested on their
+  own.
+- [`view/resolve.rs`](../urushi/src/view/resolve.rs) owns the pass itself: a
+  `View` and an `Available` in, one `ResolvedView` of styled graphemes out. It
+  assembles the rectangle the sizes describe — the box model, row and column
+  composition, overflow, and the degenerate safety net.
 - [`view/rendered.rs`](../urushi/src/view/rendered.rs) owns `RenderedBlock`, the
   one place ANSI-aware measurement happens.
 - [`view/join.rs`](../urushi/src/view/join.rs) composes blocks that have already

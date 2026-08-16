@@ -97,8 +97,8 @@ pub use component::{
 };
 pub use render::AnsiRenderer;
 pub use style::{
-    Align, BlockStyle, BlockStyleProperty, BlockStylePropertyKey, Border, Color, Modifier, Sides,
-    TextStyle, TextStyleProperty, TextStylePropertyKey, VerticalAlign,
+    Align, BlockStyle, BlockStyleProperty, BlockStylePropertyKey, Border, Color, Length, Modifier,
+    Overflow, Sides, TextStyle, TextStyleProperty, TextStylePropertyKey, VerticalAlign,
 };
 pub use terminal::{AnsiPolicy, ColorProfile, TerminalProfile};
 #[cfg(feature = "terminal")]
@@ -109,6 +109,6 @@ pub use theme::{
     SemanticTokens, TableRole, TextThemeRole, Theme, ThemeSet, TreeRole,
 };
 pub use view::{
-    Limits, RenderedBlock, ResolvedView, Size, StyledGrapheme, View, join_horizontal,
+    Available, RenderedBlock, ResolvedView, Size, StyledGrapheme, View, join_horizontal,
     join_vertical, measure, resolve,
 };
