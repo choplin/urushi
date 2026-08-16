@@ -2,26 +2,29 @@
 
 use ratatui::style::{Color as RatatuiColor, Modifier as RatatuiModifier, Style as InnerStyle};
 
-use urushi::{BlockStyle, Color, Modifier, TextStyle};
+use urushi::{Color, Modifier, TextStyle};
 
+/// One logical [`TextStyle`] as a Ratatui style.
+///
+/// This is the whole style boundary of the adapter. Geometry never reaches it:
+/// a [`ResolvedView`](urushi::ResolvedView) carries only `TextStyle` per
+/// grapheme, and a block's border colors arrive as the border graphemes' own
+/// text style, so the adapter never distinguishes a border from its content.
+///
+/// The wrapper exists because `Style` and `TextStyle` are both foreign to this
+/// crate, so `impl From<&TextStyle> for ratatui::Style` is not allowed here.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct RatatuiStyle {
     content: InnerStyle,
-    border: InnerStyle,
 }
 
 impl RatatuiStyle {
     pub const fn into_inner(self) -> InnerStyle {
         self.content
     }
-    pub const fn border_style(self) -> InnerStyle {
-        self.border
-    }
 }
 
 impl From<&TextStyle> for RatatuiStyle {
-    /// Converts a text style. A [`TextStyle`] carries no geometry, so the border
-    /// style stays empty.
     fn from(value: &TextStyle) -> Self {
         let mut style = InnerStyle::new();
         if let Some(color) = value.foreground_color() {
@@ -32,24 +35,7 @@ impl From<&TextStyle> for RatatuiStyle {
         }
         Self {
             content: style.add_modifier(convert_modifier(value.modifiers())),
-            border: InnerStyle::new(),
         }
-    }
-}
-
-impl From<&BlockStyle> for RatatuiStyle {
-    /// Converts a block style: its fill becomes the content style and its
-    /// border colors the border style.
-    fn from(value: &BlockStyle) -> Self {
-        let content = Self::from(value.text()).content;
-        let mut border = InnerStyle::new();
-        if let Some(color) = value.border_foreground_color() {
-            border = border.fg(convert_color(color));
-        }
-        if let Some(color) = value.border_background_color() {
-            border = border.bg(convert_color(color));
-        }
-        Self { content, border }
     }
 }
 
@@ -85,7 +71,7 @@ impl From<RatatuiStyle> for InnerStyle {
     }
 }
 
-pub(super) const fn convert_color(color: Color) -> RatatuiColor {
+const fn convert_color(color: Color) -> RatatuiColor {
     match color {
         Color::Ansi(0) => RatatuiColor::Black,
         Color::Ansi(1) => RatatuiColor::Red,

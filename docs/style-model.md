@@ -209,10 +209,11 @@ Fixed height is a minimum, not a clipping limit. Content taller than the fixed
 height expands the box so no row is discarded. An output boundary with a finite
 area, such as a Ratatui `Rect`, may still clip the resolved box to that area.
 Dedicated maximum-dimension properties own content truncation when present;
-fixed height does not. Styles without fixed height retain the existing
-fixed-width resolution policy. When fixed width and height are combined,
-Ratatui may expand a too-narrow content box within the available `Rect` to
-preserve a displayed wide character and match direct rendering.
+fixed height does not. Fixed width is a minimum in the same sense: a grapheme
+wider than the requested width expands the content box rather than being
+dropped, because the layout pass never splits a wide character. This happens in
+the layout pass, so every backend sees the expanded box; it is not a Ratatui
+adjustment made against the available `Rect`.
 
 Shorter content is top-aligned by default. `align_vertical` places the padded
 content block at the top, center, or bottom of the fixed content box. Like Lip
@@ -290,8 +291,11 @@ the padded content width plus the enabled vertical-edge columns.
 A border with all four sides disabled contributes no rows or columns and is
 layout-equivalent to no border. Border foreground and background colors apply
 uniformly to every enabled edge. The direct ANSI renderer and the Ratatui
-widget use this same geometry; constrained Ratatui areas clip at the area's
-right and bottom boundaries after reserving enabled edge cells.
+widget use this same geometry, because both consume the same resolved
+rectangle. A `Rect` smaller than the block clips it at the area's right and
+bottom boundaries; it does not lay the box out again inside the smaller area,
+so a trailing border edge outside the area is cropped rather than pulled
+inwards.
 
 ## Alignment with Lip Gloss and noctui
 

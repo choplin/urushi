@@ -11,7 +11,7 @@ The runtime adds a TEA-style application framework above Ratatui while leaving
 Ratatui responsible for widgets, layout, buffers, backends, and cell-level
 diffing.
 It extends the existing `urushi-tui` Ratatui adapter without making
-the existing renderer-neutral line model depend on Ratatui.
+the existing renderer-neutral view model depend on Ratatui.
 
 ## Goals
 
@@ -134,12 +134,19 @@ It may be an application-owned value, a function that composes Ratatui widgets,
 or another renderer input that can be consumed during a draw.
 
 This term does not silently redefine the existing
-[`urushi::view::View`](../urushi/src/view/model.rs), which is a concrete ordered
-collection of styled lines and spans.
-That line-oriented type can be embedded or adapted where useful, but it is not
-required to become the canonical full-screen layout tree.
+[`urushi::view::View`](../urushi/src/view/model.rs), which is a tree of text,
+block, row, and column nodes that one layout pass resolves into a rectangle.
+That type can be embedded or adapted where useful, but this document does not
+by itself settle whether it becomes the canonical full-screen layout tree.
 Urushi also does not introduce an independent resolved render tree merely to
 mirror another framework.
+
+> **Open question.** This section was written when `urushi::view::View` was a
+> line-oriented collection of styled spans, and its reasoning rested on that
+> shape. `View` is now a rectangle tree with its own resolution pass, which
+> makes it a plausible candidate for the role this section set aside. Whether
+> the TUI `View` should be that type is an open design decision, not a
+> conclusion this document has reached.
 
 ## Effects and expensive preparation
 

@@ -1,13 +1,17 @@
 use ratatui::{
     Terminal,
     backend::TestBackend,
+    buffer::Buffer,
+    layout::Rect,
     style::{Color as RatatuiColor, Modifier},
+    widgets::Widget as _,
 };
 use urushi::{
-    AnsiPolicy, Color, ColorProfile, Modifier as UrushiModifier, PanelRole, SemanticTokens,
-    TerminalProfile, TextStyle, Theme, visible_width,
+    Align, AnsiPolicy, AnsiRenderer, BlockStyle, Border, Color, ColorProfile, Limits,
+    Modifier as UrushiModifier, PanelRole, SemanticTokens, TerminalProfile, TextStyle, Theme,
+    VerticalAlign, View, measure, visible_width,
 };
-use urushi_tui::{RatatuiStyle, RatatuiStyleExt as _};
+use urushi_tui::{RatatuiStyle, RatatuiStyleExt as _, ViewWidget};
 
 #[test]
 fn one_theme_component_renders_to_plain_cli_and_ratatui() {
@@ -51,10 +55,204 @@ fn theme_widget_clips_safely_at_a_boundary_size() {
         .draw(|frame| frame.render_widget(panel.widget("日本語"), frame.area()))
         .expect("draw frame");
 
+    // The area is narrower than the panel, so the crop removes the right
+    // border rather than refitting the box: `Limits` is an outer clip, and the
+    // ANSI backend at the same limits produces the same rectangle.
     let buffer = terminal.backend().buffer();
-    assert_eq!(visual_line(buffer, 0), "╭────╮");
-    assert_eq!(visual_line(buffer, 1), "│ 日 │");
-    assert_eq!(visual_line(buffer, 2), "╰────╯");
+    assert_eq!(visual_line(buffer, 0), "╭─────");
+    assert_eq!(visual_line(buffer, 1), "│ 日本");
+    assert_eq!(visual_line(buffer, 2), "╰─────");
+}
+
+/// The two backends consume the same `ResolvedView`, so a shared corpus must
+/// come out as the same rectangle in both. Each case is drawn into a `Rect` and
+/// compared with the ANSI renderer given the `Limits` that `Rect` implies, so
+/// any divergence other than the crop shows up here.
+#[test]
+fn both_backends_render_the_shared_view_corpus_identically() {
+    for (case, view, area) in corpus() {
+        let rendered = plain_renderer().render_within(&view, limits_of(area));
+        // Cells beyond the resolved rectangle belong to the caller's buffer,
+        // not to the view, so the comparison is bounded by the resolved size.
+        let width = u16::try_from(rendered.size().width()).expect("resolved width");
+        let expected: Vec<&str> = rendered.as_str().lines().collect();
+
+        let mut buffer = Buffer::empty(area);
+        ViewWidget::new(&view).render(area, &mut buffer);
+
+        assert_eq!(
+            rendered.size().height(),
+            expected.len(),
+            "{case}: row count"
+        );
+        for (row, expected_line) in expected.into_iter().enumerate() {
+            assert_eq!(
+                visual_row(&buffer, row as u16, width),
+                expected_line,
+                "{case}: row {row}",
+            );
+        }
+    }
+}
+
+/// A row mixing plain text with a bordered block resolves to one rectangle
+/// whose height is the block's, in both backends.
+#[test]
+fn a_bordered_block_inside_a_row_has_the_same_rectangle_in_both_backends() {
+    let view = bordered_block_in_a_row();
+    let size = measure(&view);
+    assert_eq!(size.height(), 3, "the block's height wins the row");
+
+    let area = Rect::new(0, 0, 12, 3);
+    let mut buffer = Buffer::empty(area);
+    ViewWidget::new(&view).render(area, &mut buffer);
+
+    let ansi = plain_renderer().render(&view);
+    assert_eq!(ansi.size(), size);
+    for (row, expected_line) in ansi.as_str().lines().enumerate() {
+        assert_eq!(visual_line(&buffer, row as u16), expected_line);
+    }
+}
+
+/// Styles survive the conversion, not just geometry: the border and the text
+/// inside the block keep the colors the view gave them.
+#[test]
+fn the_ratatui_backend_keeps_the_logical_styles_of_a_resolved_view() {
+    let view = bordered_block_in_a_row();
+    let area = Rect::new(0, 0, 12, 3);
+    let mut buffer = Buffer::empty(area);
+
+    ViewWidget::new(&view).render(area, &mut buffer);
+
+    assert_eq!(
+        buffer.cell((8, 0)).expect("border cell").fg,
+        RatatuiColor::Rgb(80, 160, 255)
+    );
+    assert_eq!(
+        buffer.cell((9, 1)).expect("block content cell").fg,
+        RatatuiColor::Green
+    );
+    assert_eq!(
+        buffer.cell((0, 1)).expect("row text cell").fg,
+        RatatuiColor::Reset
+    );
+}
+
+fn bordered_block_in_a_row() -> View {
+    View::row(
+        VerticalAlign::Center,
+        [
+            View::text("status: ", TextStyle::new()),
+            View::block(
+                BlockStyle::new()
+                    .border(Border::ROUNDED)
+                    .border_foreground(Color::Rgb(80, 160, 255)),
+                View::text("ok", TextStyle::new().foreground(Color::GREEN)),
+            ),
+        ],
+    )
+}
+
+/// Views exercising text, blocks, rows, columns, CJK, fixed and maximum
+/// dimensions, both alignment biases, and cropping.
+fn corpus() -> Vec<(&'static str, View, Rect)> {
+    let plain = TextStyle::new();
+    vec![
+        (
+            "multiline text",
+            View::text("alpha\nbeta gamma", plain.clone()),
+            Rect::new(0, 0, 10, 2),
+        ),
+        (
+            "bordered block with padding and CJK",
+            View::block(
+                BlockStyle::new().border(Border::ROUNDED).padding((0, 1)),
+                View::text("保存しました", plain.clone()),
+            ),
+            Rect::new(0, 0, 16, 3),
+        ),
+        (
+            "bordered block in a row",
+            bordered_block_in_a_row(),
+            Rect::new(0, 0, 12, 3),
+        ),
+        (
+            "column centering narrower children",
+            View::column(
+                Align::Center,
+                [
+                    View::text("wide enough line", plain.clone()),
+                    View::text("short", plain.clone()),
+                    View::block(
+                        BlockStyle::new().border(Border::ASCII),
+                        View::text("x", plain.clone()),
+                    ),
+                ],
+            ),
+            Rect::new(0, 0, 16, 5),
+        ),
+        (
+            "row centering shorter children, odd row above",
+            View::row(
+                VerticalAlign::Center,
+                [
+                    View::text("a", plain.clone()),
+                    View::block(
+                        BlockStyle::new().height(4).border(Border::ASCII),
+                        View::text("tall", plain.clone()),
+                    ),
+                ],
+            ),
+            Rect::new(0, 0, 8, 6),
+        ),
+        (
+            "block vertical align centers with the odd row below",
+            View::block(
+                BlockStyle::new()
+                    .width(6)
+                    .height(4)
+                    .align(Align::Right)
+                    .align_vertical(VerticalAlign::Center),
+                View::text("x", plain.clone()),
+            ),
+            Rect::new(0, 0, 6, 4),
+        ),
+        (
+            "maximum width crops a wide grapheme",
+            View::block(
+                BlockStyle::new().max_width(3),
+                View::text("日本語", plain.clone()),
+            ),
+            Rect::new(0, 0, 6, 1),
+        ),
+        (
+            "a narrow rect crops the block",
+            View::block(
+                BlockStyle::new().border(Border::NORMAL),
+                View::text("日本語", plain.clone()),
+            ),
+            Rect::new(0, 0, 5, 3),
+        ),
+        (
+            "a short rect crops trailing rows",
+            View::block(
+                BlockStyle::new().border(Border::NORMAL),
+                View::text("one\ntwo\nthree", plain),
+            ),
+            Rect::new(0, 0, 7, 3),
+        ),
+    ]
+}
+
+fn limits_of(area: Rect) -> Limits {
+    Limits::size(usize::from(area.width), usize::from(area.height))
+}
+
+fn plain_renderer() -> AnsiRenderer {
+    AnsiRenderer::new(TerminalProfile::new(
+        ColorProfile::TrueColor,
+        AnsiPolicy::Disabled,
+    ))
 }
 
 #[test]
@@ -129,9 +327,19 @@ fn tokens() -> SemanticTokens {
 }
 
 fn visual_line(buffer: &ratatui::buffer::Buffer, y: u16) -> String {
+    visual_row(buffer, y, buffer.area.width)
+}
+
+/// Reads `width` cells of row `y`, joining each cell's symbol.
+fn visual_row(buffer: &ratatui::buffer::Buffer, y: u16, width: u16) -> String {
     let mut line = String::new();
     let mut x = buffer.area.left();
-    while x < buffer.area.right() {
+    let right = buffer
+        .area
+        .left()
+        .saturating_add(width)
+        .min(buffer.area.right());
+    while x < right {
         let symbol = buffer.cell((x, y)).expect("cell").symbol();
         line.push_str(symbol);
         let width = visible_width(symbol).max(1).min(usize::from(u16::MAX)) as u16;

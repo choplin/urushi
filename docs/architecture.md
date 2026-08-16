@@ -71,8 +71,14 @@ Terminal and Ratatui integrations sit outside these semantic types:
 Progress state --> Urushi progress lifecycle --> private indicatif adapter
 
 Resolved TextStyle   --> RatatuiStyle
-BlockStyle + text    --> RatatuiWidget --> caller-owned Ratatui Buffer
+View + Rect          --> ViewWidget    --> caller-owned Ratatui Buffer
+BlockStyle + text    --> RatatuiWidget --> ViewWidget's path
 ```
+
+The Ratatui adapter computes no geometry. A target `Rect` becomes `Limits`, the
+same layout pass resolves the view, and the adapter converts each grapheme and
+its logical style into cells, so the two backends cannot disagree about a
+rectangle.
 
 ## Shared foundation and surface layers
 
@@ -101,9 +107,9 @@ text cursor is the presentation information `View` does not model, and the
 prompt's viewport, help/error priority, and cleanup state live in that
 surface-specific runtime rather than in a view.
 [`inline-prompt-rendering.md`](inline-prompt-rendering.md) defines the target
-architecture for the prompt's render path. The Ratatui adapter's migration onto
-`ResolvedView` is not yet implemented; it currently draws a single `BlockStyle`
-with its own box-model code.
+architecture for the prompt's render path. The Ratatui adapter consumes
+`ResolvedView` like the ANSI renderer does, so both surfaces share the layout
+pass itself and not merely its model.
 
 The implemented layers above the foundation are:
 
@@ -116,7 +122,7 @@ runtime or to adopt its application model.
 | --- | --- | --- | --- |
 | Plain CLI output | Direct box-model `BlockStyle::render`; reusable components producing `View`; `AnsiRenderer`; `StderrTerminal`; optional spinner and progress-bar lifecycles | The application owns its command workflow and stdout policy. `StderrTerminal` and progress handles own the stderr resources they acquire. | Implemented and dogfooded. Static output, themed line components, terminal degradation, and live/plain progress are covered by repository tests and runnable examples; public progress is also exercised by Agentlog dogfood. |
 | Interactive prompt | `Form` / `Group`; typed `Input`, `Select`, and `Confirm`; synchronous validation; a prompt-specific view; inline redraw; terminal session setup and cleanup | `urushi-prompt` owns the blocking prompt session and resources it acquires. The application owns when the form runs and what submitted values mean. | Implemented and dogfooded. The core prompt flow, viewport behavior, validation, cancellation, and cleanup are covered by tests and runnable terminal examples. |
-| Full-screen TUI | `urushi-tui` logical-style conversion and box-model widgets that draw into a caller-provided Ratatui `Buffer` | Today, the consuming Ratatui application owns state, events, layout orchestration, frame scheduling, and terminal lifecycle. | Adapter implemented in a provisional crate boundary. A general Urushi TUI runtime is not implemented; [`tui-architecture.md`](tui-architecture.md) defines its target architecture. |
+| Full-screen TUI | `urushi-tui` logical-style conversion and widgets that resolve a `View` and draw it into a caller-provided Ratatui `Buffer` | Today, the consuming Ratatui application owns state, events, layout orchestration, frame scheduling, and terminal lifecycle. | Adapter implemented in a provisional crate boundary. A general Urushi TUI runtime is not implemented; [`tui-architecture.md`](tui-architecture.md) defines its target architecture. |
 
 The resulting flows are deliberately related but not identical:
 
@@ -180,7 +186,7 @@ the built-in styles as borrows.
 | --- | --- | --- |
 | [`urushi`](../urushi/) | Logical styles, themes, renderer-neutral views and components, output adapters, terminal capability resolution, and optional progress lifecycle. | None |
 | [`urushi-prompt`](../urushi-prompt/) | Typed input, select, and confirm forms; prompt state transitions; inline drawing; terminal session setup and cleanup. | `urushi` |
-| [`urushi-tui`](../urushi-tui/) | Ratatui style conversion and box-model widgets; provisional owner of future full-screen TUI concerns. | `urushi` |
+| [`urushi-tui`](../urushi-tui/) | Ratatui style conversion and widgets that draw a resolved view into a caller-owned buffer; provisional owner of future full-screen TUI concerns. | `urushi` |
 
 `urushi-prompt` owns interactive prompt behavior. The core crate must not gain
 prompt-specific navigation, validation, cursor, or form-submission policy merely
@@ -294,8 +300,10 @@ implements no alignment of its own.
   scope.
 - [`urushi-tui/src/style.rs`](../urushi-tui/src/style.rs) converts the
   stylable subset and border colors to Ratatui types.
-- [`urushi-tui/src/widget.rs`](../urushi-tui/src/widget.rs) draws the
-  Urushi box model into a caller-provided Ratatui buffer.
+- [`urushi-tui/src/widget.rs`](../urushi-tui/src/widget.rs) derives `Limits`
+  from the target `Rect`, resolves the view through the same layout pass, and
+  writes the resulting graphemes into a caller-provided Ratatui buffer. It
+  implements no box model and measures no display width of its own.
 
 `urushi-tui` is provisionally an adapter, not yet a TUI framework. It does not own
 application state, input handling, navigation, an event loop, terminal entry or
@@ -473,7 +481,9 @@ changed deliberately and this document is updated in the same change:
 ### Change Ratatui support
 
 1. Keep style/color conversion in `urushi-tui/src/style.rs`.
-2. Keep box-model buffer drawing in `urushi-tui/src/widget.rs`.
+2. Keep `Rect`-to-`Limits` translation and cell writing in
+   `urushi-tui/src/widget.rs`, and any geometry it would need in `urushi`'s
+   layout pass.
 3. Preserve the caller's ownership of terminal setup, event processing, state,
    layout orchestration, and frame rendering.
 4. Test narrow areas, CJK clipping, border colors, and terminal-profile
@@ -486,6 +496,7 @@ changed deliberately and this document is updated in the same change:
 | Box model, ANSI scopes, wrapping, alignment, and CJK width | [`urushi/tests/render.rs`](../urushi/tests/render.rs), [`urushi/tests/join.rs`](../urushi/tests/join.rs) |
 | Terminal detection and style degradation | [`urushi/tests/terminal_profile.rs`](../urushi/tests/terminal_profile.rs), tests beside `terminal/profile.rs` |
 | Theme roles resolve consistently for terminal and Ratatui output | [`urushi/tests/theme_terminal_render.rs`](../urushi/tests/theme_terminal_render.rs), [`urushi-tui/tests/theme_ratatui_render.rs`](../urushi-tui/tests/theme_ratatui_render.rs) |
+| The two backends resolve a shared view corpus to the same rectangle | [`urushi-tui/tests/theme_ratatui_render.rs`](../urushi-tui/tests/theme_ratatui_render.rs) |
 | Progress messages share theme behavior across live and stable output | tests beside [`terminal/progress/mod.rs`](../urushi/src/terminal/progress/mod.rs) |
 | Prompt submission, viewport behavior, and cleanup | tests beside [`urushi-prompt/src/runtime.rs`](../urushi-prompt/src/runtime.rs) |
 | Prompt owned-region command order and recovery checkpoints | plan assertions beside [`urushi-prompt/src/runtime.rs`](../urushi-prompt/src/runtime.rs), against [`runtime/inline_plan.rs`](../urushi-prompt/src/runtime/inline_plan.rs) |
@@ -511,15 +522,12 @@ future roadmap:
   fixed and maximum dimensions, with no flex-like grow or shrink;
 - there is no placement helper for positioning a `RenderedBlock` inside larger
   whitespace;
-- the `urushi-tui` widget still implements the box model separately instead of
-  drawing a `ResolvedView`, so the two backends share the model but not yet the
-  code;
 - text in a `Text` node is plain: escape sequences in it are measured as
   ordinary graphemes, so already-rendered output must be adopted as a
   `RenderedBlock` rather than fed back into the tree;
 - live progress currently uses a private Indicatif backend;
-- `urushi-tui` is currently limited to style conversion and box-model widget
-  drawing;
+- `urushi-tui` is currently limited to style conversion and drawing a resolved
+  view into a caller-owned buffer;
 - full-screen TUI architecture and runtime policy are intentionally outside the
   scope of this document;
 - `urushi-prompt` uses a prompt-specific internal view and renderer because it

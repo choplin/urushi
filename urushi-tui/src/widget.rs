@@ -1,17 +1,56 @@
-//! Ratatui widget rendering for urushi's box model.
+//! Ratatui widgets that draw a resolved Urushi view into a caller-owned buffer.
+//!
+//! These widgets compute no geometry. A target [`Rect`] becomes [`Limits`], the
+//! core layout pass resolves the view once, and each resulting
+//! [`StyledGrapheme`] is written to a cell. Border reservation, padding,
+//! alignment, and dimension resolution live in `urushi` alone, so the Ratatui
+//! output and the ANSI output cannot drift apart.
 
-use ratatui::{buffer::Buffer, layout::Rect, style::Style as InnerStyle, widgets::Widget};
-use unicode_segmentation::UnicodeSegmentation;
-use unicode_width::UnicodeWidthStr;
+use ratatui::{buffer::Buffer, layout::Rect, widgets::Widget};
 
-use super::{RatatuiStyle, style::convert_color};
-use urushi::{Align, BlockStyle, Border, Color, Sides, VerticalAlign, visible_width, wrap_text};
+use super::RatatuiStyle;
+use urushi::{BlockStyle, Limits, ResolvedView, StyledGrapheme, View, resolve};
 
-/// A stateless ratatui widget backed by an urushi [`BlockStyle`].
+/// A stateless Ratatui widget that draws an Urushi [`View`].
 ///
 /// The widget draws into the buffer passed to [`Widget::render`]. It does not
-/// initialize a terminal, read events, or own terminal I/O. Content is plain
-/// text; ANSI escape sequences are not interpreted inside a ratatui buffer.
+/// initialize a terminal, read events, or own terminal I/O. Text in the view is
+/// plain; ANSI escape sequences are not interpreted inside a Ratatui buffer.
+///
+/// The target `Rect` bounds the view as an outer clip, not as a layout
+/// constraint the view is re-fitted into: the view resolves at its intrinsic
+/// size and whatever falls outside the `Rect` is cropped, exactly as a terminal
+/// width crops the ANSI backend.
+#[derive(Debug, Clone, Copy)]
+pub struct ViewWidget<'a> {
+    view: &'a View,
+}
+
+impl<'a> ViewWidget<'a> {
+    /// Creates a widget that draws `view`.
+    pub const fn new(view: &'a View) -> Self {
+        Self { view }
+    }
+}
+
+impl Widget for ViewWidget<'_> {
+    fn render(self, area: Rect, buffer: &mut Buffer) {
+        draw(self.view, area, buffer);
+    }
+}
+
+impl Widget for &ViewWidget<'_> {
+    fn render(self, area: Rect, buffer: &mut Buffer) {
+        draw(self.view, area, buffer);
+    }
+}
+
+/// A stateless Ratatui widget backed by an Urushi [`BlockStyle`].
+///
+/// This is the single-block case of [`ViewWidget`], the counterpart of
+/// [`BlockStyle::render`]: both resolve `Block(style, Text(content, …))`, so a
+/// block drawn here and the same block rendered to ANSI differ only by the crop
+/// the target `Rect` imposes.
 #[derive(Debug, Clone, Copy)]
 pub struct RatatuiWidget<'a> {
     content: &'a str,
@@ -22,6 +61,14 @@ impl<'a> RatatuiWidget<'a> {
     /// Creates a widget that renders `content` with `style`.
     pub const fn new(content: &'a str, style: &'a BlockStyle) -> Self {
         Self { content, style }
+    }
+
+    /// Builds the view this widget draws.
+    fn view(&self) -> View {
+        View::block(
+            self.style.clone(),
+            View::text(self.content, self.style.text().clone()),
+        )
     }
 }
 
@@ -37,421 +84,103 @@ impl RatatuiStyleExt for BlockStyle {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
-struct BoxParts {
-    padding: Sides,
-    margin: Sides,
-    border: Option<Border>,
-    border_top: bool,
-    border_right: bool,
-    border_bottom: bool,
-    border_left: bool,
-    border_foreground: Option<Color>,
-    border_background: Option<Color>,
-    width: Option<u16>,
-    height: Option<u16>,
-    align: Align,
-    vertical_align: VerticalAlign,
-}
-
-impl BoxParts {
-    const fn from_style(style: &BlockStyle) -> Self {
-        Self {
-            padding: style.padding_sides(),
-            margin: style.margin_sides(),
-            border: style.border_kind(),
-            border_top: style.is_border_top_enabled(),
-            border_right: style.is_border_right_enabled(),
-            border_bottom: style.is_border_bottom_enabled(),
-            border_left: style.is_border_left_enabled(),
-            border_foreground: style.border_foreground_color(),
-            border_background: style.border_background_color(),
-            width: style.fixed_width(),
-            height: style.fixed_height(),
-            align: style.horizontal_alignment(),
-            vertical_align: style.vertical_alignment(),
-        }
-    }
-}
-
 impl Widget for RatatuiWidget<'_> {
     fn render(self, area: Rect, buffer: &mut Buffer) {
-        render_widget(self, area, buffer);
+        draw(&self.view(), area, buffer);
     }
 }
 
 impl Widget for &RatatuiWidget<'_> {
     fn render(self, area: Rect, buffer: &mut Buffer) {
-        render_widget(*self, area, buffer);
+        draw(&self.view(), area, buffer);
     }
 }
 
-fn render_widget(widget: RatatuiWidget<'_>, area: Rect, buffer: &mut Buffer) {
-    let maximum_area = Rect::new(
-        area.x,
-        area.y,
-        parts_limit(area.width, widget.style.maximum_width()),
-        parts_limit(area.height, widget.style.maximum_height()),
-    );
-    let clip = maximum_area.intersection(buffer.area);
-    render_widget_in_area(widget, area, clip, true, buffer);
-}
-
-fn render_widget_in_area(
-    widget: RatatuiWidget<'_>,
-    area: Rect,
-    clip: Rect,
-    preserve_legacy_layout: bool,
-    buffer: &mut Buffer,
-) {
-    let parts = BoxParts::from_style(widget.style);
-    let Some(available) = inset(area, parts.margin) else {
-        return;
-    };
-
-    let has_border = parts.border.is_some();
-    let border_columns = u16::from(has_border && parts.border_left)
-        .saturating_add(u16::from(has_border && parts.border_right));
-    let border_rows = u16::from(has_border && parts.border_top)
-        .saturating_add(u16::from(has_border && parts.border_bottom));
-    let max_box_width = available.width.saturating_sub(border_columns);
-    let max_box_height = available.height.saturating_sub(border_rows);
-
-    let horizontal_padding = parts.padding.left.saturating_add(parts.padding.right);
-    let natural_inner_width = widget
-        .content
-        .lines()
-        .map(visible_width)
-        .max()
-        .unwrap_or(0)
-        .min(usize::from(u16::MAX)) as u16;
-    let requested_box_width = parts
-        .width
-        .unwrap_or_else(|| natural_inner_width.saturating_add(horizontal_padding));
-    let mut box_width = requested_box_width.min(max_box_width);
-    let initial_inner_width = box_width.saturating_sub(horizontal_padding);
-
-    let lines = if parts.width.is_some() && (initial_inner_width > 0 || parts.height.is_some()) {
-        wrap_text(widget.content, usize::from(initial_inner_width.max(1)))
-    } else {
-        let mut lines: Vec<String> = widget.content.lines().map(str::to_owned).collect();
-        if lines.is_empty() {
-            lines.push(String::new());
-        }
-        lines
-    };
-
-    // For fixed-height boxes, match direct rendering when one displayed
-    // character is wider than the requested inner width: preserve the
-    // character and expand when the area can accommodate it. The height guard
-    // keeps width-only rendering on its existing resolution path.
-    if parts.height.is_some() {
-        let rendered_inner_width = lines
-            .iter()
-            .map(|line| visible_width(line))
-            .max()
-            .unwrap_or(0)
-            .min(usize::from(u16::MAX)) as u16;
-        let rendered_box_width = rendered_inner_width.saturating_add(horizontal_padding);
-        box_width = box_width.max(rendered_box_width).min(max_box_width);
-    }
-
-    let content_height = u16::try_from(lines.len()).unwrap_or(u16::MAX);
-    let natural_box_height = parts
-        .padding
-        .top
-        .saturating_add(content_height)
-        .saturating_add(parts.padding.bottom);
-    let requested_box_height = parts
-        .height
-        .map_or(natural_box_height, |height| height.max(natural_box_height));
-    let box_height = requested_box_height.min(max_box_height);
-    let total_width = box_width.saturating_add(border_columns);
-    let total_height = box_height.saturating_add(border_rows);
-    let widget_area = Rect::new(available.x, available.y, total_width, total_height);
-
-    let text_style = RatatuiStyle::from(widget.style).into_inner();
-    let box_area = Rect::new(
-        widget_area
-            .x
-            .saturating_add(u16::from(has_border && parts.border_left)),
-        widget_area
-            .y
-            .saturating_add(u16::from(has_border && parts.border_top)),
-        box_width,
-        box_height,
-    );
-    let outer_right = widget_area
-        .right()
-        .saturating_add(parts.margin.right)
-        .min(area.right());
-    let outer_bottom = widget_area
-        .bottom()
-        .saturating_add(parts.margin.bottom)
-        .min(area.bottom());
-    let maximum_width_is_binding = widget
-        .style
-        .maximum_width()
-        .is_some_and(|maximum| maximum > 0 && area.x.saturating_add(maximum) < outer_right);
-    let maximum_height_is_binding = widget
-        .style
-        .maximum_height()
-        .is_some_and(|maximum| maximum > 0 && area.y.saturating_add(maximum) < outer_bottom);
-    if preserve_legacy_layout && !maximum_width_is_binding && !maximum_height_is_binding {
-        let legacy_area = area.intersection(buffer.area);
-        return render_widget_in_area(widget, legacy_area, legacy_area, false, buffer);
-    }
+/// Resolves `view` for `area` and writes the resulting rectangle.
+fn draw(view: &View, area: Rect, buffer: &mut Buffer) {
+    let clip = area.intersection(buffer.area);
     if clip.is_empty() {
         return;
     }
+    write_cells(&resolve(view, limits(area)), area, clip, buffer);
+}
 
-    let maximum_width_crops_box = maximum_width_is_binding && clip.right() < box_area.right();
-    if !maximum_width_crops_box {
-        fill(box_area.intersection(clip), text_style, buffer);
-    }
-    if let Some(border) = parts.border {
-        draw_border(
-            widget_area,
-            available.intersection(clip),
-            border,
-            parts,
-            border_style(parts),
-            buffer,
-        );
-    }
+/// Translates a target rectangle into the outer clip the layout pass applies.
+fn limits(area: Rect) -> Limits {
+    Limits::size(usize::from(area.width), usize::from(area.height))
+}
 
-    let content_x = box_area
-        .x
-        .saturating_add(parts.padding.left.min(box_area.width));
-    let content_y = box_area
-        .y
-        .saturating_add(parts.padding.top.min(box_area.height));
-    let content_width = box_area
-        .width
-        .saturating_sub(parts.padding.left)
-        .saturating_sub(parts.padding.right);
-    let content_rows = box_area
-        .height
-        .saturating_sub(parts.padding.top)
-        .saturating_sub(parts.padding.bottom);
-    let rendered_content_height = content_height.min(content_rows);
-    let vertical_gap = content_rows.saturating_sub(rendered_content_height);
-    let vertical_offset = match parts.vertical_align {
-        VerticalAlign::Top => 0,
-        VerticalAlign::Center => vertical_gap / 2,
-        VerticalAlign::Bottom => vertical_gap,
-    };
-    let first_content_row = content_y.saturating_add(vertical_offset);
-    let last_content_row = first_content_row.saturating_add(rendered_content_height);
-
-    for y in box_area.top()..box_area.bottom() {
-        if y < first_content_row || y >= last_content_row {
-            fill(
-                Rect::new(box_area.x, y, box_area.width, 1).intersection(clip),
-                text_style,
-                buffer,
-            );
-        }
-    }
-
-    for (offset, line) in lines.iter().take(usize::from(content_rows)).enumerate() {
-        let line_width = visible_width(line).min(usize::from(u16::MAX)) as u16;
-        let gap = content_width.saturating_sub(line_width);
-        let alignment_offset = match parts.align {
-            Align::Left => 0,
-            Align::Center => gap / 2,
-            Align::Right => gap,
+/// Writes a resolved rectangle, anchored at `area`'s origin.
+///
+/// `clip` masks which cells may be written; it never moves the rectangle. A
+/// grapheme that would straddle the mask is dropped rather than split, matching
+/// how the layout pass crops.
+fn write_cells(resolved: &ResolvedView, area: Rect, clip: Rect, buffer: &mut Buffer) {
+    for (row, graphemes) in resolved.rows().iter().enumerate() {
+        let Some(y) = offset(area.y, row) else {
+            return;
         };
-        let y = content_y
-            .saturating_add(vertical_offset)
-            .saturating_add(offset as u16);
-        let x = content_x.saturating_add(alignment_offset);
-        if y >= clip.top() && y < clip.bottom() {
-            fill(
-                Rect::new(box_area.x, y, x.saturating_sub(box_area.x), 1).intersection(clip),
-                text_style,
-                buffer,
-            );
+        if y < clip.top() {
+            continue;
         }
-        if y >= clip.top() && y < clip.bottom() {
-            let available_cells = content_width.saturating_sub(alignment_offset);
-            draw_line_clipped(line, x, y, available_cells, clip, text_style, buffer);
-            if line_width <= available_cells {
-                let end_x = x.saturating_add(line_width);
-                fill(
-                    Rect::new(end_x, y, box_area.right().saturating_sub(end_x), 1)
-                        .intersection(clip),
-                    text_style,
-                    buffer,
-                );
-            }
+        if y >= clip.bottom() {
+            return;
+        }
+
+        let mut column = 0;
+        for grapheme in graphemes {
+            let Some(x) = offset(area.x, column) else {
+                break;
+            };
+            column += grapheme.width();
+            write_grapheme(grapheme, x, y, clip, buffer);
         }
     }
 }
 
-fn parts_limit(available: u16, maximum: Option<u16>) -> u16 {
-    match maximum {
-        Some(maximum) if maximum > 0 => available.min(maximum),
-        None => available,
-        Some(_) => available,
+/// Writes one grapheme, leaving the cells a wide grapheme hides reset.
+fn write_grapheme(grapheme: &StyledGrapheme, x: u16, y: u16, clip: Rect, buffer: &mut Buffer) {
+    // Zero-width graphemes have no cell of their own, and a grapheme is never
+    // split across the clip boundary.
+    let Ok(width) = u16::try_from(grapheme.width()) else {
+        return;
+    };
+    if width == 0 {
+        return;
     }
-}
-
-fn inset(area: Rect, sides: Sides) -> Option<Rect> {
-    let width = area
-        .width
-        .saturating_sub(sides.left)
-        .saturating_sub(sides.right);
-    let height = area
-        .height
-        .saturating_sub(sides.top)
-        .saturating_sub(sides.bottom);
-    (width > 0 && height > 0).then(|| {
-        Rect::new(
-            area.x.saturating_add(sides.left.min(area.width)),
-            area.y.saturating_add(sides.top.min(area.height)),
-            width,
-            height,
-        )
-    })
-}
-
-fn fill(area: Rect, style: InnerStyle, buffer: &mut Buffer) {
-    for y in area.top()..area.bottom() {
-        for x in area.left()..area.right() {
-            if let Some(cell) = buffer.cell_mut((x, y)) {
-                cell.set_symbol(" ").set_style(style);
-            }
-        }
-    }
-}
-
-fn draw_line_clipped(
-    line: &str,
-    x: u16,
-    y: u16,
-    available_cells: u16,
-    clip: Rect,
-    style: InnerStyle,
-    buffer: &mut Buffer,
-) {
-    let content_right = x.saturating_add(available_cells);
-    let mut cursor = x;
-
-    for grapheme in line.graphemes(true) {
-        let width = UnicodeWidthStr::width(grapheme).min(usize::from(u16::MAX)) as u16;
-        let next = cursor.saturating_add(width);
-        if next > content_right {
-            break;
-        }
-        if cursor >= clip.left() && next <= clip.right() {
-            buffer.set_stringn(cursor, y, grapheme, usize::from(width), style);
-        }
-        cursor = next;
-    }
-}
-
-fn border_style(parts: BoxParts) -> InnerStyle {
-    let mut style = InnerStyle::new();
-    if let Some(color) = parts.border_foreground {
-        style = style.fg(convert_color(color));
-    }
-    if let Some(color) = parts.border_background {
-        style = style.bg(convert_color(color));
-    }
-    style
-}
-
-fn draw_border(
-    area: Rect,
-    clip: Rect,
-    border: Border,
-    parts: BoxParts,
-    style: InnerStyle,
-    buffer: &mut Buffer,
-) {
-    if area.is_empty() {
+    let end = x.saturating_add(width);
+    if x < clip.left() || end > clip.right() {
         return;
     }
 
-    let left = area.left();
-    let content_left = left.saturating_add(u16::from(parts.border_left));
-    let content_width = area
-        .width
-        .saturating_sub(u16::from(parts.border_left))
-        .saturating_sub(u16::from(parts.border_right));
-    let right = content_left.saturating_add(content_width);
-    let top = area.top();
-    let content_top = top.saturating_add(u16::from(parts.border_top));
-    let content_height = area
-        .height
-        .saturating_sub(u16::from(parts.border_top))
-        .saturating_sub(u16::from(parts.border_bottom));
-    let bottom = content_top.saturating_add(content_height);
-
-    if parts.border_top {
-        if parts.border_left {
-            set_char_clipped(buffer, clip, left, top, border.top_left, style);
-        }
-        for x in content_left..content_left.saturating_add(content_width) {
-            set_char_clipped(buffer, clip, x, top, border.top, style);
-        }
-        if parts.border_right {
-            set_char_clipped(buffer, clip, right, top, border.top_right, style);
-        }
-    }
-
-    for y in content_top..content_top.saturating_add(content_height) {
-        if parts.border_left {
-            set_char_clipped(buffer, clip, left, y, border.left, style);
-        }
-        if parts.border_right {
-            set_char_clipped(buffer, clip, right, y, border.right, style);
-        }
-    }
-
-    if parts.border_bottom {
-        if parts.border_left {
-            set_char_clipped(buffer, clip, left, bottom, border.bottom_left, style);
-        }
-        for x in content_left..content_left.saturating_add(content_width) {
-            set_char_clipped(buffer, clip, x, bottom, border.bottom, style);
-        }
-        if parts.border_right {
-            set_char_clipped(buffer, clip, right, bottom, border.bottom_right, style);
-        }
-    }
-}
-
-fn set_char_clipped(
-    buffer: &mut Buffer,
-    clip: Rect,
-    x: u16,
-    y: u16,
-    value: char,
-    style: InnerStyle,
-) {
-    if x >= clip.left() && x < clip.right() && y >= clip.top() && y < clip.bottom() {
-        set_char(buffer, x, y, value, style);
-    }
-}
-
-fn set_char(buffer: &mut Buffer, x: u16, y: u16, value: char, style: InnerStyle) {
+    let style = RatatuiStyle::from(grapheme.style()).into_inner();
     if let Some(cell) = buffer.cell_mut((x, y)) {
-        cell.set_char(value).set_style(style);
+        cell.set_symbol(grapheme.symbol()).set_style(style);
     }
+    for hidden in x.saturating_add(1)..end {
+        if let Some(cell) = buffer.cell_mut((hidden, y)) {
+            cell.reset();
+        }
+    }
+}
+
+fn offset(origin: u16, cells: usize) -> Option<u16> {
+    u16::try_from(cells)
+        .ok()
+        .and_then(|cells| origin.checked_add(cells))
 }
 
 #[cfg(test)]
 mod tests {
     use ratatui::style::{Color as RatatuiColor, Modifier};
+    use urushi::{Align, Border, Color, TextStyle, VerticalAlign, visible_width};
 
     use super::*;
 
     #[test]
     fn converts_colors_and_every_modifier() {
         let converted = RatatuiStyle::from(
-            &BlockStyle::new()
+            &TextStyle::new()
                 .foreground(Color::Rgb(1, 2, 3))
                 .background(Color::Ansi256(212))
                 .bold()
@@ -479,23 +208,6 @@ mod tests {
     }
 
     #[test]
-    fn preserves_border_colors_for_composed_ratatui_widgets() {
-        let converted = RatatuiStyle::from(
-            &BlockStyle::new()
-                .border_foreground(Color::Rgb(10, 20, 30))
-                .border_background(Color::Ansi256(236)),
-        );
-
-        assert_eq!(converted.into_inner(), InnerStyle::new());
-        assert_eq!(
-            converted.border_style(),
-            InnerStyle::new()
-                .fg(RatatuiColor::Rgb(10, 20, 30))
-                .bg(RatatuiColor::Indexed(236))
-        );
-    }
-
-    #[test]
     fn maps_sixteen_color_palette_to_named_colors() {
         let expected = [
             RatatuiColor::Black,
@@ -518,31 +230,33 @@ mod tests {
 
         for (index, expected) in expected.into_iter().enumerate() {
             let converted =
-                RatatuiStyle::from(&BlockStyle::new().foreground(Color::Ansi(index as u8)))
+                RatatuiStyle::from(&TextStyle::new().foreground(Color::Ansi(index as u8)))
                     .into_inner();
             assert_eq!(converted.fg, Some(expected));
         }
     }
 
+    /// A block's border colors reach the buffer as the border graphemes' own
+    /// text style, so the adapter needs no separate border-style channel.
     #[test]
-    fn box_model_properties_are_not_in_the_subset() {
-        let plain = RatatuiStyle::from(&BlockStyle::new()).into_inner();
-        let boxed = RatatuiStyle::from(
-            &BlockStyle::new()
-                .padding(1)
-                .margin(1)
-                .border(Border::ROUNDED)
-                .border_foreground(Color::RED)
-                .width(20)
-                .height(10)
-                .max_width(18)
-                .max_height(8)
-                .align(Align::Center)
-                .align_vertical(VerticalAlign::Center),
-        )
-        .into_inner();
+    fn border_colors_arrive_as_the_border_graphemes_text_style() {
+        let style = BlockStyle::new()
+            .border(Border::ROUNDED)
+            .border_foreground(Color::Rgb(10, 20, 30))
+            .border_background(Color::Ansi256(236));
+        let area = Rect::new(0, 0, 3, 3);
+        let mut buffer = Buffer::empty(area);
 
-        assert_eq!(boxed, plain);
+        style.widget("x").render(area, &mut buffer);
+
+        let corner = buffer.cell((0, 0)).expect("border cell");
+        assert_eq!(corner.symbol(), "╭");
+        assert_eq!(corner.fg, RatatuiColor::Rgb(10, 20, 30));
+        assert_eq!(corner.bg, RatatuiColor::Indexed(236));
+
+        let content = buffer.cell((1, 1)).expect("content cell");
+        assert_eq!(content.fg, RatatuiColor::Reset);
+        assert_eq!(content.bg, RatatuiColor::Reset);
     }
 
     #[test]
@@ -572,8 +286,11 @@ mod tests {
         assert_eq!(border.fg, RatatuiColor::Red);
     }
 
+    /// A `Rect` narrower than the block crops it from the right. The crop drops
+    /// a grapheme that would straddle the bound rather than splitting it, so
+    /// `本` survives at cells 3–4 while the right border falls outside.
     #[test]
-    fn widget_clips_wide_content_without_splitting_a_grapheme() {
+    fn a_narrow_rect_crops_wide_content_without_splitting_a_grapheme() {
         let area = Rect::new(0, 0, 5, 3);
         let mut buffer = Buffer::empty(area);
 
@@ -582,9 +299,9 @@ mod tests {
             .widget("日本語")
             .render(area, &mut buffer);
 
-        assert_eq!(buffer_line(&buffer, 0), "┌───┐");
-        assert_eq!(buffer_line(&buffer, 1), "│日 │");
-        assert_eq!(buffer_line(&buffer, 2), "└───┘");
+        assert_eq!(buffer_line(&buffer, 0), "┌────");
+        assert_eq!(buffer_line(&buffer, 1), "│日本");
+        assert_eq!(buffer_line(&buffer, 2), "└────");
     }
 
     #[test]
@@ -601,6 +318,62 @@ mod tests {
         assert_eq!(buffer_line(&narrow, 0), "┌");
     }
 
+    #[test]
+    fn widget_styles_only_enabled_border_edges() {
+        let style = BlockStyle::new()
+            .foreground(Color::GREEN)
+            .border(Border::NORMAL)
+            .border_top(false)
+            .border_right(false)
+            .border_bottom(false)
+            .border_foreground(Color::RED);
+        let area = Rect::new(0, 0, 2, 1);
+        let mut buffer = Buffer::empty(area);
+
+        style.widget("x").render(area, &mut buffer);
+
+        assert_eq!(buffer_line(&buffer, 0), "│x");
+        assert_eq!(
+            buffer.cell((0, 0)).expect("border cell").fg,
+            RatatuiColor::Red
+        );
+        assert_eq!(
+            buffer.cell((1, 0)).expect("content cell").fg,
+            RatatuiColor::Green
+        );
+    }
+
+    /// A one-cell area keeps the block's top-left cell. A leading edge lands
+    /// there; a trailing edge is cropped away, because the crop never pulls a
+    /// far edge inwards to fit.
+    #[test]
+    fn a_one_cell_area_keeps_the_top_left_of_the_resolved_block() {
+        // (case, the one enabled edge as (top, right, bottom, left), expected)
+        let cases = [
+            ("top edge", (true, false, false, false), "-"),
+            ("left edge", (false, false, false, true), "|"),
+            ("bottom edge", (false, false, true, false), "x"),
+            ("right edge", (false, true, false, false), "x"),
+        ];
+
+        for (case, (top, right, bottom, left), expected) in cases {
+            let style = BlockStyle::new()
+                .border(Border::ASCII)
+                .border_top(top)
+                .border_right(right)
+                .border_bottom(bottom)
+                .border_left(left);
+            let area = Rect::new(0, 0, 1, 1);
+            let mut buffer = Buffer::empty(area);
+
+            style.widget("x").render(area, &mut buffer);
+
+            assert_eq!(buffer_line(&buffer, 0), expected, "{case}");
+        }
+    }
+
+    /// The widget resolves the same view `BlockStyle::render` does, so a `Rect`
+    /// at least as large as the block reproduces the direct output verbatim.
     #[test]
     fn widget_matches_direct_rendering_for_border_side_combinations() {
         let styles = [
@@ -635,23 +408,8 @@ mod tests {
                 .border_bottom(false),
         ];
 
-        for style in styles {
-            let direct = style.render("x");
-            let direct = direct.into_string();
-            let expected: Vec<_> = direct.lines().collect();
-            let width = expected
-                .iter()
-                .map(|line| visible_width(line))
-                .max()
-                .unwrap() as u16;
-            let area = Rect::new(0, 0, width, expected.len() as u16);
-            let mut buffer = Buffer::empty(area);
-
-            style.widget("x").render(area, &mut buffer);
-
-            for (y, expected_line) in expected.into_iter().enumerate() {
-                assert_eq!(buffer_line(&buffer, y as u16), expected_line);
-            }
+        for (index, style) in styles.into_iter().enumerate() {
+            assert_widget_matches_direct(&style, "x", &format!("border combination {index}"));
         }
     }
 
@@ -672,22 +430,7 @@ mod tests {
                 .padding((1, 1))
                 .border(Border::ASCII)
                 .border_top(false);
-            let direct = style.render(content);
-            let direct = direct.into_string();
-            let expected: Vec<_> = direct.lines().collect();
-            let width = expected
-                .iter()
-                .map(|line| visible_width(line))
-                .max()
-                .unwrap() as u16;
-            let area = Rect::new(0, 0, width, expected.len() as u16);
-            let mut buffer = Buffer::empty(area);
-
-            style.widget(content).render(area, &mut buffer);
-
-            for (y, expected_line) in expected.into_iter().enumerate() {
-                assert_eq!(buffer_line(&buffer, y as u16), expected_line, "{case}");
-            }
+            assert_widget_matches_direct(&style, content, case);
         }
     }
 
@@ -699,76 +442,81 @@ mod tests {
                 VerticalAlign::Center,
                 VerticalAlign::Bottom,
             ] {
-                let content = "日\nx";
                 let style = BlockStyle::new()
                     .width(6)
                     .height(7)
                     .padding((1, 1))
                     .align(horizontal)
                     .align_vertical(vertical);
-                let direct = style.render(content);
-                let direct = direct.into_string();
-                let expected: Vec<_> = direct.lines().collect();
-                let area = Rect::new(0, 0, 6, 7);
-                let mut buffer = Buffer::empty(area);
-
-                style.widget(content).render(area, &mut buffer);
-
-                for (y, expected_line) in expected.into_iter().enumerate() {
-                    assert_eq!(
-                        buffer_line(&buffer, y as u16),
-                        expected_line,
-                        "{horizontal:?} {vertical:?}"
-                    );
-                }
+                assert_widget_matches_direct(
+                    &style,
+                    "日\nx",
+                    &format!("{horizontal:?} {vertical:?}"),
+                );
             }
         }
     }
 
     #[test]
-    fn constrained_widget_realigns_center_and_bottom_within_the_available_height() {
+    fn widget_matches_direct_rendering_for_maximum_dimensions() {
+        let style = BlockStyle::new()
+            .width(6)
+            .height(4)
+            .padding((1, 1))
+            .border(Border::ASCII)
+            .margin(1)
+            .max_width(6)
+            .max_height(4);
+
+        assert_widget_matches_direct(&style, "ab", "maximum dimensions");
+    }
+
+    #[test]
+    fn widget_expands_narrow_fixed_width_for_cjk_parity() {
+        // A grapheme wider than the requested width expands the block rather
+        // than being dropped, in both backends.
+        assert_widget_matches_direct(&BlockStyle::new().width(1).height(2), "日本", "wrapped");
+        assert_widget_matches_direct(&BlockStyle::new().width(1), "日", "single grapheme");
+    }
+
+    #[test]
+    fn widget_matches_direct_maximum_width_cropping_of_wide_graphemes() {
+        // Cropping drops a straddling grapheme rather than splitting it, and
+        // the freed cells keep the block rectangular.
+        assert_widget_matches_direct(&BlockStyle::new().max_width(3), "日本語", "CJK");
+        assert_widget_matches_direct(&BlockStyle::new().max_width(3), "👩‍💻x", "ZWJ emoji");
+        assert_widget_matches_direct(
+            &BlockStyle::new().margin((0, 0, 0, 1)).max_width(2),
+            "日",
+            "margin before a wide cell",
+        );
+    }
+
+    /// A `Rect` smaller than the block crops it; it does not lay the block out
+    /// again inside the smaller area.
+    #[test]
+    fn rect_crops_the_resolved_block_instead_of_relaying_it_out() {
+        let style = BlockStyle::new().width(4).height(6);
         let area = Rect::new(0, 0, 4, 4);
 
-        for (align, expected_y) in [(VerticalAlign::Center, 1), (VerticalAlign::Bottom, 3)] {
-            let style = BlockStyle::new().width(4).height(6).align_vertical(align);
+        for (align, expected_row) in [
+            (VerticalAlign::Center, Some(2)),
+            (VerticalAlign::Bottom, None),
+        ] {
+            let style = style.clone().align_vertical(align);
             let mut buffer = Buffer::empty(area);
 
             style.widget("x").render(area, &mut buffer);
 
             for y in 0..area.height {
-                let expected = if y == expected_y { "x   " } else { "    " };
+                let expected = if Some(y) == expected_row {
+                    "x   "
+                } else {
+                    "    "
+                };
                 assert_eq!(buffer_line(&buffer, y), expected, "{align:?} row {y}");
             }
         }
-    }
-
-    #[test]
-    fn widget_expands_narrow_fixed_width_for_cjk_parity() {
-        let style = BlockStyle::new().width(1).height(2);
-        let direct = style.render("日本");
-        let area = Rect::new(0, 0, 2, 2);
-        let mut buffer = Buffer::empty(area);
-
-        style.widget("日本").render(area, &mut buffer);
-
-        assert_eq!(direct.as_str(), "日\n本");
-        assert_eq!(buffer_line(&buffer, 0), "日");
-        assert_eq!(buffer_line(&buffer, 1), "本");
-    }
-
-    #[test]
-    fn widget_preserves_narrow_width_only_clipping() {
-        let style = BlockStyle::new().background(Color::BLUE).width(1);
-        let area = Rect::new(0, 0, 2, 1);
-        let mut buffer = Buffer::empty(area);
-
-        style.widget("日").render(area, &mut buffer);
-
-        assert_eq!(buffer_line(&buffer, 0), "  ");
-        assert_eq!(
-            buffer.cell((0, 0)).expect("clipped content cell").bg,
-            RatatuiColor::Blue
-        );
     }
 
     #[test]
@@ -779,281 +527,83 @@ mod tests {
 
         style.widget("x").render(area, &mut buffer);
 
+        // The bottom border belongs to row 7 of the resolved block, so the
+        // crop removes it rather than pulling it up into the area.
         assert_eq!(buffer_line(&buffer, 0), "+----+");
         assert_eq!(buffer_line(&buffer, 1), "|x   |");
         assert_eq!(buffer_line(&buffer, 2), "|    |");
-        assert_eq!(buffer_line(&buffer, 3), "+----+");
+        assert_eq!(buffer_line(&buffer, 3), "|    |");
     }
 
+    /// A buffer covering only part of the target `Rect` masks which cells are
+    /// written; it never moves the layout's origin.
     #[test]
-    fn widget_maximum_dimensions_crop_the_resolved_outer_block() {
-        let layout = BlockStyle::new()
-            .width(6)
-            .height(4)
-            .padding((1, 1))
-            .border(Border::ASCII)
-            .margin(1)
-            .max_width(6)
-            .max_height(4);
-        let direct = layout.render("ab");
-        let direct = direct.into_string();
-        let expected: Vec<_> = direct.lines().collect();
-        let style = layout.background(Color::BLUE);
-        let area = Rect::new(0, 0, 12, 8);
-        let mut buffer = Buffer::empty(area);
-
-        style.widget("ab").render(area, &mut buffer);
-
-        assert_eq!(expected.len(), 4);
-        for (y, expected_line) in expected.into_iter().enumerate() {
-            assert_eq!(&buffer_line(&buffer, y as u16)[..6], expected_line);
-        }
-        assert_eq!(
-            buffer.cell((6, 2)).expect("outside max width").bg,
-            RatatuiColor::Reset
-        );
-        assert_eq!(
-            buffer.cell((2, 4)).expect("outside max height").bg,
-            RatatuiColor::Reset
-        );
-    }
-
-    #[test]
-    fn widget_maximum_width_does_not_split_a_cjk_cell() {
-        let style = BlockStyle::new().background(Color::BLUE).max_width(3);
-        let area = Rect::new(0, 0, 6, 1);
-        let mut buffer = Buffer::empty(area);
-
-        style.widget("日本語").render(area, &mut buffer);
-
-        assert_eq!(buffer.cell((0, 0)).expect("first CJK cell").symbol(), "日");
-        assert_eq!(buffer.cell((2, 0)).expect("inside max width").symbol(), " ");
-        assert_eq!(
-            buffer.cell((2, 0)).expect("ragged crop cell").bg,
-            RatatuiColor::Reset
-        );
-        assert_eq!(
-            buffer.cell((3, 0)).expect("outside max width").bg,
-            RatatuiColor::Reset
-        );
-    }
-
-    #[test]
-    fn widget_maximum_width_accounts_for_margin_before_a_wide_cell() {
-        let style = BlockStyle::new()
-            .background(Color::BLUE)
-            .margin((0, 0, 0, 1))
-            .max_width(2);
-        let area = Rect::new(0, 0, 3, 1);
-        let mut buffer = Buffer::empty(area);
-
-        style.widget("日").render(area, &mut buffer);
-
-        // Cropping drops the wide cell rather than splitting it, and the freed
-        // cell keeps the block rectangular at the cropped width.
-        assert_eq!(style.render("日").as_str(), "  ");
-        assert_eq!(buffer.cell((0, 0)).expect("retained margin").symbol(), " ");
-        assert_eq!(
-            buffer.cell((1, 0)).expect("ragged crop cell").bg,
-            RatatuiColor::Reset
-        );
-        assert_eq!(
-            buffer.cell((2, 0)).expect("outside maximum width").bg,
-            RatatuiColor::Reset
-        );
-    }
-
-    #[test]
-    fn widget_maximum_width_uses_grapheme_width_for_zwj_emoji() {
-        let style = BlockStyle::new().background(Color::BLUE).max_width(3);
-        let area = Rect::new(0, 0, 6, 1);
-        let mut buffer = Buffer::empty(area);
-
-        style.widget("👩‍💻x").render(area, &mut buffer);
-
-        assert_eq!(buffer.cell((0, 0)).expect("emoji cell").symbol(), "👩‍💻");
-        assert_eq!(buffer.cell((2, 0)).expect("following cell").symbol(), "x");
-        assert_eq!(
-            buffer.cell((3, 0)).expect("outside max width").bg,
-            RatatuiColor::Reset
-        );
-    }
-
-    #[test]
-    fn widget_maximum_clip_stays_anchored_to_the_requested_area() {
-        let style = BlockStyle::new()
-            .background(Color::BLUE)
-            .width(10)
-            .max_width(6);
-        let buffer_area = Rect::new(5, 0, 10, 1);
-        let mut buffer = Buffer::empty(buffer_area);
+    fn a_partial_buffer_masks_cells_without_moving_the_layout() {
+        let style = BlockStyle::new().width(10);
+        let mut buffer = Buffer::empty(Rect::new(5, 0, 5, 1));
 
         style
-            .widget("x")
+            .widget("abcdefghij")
             .render(Rect::new(0, 0, 10, 1), &mut buffer);
 
-        assert_eq!(
-            buffer.cell((5, 0)).expect("inside max width").bg,
-            RatatuiColor::Blue
-        );
-        assert_eq!(
-            buffer.cell((6, 0)).expect("outside max width").bg,
-            RatatuiColor::Reset
-        );
+        assert_eq!(buffer_line(&buffer, 0), "fghij");
+
+        let style = BlockStyle::new().width(1).height(4);
+        let mut buffer = Buffer::empty(Rect::new(0, 2, 1, 2));
+
+        style
+            .widget("a\nb\nc\nd")
+            .render(Rect::new(0, 0, 1, 4), &mut buffer);
+
+        assert_eq!(buffer.cell((0, 2)).expect("third row").symbol(), "c");
+        assert_eq!(buffer.cell((0, 3)).expect("fourth row").symbol(), "d");
     }
 
     #[test]
-    fn widget_buffer_intersection_only_clips_the_resolved_layout() {
-        let horizontal = BlockStyle::new().width(10).max_width(6);
-        let horizontal_area = Rect::new(5, 0, 10, 1);
-        let mut horizontal_buffer = Buffer::empty(horizontal_area);
-
-        horizontal
-            .widget("abcdefghij")
-            .render(Rect::new(0, 0, 10, 1), &mut horizontal_buffer);
-
-        assert_eq!(
-            horizontal_buffer
-                .cell((5, 0))
-                .expect("sixth resolved cell")
-                .symbol(),
-            "f"
+    fn view_widget_draws_a_bordered_block_inside_a_row() {
+        let view = View::row(
+            VerticalAlign::Center,
+            [
+                View::text("status: ", TextStyle::new()),
+                View::block(
+                    BlockStyle::new()
+                        .border(Border::ROUNDED)
+                        .border_foreground(Color::GREEN),
+                    View::text("ok", TextStyle::new().foreground(Color::GREEN)),
+                ),
+            ],
         );
-        assert_eq!(
-            horizontal_buffer
-                .cell((6, 0))
-                .expect("outside maximum width")
-                .symbol(),
-            " "
-        );
-
-        let vertical = BlockStyle::new().width(1).max_height(4);
-        let vertical_area = Rect::new(0, 2, 1, 2);
-        let mut vertical_buffer = Buffer::empty(vertical_area);
-
-        vertical
-            .widget("a\nb\nc\nd\ne")
-            .render(Rect::new(0, 0, 1, 5), &mut vertical_buffer);
-
-        assert_eq!(
-            vertical_buffer.cell((0, 2)).expect("third row").symbol(),
-            "c"
-        );
-        assert_eq!(
-            vertical_buffer.cell((0, 3)).expect("fourth row").symbol(),
-            "d"
-        );
-    }
-
-    #[test]
-    fn widget_preserves_legacy_partial_buffer_layout_without_a_binding_maximum() {
-        let styles = [
-            BlockStyle::new().width(10),
-            BlockStyle::new().width(10).max_width(0),
-            BlockStyle::new().width(10).max_width(99),
-        ];
-        for style in styles {
-            let buffer_area = Rect::new(5, 0, 5, 1);
-            let mut buffer = Buffer::empty(buffer_area);
-
-            style
-                .widget("abcdefghij")
-                .render(Rect::new(0, 0, 10, 1), &mut buffer);
-
-            assert_eq!(buffer_line(&buffer, 0), "abcde");
-        }
-
-        let styles = [
-            BlockStyle::new().width(1).height(4),
-            BlockStyle::new().width(1).height(4).max_height(0),
-            BlockStyle::new().width(1).height(4).max_height(99),
-        ];
-        for style in styles {
-            let buffer_area = Rect::new(0, 2, 1, 2);
-            let mut buffer = Buffer::empty(buffer_area);
-
-            style
-                .widget("a\nb\nc\nd")
-                .render(Rect::new(0, 0, 1, 4), &mut buffer);
-
-            assert_eq!(
-                buffer.cell((0, 2)).expect("first visible row").symbol(),
-                "a"
-            );
-            assert_eq!(
-                buffer.cell((0, 3)).expect("second visible row").symbol(),
-                "b"
-            );
-        }
-    }
-
-    #[test]
-    fn widget_styles_only_enabled_border_edges() {
-        let style = BlockStyle::new()
-            .foreground(Color::GREEN)
-            .border(Border::NORMAL)
-            .border_top(false)
-            .border_right(false)
-            .border_bottom(false)
-            .border_foreground(Color::RED);
-        let area = Rect::new(0, 0, 2, 1);
+        let area = Rect::new(0, 0, 12, 3);
         let mut buffer = Buffer::empty(area);
 
-        style.widget("x").render(area, &mut buffer);
+        ViewWidget::new(&view).render(area, &mut buffer);
 
-        assert_eq!(buffer_line(&buffer, 0), "│x");
+        assert_eq!(buffer_line(&buffer, 0), "        ╭──╮");
+        assert_eq!(buffer_line(&buffer, 1), "status: │ok│");
+        assert_eq!(buffer_line(&buffer, 2), "        ╰──╯");
         assert_eq!(
-            buffer.cell((0, 0)).expect("border cell").fg,
-            RatatuiColor::Red
-        );
-        assert_eq!(
-            buffer.cell((1, 0)).expect("content cell").fg,
+            buffer.cell((8, 0)).expect("border cell").fg,
             RatatuiColor::Green
         );
     }
 
-    #[test]
-    fn widget_draws_the_configured_edge_in_degenerate_areas() {
-        let cases = [
-            (
-                BlockStyle::new()
-                    .border(Border::ASCII)
-                    .border_right(false)
-                    .border_bottom(false)
-                    .border_left(false),
-                "-",
-            ),
-            (
-                BlockStyle::new()
-                    .border(Border::ASCII)
-                    .border_top(false)
-                    .border_right(false)
-                    .border_bottom(false),
-                "|",
-            ),
-            (
-                BlockStyle::new()
-                    .border(Border::ASCII)
-                    .border_top(false)
-                    .border_right(false)
-                    .border_left(false),
-                "-",
-            ),
-            (
-                BlockStyle::new()
-                    .border(Border::ASCII)
-                    .border_top(false)
-                    .border_bottom(false)
-                    .border_left(false),
-                "|",
-            ),
-        ];
+    /// Asserts the widget reproduces `BlockStyle::render` in a `Rect` sized to
+    /// the block.
+    fn assert_widget_matches_direct(style: &BlockStyle, content: &str, case: &str) {
+        let direct = style.render(content);
+        let expected: Vec<&str> = direct.as_str().lines().collect();
+        let area = Rect::new(
+            0,
+            0,
+            u16::try_from(direct.size().width()).expect("block width"),
+            u16::try_from(direct.size().height()).expect("block height"),
+        );
+        let mut buffer = Buffer::empty(area);
 
-        for (style, expected) in cases {
-            let area = Rect::new(0, 0, 1, 1);
-            let mut buffer = Buffer::empty(area);
-            style.widget("x").render(area, &mut buffer);
-            assert_eq!(buffer_line(&buffer, 0), expected);
+        style.widget(content).render(area, &mut buffer);
+
+        for (y, expected_line) in expected.into_iter().enumerate() {
+            assert_eq!(buffer_line(&buffer, y as u16), expected_line, "{case}");
         }
     }
 
