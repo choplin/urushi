@@ -19,11 +19,23 @@ A top-level document describes the code as it exists today. A document that
 instead defines a target architecture for planned work must say so explicitly
 and defer to `architecture.md` as the source of truth for the current state.
 
-## `design/`: why
+A top-level document carries the background and goals a reader needs to
+understand the shape it defines — the problem the unit solves and what it must
+provide. A contract stated without its purpose is not comprehensible. What it
+does not carry is the defense of that shape against the alternatives it was
+chosen over.
+
+## `design/`: why this shape and not another
 
 Each file under [`design/`](design/) records one design decision: the rule
-itself and the reasoning behind it, including rejected alternatives and past
-history where they explain the choice.
+itself, the reasoning behind it, the rejected alternatives, and past history
+where it explains the choice. Its subject is always a choice that could have
+gone another way.
+
+Placement follows from what is lost by deletion. If removing a passage leaves
+the reader unable to understand the rule, it belongs with the rule. If the
+reader still understands the rule but can no longer judge whether it should
+change, it belongs here.
 
 These are not ADRs. When a decision changes, its file is rewritten in place to
 describe the current decision; the file always reads as the present rationale,
@@ -40,6 +52,6 @@ when decisions were made and what they replaced.
 
 Every statement has exactly one home. A document that needs a fact settled
 elsewhere links to it instead of restating it. In particular: top-level
-documents state rules and link to `design/` for the reasoning; `design/`
-documents own the why and do not re-specify contracts that a top-level document
-defines.
+documents state rules and link to `design/` for the justification of the choice
+behind them; `design/` documents own that justification and do not re-specify
+contracts that a top-level document defines.
