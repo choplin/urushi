@@ -42,8 +42,8 @@ let style = TextStyle::new()
 
 `TextStyle::new()` and `TextStyle::default()` are empty styles. Removing a property
 restores its ordinary default in the resulting value: no color, no border,
-zero spacing, automatic width and height, left horizontal alignment, or top
-vertical alignment.
+zero spacing, automatic width and height, no minimum or maximum bounds, wrap
+overflow, left horizontal alignment, or top vertical alignment.
 
 ## Closed property vocabulary
 
@@ -78,10 +78,13 @@ enum BlockStyleProperty {
     BorderLeft(bool),
     BorderForeground(Color),
     BorderBackground(Color),
-    Width(u16),
-    Height(u16),
+    Width(Length),
+    Height(Length),
+    MinWidth(u16),
+    MinHeight(u16),
     MaxWidth(u16),
     MaxHeight(u16),
+    Overflow(Overflow),
     Align(Align),
     VerticalAlign(VerticalAlign),
 }
@@ -99,8 +102,11 @@ enum BlockStylePropertyKey {
     BorderBackground,
     Width,
     Height,
+    MinWidth,
+    MinHeight,
     MaxWidth,
     MaxHeight,
+    Overflow,
     Align,
     VerticalAlign,
 }
@@ -137,10 +143,11 @@ let style = BlockStyle::new()
     .bold()
     .padding((0, 1))
     .border(Border::ROUNDED)
-    .width(20)
-    .height(5)
-    .max_width(18)
-    .max_height(6)
+    .width(20)                     // Length::Cells(20) through From<u16>
+    .height(Length::Fill(1))
+    .min_width(12)
+    .max_width(60)
+    .overflow(Overflow::Ellipsis)
     .align(Align::Center)
     .align_vertical(VerticalAlign::Center);
 ```
@@ -194,46 +201,73 @@ If an application needs several transforms, it can fold functions over a base
 style. There is no separate patch data type; the reasoning is recorded in
 [`design/style-value-model.md`](design/style-value-model.md).
 
-## Fixed dimensions
+## Dimensions
 
-`width` and `height` describe the padded content box. Padding is inside the
-requested dimensions; enabled border columns and rows, followed by margin, are
-outside them. For example, `height(3)` with a top and bottom border produces
-five rows before margin.
+The `Length` vocabulary, the clamp, the distribution across siblings, and the
+degenerate cases are defined in [`view-model.md`](view-model.md)'s Sizing
+section; this document states what the properties mean as style values.
 
-Fixed height is a minimum, not a clipping limit. Content taller than the fixed
-height expands the box so no row is discarded. An output boundary with a finite
-area, such as a Ratatui `Rect`, may still clip the resolved box to that area.
-Dedicated maximum-dimension properties own content truncation when present;
-fixed height does not. Fixed width is a minimum in the same sense: a grapheme
-wider than the requested width expands the content box rather than being
-dropped, because the layout pass never splits a wide character. This happens in
-the layout pass, so every backend sees the expanded box; it is not a Ratatui
-adjustment made against the available `Rect`.
+All six sizing properties — `width`, `height`, `min_width`, `min_height`,
+`max_width`, `max_height` — describe the box the terminal shows: content plus
+padding plus enabled border edges. Margin lies outside. `height(Cells(3))`
+with a top and bottom border is three rows tall, one of them content. The
+absence of `width` or `height` means auto: the intrinsic size of the content.
+`u16` converts into `Length::Cells`, so `width(20)` reads as before.
+
+A dimension is a preferred size, resolved under the available area: shorter
+content is padded out to it, longer content is absorbed by the overflow rule
+below, and the frame closes at the resolved size either way.
+
+Conversions between the outer box and the content area inside it go through
+one query: `frame_size()` returns the per-axis overhead of enabled border
+edges plus padding. (Margin lies outside the box and keeps its own getter.)
+Outer to inner — how many rows fit a panel of a given height — is
+subtraction; inner to outer is rarely arithmetic at all: an unsized box
+already takes its content's size plus frame, and an exact content dimension
+is expressed structurally with an inner unframed block, as
+[`view-model.md`](view-model.md) shows. The query exists for the numbers that
+leave the style system: matching another box's size, or computing an
+application's layout breakpoints.
 
 Shorter content is top-aligned by default. `align_vertical` places the padded
-content block at the top, center, or bottom of the fixed content box. Like Lip
-Gloss, centered content puts an odd extra row below the padded block: a
+content block at the top, center, or bottom of the resolved content box. Like
+Lip Gloss, centered content puts an odd extra row below the padded block: a
 three-row gap is split as one row above and two below. Background color covers
-both padding and every alignment row in the fixed content box.
+both padding and every alignment row.
 
-## Maximum dimensions
+## Minimum and maximum dimensions
 
-`max_width` and `max_height` are hard limits on the final rendered block. In
-contrast to fixed dimensions, they include padding, enabled border edges, and
-margin. Like Lip Gloss, a zero maximum disables that constraint; use generic
-`remove` when the property itself should be absent from the `TextStyle` value.
+`min_width`, `min_height`, `max_width`, and `max_height` are bounds in cells
+on the same box the dimensions measure. They participate in layout: a box
+shrinks to fit its content down to its minimum and never exceeds its maximum.
+A maximum without a dimension gives shrink-to-fit sizing with a cap and no
+padding-out; a minimum states the size below which the application's layout
+stops making sense, which also fixes the box's floor when siblings compete
+for a too-small area.
 
-Rendering first wraps content only when `width` is present, then resolves fixed
-width and height, alignment, padding, border, and margin. Maximum dimensions
-are applied last: `max_width` crops every row without rewrapping, and
-`max_height` keeps rows from the top. Consequently, a maximum wins when it is
-smaller than a fixed dimension. Cropping never splits a grapheme cluster or a
-wide character: a grapheme that would straddle the bound is dropped, and the
-freed cells become blanks so the block stays rectangular at the cropped width.
+Below every explicit minimum lies the implicit one: the layout pass never
+splits a grapheme cluster or a wide character, so a box never resolves
+narrower than its widest unsplittable token without entering the degenerate
+rules. Bounds are absent by default; use generic `remove` to delete one, not
+a zero value.
 
-Ratatui follows the same order. Its `Rect` remains an additional external clip;
-the smaller of the explicit maximum and the available area is visible.
+## Overflow
+
+Content that cannot fit the resolved box is absorbed by the content, under a
+policy the application chooses per block:
+
+```rust
+pub enum Overflow {
+    Wrap,      // reflow to the content width — the default
+    Clip,      // cut inside the frame; the frame stays closed
+    Ellipsis,  // clip, with a trailing … marking the cut
+}
+```
+
+`overflow` governs the width axis; height always clips inside the frame. No
+policy opens the frame: a border is never cut by sizing, only by the
+degenerate safety net. Cutting an already-rendered string at a column is a
+text-layer utility, not a style property.
 
 ## Theme contract
 
@@ -286,10 +320,9 @@ A border with all four sides disabled contributes no rows or columns and is
 layout-equivalent to no border. Border foreground and background colors apply
 uniformly to every enabled edge. The direct ANSI renderer and the Ratatui
 widget use this same geometry, because both consume the same resolved
-rectangle. A `Rect` smaller than the block clips it at the area's right and
-bottom boundaries; it does not lay the box out again inside the smaller area,
-so a trailing border edge outside the area is cropped rather than pulled
-inwards.
+rectangle. A `Rect` smaller than the block is an `Available` bound the box
+resolves under, so the frame closes inside the area; only the degenerate
+safety net — an area the frame itself cannot fit — ever crops an edge.
 
 ## Required verification
 

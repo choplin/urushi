@@ -59,7 +59,7 @@ plain text + BlockStyle --> BlockStyle::render --> RenderedBlock
 ```
 
 `BlockStyle::render` resolves `Block(style, Text(content, style.text))` with
-unbounded limits, so there is one implementation of the box model in the
+unbounded `Available`, so there is one implementation of the box model in the
 workspace. [`RenderedBlock`](../urushi/src/view/rendered.rs) carries the size it
 was measured at; `join_horizontal` and `join_vertical` compose such blocks
 without re-measuring escape sequences. The reasoning behind this shape is
@@ -75,8 +75,8 @@ View + Rect          --> ViewWidget    --> caller-owned Ratatui Buffer
 BlockStyle + text    --> RatatuiWidget --> ViewWidget's path
 ```
 
-The Ratatui adapter computes no geometry. A target `Rect` becomes `Limits`, the
-same layout pass resolves the view, and the adapter converts each grapheme and
+The Ratatui adapter computes no geometry. A target `Rect` becomes `Available`, the
+same layout pass resolves the view within it, and the adapter converts each grapheme and
 its logical style into cells, so the two backends cannot disagree about a
 rectangle.
 
@@ -200,7 +200,7 @@ to share styling.
 | [`style`](../urushi/src/style/) | Colors, border glyphs, box spacing and alignment, the text `TextStyle` and the geometry-bearing `BlockStyle`, and the direct block render entry point. | `text`, `view` |
 | [`text`](../urushi/src/text/) | ANSI-aware visible-width measurement and cell-aware word/CJK wrapping. | None |
 | [`theme`](../urushi/src/theme/) | Semantic color tokens, reusable component roles and styles, application role resolution, and explicit light/dark selection. | `style` |
-| [`view`](../urushi/src/view/) | The renderer-neutral `View` tree, the one layout pass (`measure` / `resolve`, `Size`, `Limits`, `StyledGrapheme`, `ResolvedView`), and composition of already-rendered `RenderedBlock` values. | `style`, `text` |
+| [`view`](../urushi/src/view/) | The renderer-neutral `View` tree, the one layout pass (`measure` / `resolve`, `Size`, `Available`, `StyledGrapheme`, `ResolvedView`), and composition of already-rendered `RenderedBlock` values. | `style`, `text` |
 | [`component`](../urushi/src/component/) | Reusable semantic components that return `View`; currently summaries, warnings, owned lists, owned trees, and owned tables. | `theme`, `view`, `text` |
 | [`render`](../urushi/src/render/) | Translation of renderer-neutral views to ANSI text. | `style`, `view`, `terminal/profile` |
 | [`terminal`](../urushi/src/terminal/) | Terminal capability detection, color degradation, stderr ownership, output-mode selection, and optional progress lifecycle. | `style`, `theme`, `view`, `render` |
@@ -301,7 +301,7 @@ implements no alignment of its own.
   scope.
 - [`urushi-tui/src/style.rs`](../urushi-tui/src/style.rs) converts the
   stylable subset and border colors to Ratatui types.
-- [`urushi-tui/src/widget.rs`](../urushi-tui/src/widget.rs) derives `Limits`
+- [`urushi-tui/src/widget.rs`](../urushi-tui/src/widget.rs) derives `Available`
   from the target `Rect`, resolves the view through the same layout pass, and
   writes the resulting graphemes into a caller-provided Ratatui buffer. It
   implements no box model and measures no display width of its own.
@@ -482,7 +482,7 @@ changed deliberately and this document is updated in the same change:
 ### Change Ratatui support
 
 1. Keep style/color conversion in `urushi-tui/src/style.rs`.
-2. Keep `Rect`-to-`Limits` translation and cell writing in
+2. Keep `Rect`-to-`Available` translation and cell writing in
    `urushi-tui/src/widget.rs`, and any geometry it would need in `urushi`'s
    layout pass.
 3. Preserve the caller's ownership of terminal setup, event processing, state,

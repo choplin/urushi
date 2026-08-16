@@ -22,7 +22,8 @@ pub struct BlockStyle {
     padding, margin,
     border, border_top, border_right, border_bottom, border_left,
     border_foreground, border_background,
-    width, height, max_width, max_height,
+    width, height, min_width, min_height, max_width, max_height,
+    overflow,
     align, vertical_align,
     text: TextStyle,
 }
@@ -56,7 +57,9 @@ there is one way to express each node.
 
 ## Composition
 
-Every node resolves to a rectangle.
+Every node resolves to a rectangle. The rules below give each node its
+*intrinsic* size — the rectangle it takes when the area imposes no bound; how a
+bounded area changes these sizes is defined in the Sizing section.
 
 - A `Text` node's rectangle is its own lines, padded to the width of its widest
   line.
@@ -93,17 +96,25 @@ rectangle:
 ```rust
 pub struct Size { width: usize, height: usize }
 
-/// An outer clip applied after intrinsic layout.
-pub struct Limits { max_width: Option<usize>, max_height: Option<usize> }
+/// The area a view may occupy: an input to layout, not an afterthought.
+pub struct Available { width: Option<usize>, height: Option<usize> }
 
 /// One grapheme, the width it occupies, and its logical style.
 pub struct StyledGrapheme { symbol: String, width: usize, style: TextStyle }
 
 pub struct ResolvedView { size: Size, rows: Vec<Vec<StyledGrapheme>> }
 
+/// The intrinsic size: what the view asks for when nothing bounds it.
 pub fn measure(view: &View) -> Size;
-pub fn resolve(view: &View, limits: Limits) -> ResolvedView;
+pub fn resolve(view: &View, available: Available) -> ResolvedView;
 ```
+
+`Available` — a terminal width, or a Ratatui `Rect` — participates in sizing
+from the start: it flows down the tree, each node's resolved size flows back
+up, and each node is visited once in each direction. It is not a clip applied
+to a finished rectangle. The Sizing section defines how a bound reshapes a
+box; a raw crop survives only as the degenerate-case safety net defined
+there.
 
 Every row's widths sum to `size.width`, and the row count equals `size.height`.
 Styles in a `ResolvedView` are logical: a `TerminalProfile` is applied when a
@@ -115,12 +126,155 @@ sees text below grapheme granularity and receives every width from the layout
 pass instead of re-deriving it.
 
 `BlockStyle::render` is the single-block case of the same pass: it resolves
-`Block(style, Text(content, style.text))` with unbounded limits. There is one
-implementation of the box model in the workspace.
+`Block(style, Text(content, style.text))` with unbounded `Available`. There is
+one implementation of the box model in the workspace.
 
-Clipping is layered. `BlockStyle`'s `max_width` and `max_height` crop a block
-during resolution; `Limits` — a terminal width, or a Ratatui `Rect` — is applied
-last, so the smaller bound wins.
+## Sizing
+
+Three questions are kept separate: how large a box is, how siblings share an
+area, and what happens to content that does not fit. Why they separate this
+way, and which alternatives were rejected, is recorded in
+[`design/view-block-model.md`](design/view-block-model.md).
+
+### How large a box is
+
+Sizes are expressed in one vocabulary:
+
+```rust
+pub enum Length {
+    Cells(u16),  // an absolute number of terminal cells
+    Fill(u16),   // a weighted share of the remaining area
+}
+```
+
+`width` and `height` take a `Length`; their absence means *auto* — the
+intrinsic size. `u16` converts into `Length::Cells`, so `width(20)` stays
+concise. `min_width`, `min_height`, `max_width`, and `max_height` are bounds
+in cells. Every one of these measures the same box: content plus padding plus
+enabled border edges. Margin lies outside. A bordered box "of width 6" is six
+visible cells wide — `┌────┐` — and a `Fill` share and an `Available` bound
+measure that same box.
+
+A box's used size is a clamp, per axis:
+
+```
+base = width if set (Cells directly; Fill resolved against the remaining area)
+       else the intrinsic size
+used = base
+         capped by  min(max_width, available)
+         floored by max(min_width, min-content)
+```
+
+*min-content* is the size below which the box cannot go without splitting a
+grapheme: the widest unsplittable token for width, one row per line for
+height. `measure` returns the *max-content* size. When the floor exceeds the
+cap, the floor wins and the degenerate rules below apply.
+
+There is no property that sizes the content box from inside a frame. A box
+with no size takes its content's size plus frame; an exact content dimension
+is written structurally, as a size on an unframed inner block, whose outer
+size and content size coincide:
+
+```rust
+// "Wrap this text at 40 cells" inside a framed panel.
+View::block(panel,                       // border and padding, width auto
+    View::block(BlockStyle::new().width(40), text))
+```
+
+Conversions that leave the style system — matching another box's outer size,
+or computing an application's layout breakpoints — go through
+`BlockStyle::frame_size`, defined in [`style-model.md`](style-model.md).
+
+### How siblings share an area
+
+`Row` hands its available width to its children; `Column`, its height. On that
+main axis:
+
+- `Cells` children take their stated size.
+- Auto children take their intrinsic size.
+- `Fill` children divide what remains, in proportion to their weights.
+
+```rust
+// A fixed sidebar; main takes the rest.
+View::row([sidebar.width(20), main.width(Fill(1))])
+// A 50/50 split, and a 1:2 split.
+View::row([a.width(Fill(1)), b.width(Fill(1))])
+View::row([a.width(Fill(1)), b.width(Fill(2))])
+// A status bar: ends sized to content, the middle absorbs the slack.
+View::row([mode, path.width(Fill(1)).overflow(Overflow::Ellipsis), pos])
+```
+
+On the cross axis — height in a `Row`, width in a `Column` — there is nothing
+to divide: the container passes its available extent to every child
+unchanged, and a `Fill` length there stretches to it. A fixed-width sidebar
+spanning the terminal's height is `width(20).height(Fill(1))` inside a `Row`,
+and panels stacked inside it divide that height with their own `Length`s.
+
+Each child is resolved once at its assigned size. There is no renegotiation: a
+`Fill` child whose clamp caps it below its share leaves the remainder unused,
+and the container resolves smaller than its area. Capping a *group* therefore
+belongs on an enclosing block:
+
+```rust
+// Sidebar plus main, at most 120 cells, centered in the terminal.
+View::block(BlockStyle::new().width(Fill(1)).align(Align::Center),
+    View::block(BlockStyle::new().max_width(120),
+        View::row([sidebar.width(20), main.width(Fill(1))])))
+```
+
+A box resolved below its available area is *placed* by its parent's existing
+alignment — `align`, `vertical_align`, and the `Row`/`Column` parameters — as
+the outer `Fill(1)` block above places the capped group.
+
+When even minimum sizes exceed the area, children shrink below their intrinsic
+sizes: `Fill` children first, then auto children, then `Cells` children, each
+proportionally to size and floored at its own `max(min_width, min-content)`. A
+floor that binds freezes that child and the shortfall falls on the rest — an
+iteration over numbers only; no child is laid out twice.
+
+A `Fill` length resolves against an area, so it needs one: a box containing a
+`Fill` child spans its own available extent (through its own clamp). Under
+`measure`, where no area exists, `Fill` contributes the intrinsic size, and
+weights have no effect.
+
+### What happens to content that does not fit
+
+The frame always closes at the used size. Overflow is absorbed by the
+content, under a policy the application chooses per block:
+
+```rust
+pub enum Overflow {
+    Wrap,      // width default: reflow to the content width
+    Clip,      // cut inside the frame; the frame stays closed
+    Ellipsis,  // clip, with a trailing … marking the cut
+}
+```
+
+`overflow` governs the width axis. Height always clips inside the frame;
+clipping inside a closed frame is a viewport's behavior, so scrolling composes
+on top of this rule. A bare `Text` resolved in a narrow area wraps — the same
+default a block's content gets; choosing another policy requires a block,
+because the policy is a box property. Cutting an already-rendered string at a
+column is a text-layer utility, not part of the box model.
+
+### Degenerate cases
+
+When a box cannot reach even its floor, it degrades in order: margin
+collapses first, then padding, then content. Only when the area cannot hold
+the frame itself — two border columns in a width of one — does the final
+safety net crop the assembled rectangle, grapheme-atomically, blank-filling a
+dropped wide character's cells. This crop is the single way a frame is ever
+cut, and it is unreachable while the frame fits.
+
+### What stays outside layout
+
+Conditional structure is not a sizing property. "Hide the sidebar when the
+terminal is narrow" and "stack vertically below 80 cells" are decisions about
+which tree to build, made by the application's view function, which holds the
+size that `resolve` will be given. The model's obligation is that breakpoints
+are computable — `measure` is public, minimums are declared, and
+`BlockStyle::frame_size` exposes a box's frame overhead — not that trees
+rewrite themselves.
 
 ## Plain text and rendered output
 
@@ -163,12 +317,12 @@ escape sequences at all.
 
 - `AnsiRenderer` resolves a view and serializes each row, coalescing adjacent
   graphemes of equal effective style into one SGR scope.
-- `urushi-tui`'s `ViewWidget` derives `Limits` from the target `Rect`, resolves
-  the view, converts each grapheme's logical `TextStyle` through `RatatuiStyle`, and
-  writes cells. `RatatuiWidget` draws a single `BlockStyle` through the same
-  path.
-- The core crate holds no Ratatui dependency: `ResolvedView` and `Limits` are
-  Urushi values.
+- `urushi-tui`'s `ViewWidget` derives `Available` from the target `Rect`,
+  resolves the view, converts each grapheme's logical `TextStyle` through
+  `RatatuiStyle`, and writes cells. `RatatuiWidget` draws a single `BlockStyle`
+  through the same path.
+- The core crate holds no Ratatui dependency: `ResolvedView` and `Available`
+  are Urushi values.
 
 A backend does not compute geometry. Drawing each block by handing its `Rect` to
 a widget that lays the box out again would put a second box model in the
@@ -190,8 +344,21 @@ Changes to this model must test:
   height is the block's, in both backends;
 - a shared corpus of views asserted against both the ANSI string and the Ratatui
   buffer, so the backends cannot diverge silently;
-- `BlockStyle::render` results for border side combinations, fixed and maximum
-  dimensions, alignment, and wrapping;
+- `width`, the `min`/`max` bounds, and `Available` agreeing on the box they
+  measure: a bordered `width(6)` box occupies six cells;
+- a closed frame at every combination of bound and content length — no resolve
+  output with a cut border outside the degenerate cases;
+- `Fill` distribution: fixed-plus-rest, equal and weighted splits, cross-axis
+  stretch, a capped `Fill` child leaving slack unredistributed, and the
+  enclosing `max_width`-block idiom;
+- deficit shrinking order and floors, including a binding floor freezing a
+  child;
+- each `Overflow` value on the width axis, and height clipping inside the
+  frame;
+- degenerate degradation order, and the safety-net crop only when the frame
+  itself cannot fit;
+- `BlockStyle::render` results for border side combinations, `Length` and
+  bound combinations, alignment, and wrapping;
 - `Row` and `Column` alignment including the odd-row `Center` bias, and
   `BlockStyle`'s opposite bias;
 - wide characters and grapheme clusters surviving composition and clipping in

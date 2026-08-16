@@ -147,7 +147,7 @@ design exists to make identical.
 
 | Stage | Input → output | Concern |
 | --- | --- | --- |
-| Resolve | `View` + `Limits` → `ResolvedView` | Generic. Measure, wrap, and clip content to a box. No prompt policy. |
+| Resolve | `View` + `Available` → `ResolvedView` | Generic. Size content into a box under the available area. No prompt policy. |
 | Frame | `ResolvedView` + policy → `FramedView` | Prompt-specific. Window a bounded viewport onto the resolved content, vertically and horizontally. |
 | Plan | `FramedView` + `InlinePresentation` + geometry → `InlineRenderPlan` | Pure. Decide which commands reach the terminal. **Shared.** |
 | Execute | `InlineRenderPlan` → terminal | I/O and byte encoding only. |
@@ -168,18 +168,18 @@ of prompt semantics.
 ### A prompt resolves unbounded in width
 
 Following the cursor is a windowing decision, and windowing belongs to Frame.
-That forces a constraint upstream: **Frame cannot recover content that Resolve
-already clipped away.** If a line is clipped to the viewport width before Frame
-sees it, and the cursor sits beyond that width, the text it would need to scroll
-into view is gone.
+That forces a constraint upstream: **Frame cannot undo what Resolve did to a
+line.** A width bound makes Resolve absorb the overflow — wrapping reflows the
+line's geometry, clipping discards its tail — and either way the single line
+the cursor's column addresses no longer exists for Frame to scroll.
 
 A prompt therefore resolves with no width bound and lets Frame take the
 horizontal window. Height is still bounded at Resolve, because Frame selects
 rows rather than reflowing them.
 
 This is a constraint on how a prompt *calls* Resolve, not a change to Resolve.
-`Limits` keeps both bounds for consumers that want them; a prompt simply does
-not use the width bound.
+`Available` keeps both bounds for consumers that want them; a prompt simply
+does not use the width bound.
 
 The alternative — making the cursor an input to Resolve so it can clip around it
 — would put prompt policy inside the stage this design defines as generic, and
