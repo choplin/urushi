@@ -126,19 +126,8 @@ edge produces a stream of them, and re-establishing the region once per event
 would multiply whatever remains are left behind. One re-establishment per
 settled size is the requirement; the plan stage cannot enforce it.
 
-#### The cost this accepts
-
-Treating every resize as region loss is broad. Both a width change, through
-reflow, and a height reduction, by pushing content up, invalidate an absolute
-origin, so a narrower rule would still cover nearly every resize. The design
-accepts the breadth rather than guessing.
-
-This is not only a safety judgement. It is also a decision to accept visible
-residue: after a resize the previous frame's upper rows may stay on screen, and
-nothing will ever remove them. The alternative — erasing rows whose position
-was inferred rather than known — risks destroying output this prompt does not
-own, which is unrecoverable for the user. Residue is ugly and bounded; erasure
-is invisible and unbounded.
+The breadth of treating every resize as a loss, the residue this accepts, and
+why the two continuations are asymmetric are argued in [`design/inline-prompt-rendering.md`](design/inline-prompt-rendering.md).
 
 ## Stages
 
@@ -171,19 +160,6 @@ horizontal scrolling. That needs the part of the line the viewport width would
 have removed — which Resolve has already absorbed by the time Frame runs,
 reflowing it under `Wrap` or discarding it under `Clip`.
 
-Resolving the prompt with no width bound would preserve it, and that is not an
-option. **An unbounded width axis is the measurement mode, not a narrower
-layout.** Under it `Fill` contributes an intrinsic size and its weights stop
-meaning anything, so a field can no longer be sized as a share of what the
-prefix leaves; `Wrap` has nothing to wrap against, so every row loses the
-overflow policy the application chose; and a bounded row's `used` size stops
-being capped by an area that no longer exists. Asking a prompt to resolve
-unbounded asks it to render its measurement.
-
-Widening one block instead does not work either: a box's used size is capped by
-the available area, so a field cannot declare itself wider than the terminal to
-keep its tail alive.
-
 The window is therefore chosen where the knowledge already is, before a `View`
 exists. A text field holds its value and its cursor; the view function that
 places that field knows the available width and the structure it is placing the
@@ -195,14 +171,15 @@ which is where this belongs.
 Consequences:
 
 - Resolve is called with the real available area, so every row absorbs its own
-  overflow under the policy its block declares.
+  overflow under the policy its block declares, and sizing behaves as the view
+  model specifies.
 - Frame windows rows and does not reflow them. It has no horizontal concern.
 - The cursor reaches Plan as a position inside an already-windowed row.
 
 This puts one layout fact — how much width a field ends up with — in the view
-function as well as in Resolve. That duplication is the cost. It is bounded:
-the view function is the prompt's own code, placing its own structure, and a
-view function is expected to hold the size that `resolve` will be given.
+function as well as in Resolve. Why that cost is preferred to resolving the
+prompt unbounded, which [`design/inline-prompt-rendering.md`](design/inline-prompt-rendering.md) argues, is that an unbounded axis is a
+measurement rather than a looser layout.
 
 ## The row unit
 
@@ -252,10 +229,9 @@ modes, and a style type must rule out both:
 - **Redundant spellings.** If a default color can be written either as "absent"
   or as an explicit reset, or if modifiers are carried as an add set and a
   subtract set, one appearance has several values. The style a run carries must
-  be a normalized form with neither. `TextStyle` — an optional foreground, an
-  optional background, and one modifier set, over a color type with no reset
-  variant — is that form, which is why no separate "effective" style type is
-  needed alongside it.
+  be a normalized form with neither. `TextStyle`, defined in
+  [`style-model.md`](style-model.md), is that form, which is why no separate
+  "effective" style type is needed alongside it.
 - **Capability degradation.** Two colors a terminal profile collapses to the
   same output are equal on screen and unequal in a logical style. The style a
   run carries must therefore already be resolved against the profile, not left
@@ -297,10 +273,8 @@ The rule for admitting any future fold is narrow:
 > because a terminal is assumed to implement an attribute a particular way is
 > not a fold.
 
-Reversed video is the case this excludes. Swapping a foreground and a
-background looks the same as setting reverse, but a dim attribute may apply to
-the declared foreground or to the effective one depending on the terminal, so
-rewriting one form into the other can change what is drawn.
+Reversed video is the case this excludes; [`design/inline-prompt-rendering.md`](design/inline-prompt-rendering.md) shows why an
+appearance-based rule would have admitted it.
 
 One residue is not closable: when the foreground is absent, its concrete colour
 is the terminal's default and unknown here, so an underline colour equal to it
@@ -424,9 +398,8 @@ row within the region. It does not maintain `rows`: after a failure the drawn
 content is indeterminate, cleanup erases the region regardless, and the field
 is reset.
 
-This replaces claiming rows pessimistically before writing. A high-water mark
-maintained by `step` is both simpler and more accurate than over-stating the
-extent up front, because it reflects what was actually touched.
+This replaces per-command recovery state and a pessimistic claim made before
+writing; [`design/inline-prompt-rendering.md`](design/inline-prompt-rendering.md) records why both were dropped.
 
 ### Recovery depends on clearing a row before writing it
 
@@ -456,15 +429,10 @@ A prompt region is a rectangle whose left edge is column zero. If the cursor is
 not at column zero when a prompt starts, the prompt emits a carriage return and
 line feed to reach a fresh row before establishing the region.
 
-The alternative — anchoring the rectangle at the column where the prompt
-happened to start — propagates a starting column through every width
-calculation, every row's column command, and the cursor position. It buys the
-ability to place a prompt on a row that already contains output, which no
-prompt API asks for: a prompt owns the rows it draws.
-
 This is a deliberate reduction in capability and is the design's most
-reversible decision. Reinstating a non-zero left edge means threading one
-value through the Frame and Plan stages.
+reversible decision: reinstating a non-zero left edge means threading one
+value through the Frame and Plan stages. [`design/inline-prompt-rendering.md`](design/inline-prompt-rendering.md) records what it
+was chosen over.
 
 ## What must be identical
 
