@@ -2,9 +2,10 @@ use std::any::Any;
 
 use crate::{
     FieldKey, Form, Group,
-    runtime::{self, FieldAction, FieldEntry, PromptView, RuntimeField, ViewLine, ViewSpan},
+    runtime::{
+        self, FieldAction, FieldEntry, PromptStyles, PromptView, RuntimeField, ViewLine, ViewSpan,
+    },
 };
-use urushi::ComponentRole;
 
 struct SiblingField {
     key: FieldKey<String>,
@@ -33,14 +34,12 @@ impl RuntimeField for SiblingField {
         Box::new(String::new())
     }
 
-    fn view(&self) -> PromptView {
+    fn view(&self, styles: &PromptStyles, _focused: bool) -> PromptView {
         PromptView {
-            lines: vec![ViewLine {
-                spans: vec![ViewSpan {
-                    text: self.key.name().to_owned(),
-                    role: ComponentRole::Body,
-                }],
-            }],
+            lines: vec![ViewLine::new(vec![ViewSpan::new(
+                self.key.name().to_owned(),
+                &styles.body,
+            )])],
             cursor: None,
         }
     }

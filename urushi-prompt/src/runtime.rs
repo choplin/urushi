@@ -302,14 +302,15 @@ impl Form {
 
     /// Runs this form using the process terminal input and standard error.
     ///
-    /// The supplied theme and terminal profile are resolved once for the
-    /// inline renderer; fields only emit semantic component roles.
+    /// The supplied theme and terminal profile are resolved once into the
+    /// prompt's styles, and fields build their view from those resolved
+    /// values; no component role reaches the renderer.
     pub fn run(self, theme: &Theme, profile: &TerminalProfile) -> Result<FormOutcome, RunError> {
         let mut events = CrosstermEventSource;
-        let mut renderer =
-            CrosstermRenderer::stderr(theme, profile, terminal::size().unwrap_or((80, 24)));
+        let mut renderer = CrosstermRenderer::stderr(terminal::size().unwrap_or((80, 24)));
         let mut terminal = CrosstermTerminalControl;
-        self.run_with(&mut events, &mut renderer, &mut terminal)
+        let styles = PromptStyles::resolve(theme, profile);
+        self.run_with(&mut events, &mut renderer, &mut terminal, &styles)
     }
 
     pub(crate) fn run_with<S, R, T>(
@@ -317,6 +318,7 @@ impl Form {
         events: &mut S,
         renderer: &mut R,
         terminal: &mut T,
+        styles: &PromptStyles,
     ) -> Result<FormOutcome, RunError>
     where
         S: EventSource,
@@ -332,7 +334,7 @@ impl Form {
         self.groups[0].fields[0].activate();
 
         loop {
-            if let Err(source) = session.renderer.draw(&self.view(&state)) {
+            if let Err(source) = session.renderer.draw(&self.view(&state, styles)) {
                 return Err(session.fail(IoOperation::Render, source));
             }
 
@@ -459,7 +461,7 @@ impl Form {
         }
     }
 
-    fn view(&self, state: &FormState) -> PromptView {
+    fn view(&self, state: &FormState, styles: &PromptStyles) -> PromptView {
         let FormState::Running { group, field } = *state else {
             return PromptView {
                 lines: Vec::new(),
@@ -471,27 +473,23 @@ impl Form {
         let mut cursor = None;
         let mut footer = None;
         if let Some(title) = &self.groups[group].title {
-            lines.push(ViewLine {
-                spans: vec![ViewSpan {
-                    text: title.clone(),
-                    role: ComponentRole::PromptQuestion,
-                }],
-            });
+            lines.push(ViewLine::new(vec![ViewSpan::new(
+                title.clone(),
+                &styles.question,
+            )]));
         }
         if let Some(description) = &self.groups[group].description {
-            lines.push(ViewLine {
-                spans: vec![ViewSpan {
-                    text: description.clone(),
-                    role: ComponentRole::Muted,
-                }],
-            });
+            lines.push(ViewLine::new(vec![ViewSpan::new(
+                description.clone(),
+                &styles.muted,
+            )]));
         }
         if !lines.is_empty() {
-            lines.push(ViewLine { spans: Vec::new() });
+            lines.push(ViewLine::blank());
         }
         for (index, entry) in self.groups[group].fields.iter().enumerate() {
             let focused = index == field;
-            let mut field_view = entry.view();
+            let mut field_view = entry.view(styles, focused);
             if field_view.lines.last().is_some_and(is_help_line) {
                 let help = field_view
                     .lines
@@ -502,38 +500,19 @@ impl Form {
                 }
             }
 
-            if !focused {
-                field_view.cursor = None;
-                for line in &mut field_view.lines {
-                    line.spans.retain(|span| {
-                        span.role != ComponentRole::PromptCursor || span.text != " "
-                    });
-                    for span in &mut line.spans {
-                        match span.role {
-                            ComponentRole::PromptCursor => {
-                                span.role = ComponentRole::PromptAnswer;
-                            }
-                            ComponentRole::PromptQuestion => {
-                                span.role = ComponentRole::Muted;
-                            }
-                            _ => {}
-                        }
-                    }
-                }
-            }
-
             let row_offset = lines.len();
             for mut line in field_view.lines {
+                line.active = focused;
                 line.spans.insert(
                     0,
-                    ViewSpan {
-                        text: if focused { "┃ " } else { "  " }.to_owned(),
-                        role: if focused {
-                            ComponentRole::Accent
+                    ViewSpan::new(
+                        if focused { "┃ " } else { "  " },
+                        if focused {
+                            &styles.accent
                         } else {
-                            ComponentRole::Body
+                            &styles.body
                         },
-                    },
+                    ),
                 );
                 lines.push(line);
             }
@@ -545,28 +524,25 @@ impl Form {
                 });
             }
             if index + 1 < self.groups[group].fields.len() {
-                lines.push(ViewLine { spans: Vec::new() });
+                lines.push(ViewLine::blank());
             }
         }
 
         if let Some(help) = footer {
-            lines.push(ViewLine { spans: Vec::new() });
-            lines.push(ViewLine {
-                spans: vec![
-                    ViewSpan {
-                        text: "  ".to_owned(),
-                        role: ComponentRole::Body,
-                    },
-                    ViewSpan {
-                        text: help
-                            .spans
+            lines.push(ViewLine::blank());
+            lines.push(
+                ViewLine::new(vec![
+                    ViewSpan::new("  ", &styles.body),
+                    ViewSpan::new(
+                        help.spans
                             .into_iter()
                             .map(|span| span.text)
                             .collect::<String>(),
-                        role: ComponentRole::PromptHelp,
-                    },
-                ],
-            });
+                        &styles.help,
+                    ),
+                ])
+                .with_kind(LineKind::Help),
+            );
         }
 
         PromptView { lines, cursor }
@@ -793,8 +769,8 @@ impl FieldEntry {
         self.field.take_value()
     }
 
-    fn view(&self) -> PromptView {
-        self.field.view()
+    fn view(&self, styles: &PromptStyles, focused: bool) -> PromptView {
+        self.field.view(styles, focused)
     }
 
     fn captures_tab(&self) -> bool {
@@ -805,7 +781,13 @@ impl FieldEntry {
 pub(crate) trait RuntimeField {
     fn event(&mut self, event: Event) -> FieldAction;
     fn take_value(&mut self) -> Box<dyn Any>;
-    fn view(&self) -> PromptView;
+    /// Builds this field's view with theme and profile already resolved.
+    ///
+    /// `focused` is passed rather than post-processed out of the result: once
+    /// a span carries a resolved style, an unfocused field's rows cannot be
+    /// derived from a focused field's rows without guessing which role a
+    /// style came from.
+    fn view(&self, styles: &PromptStyles, focused: bool) -> PromptView;
 
     fn validation_error(&self) -> Option<&str> {
         None
@@ -839,22 +821,75 @@ impl PromptView {
 }
 
 fn is_help_line(line: &ViewLine) -> bool {
-    !line.spans.is_empty()
-        && line
-            .spans
-            .iter()
-            .all(|span| span.role == ComponentRole::PromptHelp)
+    !line.spans.is_empty() && line.kind == LineKind::Help
+}
+
+/// What the frame policy must know about a row beyond the text it draws.
+///
+/// Spans carry a resolved [`TextStyle`], so the semantics a row is selected,
+/// windowed, or reinstated by cannot be recovered from them: a terminal
+/// profile may collapse two roles onto the same style. The classification
+/// therefore lives on the row.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(crate) enum LineKind {
+    /// An ordinary row with no policy meaning.
+    #[default]
+    Content,
+    /// A selectable row: a select option or a confirm button.
+    Choice {
+        /// Whether this is the row the field's own selection sits on.
+        focused: bool,
+    },
+    /// The validation-error row, reinstated when scrolled out of view.
+    Error,
+    /// The help row, clipped rather than wrapped and reinstated when scrolled
+    /// out of view.
+    Help,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct ViewLine {
     pub spans: Vec<ViewSpan>,
+    pub kind: LineKind,
+    /// Whether this row belongs to the field the form has focused.
+    pub active: bool,
+}
+
+impl ViewLine {
+    pub(crate) fn new(spans: Vec<ViewSpan>) -> Self {
+        Self {
+            spans,
+            kind: LineKind::Content,
+            active: false,
+        }
+    }
+
+    pub(crate) fn blank() -> Self {
+        Self::new(Vec::new())
+    }
+
+    #[must_use]
+    pub(crate) fn with_kind(mut self, kind: LineKind) -> Self {
+        self.kind = kind;
+        self
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct ViewSpan {
     pub text: String,
-    pub role: ComponentRole,
+    /// The style as it will be emitted: resolved against both the theme and
+    /// the terminal profile.
+    pub style: TextStyle,
+}
+
+impl ViewSpan {
+    pub(crate) fn new(text: impl Into<String>, style: &TextStyle) -> Self {
+        Self {
+            text: text.into(),
+            style: style.clone(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1014,23 +1049,21 @@ fn translate_key(
 
 struct CrosstermRenderer<W> {
     writer: W,
-    styles: PromptStyles,
     presentation: InlinePresentation,
     columns: u16,
     rows: u16,
 }
 
 impl CrosstermRenderer<io::Stderr> {
-    fn stderr(theme: &Theme, profile: &TerminalProfile, size: (u16, u16)) -> Self {
-        Self::new(theme, profile, io::stderr(), size)
+    fn stderr(size: (u16, u16)) -> Self {
+        Self::new(io::stderr(), size)
     }
 }
 
 impl<W: Write> CrosstermRenderer<W> {
-    fn new(theme: &Theme, profile: &TerminalProfile, writer: W, size: (u16, u16)) -> Self {
+    fn new(writer: W, size: (u16, u16)) -> Self {
         Self {
             writer,
-            styles: PromptStyles::resolve(theme, profile),
             presentation: InlinePresentation::default(),
             columns: size.0.max(1),
             rows: size.1.max(1),
@@ -1038,7 +1071,7 @@ impl<W: Write> CrosstermRenderer<W> {
     }
 
     fn present(&mut self, plan: InlineRenderPlan) -> io::Result<()> {
-        crossterm_executor::execute(&mut self.writer, &self.styles, &mut self.presentation, plan)
+        crossterm_executor::execute(&mut self.writer, &mut self.presentation, plan)
     }
 }
 
@@ -1060,24 +1093,36 @@ impl<W: Write> Renderer for CrosstermRenderer<W> {
     }
 }
 
-struct PromptStyles {
-    body: TextStyle,
-    muted: TextStyle,
-    accent: TextStyle,
-    question: TextStyle,
-    answer: TextStyle,
-    placeholder: TextStyle,
-    cursor: TextStyle,
-    option: TextStyle,
-    option_selected: TextStyle,
-    button: TextStyle,
-    button_focused: TextStyle,
-    help: TextStyle,
-    error: TextStyle,
+/// The prompt's component roles resolved against a theme and a terminal
+/// profile.
+///
+/// Views are built from these values rather than from roles, so the style a
+/// span carries is the style as it will be emitted. Resolving here — above
+/// layout and planning — is what makes two rows that look the same compare
+/// equal, whatever the profile collapsed to produce them.
+pub(crate) struct PromptStyles {
+    pub body: TextStyle,
+    pub muted: TextStyle,
+    pub accent: TextStyle,
+    pub question: TextStyle,
+    pub answer: TextStyle,
+    pub placeholder: TextStyle,
+    pub cursor: TextStyle,
+    pub option: TextStyle,
+    pub option_selected: TextStyle,
+    pub button: TextStyle,
+    pub button_focused: TextStyle,
+    pub help: TextStyle,
+    pub error: TextStyle,
 }
 
 impl PromptStyles {
-    fn resolve(theme: &Theme, profile: &TerminalProfile) -> Self {
+    /// The style a field's question takes; an unfocused field recedes.
+    pub(crate) fn question(&self, focused: bool) -> &TextStyle {
+        if focused { &self.question } else { &self.muted }
+    }
+
+    pub(crate) fn resolve(theme: &Theme, profile: &TerminalProfile) -> Self {
         Self {
             body: profile.resolve_text_style(&theme.text_style(ComponentRole::Body)),
             muted: profile.resolve_text_style(&theme.text_style(ComponentRole::Muted)),
@@ -1097,24 +1142,27 @@ impl PromptStyles {
             error: profile.resolve_text_style(&theme.text_style(ComponentRole::PromptError)),
         }
     }
+}
 
-    fn style(&self, role: ComponentRole) -> &TextStyle {
-        match role {
-            ComponentRole::Body => &self.body,
-            ComponentRole::Muted => &self.muted,
-            ComponentRole::Accent => &self.accent,
-            ComponentRole::PromptQuestion => &self.question,
-            ComponentRole::PromptAnswer => &self.answer,
-            ComponentRole::PromptPlaceholder => &self.placeholder,
-            ComponentRole::PromptCursor => &self.cursor,
-            ComponentRole::PromptOption => &self.option,
-            ComponentRole::PromptOptionSelected => &self.option_selected,
-            ComponentRole::PromptButton => &self.button,
-            ComponentRole::PromptButtonFocused => &self.button_focused,
-            ComponentRole::PromptHelp => &self.help,
-            ComponentRole::PromptError => &self.error,
-            ComponentRole::Success | ComponentRole::Warning | ComponentRole::Error => &self.body,
-        }
+/// Styles whose every role is a distinct value, so a test that asserts which
+/// role a span was built from cannot pass by coincidence.
+#[cfg(test)]
+pub(crate) fn test_styles() -> PromptStyles {
+    let style = |index: u8| TextStyle::new().foreground(urushi::Color::Rgb(index, 0, 0));
+    PromptStyles {
+        body: style(1),
+        muted: style(2),
+        accent: style(3),
+        question: style(4),
+        answer: style(5),
+        placeholder: style(6),
+        cursor: style(7),
+        option: style(8),
+        option_selected: style(9),
+        button: style(10),
+        button_focused: style(11),
+        help: style(12),
+        error: style(13),
     }
 }
 
@@ -1219,14 +1267,12 @@ mod tests {
             Box::new(self.value.clone())
         }
 
-        fn view(&self) -> PromptView {
+        fn view(&self, styles: &PromptStyles, _focused: bool) -> PromptView {
             PromptView {
-                lines: vec![ViewLine {
-                    spans: vec![ViewSpan {
-                        text: self.key.name().to_owned(),
-                        role: ComponentRole::Body,
-                    }],
-                }],
+                lines: vec![ViewLine::new(vec![ViewSpan::new(
+                    self.key.name().to_owned(),
+                    &styles.body,
+                )])],
                 cursor: None,
             }
         }
@@ -1457,7 +1503,7 @@ mod tests {
             TestField::new("first", "one"),
             TestField::new("second", "two"),
         ])
-        .run_with(&mut events, &mut renderer, &mut terminal)
+        .run_with(&mut events, &mut renderer, &mut terminal, &test_styles())
         .expect("form submits");
 
         let FormOutcome::Submitted(values) = outcome else {
@@ -1495,7 +1541,8 @@ mod tests {
             form([TestField::new("first", "one")]).run_with(
                 &mut events,
                 &mut renderer,
-                &mut terminal
+                &mut terminal,
+                &test_styles(),
             ),
             Ok(FormOutcome::Cancelled)
         ));
@@ -1517,7 +1564,8 @@ mod tests {
             form([TestField::new("first", "one")]).run_with(
                 &mut events,
                 &mut renderer,
-                &mut terminal
+                &mut terminal,
+                &test_styles(),
             ),
             Ok(FormOutcome::Cancelled)
         ));
@@ -1562,7 +1610,7 @@ mod tests {
         let mut terminal = RecordingTerminal::interactive();
 
         let outcome = form
-            .run_with(&mut events, &mut renderer, &mut terminal)
+            .run_with(&mut events, &mut renderer, &mut terminal, &test_styles())
             .expect("form submits after an explicit answer");
         let FormOutcome::Submitted(values) = outcome else {
             panic!("expected submitted form");
@@ -1635,7 +1683,7 @@ mod tests {
         let mut terminal = RecordingTerminal::interactive();
 
         let outcome = form
-            .run_with(&mut events, &mut renderer, &mut terminal)
+            .run_with(&mut events, &mut renderer, &mut terminal, &test_styles())
             .expect("form submits");
         let FormOutcome::Submitted(values) = outcome else {
             panic!("expected submitted values");
@@ -1670,7 +1718,8 @@ mod tests {
             form([TestField::new("field", "value")]).run_with(
                 &mut events,
                 &mut renderer,
-                &mut terminal
+                &mut terminal,
+                &test_styles(),
             ),
             Err(RunError::NotInteractive)
         ));
@@ -1686,6 +1735,7 @@ mod tests {
             &mut events,
             &mut renderer,
             &mut terminal,
+            &test_styles(),
         );
         assert_io_operation(result, IoOperation::ReadEvent);
         assert_eq!(renderer.finishes, vec![RenderFinish::Error]);
@@ -1709,6 +1759,7 @@ mod tests {
             &mut events,
             &mut renderer,
             &mut terminal,
+            &test_styles(),
         );
         assert_io_operation(result, IoOperation::Render);
         assert_eq!(renderer.finishes, vec![RenderFinish::Error]);
@@ -1739,6 +1790,7 @@ mod tests {
             &mut events,
             &mut renderer,
             &mut terminal,
+            &test_styles(),
         );
         assert_io_operation(result, IoOperation::Cleanup);
         assert_eq!(renderer.finishes, vec![RenderFinish::Submitted]);
@@ -1763,6 +1815,7 @@ mod tests {
                 &mut events,
                 &mut renderer,
                 &mut terminal,
+                &test_styles(),
             );
         }));
         assert!(panic.is_err());
@@ -1801,12 +1854,15 @@ mod tests {
         PromptView { lines, cursor }
     }
 
-    fn view_line(text: &str, role: ComponentRole) -> ViewLine {
+    fn view_line(text: &str, style: &TextStyle) -> ViewLine {
+        ViewLine::new(vec![ViewSpan::new(text, style)])
+    }
+
+    /// A row belonging to the focused field, as `Form::view` marks them.
+    fn active_line(line: ViewLine) -> ViewLine {
         ViewLine {
-            spans: vec![ViewSpan {
-                text: text.to_owned(),
-                role,
-            }],
+            active: true,
+            ..line
         }
     }
 
@@ -1853,20 +1909,13 @@ mod tests {
     fn inline_renderer_uses_resolved_theme_styles_and_preserves_mid_line_origin() {
         let theme = test_theme();
         let profile = TerminalProfile::new(ColorProfile::TrueColor, AnsiPolicy::Enabled);
-        let mut renderer = CrosstermRenderer::new(&theme, &profile, Vec::new(), (20, 4));
+        let styles = PromptStyles::resolve(&theme, &profile);
+        let mut renderer = CrosstermRenderer::new(Vec::new(), (20, 4));
         let view = renderer_view(
-            vec![ViewLine {
-                spans: vec![
-                    ViewSpan {
-                        text: "質問".to_owned(),
-                        role: ComponentRole::PromptQuestion,
-                    },
-                    ViewSpan {
-                        text: "＊".to_owned(),
-                        role: ComponentRole::PromptCursor,
-                    },
-                ],
-            }],
+            vec![ViewLine::new(vec![
+                ViewSpan::new("質問", &styles.question),
+                ViewSpan::new("＊", &styles.cursor),
+            ])],
             Some(ViewCursor { row: 0, column: 2 }),
         );
 
@@ -1898,12 +1947,13 @@ mod tests {
     fn first_draw_reserves_rows_before_saving_the_render_origin() {
         let theme = test_theme();
         let profile = TerminalProfile::new(ColorProfile::Monochrome, AnsiPolicy::Disabled);
-        let mut renderer = CrosstermRenderer::new(&theme, &profile, Vec::new(), (20, 4));
+        let styles = PromptStyles::resolve(&theme, &profile);
+        let mut renderer = CrosstermRenderer::new(Vec::new(), (20, 4));
         let view = renderer_view(
             vec![
-                view_line("first", ComponentRole::PromptQuestion),
-                view_line("second", ComponentRole::PromptAnswer),
-                view_line("third", ComponentRole::PromptHelp),
+                view_line("first", &styles.question),
+                view_line("second", &styles.answer),
+                view_line("third", &styles.help).with_kind(LineKind::Help),
             ],
             None,
         );
@@ -1938,9 +1988,10 @@ mod tests {
     fn unchanged_frames_only_reposition_the_cursor() {
         let theme = test_theme();
         let profile = TerminalProfile::new(ColorProfile::Monochrome, AnsiPolicy::Disabled);
-        let mut renderer = CrosstermRenderer::new(&theme, &profile, Vec::new(), (20, 4));
+        let styles = PromptStyles::resolve(&theme, &profile);
+        let mut renderer = CrosstermRenderer::new(Vec::new(), (20, 4));
         let view = renderer_view(
-            vec![view_line("stable", ComponentRole::PromptAnswer)],
+            vec![view_line("stable", &styles.answer)],
             Some(ViewCursor { row: 0, column: 2 }),
         );
         renderer.draw(&view).expect("first frame renders");
@@ -1970,12 +2021,13 @@ mod tests {
     fn submitted_prompt_finishes_with_a_scrolling_line_feed() {
         let theme = test_theme();
         let profile = TerminalProfile::new(ColorProfile::Monochrome, AnsiPolicy::Disabled);
-        let mut renderer = CrosstermRenderer::new(&theme, &profile, Vec::new(), (20, 2));
+        let styles = PromptStyles::resolve(&theme, &profile);
+        let mut renderer = CrosstermRenderer::new(Vec::new(), (20, 2));
         renderer
             .draw(&renderer_view(
                 vec![
-                    view_line("answer", ComponentRole::PromptAnswer),
-                    view_line("help", ComponentRole::PromptHelp),
+                    view_line("answer", &styles.answer),
+                    view_line("help", &styles.help).with_kind(LineKind::Help),
                 ],
                 None,
             ))
@@ -1999,6 +2051,58 @@ mod tests {
         renderer
             .finish(RenderFinish::Submitted)
             .expect("submitted prompt finishes");
+    }
+
+    #[test]
+    fn a_wrapping_focused_field_still_leaves_room_for_the_error_and_help_rows() {
+        // A focused field's rows carry the "┃ " marker only on the row that
+        // starts each logical line. Treating every wrapped continuation as
+        // undisplaceable too would leave no spare row, and a short viewport
+        // would silently drop the validation error and the help line — the
+        // user would see Enter do nothing with no explanation.
+        let mut form = Form::builder()
+            .group(
+                Group::builder()
+                    .field(Input::new(FieldKey::new("first"), "First", "one").expect("input"))
+                    .field(
+                        Input::new(
+                            FieldKey::new("second"),
+                            "A question long enough that it wraps across several terminal rows",
+                            "value",
+                        )
+                        .expect("input")
+                        .help("enter continue")
+                        .validate(Box::new(|_| {
+                            Err(crate::ValidationError::new("Not acceptable."))
+                        })),
+                    )
+                    .build()
+                    .expect("group"),
+            )
+            .build()
+            .expect("form");
+        let mut state = FormState::Running { group: 0, field: 0 };
+        assert_eq!(form.reduce(&mut state, enter()), ReducerResult::Running);
+        // Enter on the focused field is refused and raises its error row.
+        assert_eq!(form.reduce(&mut state, enter()), ReducerResult::Running);
+
+        let styles = test_styles();
+        for rows in 3..=6 {
+            let laid_out = layout::lay_out(20, rows, &form.view(&state, &styles));
+            let drawn = laid_out
+                .lines
+                .iter()
+                .map(layout::RenderedLine::text)
+                .collect::<Vec<_>>();
+            assert!(
+                drawn.iter().any(|line| line.contains("Not acceptable")),
+                "validation error dropped at {rows} rows: {drawn:?}"
+            );
+            assert!(
+                drawn.iter().any(|line| line.contains("enter continue")),
+                "help row dropped at {rows} rows: {drawn:?}"
+            );
+        }
     }
 
     #[test]
@@ -2030,8 +2134,9 @@ mod tests {
         assert_eq!(form.reduce(&mut state, enter()), ReducerResult::Running);
         let theme = test_theme();
         let profile = TerminalProfile::new(ColorProfile::Monochrome, AnsiPolicy::Disabled);
-        let renderer = CrosstermRenderer::new(&theme, &profile, Vec::new(), (80, 10));
-        let before = layout::lay_out(renderer.columns, renderer.rows, &form.view(&state));
+        let styles = PromptStyles::resolve(&theme, &profile);
+        let renderer = CrosstermRenderer::new(Vec::new(), (80, 10));
+        let before = layout::lay_out(renderer.columns, renderer.rows, &form.view(&state, &styles));
         assert_eq!(
             form.reduce(
                 &mut state,
@@ -2042,7 +2147,7 @@ mod tests {
             ),
             ReducerResult::Running
         );
-        let after = layout::lay_out(renderer.columns, renderer.rows, &form.view(&state));
+        let after = layout::lay_out(renderer.columns, renderer.rows, &form.view(&state, &styles));
         let unchanged = before
             .lines
             .iter()
@@ -2059,13 +2164,14 @@ mod tests {
     fn error_cleanup_clears_rows_claimed_before_a_partial_first_draw() {
         let theme = test_theme();
         let profile = TerminalProfile::new(ColorProfile::Monochrome, AnsiPolicy::Disabled);
+        let styles = PromptStyles::resolve(&theme, &profile);
         let writer = PrefixThenFailWriter::new("first");
-        let mut renderer = CrosstermRenderer::new(&theme, &profile, writer, (20, 4));
+        let mut renderer = CrosstermRenderer::new(writer, (20, 4));
         let view = renderer_view(
             vec![
-                view_line("first", ComponentRole::PromptQuestion),
-                view_line("second", ComponentRole::PromptOption),
-                view_line("third", ComponentRole::PromptError),
+                view_line("first", &styles.question),
+                view_line("second", &styles.option),
+                view_line("third", &styles.error).with_kind(LineKind::Error),
             ],
             None,
         );
@@ -2104,15 +2210,11 @@ mod tests {
     fn error_cleanup_clears_growth_beyond_previous_rows_after_partial_draw() {
         let theme = test_theme();
         let profile = TerminalProfile::new(ColorProfile::Monochrome, AnsiPolicy::Disabled);
-        let mut renderer = CrosstermRenderer::new(
-            &theme,
-            &profile,
-            PrefixThenFailWriter::new("growth"),
-            (20, 4),
-        );
+        let styles = PromptStyles::resolve(&theme, &profile);
+        let mut renderer = CrosstermRenderer::new(PrefixThenFailWriter::new("growth"), (20, 4));
         renderer
             .draw(&renderer_view(
-                vec![view_line("short", ComponentRole::PromptQuestion)],
+                vec![view_line("short", &styles.question)],
                 None,
             ))
             .expect("initial draw succeeds");
@@ -2120,9 +2222,9 @@ mod tests {
 
         let growth = renderer_view(
             vec![
-                view_line("growth", ComponentRole::PromptQuestion),
-                view_line("second", ComponentRole::PromptOption),
-                view_line("third", ComponentRole::PromptError),
+                view_line("growth", &styles.question),
+                view_line("second", &styles.option),
+                view_line("third", &styles.error).with_kind(LineKind::Error),
             ],
             None,
         );
@@ -2155,23 +2257,16 @@ mod tests {
     fn inline_renderer_clears_stale_rows_and_clamps_cjk_cursor_in_narrow_viewports() {
         let theme = test_theme();
         let profile = TerminalProfile::new(ColorProfile::TrueColor, AnsiPolicy::Enabled);
-        let mut renderer = CrosstermRenderer::new(&theme, &profile, Vec::new(), (4, 2));
+        let styles = PromptStyles::resolve(&theme, &profile);
+        let mut renderer = CrosstermRenderer::new(Vec::new(), (4, 2));
         renderer
             .draw(&renderer_view(
                 vec![
-                    ViewLine {
-                        spans: vec![
-                            ViewSpan {
-                                text: "名前 ".to_owned(),
-                                role: ComponentRole::PromptQuestion,
-                            },
-                            ViewSpan {
-                                text: "あいうえ".to_owned(),
-                                role: ComponentRole::PromptAnswer,
-                            },
-                        ],
-                    },
-                    view_line("validation message", ComponentRole::PromptError),
+                    ViewLine::new(vec![
+                        ViewSpan::new("名前 ", &styles.question),
+                        ViewSpan::new("あいうえ", &styles.answer),
+                    ]),
+                    view_line("validation message", &styles.error).with_kind(LineKind::Error),
                 ],
                 Some(ViewCursor { row: 0, column: 11 }),
             ))
@@ -2180,7 +2275,7 @@ mod tests {
             renderer.columns,
             renderer.rows,
             &renderer_view(
-                vec![view_line("名前 あいうえ", ComponentRole::PromptAnswer)],
+                vec![view_line("名前 あいうえ", &styles.answer)],
                 Some(ViewCursor { row: 0, column: 11 }),
             ),
         );
@@ -2190,7 +2285,7 @@ mod tests {
         renderer.resize(3, 1);
         renderer
             .draw(&renderer_view(
-                vec![view_line("短い", ComponentRole::PromptQuestion)],
+                vec![view_line("短い", &styles.question)],
                 None,
             ))
             .expect("redraw succeeds");
@@ -2214,14 +2309,14 @@ mod tests {
 
     #[test]
     fn narrow_viewports_omit_wide_scalars_without_losing_cursor_bounds() {
-        let cjk_line = view_line("あ", ComponentRole::PromptCursor);
-        assert!(wrap_line(&cjk_line, 1)[0].spans.is_empty());
-        assert!(clip_line(&cjk_line, 0, 1).0.spans.is_empty());
-
         let theme = test_theme();
         let profile = TerminalProfile::new(ColorProfile::TrueColor, AnsiPolicy::Enabled);
+        let styles = PromptStyles::resolve(&theme, &profile);
+        let cjk_line = view_line("あ", &styles.cursor);
+        assert!(wrap_line(&cjk_line, 1)[0].spans.is_empty());
+        assert!(clip_line(&cjk_line, 0, 1).0.spans.is_empty());
         for columns in [0, 1] {
-            let mut renderer = CrosstermRenderer::new(&theme, &profile, Vec::new(), (columns, 1));
+            let mut renderer = CrosstermRenderer::new(Vec::new(), (columns, 1));
             let view = renderer_view(
                 vec![cjk_line.clone()],
                 Some(ViewCursor { row: 0, column: 0 }),
@@ -2242,28 +2337,21 @@ mod tests {
     fn short_viewports_never_replace_the_active_field_with_help() {
         let theme = test_theme();
         let profile = TerminalProfile::new(ColorProfile::Monochrome, AnsiPolicy::Disabled);
+        let styles = PromptStyles::resolve(&theme, &profile);
         for rows in 1..=4 {
-            let renderer = CrosstermRenderer::new(&theme, &profile, Vec::new(), (40, rows));
+            let renderer = CrosstermRenderer::new(Vec::new(), (40, rows));
             let view = renderer_view(
                 vec![
-                    view_line("previous question", ComponentRole::Muted),
-                    view_line("previous answer", ComponentRole::PromptAnswer),
-                    view_line("", ComponentRole::Body),
-                    view_line("┃ current question", ComponentRole::Accent),
-                    ViewLine {
-                        spans: vec![
-                            ViewSpan {
-                                text: "┃ ".to_owned(),
-                                role: ComponentRole::Accent,
-                            },
-                            ViewSpan {
-                                text: "› current answer".to_owned(),
-                                role: ComponentRole::PromptCursor,
-                            },
-                        ],
-                    },
-                    view_line("", ComponentRole::Body),
-                    view_line("enter continue", ComponentRole::PromptHelp),
+                    view_line("previous question", &styles.muted),
+                    view_line("previous answer", &styles.answer),
+                    view_line("", &styles.body),
+                    active_line(view_line("┃ current question", &styles.accent)),
+                    active_line(ViewLine::new(vec![
+                        ViewSpan::new("┃ ", &styles.accent),
+                        ViewSpan::new("› current answer", &styles.cursor),
+                    ])),
+                    view_line("", &styles.body),
+                    view_line("enter continue", &styles.help).with_kind(LineKind::Help),
                 ],
                 Some(ViewCursor { row: 4, column: 18 }),
             );
@@ -2272,18 +2360,20 @@ mod tests {
 
             assert_eq!(layout.lines.len(), usize::from(rows));
             assert!(layout.cursor.is_some_and(|cursor| cursor.row < rows));
+            // Monochrome collapses every role onto one style, so the row a
+            // frame decision selected is identifiable only by its content.
             assert!(
                 layout
                     .lines
                     .iter()
-                    .any(|line| line.has_role(ComponentRole::PromptCursor)),
+                    .any(|line| line.text().contains("current answer")),
                 "active input missing at {rows} rows"
             );
             assert_eq!(
                 layout
                     .lines
                     .iter()
-                    .any(|line| line.has_role(ComponentRole::PromptHelp)),
+                    .any(|line| line.text().contains("enter continue")),
                 rows >= 3,
                 "unexpected help visibility at {rows} rows"
             );
@@ -2294,25 +2384,24 @@ mod tests {
     fn one_row_viewports_show_the_actionable_choice() {
         let theme = test_theme();
         let profile = TerminalProfile::new(ColorProfile::Monochrome, AnsiPolicy::Disabled);
-        let renderer = CrosstermRenderer::new(&theme, &profile, Vec::new(), (40, 1));
+        let styles = PromptStyles::resolve(&theme, &profile);
+        let renderer = CrosstermRenderer::new(Vec::new(), (40, 1));
         let view = renderer_view(
             vec![
-                view_line("┃ choose a language", ComponentRole::Accent),
-                view_line("┃   Japanese", ComponentRole::PromptOption),
-                ViewLine {
-                    spans: vec![
-                        ViewSpan {
-                            text: "┃ ".to_owned(),
-                            role: ComponentRole::Accent,
-                        },
-                        ViewSpan {
-                            text: "› English".to_owned(),
-                            role: ComponentRole::PromptOptionSelected,
-                        },
-                    ],
-                },
-                view_line("", ComponentRole::Body),
-                view_line("↑/↓ select", ComponentRole::PromptHelp),
+                active_line(view_line("┃ choose a language", &styles.accent)),
+                active_line(
+                    view_line("┃   Japanese", &styles.option)
+                        .with_kind(LineKind::Choice { focused: false }),
+                ),
+                active_line(
+                    ViewLine::new(vec![
+                        ViewSpan::new("┃ ", &styles.accent),
+                        ViewSpan::new("› English", &styles.option_selected),
+                    ])
+                    .with_kind(LineKind::Choice { focused: true }),
+                ),
+                view_line("", &styles.body),
+                view_line("↑/↓ select", &styles.help).with_kind(LineKind::Help),
             ],
             None,
         );
@@ -2320,30 +2409,21 @@ mod tests {
         let layout = layout::lay_out(renderer.columns, renderer.rows, &view);
 
         assert_eq!(layout.lines.len(), 1);
-        assert!(layout.lines[0].has_role(ComponentRole::PromptOptionSelected));
-        assert!(!layout.lines[0].has_role(ComponentRole::PromptHelp));
+        assert_eq!(layout.lines[0].text(), "┃ › English");
 
         let confirm_view = renderer_view(
             vec![
-                view_line("┃ continue?", ComponentRole::Accent),
-                view_line("┃", ComponentRole::Accent),
-                ViewLine {
-                    spans: vec![
-                        ViewSpan {
-                            text: "┃ ".to_owned(),
-                            role: ComponentRole::Accent,
-                        },
-                        ViewSpan {
-                            text: "  Yes  ".to_owned(),
-                            role: ComponentRole::PromptButtonFocused,
-                        },
-                        ViewSpan {
-                            text: "   No  ".to_owned(),
-                            role: ComponentRole::PromptButton,
-                        },
-                    ],
-                },
-                view_line("y/n answer", ComponentRole::PromptHelp),
+                active_line(view_line("┃ continue?", &styles.accent)),
+                active_line(view_line("┃", &styles.accent)),
+                active_line(
+                    ViewLine::new(vec![
+                        ViewSpan::new("┃ ", &styles.accent),
+                        ViewSpan::new("  Yes  ", &styles.button_focused),
+                        ViewSpan::new("   No  ", &styles.button),
+                    ])
+                    .with_kind(LineKind::Choice { focused: true }),
+                ),
+                view_line("y/n answer", &styles.help).with_kind(LineKind::Help),
             ],
             None,
         );
@@ -2351,24 +2431,96 @@ mod tests {
         let confirm_layout = layout::lay_out(renderer.columns, renderer.rows, &confirm_view);
 
         assert_eq!(confirm_layout.lines.len(), 1);
-        assert!(confirm_layout.lines[0].has_role(ComponentRole::PromptButtonFocused));
-        assert!(!confirm_layout.lines[0].has_role(ComponentRole::PromptHelp));
+        assert_eq!(confirm_layout.lines[0].text(), "┃   Yes     No  ");
     }
 
     #[test]
     fn inline_renderer_applies_terminal_profile_before_writing_styles() {
         let theme = test_theme();
         let profile = TerminalProfile::new(ColorProfile::Monochrome, AnsiPolicy::Disabled);
-        let mut renderer = CrosstermRenderer::new(&theme, &profile, Vec::new(), (20, 2));
+        let styles = PromptStyles::resolve(&theme, &profile);
+        let mut renderer = CrosstermRenderer::new(Vec::new(), (20, 2));
         renderer
             .draw(&renderer_view(
-                vec![view_line("plain", ComponentRole::PromptQuestion)],
+                vec![view_line("plain", &styles.question)],
                 None,
             ))
             .expect("draw succeeds");
         let output = String::from_utf8(renderer.writer).expect("renderer writes UTF-8 commands");
         assert!(!output.contains("\x1b[1m"));
         assert!(output.contains("plain"));
+    }
+
+    #[test]
+    fn every_pair_of_roles_compares_equal_exactly_when_it_paints_the_same() {
+        // The property the whole resolved-style view rests on: a row is the
+        // unit the plan stage compares to decide whether to redraw, so two
+        // spans must carry equal values whenever, and only whenever, they
+        // reach the terminal as the same bytes.
+        let theme = test_theme();
+        for color in [
+            ColorProfile::TrueColor,
+            ColorProfile::Ansi256,
+            ColorProfile::Ansi16,
+            ColorProfile::Monochrome,
+        ] {
+            for ansi in [AnsiPolicy::Enabled, AnsiPolicy::Disabled] {
+                let profile = TerminalProfile::new(color, ansi);
+                let styles = PromptStyles::resolve(&theme, &profile);
+                let roles = [
+                    ("body", &styles.body),
+                    ("muted", &styles.muted),
+                    ("accent", &styles.accent),
+                    ("question", &styles.question),
+                    ("answer", &styles.answer),
+                    ("placeholder", &styles.placeholder),
+                    ("cursor", &styles.cursor),
+                    ("option", &styles.option),
+                    ("option_selected", &styles.option_selected),
+                    ("button", &styles.button),
+                    ("button_focused", &styles.button_focused),
+                    ("help", &styles.help),
+                    ("error", &styles.error),
+                ];
+                for (left_name, left) in roles {
+                    for (right_name, right) in roles {
+                        assert_eq!(
+                            left == right,
+                            left.paint("x") == right.paint("x"),
+                            "{left_name} vs {right_name} under {color:?}/{ansi:?}"
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn a_profile_that_erases_a_difference_makes_the_runs_equal_and_merges_them() {
+        let theme = test_theme();
+        let colored = PromptStyles::resolve(
+            &theme,
+            &TerminalProfile::new(ColorProfile::TrueColor, AnsiPolicy::Enabled),
+        );
+        let monochrome = PromptStyles::resolve(
+            &theme,
+            &TerminalProfile::new(ColorProfile::Monochrome, AnsiPolicy::Disabled),
+        );
+
+        // Two roles the theme gives different appearances.
+        assert_ne!(colored.question, colored.answer);
+        // The profile erases that distinction, so the values must be equal:
+        // otherwise rows that render identically compare unequal and redraw
+        // every frame.
+        assert_eq!(monochrome.question, monochrome.answer);
+
+        let line = ViewLine::new(vec![
+            ViewSpan::new("ab", &monochrome.question),
+            ViewSpan::new("cd", &monochrome.answer),
+        ]);
+        let rendered = wrap_line(&line, 10);
+        assert_eq!(rendered[0].spans.len(), 1);
+        assert_eq!(rendered[0].text(), "abcd");
     }
 
     fn assert_io_operation(result: Result<FormOutcome, RunError>, expected: IoOperation) {

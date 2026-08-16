@@ -1,11 +1,12 @@
 use std::any::Any;
 
-use urushi::{ComponentRole, visible_width};
+use urushi::visible_width;
 
 use crate::{
     FieldConfigError, FieldKey,
     runtime::{
-        self, Event, FieldAction, FieldEntry, KeyCode, PromptView, RuntimeField, ViewLine, ViewSpan,
+        self, Event, FieldAction, FieldEntry, KeyCode, LineKind, PromptStyles, PromptView,
+        RuntimeField, ViewLine, ViewSpan,
     },
 };
 
@@ -169,20 +170,16 @@ impl RuntimeField for Confirm {
         })
     }
 
-    fn view(&self) -> PromptView {
-        let mut lines = vec![ViewLine {
-            spans: vec![ViewSpan {
-                text: self.question.clone(),
-                role: ComponentRole::PromptQuestion,
-            }],
-        }];
+    fn view(&self, styles: &PromptStyles, focused: bool) -> PromptView {
+        let mut lines = vec![ViewLine::new(vec![ViewSpan::new(
+            self.question.clone(),
+            styles.question(focused),
+        )])];
         if let Some(description) = &self.description {
-            lines.push(ViewLine {
-                spans: vec![ViewSpan {
-                    text: description.clone(),
-                    role: ComponentRole::Muted,
-                }],
-            });
+            lines.push(ViewLine::new(vec![ViewSpan::new(
+                description.clone(),
+                &styles.muted,
+            )]));
         }
         let button_width = visible_width(&self.yes_label)
             .saturating_add(4)
@@ -194,55 +191,47 @@ impl RuntimeField for Confirm {
             |description| visible_width(&self.question).max(visible_width(description)),
         );
         let left_padding = header_width.saturating_sub(button_width) / 2;
-        lines.push(ViewLine { spans: Vec::new() });
-        let mut buttons = ViewLine { spans: Vec::new() };
+        lines.push(ViewLine::blank());
+        let mut buttons = ViewLine::blank();
         if left_padding > 0 {
-            buttons.spans.push(ViewSpan {
-                text: " ".repeat(left_padding),
-                role: ComponentRole::Body,
-            });
+            buttons
+                .spans
+                .push(ViewSpan::new(" ".repeat(left_padding), &styles.body));
         }
         for (index, (value, label)) in [(true, &self.yes_label), (false, &self.no_label)]
             .into_iter()
             .enumerate()
         {
-            let role = if self.selected == Some(value) {
-                ComponentRole::PromptButtonFocused
+            let button_focused = self.selected == Some(value);
+            let style = if button_focused {
+                &styles.button_focused
             } else {
-                ComponentRole::PromptButton
+                &styles.button
             };
             if index > 0 {
-                buttons.spans.push(ViewSpan {
-                    text: " ".to_owned(),
-                    role: ComponentRole::Body,
-                });
+                buttons.spans.push(ViewSpan::new(" ", &styles.body));
             }
-            buttons.spans.push(ViewSpan {
-                text: format!("  {label}  "),
-                role,
-            });
+            buttons
+                .spans
+                .push(ViewSpan::new(format!("  {label}  "), style));
         }
+        buttons.kind = LineKind::Choice {
+            focused: self.selected.is_some(),
+        };
         lines.push(buttons);
         if self.show_unanswered {
-            lines.push(ViewLine {
-                spans: vec![
-                    ViewSpan {
-                        text: "! ".to_owned(),
-                        role: ComponentRole::PromptError,
-                    },
-                    ViewSpan {
-                        text: self.unanswered_message.clone(),
-                        role: ComponentRole::PromptError,
-                    },
-                ],
-            });
+            lines.push(
+                ViewLine::new(vec![
+                    ViewSpan::new("! ", &styles.error),
+                    ViewSpan::new(self.unanswered_message.clone(), &styles.error),
+                ])
+                .with_kind(LineKind::Error),
+            );
         }
-        lines.push(ViewLine {
-            spans: vec![ViewSpan {
-                text: self.help.clone(),
-                role: ComponentRole::PromptHelp,
-            }],
-        });
+        lines.push(
+            ViewLine::new(vec![ViewSpan::new(self.help.clone(), &styles.help)])
+                .with_kind(LineKind::Help),
+        );
 
         PromptView {
             lines,
@@ -254,6 +243,7 @@ impl RuntimeField for Confirm {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::runtime::test_styles;
 
     fn key(code: KeyCode) -> Event {
         Event::Key(runtime::KeyEvent {
@@ -274,16 +264,15 @@ mod tests {
     fn default_is_selected_visually_but_source_is_undecided_until_submit() {
         let mut confirm = Confirm::new(FieldKey::new("confirm"), "Continue?", Some(false))
             .expect("confirm is valid");
-        let initial = confirm.view();
+        let styles = test_styles();
+        let initial = confirm.view(&styles, true);
         assert_eq!(initial.cursor, None);
-        assert_eq!(
-            initial.lines[0].spans[0].role,
-            ComponentRole::PromptQuestion
-        );
+        assert_eq!(initial.lines[0].spans[0].style, styles.question);
         assert!(
-            initial.lines[2].spans.iter().any(|span| span.role
-                == ComponentRole::PromptButtonFocused
-                && span.text == "  No  ")
+            initial.lines[2]
+                .spans
+                .iter()
+                .any(|span| span.style == styles.button_focused && span.text == "  No  ")
         );
         assert_eq!(confirm.source, None);
 
@@ -322,27 +311,22 @@ mod tests {
             .labels("Proceed", "Stop")
             .help("Choose, then press Enter.")
             .unanswered_message("Choose an answer.");
-        let initial = confirm.view();
-        assert_eq!(initial.lines[2].spans[0].role, ComponentRole::PromptButton);
-        assert_eq!(initial.lines[2].spans[2].role, ComponentRole::PromptButton);
+        let styles = test_styles();
+        let initial = confirm.view(&styles, true);
+        assert_eq!(initial.lines[2].spans[0].style, styles.button);
+        assert_eq!(initial.lines[2].spans[2].style, styles.button);
         assert_eq!(initial.lines[2].spans[0].text, "  Proceed  ");
         assert_eq!(initial.lines[2].spans[2].text, "  Stop  ");
         assert_eq!(confirm.event(key(KeyCode::Enter)), FieldAction::Stay);
-        assert_eq!(
-            confirm.view().lines[3].spans[0].role,
-            ComponentRole::PromptError
-        );
-        assert_eq!(
-            confirm.view().lines[4].spans[0].role,
-            ComponentRole::PromptHelp
-        );
-        assert_eq!(confirm.view().lines[3].spans[1].text, "Choose an answer.");
-        assert_eq!(
-            confirm.view().lines[4].spans[0].text,
-            "Choose, then press Enter."
-        );
+        let answered = confirm.view(&styles, true);
+        assert_eq!(answered.lines[3].kind, LineKind::Error);
+        assert_eq!(answered.lines[3].spans[0].style, styles.error);
+        assert_eq!(answered.lines[4].kind, LineKind::Help);
+        assert_eq!(answered.lines[4].spans[0].style, styles.help);
+        assert_eq!(answered.lines[3].spans[1].text, "Choose an answer.");
+        assert_eq!(answered.lines[4].spans[0].text, "Choose, then press Enter.");
         assert_eq!(confirm.event(key(KeyCode::Right)), FieldAction::Stay);
-        assert_eq!(confirm.view().lines.len(), 4);
+        assert_eq!(confirm.view(&styles, true).lines.len(), 4);
         assert_eq!(confirm.event(key(KeyCode::Enter)), FieldAction::Accept);
     }
 
@@ -355,14 +339,12 @@ mod tests {
         )
         .expect("confirm is valid");
 
-        let view = confirm.view();
+        let styles = test_styles();
+        let view = confirm.view(&styles, true);
         assert!(view.lines[1].spans.is_empty());
-        assert_eq!(view.lines[2].spans[0].role, ComponentRole::Body);
+        assert_eq!(view.lines[2].spans[0].style, styles.body);
         assert_eq!(view.lines[2].spans[0].text, "          ");
-        assert_eq!(
-            view.lines[2].spans[1].role,
-            ComponentRole::PromptButtonFocused
-        );
+        assert_eq!(view.lines[2].spans[1].style, styles.button_focused);
         assert_eq!(view.lines[2].spans[1].text, "  Yes  ");
     }
 }

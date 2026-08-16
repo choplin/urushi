@@ -177,9 +177,10 @@ convention is:
 `TextThemeRole::resolve` returns an owned `TextStyle` because a role that must be
 re-resolved is one whose style is derived rather than stored. A consumer that
 resolves many roles per frame should resolve once into its own struct of styles
-and borrow from that struct while drawing; `urushi-prompt`'s inline renderer
-builds `PromptStyles` this way at construction. `Theme::components` also exposes
-the built-in styles as borrows.
+and borrow from that struct while drawing; `urushi-prompt` builds `PromptStyles`
+this way once per run and builds its view from those values, so nothing below
+the view sees a role. `Theme::components` also exposes the built-in styles as
+borrows.
 
 ## Workspace responsibilities
 
@@ -350,6 +351,13 @@ not require changes in consumers such as Agentlog.
 writer-specific ANSI policy and color fidelity at an output boundary. Detect a
 profile for the writer that will receive the result; do not reuse stdout's
 profile for stderr or a Ratatui surface.
+
+`urushi-prompt`'s prompt-specific view is the one deliberate exception: its
+spans carry profile-resolved styles from the moment the view is built, several
+stages above the writer. Rows there are compared for equality to decide whether
+to redraw, so equal appearance has to mean equal value — see
+[`inline-prompt-rendering.md`](inline-prompt-rendering.md), "Runs have a
+canonical form". This does not relax the contract for `Theme` or `View`.
 
 The immutable value model, closed property vocabulary, and generic
 `add`/`remove` operations are specified in

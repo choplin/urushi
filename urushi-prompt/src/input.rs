@@ -1,13 +1,13 @@
 use std::any::Any;
 
 use unicode_segmentation::UnicodeSegmentation;
-use urushi::{ComponentRole, visible_width};
+use urushi::visible_width;
 
 use crate::{
     FieldConfigError, FieldKey,
     runtime::{
-        self, Event, FieldAction, FieldEntry, KeyCode, PromptView, RuntimeField, ViewCursor,
-        ViewLine, ViewSpan,
+        self, Event, FieldAction, FieldEntry, KeyCode, LineKind, PromptStyles, PromptView,
+        RuntimeField, ViewCursor, ViewLine, ViewSpan,
     },
 };
 
@@ -177,17 +177,17 @@ impl Input {
         FieldAction::Accept
     }
 
-    fn answer_spans(&self) -> Vec<ViewSpan> {
+    fn answer_spans(&self, styles: &PromptStyles, focused: bool) -> Vec<ViewSpan> {
         if self.value.is_empty() {
-            let mut spans = vec![ViewSpan {
-                text: " ".to_owned(),
-                role: ComponentRole::PromptCursor,
-            }];
+            // The blank the cursor sits on exists only to be highlighted; an
+            // unfocused field has no cursor and would draw a stray space.
+            let mut spans = if focused {
+                vec![ViewSpan::new(" ", &styles.cursor)]
+            } else {
+                Vec::new()
+            };
             if let Some(placeholder) = &self.placeholder {
-                spans.push(ViewSpan {
-                    text: placeholder.clone(),
-                    role: ComponentRole::PromptPlaceholder,
-                });
+                spans.push(ViewSpan::new(placeholder.clone(), &styles.placeholder));
             }
             return spans;
         }
@@ -195,28 +195,29 @@ impl Input {
         let cursor_byte = self.byte_index(self.cursor);
         let mut spans = Vec::new();
         if cursor_byte > 0 {
-            spans.push(ViewSpan {
-                text: self.value[..cursor_byte].to_owned(),
-                role: ComponentRole::PromptAnswer,
-            });
+            spans.push(ViewSpan::new(
+                self.value[..cursor_byte].to_owned(),
+                &styles.answer,
+            ));
         }
         if let Some(grapheme) = self.value[cursor_byte..].graphemes(true).next() {
-            spans.push(ViewSpan {
-                text: grapheme.to_owned(),
-                role: ComponentRole::PromptCursor,
-            });
+            // An unfocused field has no cursor, so the character under it is
+            // drawn as ordinary answer text.
+            let style = if focused {
+                &styles.cursor
+            } else {
+                &styles.answer
+            };
+            spans.push(ViewSpan::new(grapheme, style));
             let after_cursor = cursor_byte + grapheme.len();
             if after_cursor < self.value.len() {
-                spans.push(ViewSpan {
-                    text: self.value[after_cursor..].to_owned(),
-                    role: ComponentRole::PromptAnswer,
-                });
+                spans.push(ViewSpan::new(
+                    self.value[after_cursor..].to_owned(),
+                    &styles.answer,
+                ));
             }
-        } else {
-            spans.push(ViewSpan {
-                text: " ".to_owned(),
-                role: ComponentRole::PromptCursor,
-            });
+        } else if focused {
+            spans.push(ViewSpan::new(" ", &styles.cursor));
         }
         spans
     }
@@ -293,57 +294,41 @@ impl RuntimeField for Input {
         Box::new(std::mem::take(&mut self.value))
     }
 
-    fn view(&self) -> PromptView {
+    fn view(&self, styles: &PromptStyles, focused: bool) -> PromptView {
         let answer_start = 2_usize;
         let cursor_prefix = &self.value[..self.byte_index(self.cursor)];
         let cursor_column = answer_start.saturating_add(visible_width(cursor_prefix));
-        let mut answer = ViewLine {
-            spans: vec![ViewSpan {
-                text: "› ".to_owned(),
-                role: ComponentRole::PromptAnswer,
-            }],
-        };
-        answer.spans.extend(self.answer_spans());
-        let mut lines = vec![ViewLine {
-            spans: vec![ViewSpan {
-                text: self.question.clone(),
-                role: ComponentRole::PromptQuestion,
-            }],
-        }];
+        let mut answer = ViewLine::new(vec![ViewSpan::new("› ", &styles.answer)]);
+        answer.spans.extend(self.answer_spans(styles, focused));
+        let mut lines = vec![ViewLine::new(vec![ViewSpan::new(
+            self.question.clone(),
+            styles.question(focused),
+        )])];
         if let Some(description) = &self.description {
-            lines.push(ViewLine {
-                spans: vec![ViewSpan {
-                    text: description.clone(),
-                    role: ComponentRole::Muted,
-                }],
-            });
+            lines.push(ViewLine::new(vec![ViewSpan::new(
+                description.clone(),
+                &styles.muted,
+            )]));
         }
         let answer_row = lines.len();
         lines.push(answer);
         if let Some(message) = &self.validation_error {
-            lines.push(ViewLine {
-                spans: vec![
-                    ViewSpan {
-                        text: "! ".to_owned(),
-                        role: ComponentRole::PromptError,
-                    },
-                    ViewSpan {
-                        text: message.clone(),
-                        role: ComponentRole::PromptError,
-                    },
-                ],
-            });
+            lines.push(
+                ViewLine::new(vec![
+                    ViewSpan::new("! ", &styles.error),
+                    ViewSpan::new(message.clone(), &styles.error),
+                ])
+                .with_kind(LineKind::Error),
+            );
         }
-        lines.push(ViewLine {
-            spans: vec![ViewSpan {
-                text: self.help.clone(),
-                role: ComponentRole::PromptHelp,
-            }],
-        });
+        lines.push(
+            ViewLine::new(vec![ViewSpan::new(self.help.clone(), &styles.help)])
+                .with_kind(LineKind::Help),
+        );
 
         PromptView {
             lines,
-            cursor: Some(ViewCursor {
+            cursor: focused.then(|| ViewCursor {
                 row: answer_row.min(usize::from(u16::MAX)) as u16,
                 column: cursor_column.min(usize::from(u16::MAX)) as u16,
             }),
@@ -369,7 +354,7 @@ mod tests {
     use super::*;
     use crate::{
         Form, FormOutcome, Group,
-        runtime::{EventSource, RenderFinish, Renderer, TerminalControl},
+        runtime::{EventSource, RenderFinish, Renderer, TerminalControl, test_styles},
     };
 
     fn key(code: KeyCode) -> Event {
@@ -418,44 +403,86 @@ mod tests {
     }
 
     #[test]
-    fn view_uses_semantic_roles_and_cjk_display_columns() {
+    fn view_uses_resolved_styles_and_cjk_display_columns() {
         let mut input = Input::new(FieldKey::new("name"), "名前", "あ")
             .expect("input is valid")
             .placeholder("入力してください");
         assert_eq!(input.event(key(KeyCode::Home)), FieldAction::Stay);
 
-        let view = input.view();
+        let styles = test_styles();
+        let view = input.view(&styles, true);
         assert_eq!(
             view.lines[0].spans,
-            vec![ViewSpan {
-                text: "名前".to_owned(),
-                role: ComponentRole::PromptQuestion,
-            }]
+            vec![ViewSpan::new("名前", &styles.question)]
         );
         assert_eq!(view.lines[1].spans[0].text, "› ");
-        assert_eq!(view.lines[1].spans[1].role, ComponentRole::PromptCursor);
+        assert_eq!(view.lines[1].spans[1].style, styles.cursor);
         assert_eq!(view.cursor, Some(ViewCursor { row: 1, column: 2 }));
-        assert_eq!(view.lines[2].spans[0].role, ComponentRole::PromptHelp);
+        assert_eq!(view.lines[2].kind, LineKind::Help);
+        assert_eq!(view.lines[2].spans[0].style, styles.help);
 
         let empty = Input::new(FieldKey::new("empty"), "Name", "")
             .expect("input is valid")
             .placeholder("Example");
-        assert_eq!(
-            empty.view().lines[1].spans[1].role,
-            ComponentRole::PromptCursor
-        );
-        assert_eq!(
-            empty.view().lines[1].spans[2].role,
-            ComponentRole::PromptPlaceholder
-        );
+        let empty_view = empty.view(&styles, true);
+        assert_eq!(empty_view.lines[1].spans[1].style, styles.cursor);
+        assert_eq!(empty_view.lines[1].spans[2].style, styles.placeholder);
 
         assert_eq!(input.event(key(KeyCode::End)), FieldAction::Stay);
         assert_eq!(
-            input.view().lines[1].spans.last(),
-            Some(&ViewSpan {
-                text: " ".to_owned(),
-                role: ComponentRole::PromptCursor,
-            })
+            input.view(&styles, true).lines[1].spans.last(),
+            Some(&ViewSpan::new(" ", &styles.cursor))
+        );
+    }
+
+    #[test]
+    fn an_unfocused_input_recedes_and_drops_the_cursor() {
+        let styles = test_styles();
+        let input = Input::new(FieldKey::new("name"), "Name", "value").expect("input is valid");
+
+        let unfocused = input.view(&styles, false);
+        assert_eq!(unfocused.lines[0].spans[0].style, styles.muted);
+        assert!(
+            unfocused.lines[1]
+                .spans
+                .iter()
+                .all(|span| span.style != styles.cursor)
+        );
+        assert_eq!(
+            unfocused.lines[1]
+                .spans
+                .iter()
+                .map(|span| span.text.as_str())
+                .collect::<String>(),
+            "› value"
+        );
+
+        let empty = Input::new(FieldKey::new("empty"), "Name", "").expect("input is valid");
+        assert!(empty.view(&styles, false).lines[1].spans[1..].is_empty());
+    }
+
+    #[test]
+    fn an_unfocused_input_keeps_a_space_the_cursor_was_resting_on() {
+        // Losing focus drops the cursor, not a character of the value. The
+        // blank that is dropped is the synthetic one drawn past the end of the
+        // value, which is why it is decided by position rather than by text.
+        let styles = test_styles();
+        let mut input = Input::new(FieldKey::new("name"), "Name", "John Doe")
+            .expect("input is valid")
+            .placeholder("");
+        assert_eq!(input.event(key(KeyCode::Home)), FieldAction::Stay);
+        for _ in 0..4 {
+            assert_eq!(input.event(key(KeyCode::Right)), FieldAction::Stay);
+        }
+
+        let unfocused = input.view(&styles, false);
+        assert_eq!(
+            unfocused.lines[1]
+                .spans
+                .iter()
+                .map(|span| span.text.as_str())
+                .collect::<String>(),
+            "› John Doe"
         );
     }
 
@@ -571,7 +598,7 @@ mod tests {
         let mut terminal = InteractiveTerminal;
 
         let outcome = form
-            .run_with(&mut events, &mut renderer, &mut terminal)
+            .run_with(&mut events, &mut renderer, &mut terminal, &test_styles())
             .expect("form submits");
         let FormOutcome::Submitted(values) = outcome else {
             panic!("expected submitted values");
@@ -586,7 +613,7 @@ mod tests {
         assert!(renderer.views[1].lines.iter().any(|line| {
             line.spans
                 .iter()
-                .any(|span| span.role == ComponentRole::PromptError)
+                .any(|span| span.style == test_styles().error)
         }));
         assert_eq!(renderer.views[2].lines.len(), 7);
         assert_eq!(renderer.views[3].lines[3].spans[0].text, "┃ ");
@@ -604,7 +631,7 @@ mod tests {
                 .lines
                 .iter()
                 .flat_map(|line| &line.spans)
-                .filter(|span| span.role == ComponentRole::PromptHelp)
+                .filter(|span| span.style == test_styles().help)
                 .count(),
             1
         );

@@ -12,7 +12,6 @@ use crossterm::{
 };
 
 use super::{
-    PromptStyles,
     inline_plan::{Checkpoint, InlineCommand, InlineRenderPlan},
     presentation::InlinePresentation,
 };
@@ -22,7 +21,6 @@ use super::{
 /// [`super::inline_plan`].
 pub(crate) fn execute<W: Write>(
     writer: &mut W,
-    styles: &PromptStyles,
     presentation: &mut InlinePresentation,
     plan: InlineRenderPlan,
 ) -> io::Result<()> {
@@ -31,7 +29,7 @@ pub(crate) fn execute<W: Write>(
     }
 
     for step in plan.steps {
-        write_command(writer, styles, &step.command)?;
+        write_command(writer, &step.command)?;
         if let Some(checkpoint) = step.committed {
             commit(presentation, checkpoint);
         }
@@ -51,11 +49,7 @@ fn commit(presentation: &mut InlinePresentation, checkpoint: Checkpoint) {
     }
 }
 
-fn write_command<W: Write>(
-    writer: &mut W,
-    styles: &PromptStyles,
-    command: &InlineCommand,
-) -> io::Result<()> {
+fn write_command<W: Write>(writer: &mut W, command: &InlineCommand) -> io::Result<()> {
     match command {
         InlineCommand::HideCursor => queue!(writer, cursor::Hide),
         InlineCommand::ShowCursor => queue!(writer, cursor::Show),
@@ -71,7 +65,7 @@ fn write_command<W: Write>(
         InlineCommand::CarriageReturnNewline => writer.write_all(b"\r\n"),
         InlineCommand::WriteLine(line) => {
             for span in &line.spans {
-                writer.write_all(styles.style(span.role).paint(&span.text).as_bytes())?;
+                writer.write_all(span.style.paint(&span.text).as_bytes())?;
             }
             Ok(())
         }

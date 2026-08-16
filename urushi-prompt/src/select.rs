@@ -1,12 +1,12 @@
 use std::any::Any;
 
 use unicode_segmentation::UnicodeSegmentation;
-use urushi::ComponentRole;
 
 use crate::{
     FieldConfigError, FieldKey,
     runtime::{
-        self, Event, FieldAction, FieldEntry, KeyCode, PromptView, RuntimeField, ViewLine, ViewSpan,
+        self, Event, FieldAction, FieldEntry, KeyCode, LineKind, PromptStyles, PromptView,
+        RuntimeField, ViewLine, ViewSpan,
     },
 };
 
@@ -284,45 +284,41 @@ impl<T: 'static> RuntimeField for Select<T> {
         Box::new(self.options.remove(self.selected).value)
     }
 
-    fn view(&self) -> PromptView {
-        let mut title = ViewLine {
-            spans: vec![ViewSpan {
-                text: self.question.clone(),
-                role: ComponentRole::PromptQuestion,
-            }],
-        };
+    fn view(&self, styles: &PromptStyles, focused: bool) -> PromptView {
+        let mut title = ViewLine::new(vec![ViewSpan::new(
+            self.question.clone(),
+            styles.question(focused),
+        )]);
         let mut cursor = None;
         if self.filtering || !self.filter.is_empty() {
-            title.spans.push(ViewSpan {
-                text: "  / ".to_owned(),
-                role: ComponentRole::PromptAnswer,
-            });
+            title.spans.push(ViewSpan::new("  / ", &styles.answer));
             if !self.filter.is_empty() {
-                title.spans.push(ViewSpan {
-                    text: self.filter.clone(),
-                    role: ComponentRole::PromptAnswer,
-                });
+                title
+                    .spans
+                    .push(ViewSpan::new(self.filter.clone(), &styles.answer));
             }
             if self.filtering {
-                title.spans.push(ViewSpan {
-                    text: " ".to_owned(),
-                    role: ComponentRole::PromptCursor,
-                });
-                cursor = Some(crate::runtime::ViewCursor {
-                    row: 0,
-                    column: urushi::visible_width(&format!("{}  / {}", self.question, self.filter))
+                // The blank marks where typing continues, so it belongs to the
+                // cursor and disappears with it when the field loses focus.
+                if focused {
+                    title.spans.push(ViewSpan::new(" ", &styles.cursor));
+                    cursor = Some(crate::runtime::ViewCursor {
+                        row: 0,
+                        column: urushi::visible_width(&format!(
+                            "{}  / {}",
+                            self.question, self.filter
+                        ))
                         .min(usize::from(u16::MAX)) as u16,
-                });
+                    });
+                }
             }
         }
         let mut lines = vec![title];
         if let Some(description) = &self.description {
-            lines.push(ViewLine {
-                spans: vec![ViewSpan {
-                    text: description.clone(),
-                    role: ComponentRole::Muted,
-                }],
-            });
+            lines.push(ViewLine::new(vec![ViewSpan::new(
+                description.clone(),
+                &styles.muted,
+            )]));
         }
         let list_height = self.visible_rows.min(self.options.len());
         let (start, end) = if self.filtered.is_empty() {
@@ -336,39 +332,27 @@ impl<T: 'static> RuntimeField for Select<T> {
             (start, end)
         };
         if self.filtered.is_empty() {
-            lines.push(ViewLine {
-                spans: vec![ViewSpan {
-                    text: self.no_matches_message.clone(),
-                    role: ComponentRole::PromptError,
-                }],
-            });
+            lines.push(
+                ViewLine::new(vec![ViewSpan::new(
+                    self.no_matches_message.clone(),
+                    &styles.error,
+                )])
+                .with_kind(LineKind::Error),
+            );
         } else {
             lines.extend(self.filtered[start..end].iter().map(|index| {
                 let option = &self.options[*index];
-                ViewLine {
-                    spans: {
-                        let role = if *index == self.selected {
-                            ComponentRole::PromptOptionSelected
-                        } else {
-                            ComponentRole::PromptOption
-                        };
-                        vec![
-                            ViewSpan {
-                                text: if *index == self.selected {
-                                    "› "
-                                } else {
-                                    "  "
-                                }
-                                .to_owned(),
-                                role,
-                            },
-                            ViewSpan {
-                                text: option.label.clone(),
-                                role,
-                            },
-                        ]
-                    },
-                }
+                let selected = *index == self.selected;
+                let style = if selected {
+                    &styles.option_selected
+                } else {
+                    &styles.option
+                };
+                ViewLine::new(vec![
+                    ViewSpan::new(if selected { "› " } else { "  " }, style),
+                    ViewSpan::new(option.label.clone(), style),
+                ])
+                .with_kind(LineKind::Choice { focused: selected })
             }));
         }
         let rendered_rows = if self.filtered.is_empty() {
@@ -376,7 +360,7 @@ impl<T: 'static> RuntimeField for Select<T> {
         } else {
             end - start
         };
-        lines.extend((rendered_rows..list_height).map(|_| ViewLine { spans: Vec::new() }));
+        lines.extend((rendered_rows..list_height).map(|_| ViewLine::blank()));
         if self.options.len() > self.visible_rows {
             let above = start;
             let below = self.filtered.len().saturating_sub(end);
@@ -386,19 +370,15 @@ impl<T: 'static> RuntimeField for Select<T> {
                 (above, 0) => format!("  ↑ {above}"),
                 (above, below) => format!("  ↑ {above} • ↓ {below}"),
             };
-            lines.push(ViewLine {
-                spans: vec![ViewSpan {
-                    text: status,
-                    role: ComponentRole::Muted,
-                }],
-            });
+            lines.push(ViewLine::new(vec![ViewSpan::new(status, &styles.muted)]));
         }
-        lines.push(ViewLine {
-            spans: vec![ViewSpan {
-                text: self.current_help().to_owned(),
-                role: ComponentRole::PromptHelp,
-            }],
-        });
+        lines.push(
+            ViewLine::new(vec![ViewSpan::new(
+                self.current_help().to_owned(),
+                &styles.help,
+            )])
+            .with_kind(LineKind::Help),
+        );
 
         PromptView { lines, cursor }
     }
@@ -419,7 +399,7 @@ mod tests {
     use super::*;
     use crate::{
         Confirm, ConfirmSource, Form, FormOutcome, Group, Input,
-        runtime::{EventSource, RenderFinish, Renderer, TerminalControl},
+        runtime::{EventSource, RenderFinish, Renderer, TerminalControl, test_styles},
     };
 
     fn key(code: KeyCode) -> Event {
@@ -460,52 +440,58 @@ mod tests {
             vec![SelectOption::new("Only", 1)],
         )
         .expect("single option is valid");
+        let styles = test_styles();
         assert_eq!(single.event(key(KeyCode::Left)), FieldAction::Stay);
-        assert_eq!(single.view().lines[1].spans[1].text, "Only");
+        assert_eq!(single.view(&styles, true).lines[1].spans[1].text, "Only");
         assert_eq!(single.event(key(KeyCode::Right)), FieldAction::Stay);
-        assert_eq!(single.view().lines[1].spans[1].text, "Only");
+        assert_eq!(single.view(&styles, true).lines[1].spans[1].text, "Only");
 
         let mut multiple = Select::new(FieldKey::new("multiple"), "Multiple", options())
             .expect("multiple options are valid");
         assert_eq!(multiple.event(key(KeyCode::Up)), FieldAction::Stay);
         assert_eq!(
-            multiple.view().lines[2].spans[0].role,
-            ComponentRole::PromptOptionSelected
+            multiple.view(&styles, true).lines[2].spans[0].style,
+            styles.option_selected
         );
         assert_eq!(multiple.event(key(KeyCode::Down)), FieldAction::Stay);
         assert_eq!(
-            multiple.view().lines[1].spans[0].role,
-            ComponentRole::PromptOptionSelected
+            multiple.view(&styles, true).lines[1].spans[0].style,
+            styles.option_selected
         );
         assert_eq!(multiple.event(key(KeyCode::Right)), FieldAction::Stay);
         assert_eq!(
-            multiple.view().lines[2].spans[0].role,
-            ComponentRole::PromptOptionSelected
+            multiple.view(&styles, true).lines[2].spans[0].style,
+            styles.option_selected
         );
         assert_eq!(multiple.event(key(KeyCode::Left)), FieldAction::Stay);
         assert_eq!(
-            multiple.view().lines[1].spans[0].role,
-            ComponentRole::PromptOptionSelected
+            multiple.view(&styles, true).lines[1].spans[0].style,
+            styles.option_selected
         );
     }
 
     #[test]
-    fn view_has_question_and_option_semantic_roles() {
+    fn view_carries_resolved_styles_and_frame_classification() {
         let select = Select::new(FieldKey::new("choice"), "Choose", options())
             .expect("select is valid")
             .help("Use arrows, then Enter.");
-        let view = select.view();
+        let styles = test_styles();
+        let view = select.view(&styles, true);
         assert_eq!(view.cursor, None);
         assert_eq!(view.lines[0].spans[0].text, "Choose");
-        assert_eq!(view.lines[0].spans[0].role, ComponentRole::PromptQuestion);
+        assert_eq!(view.lines[0].spans[0].style, styles.question);
         assert_eq!(view.lines[1].spans[0].text, "› ");
-        assert_eq!(
-            view.lines[1].spans[0].role,
-            ComponentRole::PromptOptionSelected
-        );
-        assert_eq!(view.lines[2].spans[0].role, ComponentRole::PromptOption);
-        assert_eq!(view.lines[3].spans[0].role, ComponentRole::PromptHelp);
+        assert_eq!(view.lines[1].spans[0].style, styles.option_selected);
+        assert_eq!(view.lines[1].kind, LineKind::Choice { focused: true });
+        assert_eq!(view.lines[2].spans[0].style, styles.option);
+        assert_eq!(view.lines[2].kind, LineKind::Choice { focused: false });
+        assert_eq!(view.lines[3].kind, LineKind::Help);
+        assert_eq!(view.lines[3].spans[0].style, styles.help);
         assert_eq!(view.lines[3].spans[0].text, "Use arrows, then Enter.");
+        assert_eq!(
+            select.view(&styles, false).lines[0].spans[0].style,
+            styles.muted
+        );
     }
 
     #[test]
@@ -519,7 +505,7 @@ mod tests {
 
         assert!(
             select
-                .view()
+                .view(&test_styles(), true)
                 .lines
                 .iter()
                 .any(|line| { line.spans.iter().any(|span| span.text == "  ↓ 9") })
@@ -528,7 +514,7 @@ mod tests {
         assert_eq!(select.selected, 11);
         assert!(
             select
-                .view()
+                .view(&test_styles(), true)
                 .lines
                 .iter()
                 .any(|line| { line.spans.iter().any(|span| span.text == "  ↑ 9") })
@@ -555,11 +541,13 @@ mod tests {
         );
         assert!(select.filtered.is_empty());
         assert_eq!(select.event(key(KeyCode::Enter)), FieldAction::Stay);
-        assert!(select.view().lines.iter().any(|line| {
-            line.spans
+        assert!(
+            select
+                .view(&test_styles(), true)
+                .lines
                 .iter()
-                .any(|span| span.role == ComponentRole::PromptError)
-        }));
+                .any(|line| line.kind == LineKind::Error)
+        );
     }
 
     #[derive(Default)]
@@ -667,7 +655,7 @@ mod tests {
         let mut terminal = InteractiveTerminal;
 
         let outcome = form
-            .run_with(&mut events, &mut renderer, &mut terminal)
+            .run_with(&mut events, &mut renderer, &mut terminal, &test_styles())
             .expect("form submits");
         let FormOutcome::Submitted(values) = outcome else {
             panic!("expected submitted values");
@@ -683,12 +671,12 @@ mod tests {
         );
         assert_eq!(values.get(&tail_key), Some(&"done".to_owned()));
         assert_eq!(
-            renderer.views[1].lines[2].spans[1].role,
-            ComponentRole::PromptOptionSelected
+            renderer.views[1].lines[2].spans[1].style,
+            test_styles().option_selected
         );
         assert_eq!(
-            renderer.views[5].lines[2].spans[1].role,
-            ComponentRole::PromptOptionSelected
+            renderer.views[5].lines[2].spans[1].style,
+            test_styles().option_selected
         );
     }
 }
