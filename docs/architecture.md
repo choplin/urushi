@@ -212,23 +212,9 @@ not introduce a private definition of CJK display width.
 Themes describe meaning. They do not detect `NO_COLOR`, inspect TTY state, emit
 ANSI, or retain an output writer.
 
-Indicatif is an implementation detail. Public progress types expose messages,
-positions, and semantic completion operations; they do not expose Indicatif
-types, templates, draw targets, or tick configuration. Live and plain messages
-both use `ComponentRole::Body`, and `TerminalProfile` resolves terminal
-capabilities before data reaches the private backend, so replacing Indicatif
-does not reach a consumer.
-
-`List` and `Tree`, including their recursive item and node types, are owned
-presentation-neutral data. `ListStyle` and `TreeStyle` own the corresponding
-semantic styles and marker policies, receive the data model, and compose a
-renderer-neutral `View`.
-
-`Table` and `TableStyle` follow the same separation. A table cell is a `Block`:
-the table supplies the column width, the cell padding, and the row height, and
-the cell's `BlockStyle` supplies the alignment applied inside that box, so the
-table implements no alignment of its own. The contract these components follow
-is defined in [`component-model.md`](component-model.md).
+Reusable components separate owned, presentation-neutral data — `List`,
+`Tree`, `Table` — from the component style that composes it into a `View`. The
+contract they follow is defined in [`component-model.md`](component-model.md).
 
 ## Core contracts
 
@@ -239,12 +225,11 @@ the writer-specific ANSI policy and color fidelity at an output boundary. Detect
 a profile for the writer that will receive the result; do not reuse stdout's
 profile for stderr or a Ratatui surface.
 
-The prompt's view is the one deliberate exception: its spans carry
-profile-resolved styles from the moment the view is built, several stages above
-the writer. Rows there are compared for equality to decide whether to redraw, so
-equal appearance has to mean equal value — see
-[`inline-prompt-rendering.md`](inline-prompt-rendering.md), "Runs have a
-canonical form". This does not relax the contract for `Theme` or `View`.
+The prompt's view is the one deliberate exception: its runs carry
+profile-resolved styles from the moment the view is built, because rows there
+are compared for equality to decide whether to redraw — see
+[`design/style-canonical-form.md`](design/style-canonical-form.md). This does
+not relax the contract for `Theme` or `View`.
 
 The immutable value model, closed property vocabulary, and generic
 `add`/`remove` operations are specified in
@@ -287,7 +272,10 @@ region is claimed, released, and recovered after a failed write.
 ### External backends stay behind adapters
 
 Ratatui types stay in `urushi-tui`; Indicatif types stay in the private core
-adapter. Public `urushi` surfaces use Urushi-owned concepts. This keeps backend
+adapter. Public `urushi` surfaces use Urushi-owned concepts: progress types
+expose messages, positions, and semantic completion operations, not Indicatif
+templates, draw targets, or tick configuration, and `TerminalProfile` resolves
+capabilities before data reaches the private backend. This keeps backend
 replacement local and prevents backend lifecycle rules from becoming core
 application contracts.
 

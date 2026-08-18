@@ -5,9 +5,18 @@ the subsystem [`architecture.md`](architecture.md) places in `urushi-tui`.
 
 The runtime adds an application framework in the style of The Elm Architecture
 (TEA) above Ratatui while leaving Ratatui responsible for widgets, layout,
-buffers, backends, and cell-level diffing.
-It extends the `urushi-tui` Ratatui adapter without making the
-renderer-neutral view model depend on Ratatui.
+buffers, backends, and cell-level diffing. It extends the `urushi-tui` Ratatui
+adapter without making the renderer-neutral view model depend on Ratatui.
+
+Four topics have files under [`design/`](design/), linked from the sections
+that summarize them: what the TUI view is
+([`design/tui-view.md`](design/tui-view.md)); how messages are admitted,
+ordered, and drawn, including the `Sync` and startup barriers
+([`design/tui-delivery-ordering.md`](design/tui-delivery-ordering.md)); how
+effects run and how their freshness is decided
+([`design/tui-effects.md`](design/tui-effects.md)); and who owns the terminal,
+the frame, and session restoration
+([`design/tui-terminal-ownership.md`](design/tui-terminal-ownership.md)).
 
 ## Goals
 
@@ -26,38 +35,37 @@ The TUI subsystem must provide:
   applications that combine cell output with terminal graphics.
 
 The initial design does not provide application semantics such as focus,
-navigation, modal stacks, key bindings, or commands.
-Those remain ordinary model and message logic.
+navigation, modal stacks, key bindings, or commands. Those remain ordinary
+model and message logic.
 
 ## Relationship to the rest of the architecture
 
 Three boundaries in [`architecture.md`](architecture.md) constrain the TUI
 subsystem.
 
-First, `style`, `text`, `theme`, `view`, and reusable components are
-semantic modules without terminal lifecycle ownership.
-The TUI runtime may consume their values, but they must not depend on the
-runtime.
+First, `style`, `text`, `theme`, `view`, and reusable components are semantic
+modules without terminal lifecycle ownership. The TUI runtime may consume their
+values, but they must not depend on the runtime.
 
-Second, the adapter modules in [`urushi-tui`](../urushi-tui/) are output adapters.
-They convert Urushi styles and box-model values into Ratatui representations
-and draw into a supplied buffer.
-The runtime orchestrates those adapters; the adapters do not acquire
-application state, event handling, or terminal ownership.
+Second, the adapter modules in [`urushi-tui`](../urushi-tui/) are output
+adapters. They convert Urushi styles and box-model values into Ratatui
+representations and draw into a supplied buffer. The runtime orchestrates those
+adapters; the adapters do not acquire application state, event handling, or
+terminal ownership.
 
-Third, [`urushi-prompt`](../urushi-prompt/) is a prompt-specific crate.
-Its line-oriented editing, submission, viewport, cursor, and cleanup policy do
-not become the default policy for full-screen applications.
-Sharing lower-level terminal facilities in the future must not merge the two
-interaction models, prompt-style line editing and full-screen application.
+Third, [`urushi-prompt`](../urushi-prompt/) is a prompt-specific crate. Its
+line-oriented editing, submission, viewport, cursor, and cleanup policy do not
+become the default policy for full-screen applications. Sharing lower-level
+terminal facilities in the future must not merge the two interaction models,
+prompt-style line editing and full-screen application.
 
 `urushi-tui` is the crate boundary for this subsystem. Its internal modules may
 be refined without moving Ratatui concerns back into the core `urushi` crate.
 
 ## From event to terminal output
 
-The application describes state transitions and declarations.
-The runtime owns execution and terminal resources.
+The application describes state transitions and declarations. The runtime owns
+execution and terminal resources.
 
 ```text
 event sources ---------> admission policies ----+
@@ -83,9 +91,9 @@ subscription events ---> admission policies ----+              |
                                       Terminal.draw(borrowed Frame) --> Backend
 ```
 
-`Application` and `Runtime` are deliberately separate.
-An application can be composed, passed around, and tested as a description of a
-program; the runtime interprets it and owns all live execution state.
+`Application` and `Runtime` are deliberately separate. An application can be
+composed, passed around, and tested as a description of a program; the runtime
+interprets it and owns all live execution state.
 
 ## Application model
 
@@ -100,24 +108,23 @@ Application<Model, Message, View> {
 }
 ```
 
-This notation defines responsibility rather than the final Rust signature.
-The concrete API may use function pointers, closures, or generic parameters,
-but `Application` remains a pure value rather than a mutable object with
-lifecycle methods.
+This notation defines responsibility rather than the final Rust signature. The
+concrete API may use function pointers, closures, or generic parameters, but
+`Application` remains a pure value rather than a mutable object with lifecycle
+methods.
 
-The runtime owns the live `Model`.
-It invokes `update` once for every accepted message in the runtime-wide accepted
-order defined in [Admission and delivery](#admission-and-delivery) and replaces
-the live model with the returned value.
-`update` does not perform terminal I/O or mutate runtime resources.
+The runtime owns the live `Model`. It invokes `update` once for every accepted
+message in the runtime-wide accepted order and replaces the live model with the
+returned value. `update` does not perform terminal I/O or mutate runtime
+resources.
 
 `subscriptions` declares long-lived message sources as a function of the
-current model.
-The runtime reconciles the declaration with running sources and delivers their
-events through the same admission and ordering path as other messages.
+current model. The runtime reconciles the declaration with running sources and
+delivers their events through the same admission and ordering path as other
+messages.
 
-`view` returns a declarative value that a renderer can draw with Ratatui.
-It must be cheap enough to evaluate at a normal drawing opportunity; expensive
+`view` returns a declarative value that a renderer can draw with Ratatui. It
+must be cheap enough to evaluate at a normal drawing opportunity; expensive
 preparation belongs in effects.
 
 ### Meaning of View
@@ -130,66 +137,26 @@ available area. A TUI application's `view` returns the same value a plain-CLI
 call site builds, and the runtime resolves it under the terminal's area.
 
 The tree carries one node full-screen use requires beyond what plain output
-needs. An **anchor** is a leaf that occupies a rectangle and draws nothing:
-layout places it like any other node, and `resolve` reports the rectangle it
-landed on beside the resolved rows, for the caller that knows what belongs
-there to fill. An anchor carries no geometry of its own, so a sized region is
-written structurally, as an anchor inside a block. It names no backend type:
-an anchor is a key and a rectangle, and a backend with nothing to put there
-draws the blanks it resolved to.
-
-Two things reach the frame that way:
-
-- **Cursor placement.** A zero-sized anchor's reported origin is the cell the
-  terminal cursor belongs on. [`Frame`](#frame) carries the request for a draw;
-  this is how an application states it.
-- **Foreign widgets.** A sized anchor's rectangle is where the runtime's
-  `Renderer` draws an embedded Ratatui widget, after the resolved cells are
-  written. A `StatefulWidget`'s state stays in the application's model.
-
-Both are additive to the core: the node set grows by one leaf, and a resolved
-view reports an empty placement table for a tree containing no anchor. The
-node's spelling, the key type, and the `resolve` signature that returns
-placements are implementation-planning decisions this document does not fix.
-
-A view carries no scroll offset, no focus, and no redraw hint. Scrolling is a
-view-model question that composes on top of height clipping, focus stays
-ordinary model and message logic as elsewhere in this document, and
-invalidation belongs to Ratatui's cell diff.
-
-Why the TUI view is this tree, and why one anchor serves both needs, is
-recorded in [`design/tui-view.md`](design/tui-view.md).
-
-#### Consequence for `urushi-tui`
-
-The runtime's `Renderer` consumes `ResolvedView` and its placements directly
-rather than going through `ViewWidget`, because it needs the placements from
-the same resolution that produced the cells and resolves exactly once per
-frame.
-
-`ViewWidget` and `RatatuiWidget` stay public. A plain Ratatui application
-drawing an Urushi view into a `Rect` it already owns is an audience this
-document names, and it has no runtime to ask. The public surface of
-`urushi-tui` therefore grows with the runtime rather than shrinking into it,
-and the cell-writing path is shared between the widget and the `Renderer`.
+needs: an **anchor**, a leaf that occupies a rectangle and draws nothing, whose
+resolved position the caller that knows what belongs there fills. It serves the
+two things a grapheme rectangle cannot express — where the terminal cursor
+belongs, and where an embedded Ratatui widget draws. A view carries no scroll
+offset, no focus, and no redraw hint. The anchor's rule, and why one leaf serves
+both needs, are recorded in [`design/tui-view.md`](design/tui-view.md).
 
 Whatever the TUI `View` becomes, it is `urushi::view::View` or a value that
 embeds it; Urushi does not introduce a second, independent resolved render tree
 beside the one `resolve` already produces merely because Ratatui or another TUI
 framework has one.
 
-## Admission and delivery
+## Admission, delivery, and drawing
 
-Message handling has two distinct stages.
-
-An admission policy belongs to a message source and decides whether an incoming
-item is accepted, delayed with backpressure, replaced, or rejected.
-The runtime never inspects application message variants to infer admission
-policy.
-
-Once accepted, a delivery receives one position in a single runtime-wide
-order.
-A delivery contains one or more messages and a delivery mode:
+Message handling has two distinct stages. An **admission policy** belongs to a
+message source and decides whether an incoming item is accepted, delayed with
+backpressure, replaced, or rejected; the runtime never inspects application
+message variants to infer it. Once accepted, a **delivery** receives one
+position in a single runtime-wide order. A delivery contains one or more
+messages and a mode:
 
 ```text
 Delivery<Message> {
@@ -198,276 +165,82 @@ Delivery<Message> {
 }
 ```
 
-Messages within a delivery retain their order.
-Deliveries from all sources are processed in the runtime-wide accepted order.
-A `Sync` delivery does not overtake an earlier accepted `Async` delivery.
+Deliveries from all sources are processed in the runtime-wide accepted order; a
+`Sync` delivery does not overtake an earlier accepted `Async` one.
 
-Initial source policies should support these common cases:
+`Async` is the default. The runtime processes accepted messages independently
+of physical drawing: it may consume several messages and then draw only the
+latest resulting model when the terminal is ready. This is draw coalescing, not
+message coalescing — no accepted logical transition is skipped. Draw scheduling
+is a runtime policy, not an application command; the application API has no
+`request_draw`, no public damage or invalidation type, and no `View` equality
+prerequisite for skipping a draw, because Ratatui's cell diff already does that
+work.
 
-| Source | Admission behavior |
-| --- | --- |
-| Terminal key and text input | Bounded FIFO with reader backpressure |
-| Surface observations | Latest value may replace an unaccepted observation |
-| Ordinary effect completion | FIFO |
-| Canceled latest-only effect | Suppress the known-canceled completion |
-| Shutdown | Separate runtime control path |
+`Sync` is the exceptional mode for changes to the logical rendering
+environment — terminal dimensions, cell pixel dimensions, a graphics
+capability. Accepting a `Sync` delivery is a render barrier: earlier deliveries
+are processed, the whole batch is applied without intermediate draws, and
+`view` is evaluated and drawn once with the matching environment snapshot
+before later deliveries. The first frame is guarded the same way: a startup
+barrier applies initial `Sync` deliveries to convergence before the first
+draw, staging initial `Async` input until after it.
 
-By default the runtime delivers every key repeat separately.
-Each accepted key event reaches `update`, so selection, cursor, viewport, and
-other logical state stay responsive and deterministic.
-An application or source-specific policy may aggregate input when its own
-semantics permit that optimization.
+Surface information reaches the application only through a subscription as a
+message, retained in the model when needed; `view` receives no implicit
+context.
 
-## Effects and expensive preparation
+The per-source admission behaviors, the exact barrier and startup steps, and
+how each is verified are defined in
+[`design/tui-delivery-ordering.md`](design/tui-delivery-ordering.md).
 
-An `Effect<Message>` describes work to be interpreted by the runtime.
-It cannot update the model directly.
-Its observable result returns as a message and passes through normal delivery.
+## Effects
 
-Effects include filesystem and Git access, syntax highlighting, document
-layout, image rasterization, and other work that would make `update` or `view`
-too expensive.
-This separation allows every key input to advance the logical model without
-starting physical rendering or heavy preparation for every intermediate state.
+An `Effect<Message>` describes work to be interpreted by the runtime. It cannot
+update the model directly; its observable result returns as a message and
+passes through normal delivery. Effects carry filesystem and Git access, syntax
+highlighting, document layout, image rasterization, and other work that would
+make `update` or `view` too expensive, so that every key input can advance the
+logical model without starting heavy preparation for every intermediate state.
 
-The runtime must support at least these execution policies:
+The runtime supports one-shot work, long-lived work as a subscription, and
+keyed latest-only work for replaceable preparation. Whether a completion is
+still relevant is split: the runtime suppresses a completion only when it knows
+the execution was canceled or replaced; otherwise the application decides in
+`update`. The policies, the freshness rule, and the representative flows are
+defined in [`design/tui-effects.md`](design/tui-effects.md).
 
-- ordinary one-shot work whose completion is delivered in source order;
-- long-lived work represented as a subscription; and
-- keyed latest-only work for replaceable preparation.
-
-Deciding whether a completion is still relevant is split between the runtime and
-the application.
-For latest-only work, the runtime may suppress a completion only when the
-runtime itself knows that the corresponding execution was canceled or
-replaced.
-For ordinary effects, the application decides in `update` whether a completion
-still applies to the current model.
-
-A generation identifier in the application's message and model is one possible
-way to make that decision; it is not a runtime-wide damage model.
-
-In a document viewer, for example, changing the document or theme can start a
-new keyed layout or rasterization effect.
-Moving the viewport can reuse the prepared asset already stored in the model
-and render it at a new position without starting that preparation again.
-
-## Async delivery and draw scheduling
-
-`Async` is the default delivery mode.
-Key input, text input, cursor movement, selection changes, viewport movement,
-and ordinary effect completions normally use it.
-A message is not `Sync` merely because it changes visible content.
-
-The runtime processes accepted messages independently of physical drawing.
-It may consume several messages and then draw only the latest resulting model
-when the terminal is ready.
-This is draw coalescing, not message coalescing: no accepted logical transition
-is skipped.
-
-Draw scheduling is a runtime policy rather than an application command.
-The core application API therefore has no `request_draw`, `plan_draw`, public
-`Damage`, or public `Invalidation` type.
-The application expresses changes through its model, effects, and view.
-
-The initial runtime also does not require `View` equality as a prerequisite for
-skipping a draw.
-Ratatui already compares cell buffers and emits only changed cells.
-Caching or equality checks above that layer should be introduced only after
-measurement identifies a material benefit and a correct ownership boundary.
-
-## Sync delivery as a render barrier
-
-`Sync` is an exceptional delivery mode for changes to the logical rendering
-environment.
-Examples include terminal dimensions, cell pixel dimensions, or a graphics
-capability change that the application must reflect in its model before the
-corresponding frame is built.
-
-When the runtime accepts a `Sync` delivery, it:
-
-1. cancels any pending draw that has not started;
-2. processes all earlier accepted deliveries in order;
-3. applies every message in the `Sync` batch through `update` without drawing
-   intermediate models;
-4. evaluates `view` once from the model after the complete batch; and
-5. draws that view with the matching logical rendering-environment snapshot
-   before processing later deliveries.
-
-If another `Sync` delivery arrives during a draw, the runtime does not interrupt
-the draw already in progress.
-It queues the new delivery at the next position in the global order.
-
-This barrier guarantees agreement among the delivered environment facts, the
-model after `update`, and the logical rendering-environment snapshot used to
-build the frame. `Terminal` therefore does not let the backend resize the frame
-on its own at draw time: a size change the backend reports while drawing is
-not applied to that draw but enters admission as a `Sync` delivery, so the next
-barrier draws with a snapshot and a frame that agree.
-It does not freeze the operating system's physical terminal surface during the
-draw and does not claim that terminal output is an atomic transaction.
-
-### How surface information reaches the application
-
-The runtime, terminal, Ratatui, and backend handle physical rendering
-constraints.
-An application only needs surface information when that information affects
-application semantics, such as layout choices or a viewport measured in cells.
-
-Such information enters through a subscription as a message.
-The application stores the logical facts it needs in its model, and `view`
-reads them from that model like any other state.
-`view` does not receive an implicit `ViewContext` or physical `Surface` input.
-
-The runtime cannot use a revision number alone to decide whether an application
-has handled a surface change, because it does not understand arbitrary
-application messages.
-The `Sync` delivery contract provides the required coordination without
-inspecting those messages.
-
-## Startup barrier
-
-The first frame must not be built from placeholder surface information when an
-initial surface observation is available.
-The runtime therefore establishes a startup barrier before the first draw.
-
-During startup, the runtime:
-
-1. calls `init` and evaluates the initial subscriptions;
-2. collects initial `Sync` deliveries from those subscriptions;
-3. applies their messages in deterministic order, batching related surface
-   facts where possible;
-4. reevaluates model-dependent subscriptions when those messages change the
-   subscription set;
-5. repeats until no new initial `Sync` delivery is produced; and
-6. evaluates `view` once and performs the first draw.
-
-Initial `Async` deliveries are staged during this process.
-They enter normal admission and receive global ordering only after the first
-draw, so they cannot make the initial rendering environment inconsistent.
-
-The concrete implementation must bound startup reconciliation and detect a
-cycle or budget exhaustion.
-The public failure behavior when startup reconciliation cycles or exhausts its
-budget remains an API design decision.
-
-## Rendering ownership
+## Rendering and runtime ownership
 
 The shared rendering vocabulary is `View`, `Renderer`, `Frame`, `Terminal`,
-`TerminalSession`, and `Backend`.
-These names describe ownership boundaries; they do not require Urushi to
-reimplement Ratatui types that already satisfy them.
+`TerminalSession`, and `Backend`. These names describe ownership boundaries;
+they do not require Urushi to reimplement Ratatui types that already satisfy
+them.
 
-### Renderer
+| Name | Owns |
+| --- | --- |
+| `Renderer` | Resolving the view once per frame, writing the `ResolvedView` into the frame's buffer, and serving the placements that resolution reported. Not the model, scheduling, a backend, or session restoration. |
+| `Frame` | A borrowed, draw-scoped handle to the current cell buffer and the cursor request. Not the previous buffer, backend, diff, output stream, or flush. |
+| `Terminal` | Working and committed presentation state, the backend, cell diffing, output, and flushing. A presentation is committed only after output succeeds. |
+| `TerminalSession` | Restoration obligations caused by entering the session — raw mode, alternate screen, cursor visibility — on normal exit and on supported error and interruption paths. |
+| `Backend` | The physical terminal-output boundary, behind adapters, replaceable in tests. |
 
-A `Renderer` translates a TUI `View` into drawing operations during
-`Terminal.draw`.
-It resolves the view once against the frame's area, writes the resulting
-`ResolvedView` into the frame's cell buffer, and then serves the placements that
-resolution reported: the cursor request, and any Ratatui widget an application
-placed at a sized anchor.
-It reuses the cell-writing path of the existing Urushi Ratatui adapters rather
-than drawing through `ViewWidget`, which resolves internally and keeps nothing
-but the cells.
-It does not own the model, scheduling, a backend, or session restoration.
+The runtime itself owns the live model; source admission and the accepted
+delivery order; subscription reconciliation; effect execution and cancellation
+known to the runtime; draw scheduling and pending-draw cancellation; the
+terminal and terminal session; and runtime control such as shutdown. Shutdown
+is a control-path concern rather than a privileged application message
+variant. The runtime must remain independent of one mandatory async executor
+where practical.
 
-### Frame
+Cell output plus terminal graphics remains an extension boundary: the first
+implementation proves the cell-only runtime before promoting a shared graphics
+contract.
 
-A `Frame` is a borrowed, draw-scoped handle to terminal-owned working
-presentation state.
-At minimum, it provides access to the current cell buffer and the cursor request
-for that draw.
-It does not own the previous buffer, backend, diff algorithm, output stream, or
-flush operation.
-
-The final API may use `ratatui::Frame` directly or place an Urushi-owned adapter
-around it.
-Either choice must preserve this borrowed ownership model.
-
-### Terminal
-
-`Terminal` owns or delegates ownership of working and committed presentation
-state, the backend, cell diffing, output, and flushing.
-It treats a presentation as committed only after output succeeds.
-Ratatui does not give this guarantee — it swaps its buffers before the backend
-flush, so a failed flush leaves it believing the frame was shown — so `Terminal`
-keeps the local recovery state that restores it: the last committed
-presentation is retained, and a failed output leaves the next draw to redraw
-against it rather than against the frame that never reached the terminal.
-
-Cursor position and visibility requested for one frame belong to the frame and
-terminal path.
-They are not application effects. Where drawing a frame changes terminal state
-— hiding the cursor for a frame that requests none — restoring it is
-`Terminal`'s or `TerminalSession`'s obligation, never the application's.
-
-### TerminalSession
-
-`TerminalSession` owns restoration obligations caused by entering the TUI
-session, including raw mode, alternate-screen state, and cursor visibility when
-the session changes it.
-It restores the state it is responsible for on normal exit and on supported
-error and interruption paths.
-
-The session does not promise to reconstruct exact pre-session state that the
-terminal cannot report reliably, such as an unknown original cursor position.
-That limitation must remain explicit in the public contract.
-
-### Backend
-
-`Backend` is the physical terminal-output boundary.
-Backend-specific types and failure rules stay behind adapters so applications
-remain expressed in Urushi-owned concepts.
-Clock, message source, and backend boundaries must be replaceable in tests.
-
-## Runtime ownership and control
-
-The runtime owns:
-
-- the live model;
-- source admission and the accepted delivery order;
-- subscription reconciliation;
-- effect execution and cancellation known to the runtime;
-- draw scheduling and pending-draw cancellation;
-- the terminal and terminal session; and
-- runtime control such as shutdown.
-
-Shutdown is a control-path concern rather than a privileged application message
-variant.
-The final API still needs to decide how an application requests shutdown and
-how that request composes with effects and cleanup.
-
-The runtime must remain independent of one mandatory async executor where
-practical.
-Its contracts describe ordering, cancellation, and wake-up behavior rather than
-exposing a particular executor's task handles throughout application types.
-
-## Representative application flows
-
-### Lightweight Ratatui application
-
-For a lightweight Ratatui application, every accepted key event advances the
-model.
-The runtime may process many such updates before the next draw, at which point
-`view` reflects the latest model, and Ratatui emits the cell diff.
-Filesystem work or syntax highlighting runs as effects, so key handling does
-not wait for them.
-
-### Prepared assets and viewport movement
-
-For an application with prepared assets, document changes start replaceable
-preparation effects whose completed assets enter the model through messages.
-Viewport movement remains a lightweight logical update.
-The next draw reuses the existing prepared asset with the new viewport instead
-of treating every movement as damage that requires preparation.
-
-## Cell output and terminal graphics
-
-Cell output plus terminal graphics remains an extension boundary.
-The first implementation should prove the cell-only runtime before promoting a
-shared graphics contract.
-When that work begins, it must design asset lifetime, cell-and-graphics commit,
-partial-output recovery, and text-only fallback together.
+What each owner does at the boundary — the commit guarantee Ratatui does not
+give, cursor restoration, what a session cannot promise to restore — and the
+representation choices left open are defined in
+[`design/tui-terminal-ownership.md`](design/tui-terminal-ownership.md).
 
 ## Architectural invariants
 
@@ -496,44 +269,7 @@ Implementation of the TUI subsystem must preserve these invariants:
 12. Existing semantic modules and `urushi-tui` adapters keep the dependency
     direction documented in [`architecture.md`](architecture.md).
 
-## Verification strategy
-
-The implementation should establish evidence at the boundary where each
-guarantee is observed.
-
-| Guarantee | Required evidence |
-| --- | --- |
-| Pure state transitions | Unit tests for `init`, `update`, and `view` without a terminal |
-| Global ordering | Deterministic tests with interleaved input, subscription, and effect sources |
-| Bounded admission | Saturation tests for bounded FIFO, backpressure, replacement, and cancellation |
-| Async draw coalescing | Tests proving every update reaches `update` while the runtime draws only the latest model |
-| Sync barrier | Tests proving no intermediate draw and no later delivery before the barrier draw |
-| Startup | Tests for multiple initial `Sync` batches, staged `Async` input, and subscription convergence |
-| Effect freshness | Tests for ordinary stale results and runtime-known latest-only cancellation |
-| Terminal failures | Tests proving committed state advances only after successful output |
-| Session restoration | Integration tests for normal exit, error, interruption, and partial setup failure |
-
-The runtime test harness should provide deterministic message sources, a
-controllable clock, an in-memory backend, and observable effect scheduling.
-Tests should assert externally meaningful ordering and presentation behavior,
-not private task structure.
-
-## Deferred API decisions
-
-The architecture fixes responsibilities and semantics but leaves these Rust API
-choices open until implementation planning:
-
-- the concrete generic and closure representation of `Application`;
-- the concrete `Renderer` type, and the anchor node, key type, and placement-
-  returning `resolve` signature the view model needs to serve it;
-- the choice between Ratatui's `Frame` and a narrow Urushi adapter;
-- the public form of source admission policies and keyed latest-only effects;
-- executor integration without making one executor mandatory;
-- the mechanism by which an application requests shutdown and how that request
-  composes with effects and cleanup;
-- error and shutdown behavior during `Sync` processing;
-- startup reconciliation limits and error reporting; and
-- the graphics presentation and recovery model.
-
-These decisions may refine representation but must not collapse the ownership
-boundaries or ordering guarantees defined above.
+The architecture fixes responsibilities and semantics but leaves the concrete
+Rust API open until implementation planning; each design file lists the
+choices it leaves open. Those decisions may refine representation but must not
+collapse the ownership boundaries or ordering guarantees defined above.

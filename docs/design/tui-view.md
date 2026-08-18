@@ -4,8 +4,48 @@ A full-screen application's `view` function returns
 [`urushi::view::View`](../../urushi/src/view/model.rs), the same tree a plain
 CLI call site builds, and the node set carries one leaf — an anchor — for a
 region whose position layout decides but whose content this crate does not
-produce. [`tui-architecture.md`](../tui-architecture.md) states the rule; this
-file records why it is that and not something else.
+produce. [`tui-architecture.md`](../tui-architecture.md) states the shape; this
+file holds the anchor's rule and records why it is that and not something else.
+
+## The rule
+
+An anchor is a leaf that occupies a rectangle and draws nothing: layout places
+it like any other node, and `resolve` reports the rectangle it landed on beside
+the resolved rows, for the caller that knows what belongs there to fill. An
+anchor carries no geometry of its own, so a sized region is written
+structurally, as an anchor inside a block. It names no backend type: an anchor
+is a key and a rectangle, and a backend with nothing to put there draws the
+blanks it resolved to.
+
+Two things reach the frame that way:
+
+- **Cursor placement.** A zero-sized anchor's reported origin is the cell the
+  terminal cursor belongs on. The `Frame` of
+  [`tui-terminal-ownership.md`](tui-terminal-ownership.md) carries the request
+  for a draw; this is how an application states it.
+- **Foreign widgets.** A sized anchor's rectangle is where the runtime's
+  `Renderer` draws an embedded Ratatui widget, after the resolved cells are
+  written. A `StatefulWidget`'s state stays in the application's model.
+
+Both are additive to the core: the node set grows by one leaf, and a resolved
+view reports an empty placement table for a tree containing no anchor.
+
+A view carries no scroll offset, no focus, and no redraw hint. Scrolling is a
+view-model question that composes on top of height clipping, focus stays
+ordinary model and message logic, and invalidation belongs to Ratatui's cell
+diff.
+
+The runtime's `Renderer` consumes `ResolvedView` and its placements directly
+rather than going through `ViewWidget`, because it needs the placements from
+the same resolution that produced the cells and resolves exactly once per
+frame. `ViewWidget` and `RatatuiWidget` stay public: a plain Ratatui
+application drawing an Urushi view into a `Rect` it already owns is an audience
+this design names, and it has no runtime to ask. The public surface of
+`urushi-tui` therefore grows with the runtime rather than shrinking into it,
+and the cell-writing path is shared between the widget and the `Renderer`.
+
+Open representation choices: the anchor node's spelling, the key type, and the
+placement-returning `resolve` signature.
 
 ## Why the one view tree
 
@@ -21,7 +61,7 @@ spans plain output, prompts, and full-screen applications, so a component —
 a list, a tree, a table — is written once and placed anywhere. A full-screen
 tree of its own would duplicate the box model, put every component behind a
 conversion boundary, and give one application two vocabularies for the same
-rectangle. [`view-block-model.md`](view-block-model.md) records that a
+rectangle. [`box-sizing.md`](box-sizing.md) records that a
 full-screen surface, where the terminal's `Rect` is the primary fact of layout,
 is the shape the area-driven model was built for; declining to use it there
 would be declining the case it was designed for.
@@ -59,7 +99,7 @@ belongs there fills it.
 
 An anchor carries no geometry of its own. A sized region is written
 structurally, as an anchor inside a block, which is the same answer
-[`view-block-model.md`](view-block-model.md) gives to an exact content
+[`box-sizing.md`](box-sizing.md) gives to an exact content
 dimension — the tree disambiguates two intents that a property would have had to
 rank.
 
@@ -68,8 +108,8 @@ rank.
 A scrollable region looks like the third member of the list and is not. Its
 content *is* cells this crate produces; what it needs is an offset into them,
 which is a question about how the box model clips — height clips inside a closed
-frame, and [`view-model.md`](../view-model.md) records that scrolling composes
-on top of that rule. Answering it through an anchor would hand the application a
+frame, and [`overflow.md`](overflow.md) records that scrolling composes on top
+of that rule. Answering it through an anchor would hand the application a
 region the layout pass has stopped reasoning about, which is exactly what a
 viewport must not be.
 

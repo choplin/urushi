@@ -1,11 +1,14 @@
 # View and Block Split
 
-The view model splits presentation into `TextStyle` and `BlockStyle`, composes
-views as a four-node tree resolved to per-grapheme rows, and resolves sizing
-under the available area the way it does. This document records why it does
-each of those, and which alternatives were rejected. The contract itself is
-defined in [`view-model.md`](../view-model.md) and
-[`style-model.md`](../style-model.md).
+The view model splits presentation into `TextStyle` and `BlockStyle` and
+composes views as a four-node tree resolved to per-grapheme rows. This
+document records why it does each of those, and which alternatives were
+rejected. The contract itself is defined in [`view-model.md`](../view-model.md)
+and [`style-model.md`](../style-model.md); the sizing rules the tree resolves
+under have their own files — [`box-sizing.md`](box-sizing.md),
+[`area-sharing.md`](area-sharing.md), [`overflow.md`](overflow.md),
+[`layout-resolution.md`](layout-resolution.md), and
+[`rendered-output-measurement.md`](rendered-output-measurement.md).
 
 ## Why text cannot carry geometry
 
@@ -69,186 +72,13 @@ shorter child; `BlockStyle`'s `vertical_align` places it below the padded
 content block. Both match Lip Gloss in their own position, so they are separate
 rules.
 
-## Why the layout pass never inspects text for escape sequences
-
-Whether a string is plain text or already-rendered ANSI cannot be recovered
-from the string, so no engine that accepts one can decide it; any attempt is a
-heuristic. The property is therefore carried by the type — `RenderedBlock` —
-and measured once, where it is declared.
-
-The same boundary rules out a free function taking a `&str` and returning a
-width, because such a function has to guess which of the two it was handed.
-
-## Why there is one width measure, and why it is the per-grapheme sum
-
-Width is measured in exactly one way: the sum of the display widths of a
-line's grapheme clusters. Not `unicode-width`'s measure of the whole string,
-and not a measure that skips escape sequences — that third one is what
-`RenderedBlock::from_ansi` does, on the other side of the domain boundary.
-
-The two plain-text measures are not interchangeable. `unicode-width` applied to
-a whole string honors ligatures that span a cluster boundary: LAM followed by
-ALEF renders as one glyph in one cell, and the whole-string measure says one,
-while the sum says two. Over every RTL block, those are the only disagreements
-— 80 pairs, all LAM-class plus ALEF-class; outside RTL the two never differ.
-
-The sum is the one the model must use, for an ordering reason rather than a
-tidiness one. A box fixes its width before its content is wrapped into it,
-because wrapping needs a width to wrap to. That only works if "text wrapped to
-`w` occupies at most `w`" holds, which in turn requires the wrap decision and
-the width total to be the same measure. And the total has to be the sum,
-because a row of the resolved view (a `ResolvedView`) *is* a sequence of
-per-grapheme tokens whose widths add to the rectangle's width — any other
-measure produces a number no row can satisfy.
-
-The cost is that a LAM+ALEF pair is measured one cell wider than a terminal
-draws it. Merging the pair into a single token is representable — a token's
-symbol is a `String` — but matching the terminal exactly makes the measure
-terminal-dependent, which is the same move as ambiguous East Asian width and
-belongs with it: an input to `measure` and `resolve`, not a constant. Until
-that exists, this is a defined deviation rather than an unknown one.
-
-## Why the area is an input to layout
-
-The previous model applied bounds after assembly: `max_width` and the outer
-`Limits` truncated the finished rectangle row by row — Lip Gloss's
-`applyBorder`-then-`Truncate` order, inherited with its artifacts. Two boxes
-occupying the same six columns then meant different things:
-
-```
-width(4) + border      -> 6x4        max_width(6) + border  -> 6x3
-  ┌────┐                               ┌─────
-  │abcd│                               │abcde
-  │ef  │                               └─────
-  └────┘
-```
-
-The first assembles a content box and derives the frame from it; the second
-cuts the assembled rectangle, severing the derivation that placed the border,
-so the right edge vanishes. A border derives from the content box it
-surrounds: any bound that arrives after the box is assembled can only cut the
-frame open. Making `Available` an input — sizes flow down once, resolved sizes
-flow up once — is what lets the frame close at whatever size the bound forces,
-and it is the shape a full-screen surface needs anyway, where the terminal's
-`Rect` is the primary fact of layout.
-
-## What this model borrows from CSS, and what it does not
-
-CSS reached the same separation — sizing, track distribution, and overflow as
-three vocabularies — and this model borrows those concepts, not their
-implementation:
-
-| Urushi | CSS | Note |
-|---|---|---|
-| `width(Cells)` / `min_` / `max_` | `width`, `min-width`, `max-width` (border-box) | margin outside, as in CSS |
-| auto (absent `width`) | `max-content` sizing | |
-| `Fill(n)` | Grid's `fr` track | named after Ratatui's `Constraint::Fill` |
-| `Available` | the containing block | |
-| `Overflow::Wrap`/`Clip(marker)` | `white-space`, `overflow`, `text-overflow` | one enum: a terminal has no paint layer to make `overflow` its own axis |
-| min-content floor | `min-content` | grapheme atomicity, not word atomicity |
-| — | `overflow: visible` | impossible: no paint layer; a resolved rectangle is the output |
-| — | percentages | ratios are `Fill` weights; a percentage length is a possible `Length` extension |
-| view-function branching | media queries | conditional structure stays outside layout |
-
-## Why every sizing property measures the outer box
-
-Distribution and `Available` necessarily measure the box that sits in the
-area — frame included — so a content-basis `width` would leave the vocabulary
-measuring two different boxes, which is precisely the asymmetry the old
-`width`/`max_width` pair suffered from, generalized. In a terminal the outer
-box is also the visible one: a border occupies cells a reader counts, and
-`┌────┐` is a six-cell box to anyone looking at it.
-
-Even under that rule, the intent "size my content" does not need a property at
-all: it is a size on an unframed inner block, where outer and content coincide,
-so the tree disambiguates the two intents structurally and no precedence rule
-between two width properties ever arises.
-
-## Why the axes resolve in different orders
-
-The axes are asymmetric on purpose. Width is decided before the content
-because wrapping needs a width to wrap to; height is decided after it because
-wrapping is what determines the row count.
-
-It also means a box does not shrink to the longest line its own wrapping
-produced. A `max_width(9)` box whose content reflows to seven cells stays nine
-wide: narrowing it to seven would be a second width decision derived from the
-content the first one produced, and sizes flow down only once. CSS's
-shrink-to-fit resolves the same way, for the same reason.
-
-## Why `Fill`, and why nothing is renegotiated
-
-Without `Fill`, "a fixed sidebar and main takes the rest" — the most ordinary
-full-screen layout — is inexpressible under any non-negotiating rule, which is
-why this much is reclaimed from the rejected constraint-solving design.
-
-The boundary against that design stays sharp: a size is decided from an area
-and pure measurements of the subtree below it, results flow up once, and the
-only iteration is the numeric freeze loop over one axis's floors when an area
-is too small. No cross-axis coupling, no size revised once decided, no
-propagation of one sibling's resolution into another's content. Measuring a
-subtree more than once does not cross that line — a measurement is a question
-about that subtree alone, so its answer cannot depend on what a sibling
-resolved to. Depending on a sibling's resolution is exactly what a solver's
-iteration does.
-
-The remainder is deliberately not redistributed either: a `Fill` child capped
-by its own `max_width` leaves the remainder unused rather than triggering
-redistribution. Capping a group is an enclosing block's `max_width`, and the
-container that resolves below its area is placed by ordinary alignment — the
-same structure as CSS's `max-width` with auto margins. The distribution rule
-stays one sentence, and the cost is an addition at the call site.
-
-The rule that stays this simple is the division itself: `Fill` weights divide
-the remainder directly, so equal weights are an equal split. Per-child grow
-factors — CSS flex rather than CSS Grid — were rejected for exactly this: a
-grow factor distributes slack *on top of* intrinsic sizes, so two `grow(1)`
-children of unequal content do not split an area 50/50, and the flex
-`basis: 0` trick exists to cancel what the factor did.
-
-## Why overflow is the application's choice
-
-Whether excess content wraps, clips, or ends in an ellipsis is presentation
-policy, and fixing any one of them in the library would be wrong for two of
-the three real cases — prose wraps, a viewport clips, a status-bar path
-ellipsizes. What the library fixes is the invariant underneath the choice:
-the frame closes at the used size, and no overflow policy can cut it.
-
-The height axis takes less of that choice: height has no wrap analogue, and
-clipping inside a closed frame is a viewport's behavior, so height clips, and
-scrolling composes on top; a vertical marker is a possible extension.
-
-The marker a cut ends with is a parameter of clipping, not a third policy.
-Marking a cut does not absorb overflow differently — it is the same cut, made
-visible — and fixing the glyph would fix `…` for terminals that cannot show
-it, which is the problem `Border::ASCII` already exists to solve on the same
-axis. Lip Gloss draws the same line: `ansi.Truncate(s, width, tail)` takes the
-tail as a string and passes `""` for a silent cut. Because the marker is
-measured in cells like any other content, parameterizing it also removes a
-hidden assumption from the budget — a three-cell `...` costs three, where a
-fixed `…` had let the implementation subtract one.
-
-Cutting an already-*rendered* string at a column, by contrast, stays a
-text-layer utility, so that "frames close" remains an invariant of the box model
-rather than a default.
-
-## Why conditional structure stays outside layout
-
-"Hide the sidebar when the terminal is narrow" and "stack vertically below 80
-cells" are decisions about which tree to build. CSS cannot express them in
-layout properties either — they live in media queries, a layer outside
-layout — and a view function in the Elm Architecture (TEA) style already holds
-the size `resolve` will be given, so the branch costs nothing. What the model
-owes the application is computable breakpoints — public `measure`, declared
-minimums, `frame_size` — not trees that rewrite themselves. A declarative
-priority-collapse vocabulary would re-open negotiation for a case the branch
-already covers.
-
 ## Why a backend does not compute geometry
 
 Drawing each block by handing its `Rect` to a widget that lays the box out
 again would put a second box model in the adapter, and it could not express a
-block whose child is a view rather than a string.
+block whose child is a view rather than a string. Both backends therefore
+consume the one `ResolvedView`, and the Ratatui adapter turns its target
+`Rect` into `Available` rather than into a second layout.
 
 ## Rejected designs
 
@@ -272,24 +102,3 @@ block whose child is a view rather than a string.
   in the reader's mind, and the model has no default. It also forces a choice
   between Lip Gloss, where `Style` is the box, and Ratatui, where `Style` is the
   run of text — a name that means the opposite thing to half the audience.
-- **A constraint-solving layout tree with flex-like grow and shrink.** Still
-  rejected; the boundary is drawn under "Why `Fill`, and why nothing is
-  renegotiated".
-- **Sizing by post-hoc crop** — the previous model, where `max_width` and
-  `Limits` truncated the assembled rectangle. Argued under "Why the area is an
-  input to layout"; the crop survives only as the degenerate safety net.
-- **A `truncate` property alongside a layout-participating `max_width`.** It
-  would have preserved the open-frame artifact as an opt-in; argued under "Why
-  overflow is the application's choice".
-- **A fixed ellipsis glyph, with `Clip` and `Ellipsis` as sibling policies.**
-  Argued under "Why overflow is the application's choice". The cost of carrying
-  the marker is that `Overflow` and `BlockStyleProperty` are no longer `Copy`.
-- **Content-box sizing, or a second `content_width` property.** Argued under
-  "Why every sizing property measures the outer box".
-- **Per-child `grow` factors.** Argued under "Why `Fill`, and why nothing is
-  renegotiated".
-- **Fixed height as a minimum** — the previous rule, where content taller
-  than `height(n)` grew the box. It made `height` unable to state "this tall,
-  period", which a viewport needs, and it treated the axes asymmetrically for no
-  reason wrapping does not already cover. Overflow absorbs the excess inside
-  the frame, and growth-on-content is what auto sizing is for.

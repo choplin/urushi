@@ -4,7 +4,9 @@
 //! dependency one-way — width, then height, then assembly — and this module is
 //! the end of it that must not look forward: it never wraps a line, never
 //! counts a row, and reaches nothing the height phase or assembly owns. The
-//! rules it applies are `docs/view-model.md`'s, in its Sizing order.
+//! rules it applies are `docs/design/box-sizing.md`'s and
+//! `docs/design/area-sharing.md`'s, in the order `docs/design/layout-resolution.md`
+//! fixes.
 //!
 //! It runs in two passes over the tree, each visiting a node once.
 //!

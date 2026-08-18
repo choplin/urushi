@@ -6,9 +6,9 @@
 //! pass decided, which is the single thing both backends draw. That is why the
 //! ANSI string and the Ratatui buffer cannot disagree about geometry.
 //!
-//! The pass is three phases, in the order `docs/view-model.md` fixes and in
-//! the only order the dependencies allow. [`width`](super::width) settles every
-//! width, because wrapping needs a width to wrap to.
+//! The pass is three phases, in the order `docs/design/layout-resolution.md`
+//! fixes and in the only order the dependencies allow. [`width`](super::width)
+//! settles every width, because wrapping needs a width to wrap to.
 //! [`height`](super::height) then fits the text and counts the rows, because a
 //! height is what wrapping produced. [`assemble`](super::assemble) builds the
 //! rectangle those numbers describe, and decides nothing. This module is the

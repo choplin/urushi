@@ -41,7 +41,7 @@ impl UnderlineStyle {
 ///
 /// This is one value rather than a modifier flag beside a separate color
 /// property, so that one appearance cannot be spelled two ways; the reasoning
-/// is in `docs/design/style-value-model.md`.
+/// is in `docs/design/underline.md`.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
 pub struct Underline {
     pub style: UnderlineStyle,

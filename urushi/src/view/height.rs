@@ -268,7 +268,7 @@ pub(super) fn heights<'f>(fitted: &'f Fitted<'_>, area: Option<usize>) -> Sized<
 /// on how the content fitted at the cross-axis width, so the demand *is* a
 /// height resolution. Because a resolution is a pure function of the node and
 /// the area, that answer says nothing about a sibling — which is why the model
-/// permits the question (`docs/view-model.md`, "The order the rules apply").
+/// permits the question (`docs/design/layout-resolution.md`).
 ///
 /// The answer is kept, so the ordinary case settles each child once. Only a
 /// child a deficit assigns *less* than it asked for is settled again at that

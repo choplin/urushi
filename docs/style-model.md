@@ -8,7 +8,12 @@ The two style types themselves, and the view tree they style, are defined in
 [`view-model.md`](view-model.md); why presentation splits between them is
 settled in [`design/view-block-model.md`](design/view-block-model.md); why the
 value model has this shape is recorded in
-[`design/style-value-model.md`](design/style-value-model.md).
+[`design/style-value-model.md`](design/style-value-model.md). Three topics
+inside the model have files of their own — the canonical form
+([`design/style-canonical-form.md`](design/style-canonical-form.md)), the
+underline ([`design/underline.md`](design/underline.md)), and border edges
+([`design/border-edges.md`](design/border-edges.md)) — linked from the sections
+that summarize them.
 
 The value model governs both types identically: the same immutable builders,
 the same closed vocabulary, the same generic `add` and `remove`. Statements
@@ -42,159 +47,45 @@ let style = TextStyle::new()
 
 `TextStyle::new()` and `TextStyle::default()` are empty styles.
 
-Removing a property restores its ordinary default in the resulting value;
-the defaults are listed under [Property defaults](#property-defaults).
+Removing a property restores its ordinary default in the resulting value:
+no color, no border, zero spacing, automatic width and height, no minimum or
+maximum bounds, wrap overflow, left horizontal alignment, or top vertical
+alignment.
 
 ## Closed property vocabulary
 
-The generic API uses one closed enum pair per type. The text vocabulary:
+The generic API uses one closed enum pair per type: a `…Property` carrying a
+value, and a `…PropertyKey` naming one without it. The text vocabulary is
+foreground, background, underline, and modifier. The block vocabulary is the
+geometry — padding, margin, the border glyph set and its four edge switches
+and two colors, the six sizing properties, overflow, and the two alignments —
+plus, through a `Text` variant, every text property of the style filling it.
 
-```rust
-enum TextStyleProperty {
-    Foreground(Color),
-    Background(Color),
-    Underline(Underline),
-    Modifier(Modifier),
-}
-
-enum TextStylePropertyKey {
-    Foreground,
-    Background,
-    Underline,
-    Modifier(Modifier),
-}
-```
-
-The block vocabulary is the geometry plus, through its `Text` variant, every
-text property of the style filling it:
-
-```rust
-enum BlockStyleProperty {
-    Text(TextStyleProperty),
-    Padding(Sides),
-    Margin(Sides),
-    Border(Border),
-    BorderTop(bool),
-    BorderRight(bool),
-    BorderBottom(bool),
-    BorderLeft(bool),
-    BorderForeground(Color),
-    BorderBackground(Color),
-    Width(Length),
-    Height(Length),
-    MinWidth(u16),
-    MinHeight(u16),
-    MaxWidth(u16),
-    MaxHeight(u16),
-    Overflow(Overflow),
-    Align(Align),
-    VerticalAlign(VerticalAlign),
-}
-
-enum BlockStylePropertyKey {
-    Text(TextStylePropertyKey),
-    Padding,
-    Margin,
-    Border,
-    BorderTop,
-    BorderRight,
-    BorderBottom,
-    BorderLeft,
-    BorderForeground,
-    BorderBackground,
-    Width,
-    Height,
-    MinWidth,
-    MinHeight,
-    MaxWidth,
-    MaxHeight,
-    Overflow,
-    Align,
-    VerticalAlign,
-}
-```
-
-`TextStyleProperty` converts into `BlockStyleProperty`, so `BlockStyle::add` accepts
-a text property directly, and `BlockStyle::foreground` reads the same as
-`TextStyle::foreground`. There is no conversion in the other direction:
+`TextStyleProperty` converts into `BlockStyleProperty`, so `BlockStyle::add`
+accepts a text property directly, and `BlockStyle::foreground` reads the same
+as `TextStyle::foreground`. There is no conversion in the other direction:
 geometry cannot reach a `TextStyle`.
 
-Both types may store the values in typed fields rather than allocating an enum
-collection; all mutation still passes through the closed `add` and `remove`
-operations.
-
-Within that vocabulary, the Select Graphic Rendition (SGR) parameter 6 (rapid
-blink) is deliberately absent. Why the vocabulary is closed, and why rapid
-blink is not in it, is recorded in
-[`design/style-value-model.md`](design/style-value-model.md).
-
-## Underline shape and color
-
-An underline carries a shape and a color, and both live in a single property:
-
-```rust
-enum UnderlineStyle { Single, Double, Curly, Dotted, Dashed }
-
-struct Underline {
-    style: UnderlineStyle,
-    color: Option<Color>,   // None: drawn in the foreground color
-}
-```
-
-`TextStyle::underline` is `Option<Underline>`; `None` is no underline. There is
-no `Modifier::UNDERLINED` flag and no free-standing underline color property;
-[`design/style-value-model.md`](design/style-value-model.md) records why one
-appearance must not have two values.
-
-```rust
-TextStyle::new().underline();                              // single, foreground color
-TextStyle::new().underline_style(UnderlineStyle::Curly);   // keeps any color already set
-TextStyle::new().underline_color(Color::RED);              // adds a single underline if absent
-```
-
-No builder produces a color nothing draws. `underline_value` returns the whole
-`Option<Underline>`, and `remove(TextStylePropertyKey::Underline)` removes the
-underline and its color together. `BlockStyle` mirrors all of these for its fill
-text.
+The vocabulary is chosen so that one appearance has one value: an underline is
+one optional value carrying its shape and its color, not a modifier flag beside
+a color property, and Select Graphic Rendition (SGR) parameter 6 (rapid blink)
+is deliberately absent. The full enum listing, and why the vocabulary is
+closed and shaped this way, are recorded in
+[`design/style-value-model.md`](design/style-value-model.md); the underline
+value and its builders in [`design/underline.md`](design/underline.md).
 
 ## Canonical form
 
-The vocabulary above is chosen so that one appearance has one value, but one
-duplication survives it: an underline color equal to the foreground. It is a
-duplication *between* fields, so no signature makes it unrepresentable, and it
-is closed by normalization, applied to both style types alike:
-
-> Fold an underline color to *absent* when the foreground is a concrete color
-> and the underline color is **the same value**. The values are compared as
-> values: a palette red and a true-color red look different on screen and must
-> not be folded together.
-
-An underline is drawn in the foreground color unless one is set, so stating the
-color a run already has changes nothing but the bytes.
-
-The fold applies once the style is final. `TerminalProfile::resolve_text_style`
-and `resolve_block_style` apply it as their last step, after degradation,
-because degradation is what makes two logical colors equal; a style that has
-passed through a profile is therefore canonical, and no separate normalizing
-call is part of the public API.
-
-The rule for admitting any future fold is narrow:
-
-> **Fold only what is inert.** A value may be dropped when doing so cannot
-> change the output, whatever the terminal does. An equivalence that holds only
-> because a terminal is assumed to implement an attribute a particular way is
-> not a fold.
-
-One case is not closable: when the foreground is absent, its concrete color is
-the terminal's default and unknown here, so an underline color equal to it
-cannot be recognized. A canonical form owes determinism, not minimality.
-
-Why the fold happens only once the style is final, why the admission rule is
-phrased around inertness rather than appearance, and what the residue costs are
-recorded in [`design/style-value-model.md`](design/style-value-model.md).
-[`inline-prompt-rendering.md`](inline-prompt-rendering.md) defines the
-canonical form of the styled runs a prompt frame emits, which rests on this
-rule.
+One duplication survives the vocabulary: an underline color equal to the
+foreground. It is a duplication *between* fields, so no signature makes it
+unrepresentable, and it is closed by normalization once the style is final —
+`TerminalProfile::resolve_text_style` and `resolve_block_style` apply the fold
+as their last step, so a style that has passed through a profile is canonical.
+The rule for admitting any fold is narrow: **fold only what is inert** — a
+value may be dropped only when doing so cannot change the output, whatever the
+terminal does. The precise fold, its timing, its one unclosable residue, and
+the reasoning are recorded in
+[`design/style-canonical-form.md`](design/style-canonical-form.md).
 
 ## Public API
 
@@ -226,29 +117,6 @@ let style = BlockStyle::new()
     .align_vertical(VerticalAlign::Center);
 ```
 
-Border edge visibility has named builders and getters as well as generic
-properties:
-
-```rust
-let separator = BlockStyle::new()
-    .border(Border::NORMAL)
-    .border_top(false)
-    .border_right(false)
-    .border_bottom(true)
-    .border_left(false);
-
-assert!(separator.is_border_bottom_enabled());
-```
-
-`border(Border)` sets the glyph set and nothing else. Which sides are drawn is
-four independent effective values, all `true` by default, so a style that has
-never touched them draws all four sides once a glyph set is present; calling
-`border` does not rewrite them, and `border_left(false).border(Border::ROUNDED)`
-still has no left edge. Removing a side property, such as
-`BlockStylePropertyKey::BorderLeft`, restores its default value of `true`.
-Removing `Border` removes only the glyph set; it does not rewrite the four side
-values, which remain inactive until a border is added again.
-
 These builders are thin wrappers over `add`; they do not define a second
 behavior. Generic `remove` is the single way to delete a property; there are no
 `unset_*` methods.
@@ -278,75 +146,34 @@ If an application needs several transforms, it can fold functions over a base
 style. There is no separate patch data type; the reasoning is recorded in
 [`design/style-value-model.md`](design/style-value-model.md).
 
-## Dimensions
+## Geometry properties
 
-There are six sizing properties: `width` and `height` take a `Length`;
-`min_width`, `min_height`, `max_width`, and `max_height` take cells. This
-document states what they mean as style values. The `Length` vocabulary, the
-box they measure, what their absence means, the clamp between them, the
-distribution across siblings, and the degenerate rules are defined in
-[`view-model.md`](view-model.md), under "Bounds, sharing, and overflow" and
-"How a node resolves".
+`BlockStyle` carries the geometry of the box it fills. As style values:
 
-A dimension is a preferred size, resolved under the available area: shorter
-content is padded out to it, longer content is absorbed by the overflow rule
-below, and the frame closes at the resolved size either way.
+- `width` and `height` take a `Length` — `Cells` or `Fill` — and their absence
+  means auto; `min_width`, `min_height`, `max_width`, and `max_height` are
+  bounds in cells, absent by default and deleted with generic `remove`, not a
+  zero value. A dimension is a preferred size, resolved under the available
+  area: shorter content is padded out to it, longer content is absorbed by the
+  overflow rule, and the frame closes at the resolved size either way.
+- `overflow` is the policy for content that does not fit — `Overflow::Wrap`
+  (the default) or `Overflow::Clip` with an application-chosen marker.
+- `align` and `align_vertical` place shorter content inside the resolved box.
+- `border` sets a glyph set; the four `border_*` sides, `true` by default, say
+  which edges are drawn; `border_foreground` and `border_background` color
+  every enabled edge uniformly.
+
+What these values mean under layout — the box they measure, the clamp, the
+distribution across siblings, what a marker costs, and how each edge contributes
+rows and columns — is defined by the view model:
+[`design/box-sizing.md`](design/box-sizing.md),
+[`design/area-sharing.md`](design/area-sharing.md),
+[`design/overflow.md`](design/overflow.md), and
+[`design/border-edges.md`](design/border-edges.md).
 
 Conversions between the outer box and the content area inside it go through
 one query: `frame_size()` returns the per-axis overhead of enabled border
-edges plus padding. (Margin lies outside the box and keeps its own getter.)
-[`view-model.md`](view-model.md) shows what it converts and how an exact
-content dimension is expressed instead.
-
-Resolving a dimension can also leave spare rows. Shorter content is
-top-aligned by default. `align_vertical` places the padded content block at the
-top, center, or bottom of the resolved content box. As in the Lip Gloss layout
-library, centered content puts an odd extra row below the padded block: a
-three-row gap is split as one row above and two below.
-
-Background color covers both padding and every alignment row.
-
-## Minimum and maximum bounds
-
-A minimum states the size below which the application's layout stops making
-sense. How the bounds participate in the clamp, and the implicit floors below
-an explicit minimum, are defined in [`view-model.md`](view-model.md), under
-"Bounds, sharing, and overflow".
-
-Bounds are absent by default; use generic `remove` to delete one, not a zero
-value.
-
-## Overflow
-
-The overflow policy absorbs content that cannot fit the resolved box; the
-application chooses that policy per block:
-
-```rust
-pub enum Overflow {
-    Wrap,                     // reflow to the content width — the default
-    Clip(Cow<'static, str>),  // cut inside the frame, ending the line with a marker
-}
-```
-
-There are three constructors: `Overflow::clip()` cuts silently,
-`Overflow::ellipsis()` is `Clip("…")`, and `Overflow::clip_with("...")` states
-the marker an ASCII-only terminal can show — the same choice `Border::ASCII`
-answers for box glyphs. Which glyphs a terminal can render is the
-application's knowledge, so the library fixes no marker.
-
-Which axis the policy governs, what the marker costs, and how a cut relates to
-the frame are defined in [`view-model.md`](view-model.md), under "Bounds,
-sharing, and overflow" and "How a node resolves".
-
-Cutting an already-rendered string at a column is a text-layer utility, not a
-style property.
-
-## Property defaults
-
-Removing a property restores its ordinary default in the resulting value: no
-color, no border, zero spacing, automatic width and height, no minimum or
-maximum bounds, wrap overflow, left horizontal alignment, or top vertical
-alignment.
+edges plus padding. Margin lies outside the box and keeps its own getter.
 
 ## Theme contract
 
@@ -371,26 +198,18 @@ complete value, so a theme role resolves to the whole style its position uses.
 Renderers consume the values present in one `TextStyle`.
 
 - ANSI rendering emits the active colors, modifiers, and underline, in SGR
-  parameter order so that one style always spells one sequence. A single
-  underline is spelled `4` rather than the equivalent `4:1`, which a terminal
-  that does not parse subparameters still understands; the other shapes are
-  spelled `4:2` to `4:5`, and a terminal that does not parse subparameters
-  draws them as a single underline or not at all. No profile degrades a shape:
-  which shapes a terminal renders is the application's knowledge, like which
-  border glyphs and clip markers it renders. An absent underline
-  color emits nothing rather than SGR 59: `Color` has no reset spelling, and
-  the reset closing every painted scope already restores the default.
+  parameter order so that one style always spells one sequence.
 - The `urushi-tui` adapter maps the active modifier set to Ratatui's
-  `add_modifier`; it does not populate `sub_modifier`. Ratatui has no underline
-  shape, so every underline degrades to Ratatui's `Modifier::UNDERLINED` there,
-  and the underline color is dropped — reaching it would require the
-  `underline-color` feature, which pulls in a backend the adapter does not
-  depend on.
-- `TerminalProfile::resolve_text_style` maps or removes the effective text values;
-  `TerminalProfile::resolve_block_style` does the same for a block's fill and
-  border colors while preserving its geometry. An underline survives a
-  colorless profile — it is a shape — while its color degrades with the
-  foreground and background. Both return a canonical style.
+  `add_modifier`; it does not populate `sub_modifier`.
+- `TerminalProfile::resolve_text_style` maps or removes the effective text
+  values; `TerminalProfile::resolve_block_style` does the same for a block's
+  fill and border colors while preserving its geometry. Both return a
+  canonical style. No profile degrades a shape — an underline shape, a border
+  glyph, a clip marker: which shapes a terminal renders is the application's
+  knowledge.
+
+How each backend spells and degrades the underline is recorded in
+[`design/underline.md`](design/underline.md).
 
 Removing a modifier from an immutable `TextStyle` removes the value; a renderer
 that maintains prior terminal state is responsible for diffing previous and
@@ -399,29 +218,6 @@ next effective styles and emitting any required reset codes.
 style holds no removal instruction.
 
 `TextStyle::paint` and `BlockStyle::render` surround emitted styling with a
-final ANSI reset. Both take plain text: the layout pass never inspects text for escape sequences, so
-already-rendered output is adopted as a `RenderedBlock` instead of being fed
-back in.
-
-## Border edge geometry
-
-Each enabled edge contributes to the box as follows:
-
-- An enabled top or bottom edge contributes one row.
-- An enabled left or right edge contributes one column.
-- A corner glyph represents the intersection of two enabled incident edges, so
-  it is drawn only when both those edges are enabled.
-- The horizontal glyph repeats across the padded content width, and every
-  emitted row has the same outer width: the padded content width plus the
-  enabled vertical-edge columns.
-
-For example, a top edge without a left edge starts with the top horizontal
-glyph rather than the top-left corner.
-
-A border with all four sides disabled contributes no rows or columns and is
-layout-equivalent to no border. Border foreground and background colors apply
-uniformly to every enabled edge. The direct ANSI renderer and the Ratatui
-widget use this same geometry, because both consume the same resolved
-rectangle. A Ratatui `Rect` smaller than the block is an `Available` bound (see
-[`view-model.md`](view-model.md)) the box resolves under, so the frame closes
-inside the area; only the degenerate rules ever crop an edge.
+final ANSI reset. Both take plain text: the layout pass never inspects text for
+escape sequences, so already-rendered output is adopted as a `RenderedBlock`
+instead of being fed back in.

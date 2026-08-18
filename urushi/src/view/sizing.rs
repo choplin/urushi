@@ -2,10 +2,11 @@
 //! is drawn.
 //!
 //! Every function here maps sizes to sizes. None of them touches a [`View`], so
-//! none can walk a tree, and the rules of `docs/view-model.md`'s Sizing section
-//! can be checked on their own. The phases that apply them to a tree are
-//! [`width`](super::width) and [`height`](super::height); the rectangle they
-//! describe is built in [`assemble`](super::assemble).
+//! none can walk a tree, and the rules of `docs/design/box-sizing.md` and
+//! `docs/design/area-sharing.md` can be checked on their own. The phases that
+//! apply them to a tree are [`width`](super::width) and
+//! [`height`](super::height); the rectangle they describe is built in
+//! [`assemble`](super::assemble).
 //!
 //! [`View`]: crate::View
 
