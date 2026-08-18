@@ -17,10 +17,11 @@ output, interactive prompts, and full TUIs. `urushi` aims to fill that gap:
 - **Standalone first.** A `BlockStyle` renders to a block that displays as a
   plain ANSI string, so it works with `println!` — no terminal setup, raw mode,
   or event loop.
-- **Ride the ratatui ecosystem via an adapter.** The `urushi-tui` crate lets
-  the same styles be used as ratatui widgets, mapping the
-  fg/bg/modifier subset onto `ratatui::style::Style` and carrying the box
-  model in the widget implementation.
+- **Ride the ratatui ecosystem via an adapter.** The `urushi-tui` crate draws
+  urushi styles and view trees into a ratatui `Buffer`, mapping the
+  fg/bg/modifier subset onto `ratatui::style::Style` and keeping the box model
+  in urushi's layout pass. A ratatui application can use urushi as its UI
+  library without giving up its own loop.
 - **CJK correctness as a first-class goal.** Width measurement, wrapping,
   borders, and alignment are East Asian width aware.
 
@@ -34,7 +35,65 @@ surface layers, including which parts are implemented today.
 |---|---|---|
 | [`urushi`](urushi/) | Style definitions: colors, modifiers, padding, margin, borders, alignment, wrapping | Core rendering works |
 | [`urushi-prompt`](urushi-prompt/) | Theme-aware `Input`, `Select`, and `Confirm` fields with synchronous validation | Core prompt flow works |
-| [`urushi-tui`](urushi-tui/) | Ratatui style conversion and box-model widgets; provisional home for the future full-screen runtime | Adapter works; runtime is not implemented |
+| [`urushi-tui`](urushi-tui/) | The `ratatui` adapter — style conversion, box-model widgets, and the cell-writing path they share with a renderer — and the home of the full-screen runtime | Adapter works; runtime is not implemented |
+
+## Two ways to build a full-screen TUI
+
+A full-screen application needs someone to own the terminal: entering and
+restoring it, reading events, and deciding when a frame is drawn. urushi
+supports two answers, and they differ only in who that owner is.
+
+### The application owns the loop, urushi is its UI library
+
+Available today. The application keeps its ratatui `Terminal`, its event loop,
+and its own state, and reaches for urushi where it would otherwise hand-build
+styling and layout:
+
+| The application owns | urushi provides |
+|---|---|
+| Terminal entry and restoration, raw mode, the event loop, when a frame is drawn | `Theme` and `TerminalProfile`: one palette resolved for the actual writer |
+| Model state, focus, scroll offset, key handling | The box model — margin, border, padding, dimensions, alignment — resolved in one layout pass |
+| Which `Rect` each part of the screen gets | The `View` tree and reusable components that return one |
+
+Draw a whole view tree with `ViewWidget`, or a single themed block with the
+`RatatuiStyleExt::widget` shorthand. Both are ordinary stateless ratatui
+widgets that write only to the buffer they are handed:
+
+```rust
+use urushi_tui::ratatui::{RatatuiStyleExt as _, ViewWidget};
+
+terminal.draw(|frame| {
+    frame.render_widget(ViewWidget::new(&view), frame.area());
+    frame.render_widget(panel.widget("保存しました"), status_area);
+})?;
+```
+
+The target `Rect` is the area the view resolves under, so the box fits inside
+it rather than overflowing it, and wide graphemes are never split. An
+application that needs the resolution itself — to measure it, or to draw it
+more than once — resolves under `available` and writes the result with
+`draw_resolved`, which is the same cell-writing path the widgets take:
+
+```rust
+use urushi::resolve;
+use urushi_tui::ratatui::{available, draw_resolved};
+
+let resolved = resolve(&view, available(area));
+draw_resolved(&resolved, area, frame.buffer_mut());
+```
+
+Two things this approach does not carry yet: a resolved view reports no cursor
+position, so an application placing a caret computes it itself, and text inside
+a ratatui `Buffer` is plain — ANSI escape sequences are not interpreted there.
+
+### urushi owns the loop, the application describes state
+
+In development. [`docs/tui-architecture.md`](docs/tui-architecture.md) defines a
+TEA-style runtime in `urushi-tui`: the application supplies a model, an update
+function, and a view, while the runtime owns event delivery, effect execution,
+frame scheduling, and terminal lifecycle. It builds on the same view tree and
+the same cell-writing path as the adapter above, so a view written for one is a
+view for the other.
 
 ## Example
 
@@ -74,7 +133,7 @@ application override.
 
 ### The same Theme in ratatui
 
-Depend on the TUI adapter when the application also uses ratatui:
+Depend on the adapter when the application also uses ratatui:
 
 ```toml
 [dependencies]
@@ -100,12 +159,9 @@ ANSI strings and ratatui. Detect the profile for the writer owned by your
 terminal setup, or construct an explicit profile when the application already
 knows the backend capability.
 
-`urushi_tui::ratatui::RatatuiStyleExt::widget` carries margin, border, padding, dimensions, and alignment
-into the ratatui `Buffer`: the target `Rect` is the area the box resolves under, so the frame
-closes inside it and wide graphemes are never split. It is stateless and
-does not initialize or restore the terminal. `RatatuiStyle::from(&style)` converts a
-`TextStyle` when only foreground, background, and text modifiers are needed;
-that conversion carries no geometry, because a `TextStyle` has none.
+`RatatuiStyle::from(&style)` converts a `TextStyle` when only foreground,
+background, and text modifiers are needed; that conversion carries no geometry,
+because a `TextStyle` has none.
 
 Run the complete Theme → plain CLI / ratatui example with:
 
@@ -160,6 +216,7 @@ the left of the prompt's starting position.
 - [x] Nested styles as a view tree (`View::text` / `block` / `row` / `column`) resolved in one layout pass, rather than re-styling already-rendered text
 - [x] Theme layer: per-component style sets derived from a small set of semantic tokens
 - [x] `urushi-tui`: box-model Widget and loss-aware Ratatui style conversion
+- [ ] `urushi-tui`: TEA-style full-screen runtime owning event delivery, frame scheduling, and terminal lifecycle
 - [x] `urushi-prompt`: themed `Form` / `Group` with `Input`, `Select`, `Confirm`, and synchronous validation
 
 ## Acknowledgments
