@@ -33,6 +33,24 @@ whether a completion still applies to the current model.
 A generation identifier in the application's message and model is one possible
 way to make that decision; it is not a runtime-wide damage model.
 
+What the runtime knows is replacement, and only replacement. A `*_latest`
+effect started under a `Key` that another `*_latest` effect is still running
+under replaces it: a future is dropped, which ends it; a closure that has not
+started is not started, and one already running runs to its end and has its
+completion discarded. Nothing else suppresses a completion. There is no
+`Effect::cancel(key)`: an application that no longer wants a result either
+replaces the work or lets the completion reach `update` and reads it against
+the model, which is the check it needs anyway for a completion the runtime
+had no reason to suppress.
+
+Effects run behind an `Executor` boundary the runtime owns: blocking closures
+are handed to it to run off the update thread, futures to be driven, and each
+returns a handle the runtime drops to replace the work. The runtime's default
+executor is Tokio, and the harness described in
+[`tui-delivery-ordering.md`](tui-delivery-ordering.md) supplies a
+deterministic one; how an application supplies its own is defined in
+[`tui-runtime-entry.md`](tui-runtime-entry.md).
+
 In a document viewer, for example, changing the document or theme can start a
 new keyed layout or rasterization effect. Moving the viewport can reuse the
 prepared asset already stored in the model and render it at a new position
@@ -55,10 +73,15 @@ movement as damage that requires preparation.
 Effect scheduling must be observable from the runtime test harness described
 in [`tui-delivery-ordering.md`](tui-delivery-ordering.md).
 
-## Open representation choices
+## Why there is no explicit cancel
 
-- the executor boundary behind `Effect::perform` and `Effect::future`, and
-  the entry point that runs an application, which must keep the model on the
-  thread that runs `update` and `view` — the runtime's contracts describe
-  ordering, cancellation, and wake-up behavior rather than exposing a
-  particular executor's task handles throughout application types.
+Suppression that the runtime performs on its own knowledge is exactly one
+event, replacement, and the runtime can be right about it every time. Every
+other reason a completion is stale — the model moved on, the file list changed
+under the cursor, the pane closed — is a fact of the application's semantics,
+which the application already has to check when a completion arrives, since no
+replacement happened. A `cancel(key)` would spare that check in one of those
+cases and change nothing in the others; and for a closure already running it
+would not even stop the work. One habit, checking a completion against the
+model, covers all of it. Should a use appear, `cancel` is an additive
+constructor.

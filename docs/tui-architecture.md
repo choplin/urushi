@@ -245,8 +245,18 @@ known to the runtime; draw scheduling and pending-draw cancellation; the
 terminal and terminal session; and runtime control such as shutdown. Shutdown
 is a control-path concern rather than a privileged application message variant:
 an application requests it by returning `Effect::shutdown()` from `update`, and
-the runtime reads the request from that return value. The runtime must remain
-independent of one mandatory async executor where practical.
+the runtime reads the request from that return value.
+
+An application is started with `run(app)`, which blocks the calling thread,
+drives `update` and `view` there, and returns the final model; a builder
+behind it lets the executor, backend, and clock be supplied, and is how tests
+replace them. Effects run behind an executor boundary the runtime owns, with
+Tokio as its one shipped implementation; no executor type appears in an
+application. An error the runtime cannot hand to the application — a draw
+failure it did not subscribe to, a startup that does not converge — ends the
+run with the session restored. The entry point, the executor boundary, and the
+error rule are defined in
+[`design/tui-runtime-entry.md`](design/tui-runtime-entry.md).
 
 Cell output plus terminal graphics remains an extension boundary: the first
 implementation proves the cell-only runtime before promoting a shared graphics

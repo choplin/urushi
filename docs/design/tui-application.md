@@ -69,6 +69,10 @@ from a source the application did not declare — terminal input included.
 | `Subscription::input(f)` | terminal key and text input, `f: Fn(Input) -> Message + Send + Sync + 'static` |
 | `Subscription::surface(f)` | surface observations, `f: Fn(Surface) -> Message + Send + Sync + 'static` |
 | `Subscription::interval(period, f)` | a timer, `f: Fn(Instant) -> Message + Send + Sync + 'static` |
+| `Subscription::stream(key, stream)` | an application-defined source that is a `Stream<Item = Message> + Send + 'static` |
+| `Subscription::run(key, f)` | an application-defined asynchronous source, `f: FnOnce(Sender<Message>) -> Fut + Send + 'static`, `Fut: Future<Output = ()> + Send` |
+| `Subscription::run_blocking(key, f)` | an application-defined blocking source, `f: FnOnce(Sender<Message>) + Send + 'static`, run on its own thread |
+| `Subscription::terminal_errors(f)` | failures the terminal reports while drawing, `f: Fn(io::Error) -> Message + Send + Sync + 'static` |
 | `Subscription::batch(subscriptions)` | several sources |
 | `subscription.map(f)` | the same source with its message passed through `f: Fn(A) -> B + Send + Sync + 'static` |
 
@@ -88,8 +92,11 @@ function is not part of the identity: when a running subscription is declared
 again, messages from then on pass through the function of the most recent
 declaration.
 
-The public form of an application-defined source — what it receives, how it
-sends, how its admission policy is stated — is left open in
+An application-defined source is a `Stream`, or a function given a `Sender`
+whose `send` waits when the source's admission policy says so. Each of the
+three constructors has a `*_with(key, admission, …)` form that names an
+`Admission` policy explicitly; without it the source is a bounded FIFO with
+backpressure. The policies, and what a `Sender` does under each, are defined in
 [`tui-delivery-ordering.md`](tui-delivery-ordering.md).
 
 ### Key
@@ -226,6 +233,26 @@ subscription in that state.
 Rejected: an `on_input` method on `Application`, always consulted. It removes
 one line from every program and adds a fifth method and a second delivery path
 for one source.
+
+## Why an application source is a stream, and also a function
+
+A long-lived source is a stream: it yields values over time and the consumer
+sets the pace. The libraries an application reaches for — a terminal event
+reader, a filesystem watcher, a socket, a timer — already hand out `Stream`s,
+so `Subscription::stream(key, s)` takes them with no glue, and back-pressure
+falls out of the runtime polling only when it has room, with nothing for the
+source to write. A stream and a function handed a `Sender` are interconvertible
+— a channel one way, a `while let … send().await` the other — so neither is
+more capable; what the function form adds is one shape for a source the
+application writes itself, asynchronous or blocking, since `run` and
+`run_blocking` differ only in whether the body awaits. All three are thin over
+one runtime path: a spawned task that pulls or is pushed and hands each item to
+the source's admission policy.
+
+Rejected as the only form: the `Sender` function alone — every library stream
+needs a loop to forward it; the stream alone — a blocking source needs a
+thread-and-channel helper the runtime would have to provide anyway, and an
+asynchronous source written by hand needs a channel to become a stream.
 
 ## Why the latest mapper wins
 

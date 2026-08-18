@@ -40,7 +40,10 @@ this guarantee — it swaps its buffers before the backend flush, so a failed
 flush leaves it believing the frame was shown — so `Terminal` keeps the local
 recovery state that restores it: the last committed presentation is retained,
 and a failed output leaves the next draw to redraw against it rather than
-against the frame that never reached the terminal.
+against the frame that never reached the terminal. What the runtime does with
+the failure itself — deliver it to an application that subscribed to terminal
+errors, or end the run — is defined in
+[`tui-runtime-entry.md`](tui-runtime-entry.md).
 
 Cursor position and visibility requested for one frame belong to the frame and
 terminal path. They are not application effects. Where drawing a frame changes

@@ -29,6 +29,22 @@ Messages within a delivery retain their order. Deliveries from all sources are
 processed in the runtime-wide accepted order. A `Sync` delivery does not
 overtake an earlier accepted `Async` delivery.
 
+`Delivery` and its mode are runtime-internal. An application-defined source
+(`Subscription::stream`, `run`, `run_blocking` in
+[`tui-application.md`](tui-application.md)) is always `Async`; only the
+runtime's own `surface` source produces `Sync` deliveries. What an application
+states about a source is its `Admission`:
+
+| `Admission` | Behavior | Under a `Sender` |
+| --- | --- | --- |
+| `Admission::bounded(n)` — the default | FIFO of at most `n` unaccepted items; the source waits when full | `send().await` / `blocking_send()` waits |
+| `Admission::latest()` | one unaccepted slot; a newer item replaces an older one | `send` never waits |
+
+A source declares it through the `*_with(key, admission, …)` constructor and
+otherwise gets the bounded default. Effect completions and the runtime's own
+sources carry the policies the source table at the top of this section gives
+them and take no `Admission` from the application.
+
 ### Async delivery and draw scheduling
 
 `Async` is the default delivery mode. Key input, text input, cursor movement,
@@ -71,6 +87,15 @@ When the runtime accepts a `Sync` delivery, it:
 If another `Sync` delivery arrives during a draw, the runtime does not interrupt
 the draw already in progress. It queues the new delivery at the next position in
 the global order.
+
+Shutdown inside the batch follows the rule that holds everywhere: the `update`
+that returns `Effect::shutdown()` is the last `update`. The rest of the batch
+is not applied, no view is evaluated, no frame is drawn, and the runtime
+proceeds to the shutdown sequence in
+[`tui-application.md`](tui-application.md). A failure to draw the barrier
+frame is a terminal error and follows
+[`tui-runtime-entry.md`](tui-runtime-entry.md): delivered to the application if
+it subscribed to terminal errors, fatal otherwise.
 
 This barrier guarantees agreement among the delivered environment facts, the
 model after `update`, and the logical rendering-environment snapshot used to
@@ -119,9 +144,14 @@ Initial `Async` deliveries are staged during this process. They enter normal
 admission and receive global ordering only after the first draw, so they cannot
 make the initial rendering environment inconsistent.
 
-The concrete implementation must bound startup reconciliation and detect a
-cycle or budget exhaustion. The public failure behavior when startup
-reconciliation cycles or exhausts its budget remains an API design decision.
+Startup reconciliation is bounded by a round limit the runtime owns; it is not
+a configuration the application sets. When the limit is reached before the
+initial `Sync` deliveries converge, the runtime does not draw: the entry point
+returns `Error::StartupDidNotConverge`, and the terminal session is restored
+as on any exit. With the runtime's `surface` source as the only producer of
+`Sync` deliveries, and that source a singleton, reconciliation converges in
+two rounds; the limit guards a runtime defect or a future `Sync` source, and
+its value is the implementation's.
 
 ### A lightweight Ratatui application
 
@@ -147,9 +177,18 @@ controllable clock, an in-memory backend, and observable effect scheduling.
 Tests should assert externally meaningful ordering and presentation behavior,
 not private task structure.
 
-## Open representation choices
+## Why `Delivery` and its mode stay internal
 
-- the public form of source admission policies and of application-defined
-  subscription sources;
-- error and shutdown behavior during `Sync` processing; and
-- startup reconciliation limits and error reporting.
+`Sync` exists for one thing: a fact about the rendering environment that the
+next frame must already reflect. The runtime's `surface` source is the only
+producer of such facts, so nothing an application declares needs the mode, and
+exposing it would open the barrier to a source that merely wants its change
+drawn promptly — which is what `Async` already does, minus the forced draw.
+Should a rendering-environment source ever come from an application — a
+graphics capability probe, say — a mode on `Admission` is an additive change.
+
+## Why the startup limit is not configurable
+
+The limit is reached only by a defect or by a `Sync` source that does not
+exist yet; a knob for it would be a knob nobody turns. One error variant on the
+entry point states the failure, and the value stays with the implementation.
