@@ -57,7 +57,8 @@ in [`tui-delivery-ordering.md`](tui-delivery-ordering.md).
 
 ## Open representation choices
 
-- the public form of keyed latest-only effects; and
-- executor integration without making one executor mandatory — the runtime's
-  contracts describe ordering, cancellation, and wake-up behavior rather than
-  exposing a particular executor's task handles throughout application types.
+- the executor boundary behind `Effect::perform` and `Effect::future`, and
+  the entry point that runs an application, which must keep the model on the
+  thread that runs `update` and `view` — the runtime's contracts describe
+  ordering, cancellation, and wake-up behavior rather than exposing a
+  particular executor's task handles throughout application types.

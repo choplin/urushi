@@ -149,7 +149,7 @@ not private task structure.
 
 ## Open representation choices
 
-- the concrete generic and closure representation of `Application`;
-- the public form of source admission policies;
+- the public form of source admission policies and of application-defined
+  subscription sources;
 - error and shutdown behavior during `Sync` processing; and
 - startup reconciliation limits and error reporting.

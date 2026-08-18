@@ -83,7 +83,5 @@ together.
 ## Open representation choices
 
 - the concrete `Renderer` type;
-- the choice between Ratatui's `Frame` and a narrow Urushi adapter;
-- the mechanism by which an application requests shutdown and how that request
-  composes with effects and cleanup; and
+- the choice between Ratatui's `Frame` and a narrow Urushi adapter; and
 - the graphics presentation and recovery model.

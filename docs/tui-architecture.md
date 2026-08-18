@@ -97,35 +97,47 @@ interprets it and owns all live execution state.
 
 ## Application model
 
-Conceptually, an application contains four functions:
+An application is a value implementing one trait:
 
-```text
-Application<Model, Message, View> {
-  init          : () -> (Model, Effects<Message>)
-  update        : (Model, Message) -> (Model, Effects<Message>)
-  view          : &Model -> View
-  subscriptions : &Model -> Subscriptions<Message>
+```rust
+pub trait Application {
+    type Model;
+    type Message: Send + 'static;
+
+    fn init(&self) -> (Self::Model, Effect<Self::Message>);
+    fn update(&self, model: &mut Self::Model, message: Self::Message)
+        -> Effect<Self::Message>;
+    fn view(&self, model: &Self::Model) -> View;
+    fn subscriptions(&self, model: &Self::Model) -> Subscription<Self::Message>;
 }
 ```
 
-This notation defines responsibility rather than the final Rust signature. The
-concrete API may use function pointers, closures, or generic parameters, but
-`Application` remains a pure value rather than a mutable object with lifecycle
-methods.
+`Self` is the description of the program — its configuration, its theme, the
+roots it operates on — and `Model` is the state the runtime owns; the two are
+distinct types. `Application` is a pure value rather than a mutable object with
+lifecycle methods: every method takes `&self`, and nothing an application does
+mutates runtime resources.
 
 The runtime owns the live `Model`. It invokes `update` once for every accepted
-message in the runtime-wide accepted order and replaces the live model with the
-returned value. `update` does not perform terminal I/O or mutate runtime
-resources.
+message in the runtime-wide accepted order, lending the model mutably for that
+call. `update` does not perform terminal I/O or mutate runtime resources;
+everything it wants done outside the model it returns as an `Effect`, including
+the request to shut down.
 
 `subscriptions` declares long-lived message sources as a function of the
-current model. The runtime reconciles the declaration with running sources and
-delivers their events through the same admission and ordering path as other
-messages.
+current model — terminal input and surface facts among them, each with the
+function that turns the source's value into the application's `Message`. The
+runtime reconciles the declaration with running sources and delivers their
+events through the same admission and ordering path as other messages.
 
 `view` returns a declarative value that a renderer can draw with Ratatui. It
 must be cheap enough to evaluate at a normal drawing opportunity; expensive
 preparation belongs in effects.
+
+The exact forms of `Effect` and `Subscription`, the `Key` that identifies a
+replaceable effect or a running subscription, the bounds on each type, and why
+the shape is this one are defined in
+[`design/tui-application.md`](design/tui-application.md).
 
 ### Meaning of View
 
@@ -203,12 +215,14 @@ highlighting, document layout, image rasterization, and other work that would
 make `update` or `view` too expensive, so that every key input can advance the
 logical model without starting heavy preparation for every intermediate state.
 
-The runtime supports one-shot work, long-lived work as a subscription, and
-keyed latest-only work for replaceable preparation. Whether a completion is
-still relevant is split: the runtime suppresses a completion only when it knows
-the execution was canceled or replaced; otherwise the application decides in
-`update`. The policies, the freshness rule, and the representative flows are
-defined in [`design/tui-effects.md`](design/tui-effects.md).
+An effect carries either blocking work or a future, names no executor, and
+composes by `batch` and `map`; the runtime supports one-shot work, long-lived
+work as a subscription, and keyed latest-only work for replaceable preparation.
+Whether a completion is still relevant is split: the runtime suppresses a
+completion only when it knows the execution was canceled or replaced; otherwise
+the application decides in `update`. The policies, the freshness rule, and the
+representative flows are defined in [`design/tui-effects.md`](design/tui-
+effects.md).
 
 ## Rendering and runtime ownership
 
@@ -229,9 +243,10 @@ The runtime itself owns the live model; source admission and the accepted
 delivery order; subscription reconciliation; effect execution and cancellation
 known to the runtime; draw scheduling and pending-draw cancellation; the
 terminal and terminal session; and runtime control such as shutdown. Shutdown
-is a control-path concern rather than a privileged application message
-variant. The runtime must remain independent of one mandatory async executor
-where practical.
+is a control-path concern rather than a privileged application message variant:
+an application requests it by returning `Effect::shutdown()` from `update`, and
+the runtime reads the request from that return value. The runtime must remain
+independent of one mandatory async executor where practical.
 
 Cell output plus terminal graphics remains an extension boundary: the first
 implementation proves the cell-only runtime before promoting a shared graphics
