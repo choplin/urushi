@@ -200,7 +200,7 @@ to share styling.
 | --- | --- | --- |
 | [`style`](../urushi/src/style/) | Colors, border glyphs, box spacing and alignment, the text `TextStyle` and the geometry-bearing `BlockStyle`, and the direct block render entry point. | `text`, `view` |
 | [`text`](../urushi/src/text/) | Plain-text display-width measurement and cell-aware word/CJK wrapping, over the `PrintableText` / `PrintableLines` types that carry the plain-text domain. | None |
-| [`theme`](../urushi/src/theme/) | Semantic color tokens, reusable component roles and styles, application role resolution, and explicit light/dark selection. | `style` |
+| [`theme`](../urushi/src/theme/) | Semantic color tokens, reusable component roles and styles, application role resolution, and explicit light/dark selection. | `style`, `component` |
 | [`view`](../urushi/src/view/) | The renderer-neutral `View` tree, the one layout pass in its three phases — width, height, assembly — behind `measure` / `resolve` (`Size`, `Available`, `StyledGrapheme`, `ResolvedView`), and composition of already-rendered `RenderedBlock` values. | `style`, `text` |
 | [`component`](../urushi/src/component/) | Reusable semantic components that return `View`; currently summaries, warnings, owned lists, owned trees, and owned tables. | `theme`, `view`, `text` |
 | [`render`](../urushi/src/render/) | Translation of renderer-neutral views to ANSI text. | `style`, `view`, `terminal/profile` |
@@ -210,8 +210,13 @@ The intended dependency direction is from I/O and adapters toward semantic
 modules:
 
 - `style` and `text` do not depend on themes, components, renderers, or terminal
-  lifecycle;
+  lifecycle; `style` and `view` do reference each other by design, because
+  `BlockStyle::render` is the single-block case of the view's layout pass rather
+  than a second box model;
 - `theme` assigns semantic meaning to styles but does not inspect a terminal;
+  `theme` and `component` also reference each other by design, because `theme`
+  stores the component style values and `component` resolves its roles through
+  `theme`;
 - `view` does not choose a renderer or own terminal state;
 - a reusable component returns `View` and does not write output;
 - renderers translate Urushi values into a backend representation and do not
@@ -229,23 +234,34 @@ Keep this table consistent with them.
 Files separate concepts or external change drivers without creating additional
 crate boundaries.
 
-### TextStyle and text
+### Style and text
 
-- [`style/color.rs`](../urushi/src/style/color.rs) owns color representation and
-  SGR encoding.
-- [`style/border.rs`](../urushi/src/style/border.rs) owns border character sets.
-- [`style/layout.rs`](../urushi/src/style/layout.rs) owns `Align`,
-  `VerticalAlign`, and `Sides`.
-- [`style/property.rs`](../urushi/src/style/property.rs) owns the closed generic
-  property vocabulary used by `TextStyle::add` and `TextStyle::remove`.
-- [`style/text.rs`](../urushi/src/style/text.rs) owns the `TextStyle` builder,
-  box-model rules, and direct string rendering.
+- [`style/color.rs`](../urushi/src/style/color.rs) owns terminal color types and
+  their ANSI SGR encoding.
+- [`style/border.rs`](../urushi/src/style/border.rs) owns border character sets
+  for boxed content.
+- [`style/layout.rs`](../urushi/src/style/layout.rs) owns alignment, sizing, and
+  box-side values used by logical styles.
+- [`style/modifier.rs`](../urushi/src/style/modifier.rs) owns the text modifiers
+  that can be added to or removed from a logical style.
+- [`style/underline.rs`](../urushi/src/style/underline.rs) owns the underline
+  decoration: one value carrying both its style and its color.
+- [`style/property.rs`](../urushi/src/style/property.rs) owns the closed
+  property types used by `TextStyle` and `BlockStyle`.
+- [`style/text.rs`](../urushi/src/style/text.rs) owns the `TextStyle` builder:
+  everything a terminal can express about a run of text.
+- [`style/block.rs`](../urushi/src/style/block.rs) owns the `BlockStyle`
+  builder: a rectangle, and the style filling the geometry it creates, together
+  with the direct block render entry point.
 - [`text/printable.rs`](../urushi/src/text/printable.rs) owns the plain-text
   domain: `PrintableLines` for text that spans rows, `PrintableText` for one
-  row, and display-width measurement and grapheme-safe truncation on the
-  latter. Neither type can hold an escape sequence, so nothing here scans for
-  one.
-- [`text/wrap.rs`](../urushi/src/text/wrap.rs) owns word and hard wrapping.
+  row, and grapheme-safe truncation on the latter, delegating width to
+  `text/width.rs`. Neither type can hold an escape sequence, so nothing here
+  scans for one.
+- [`text/width.rs`](../urushi/src/text/width.rs) owns the one definition of
+  display width, asked by both the plain and the rendered path.
+- [`text/wrap.rs`](../urushi/src/text/wrap.rs) owns cell-aware word and hard
+  wrapping.
 
 Width and wrapping policy must remain shared. A component or renderer should
 not introduce a private definition of CJK display width.
@@ -567,13 +583,15 @@ Clippy with `config-urushi-dev.toml`.
 These are descriptions of the current implementation, not commitments to a
 future roadmap:
 
-- `View` has no constraint-solving layout: sizing is intrinsic size plus optional
-  fixed and maximum dimensions, with no flex-like grow or shrink;
+- `View` has no constraint-solving layout: sizing is the non-negotiating model
+  [`view-model.md`](view-model.md) defines — `Length::Cells` and `Length::Fill`,
+  minimum and maximum bounds, and per-block overflow — with no constraint solver
+  and no renegotiation of a size once it is decided;
 - there is no placement helper for positioning a `RenderedBlock` inside larger
   whitespace;
-- text in a `Text` node is plain: escape sequences in it are measured as
-  ordinary graphemes, so already-rendered output must be adopted as a
-  `RenderedBlock` rather than fed back into the tree;
+- text in a `Text` node is plain: passing escape sequences to it is a contract
+  violation asserted in debug builds, so already-rendered output must be adopted
+  as a `RenderedBlock` rather than fed back into the tree;
 - live progress currently uses a private Indicatif backend;
 - `urushi-tui` is currently limited to style conversion and drawing a resolved
   view into a caller-owned buffer;

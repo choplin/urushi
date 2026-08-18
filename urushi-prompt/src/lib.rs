@@ -1,9 +1,10 @@
 //! Blocking, inline terminal prompt runtime styled with [`urushi`].
 //!
 //! [`Form::run`] owns a short-lived terminal session and blocks until the form
-//! is submitted, cancelled, or terminal I/O fails. Field controls and the
-//! themed inline renderer are added separately; this crate currently exposes
-//! the runtime's stable construction and result boundaries.
+//! is submitted, cancelled, or terminal I/O fails. The crate exposes the form
+//! runtime ([`Form`], [`FormBuilder`], [`Group`], [`FormOutcome`], [`RunError`])
+//! together with the [`Input`], [`Select`], and [`Confirm`] field controls, and
+//! re-exports [`urushi`] for styling.
 
 pub use urushi;
 

@@ -212,7 +212,7 @@ assert!(separator.is_border_bottom_enabled());
 
 `border(Border)` enables the familiar four-sided rendering by default. Each
 side setting is an independent effective value. Removing a side property, such
-as `TextStylePropertyKey::BorderLeft`, restores its default value of `true`.
+as `BlockStylePropertyKey::BorderLeft`, restores its default value of `true`.
 Removing `Border` removes only the glyph set; it does not rewrite the four side
 values, which remain inactive until a border is added again.
 
@@ -329,15 +329,15 @@ text-layer utility, not a style property.
 
 ## Theme contract
 
-Themes store complete logical values of both kinds. `Theme::style` and
-`TextThemeRole::resolve` return an owned `TextStyle` for text roles; `Theme::style`
-and `BlockThemeRole::resolve` return an owned `BlockStyle` for roles whose value
-is a rectangle, such as `PanelRole` and the table's cell roles. An application
-role of either kind builds its value with the ordinary consuming builders.
-`ComponentStyles::with_style` replaces a text role's style,
-`ComponentStyles::with_panel` and `with_panel_focused` replace the panel blocks,
-and `Theme::components` exposes the stored built-in values as borrows for
-consumers that want to avoid the copy.
+Themes store complete logical values of both kinds. `Theme::text_style` and
+`TextThemeRole::resolve` return an owned `TextStyle` for text roles;
+`Theme::block_style` and `BlockThemeRole::resolve` return an owned `BlockStyle`
+for roles whose value is a rectangle, such as `PanelRole` and the table's cell
+roles. An application role of either kind builds its value with the ordinary
+consuming builders. `ComponentStyles::with_text_style` replaces a text role's
+style, `ComponentStyles::with_panel` and `with_panel_focused` replace the panel
+blocks, and `Theme::components` exposes the stored built-in values as borrows
+for consumers that want to avoid the copy.
 
 Styles do not implicitly flow from a parent view to a child: as
 [`view-model.md`](view-model.md) specifies, each child carries its own

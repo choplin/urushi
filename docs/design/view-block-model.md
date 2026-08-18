@@ -219,9 +219,11 @@ the two stages Urushi's previous model had: intrinsic resolution then a
 `Limits` clip. The repositioning of the area — `Available` as layout input,
 frames closing at used size, the degenerate-only crop — is a decision about
 the shared model and applies to both implementations. The vocabulary is
-Urushi-side work for now: noctui's block style has no box model yet (no
-`width`, no `max_width`, no border), so nothing there is renamed; when its
-box model lands, it starts from this vocabulary rather than migrating to it.
+Urushi-side work for now: noctui's block style already carries `border`, the
+`border_*` sides, `width`, `height`, `max_width`, and `max_height` as plain
+integers, and `src/view/resolve.mbt` still resolves with a `Limits` clip;
+nothing there is renamed until the `Length`, `Fill`, and `Overflow` vocabulary
+lands there, at which point those fields migrate to it.
 
 ## Rejected designs
 

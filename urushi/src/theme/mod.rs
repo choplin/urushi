@@ -52,10 +52,10 @@
 //!
 //! # Resolving in a draw loop
 //!
-//! [`Theme::style`] returns an owned [`TextStyle`](crate::TextStyle), because a role
-//! that must be re-resolved every frame is one whose style is derived rather
-//! than stored. When many roles are resolved per frame, resolve them once into
-//! a struct of styles and borrow from that struct while drawing;
+//! [`Theme::text_style`] returns an owned [`TextStyle`](crate::TextStyle),
+//! because a role that must be re-resolved every frame is one whose style is
+//! derived rather than stored. When many roles are resolved per frame, resolve
+//! them once into a struct of styles and borrow from that struct while drawing;
 //! `urushi-prompt`'s renderer does exactly this. Built-in styles are also
 //! reachable as borrows through [`Theme::components`].
 

@@ -15,7 +15,7 @@ Presentation splits into two values, and geometry belongs to only one of them:
 
 ```rust
 /// Everything a terminal can express about a run of text.
-pub struct TextStyle { fg, bg, modifiers }
+pub struct TextStyle { fg, bg, underline, modifiers }
 
 /// A rectangle, and the style filling the geometry it creates.
 pub struct BlockStyle {
@@ -397,12 +397,12 @@ impl RenderedBlock {
 - A `RenderedBlock` does not re-enter the view tree. Content that participates
   in layout is expressed as a tree.
 
-The plain side of the boundary is carried by types too, inside the crate:
-`PrintableLines` for text that spans rows and `PrintableText` for one row.
-Display width belongs to the second of these, because a width is a property of
-a row of cells; measuring across a line break would sum cells that never share
-one. Neither type inspects the string it adopts, exactly as `from_ansi` does
-not: the domain is declared, never detected.
+The plain side of the boundary is carried by types too, public alongside
+`RenderedBlock`: `PrintableLines` for text that spans rows and `PrintableText`
+for one row. Display width belongs to the second of these, because a width is a
+property of a row of cells; measuring across a line break would sum cells that
+never share one. Neither type inspects the string it adopts, exactly as
+`from_ansi` does not: the domain is declared, never detected.
 
 Passing escape sequences to a `Text` node is therefore a contract violation,
 not a supported call with a degraded result. Debug builds assert at the
