@@ -38,7 +38,7 @@ Those remain ordinary model and message logic.
 The current architecture has three boundaries that the TUI subsystem must
 preserve.
 
-First, `style`, `text`, `theme`, the existing line-oriented `view`, and reusable
+First, `style`, `text`, `theme`, the existing `view`, and reusable
 components remain semantic modules without terminal lifecycle ownership.
 The TUI runtime may consume their values but they must not depend on the
 runtime.
@@ -128,25 +128,55 @@ expensive preparation belongs in effects.
 ### Meaning of View
 
 Within this document, `View` means the declarative render input produced by a
-TUI application's `view` function.
-The final Rust representation is intentionally open.
-It may be an application-owned value, a function that composes Ratatui widgets,
-or another renderer input that can be consumed during a draw.
+TUI application's `view` function, and that type is
+[`urushi::view::View`](../urushi/src/view/model.rs) — the tree of text, block,
+row, and column nodes that one layout pass resolves into a rectangle under an
+available area. A TUI application's `view` returns the same value a plain-CLI
+call site builds, and the runtime resolves it under the terminal's area.
 
-This term does not silently redefine the existing
-[`urushi::view::View`](../urushi/src/view/model.rs), which is a tree of text,
-block, row, and column nodes that one layout pass resolves into a rectangle.
-That type can be embedded or adapted where useful, but this document does not
-by itself settle whether it becomes the canonical full-screen layout tree.
-Urushi also does not introduce an independent resolved render tree merely to
-mirror another framework.
+The tree carries one node full-screen use requires beyond what plain output
+needs. An **anchor** is a leaf that occupies a rectangle and draws nothing:
+layout places it like any other node, and `resolve` reports the rectangle it
+landed on beside the resolved rows, for the caller that knows what belongs
+there to fill. An anchor carries no geometry of its own, so a sized region is
+written structurally, as an anchor inside a block. It names no backend type:
+an anchor is a key and a rectangle, and a backend with nothing to put there
+draws the blanks it resolved to.
 
-> **Open question.** This section was written when `urushi::view::View` was a
-> line-oriented collection of styled spans, and its reasoning rested on that
-> shape. `View` is now a rectangle tree with its own resolution pass, which
-> makes it a plausible candidate for the role this section set aside. Whether
-> the TUI `View` should be that type is an open design decision, not a
-> conclusion this document has reached.
+Two things reach the frame that way:
+
+- **Cursor placement.** A zero-sized anchor's reported origin is the cell the
+  terminal cursor belongs on. [`Frame`](#frame) carries the request for a draw;
+  this is how an application states it.
+- **Foreign widgets.** A sized anchor's rectangle is where the runtime's
+  `Renderer` draws an embedded Ratatui widget, after the resolved cells are
+  written. A `StatefulWidget`'s state stays in the application's model.
+
+Both are additive to the core: the node set grows by one leaf, and a resolved
+view reports an empty placement table for a tree containing no anchor. The
+node's spelling, the key type, and the `resolve` signature that returns
+placements are implementation-planning decisions this document does not fix.
+
+A view carries no scroll offset, no focus, and no redraw hint. Scrolling is a
+view-model question that composes on top of height clipping, focus stays
+ordinary model and message logic as elsewhere in this document, and
+invalidation belongs to Ratatui's cell diff.
+
+Why the TUI view is this tree, and why one anchor serves both needs, is
+recorded in [`design/tui-view.md`](design/tui-view.md).
+
+#### Consequence for `urushi-tui`
+
+The runtime's `Renderer` consumes `ResolvedView` and its placements directly
+rather than going through `ViewWidget`, because it needs the placements from
+the same resolution that produced the cells and resolves exactly once per
+frame.
+
+`ViewWidget` and `RatatuiWidget` stay public. A plain Ratatui application
+drawing an Urushi view into a `Rect` it already owns is an audience this
+document names, and it has no runtime to ask. The public surface of
+`urushi-tui` therefore grows with the runtime rather than shrinking into it,
+and the cell-writing path is shared between the widget and the `Renderer`.
 
 ## Effects and expensive preparation
 
@@ -324,7 +354,13 @@ reimplement Ratatui types that already satisfy them.
 
 A `Renderer` translates a TUI `View` into drawing operations during
 `Terminal.draw`.
-It may compose Ratatui widgets and reuse the existing Urushi Ratatui adapters.
+It resolves the view once against the frame's area, writes the resulting
+`ResolvedView` into the frame's cell buffer, and then serves the placements that
+resolution reported: the cursor request, and any Ratatui widget an application
+placed at a sized anchor.
+It reuses the cell-writing path of the existing Urushi Ratatui adapters rather
+than drawing through `ViewWidget`, which resolves internally and keeps nothing
+but the cells.
 It does not own the model, scheduling, a backend, or session restoration.
 
 ### Frame
@@ -475,7 +511,8 @@ The architecture fixes responsibilities and semantics but leaves these Rust API
 choices open until implementation planning:
 
 - the concrete generic and closure representation of `Application`;
-- the concrete TUI `View` and `Renderer` types;
+- the concrete `Renderer` type, and the anchor node, key type, and placement-
+  returning `resolve` signature the view model needs to serve it;
 - whether `Frame` is Ratatui's type or a narrow Urushi adapter;
 - the public form of source admission policies and keyed latest-only effects;
 - executor integration without making one executor mandatory;
