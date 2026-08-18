@@ -1,17 +1,7 @@
 # Inline Prompt Rendering
 
-This document defines the target architecture for drawing an interactive prompt
+This document defines the architecture for drawing an interactive prompt
 inline in a terminal.
-It is a normative design for planned work, not a description of code that is
-already implemented.
-[`architecture.md`](architecture.md) remains the source of truth for the
-repository as it exists today.
-
-This design is shared with the sibling project noctui. The stages, the state,
-the command vocabulary, and the rules below are one design realized twice.
-Implementations may differ in how a call is spelled, in error representation,
-and in module layout; they may not differ in which types exist, what each
-operation computes, or how the state machine behaves.
 
 ## Goals
 
@@ -25,13 +15,45 @@ Inline prompt rendering must:
   when a terminal write fails midway; and
 - allow command ordering and state transitions to be tested without a terminal.
 
+## Presentation state
+
+A prompt tracks the state below while it draws. The region, its origin, and the
+frame that draws it are defined in the sections that follow.
+
+```text
+InlinePresentation {
+  anchored       : bool        // a valid origin is saved
+  reserved_rows  : int         // rows materialized below the origin
+  owned_rows     : int         // rows cleanup must erase
+  rows           : [Row]       // last drawn content, for diffing
+  drawn          : bool        // this prompt has put something on screen
+}
+```
+
+`anchored` is a single predicate covering both "no origin has been saved yet"
+and "the origin is stale because the region is mid-growth". Cleanup treats them
+identically, so they are one field.
+
+`reserved_rows` never decreases while a prompt runs. `owned_rows` is the extent
+cleanup must erase; after a successful frame it equals that frame's height,
+because stale rows were cleared during the frame.
+
+`drawn` is set by the first successful write and is never cleared for the
+lifetime of the prompt. Every other field describes the region currently being
+tracked and is reset when that region is lost; `drawn` describes the screen,
+which a loss does not undo.
+
 ## The owned region
+
+The region rules are what keep terminal content outside the prompt untouched,
+including after a failed write.
 
 A prompt draws inline. It never enters the alternate screen and never clears
 the terminal. It owns a *region*: a run of rows anchored at a saved cursor
-position. Only rows inside that region may be erased or rewritten. Terminal
-content above the origin, and below the last materialized row, belongs to
-whatever produced it.
+position. A region row spans the full terminal width, so the prompt owns a
+row's end as well as its start. Only rows inside that region may be erased or
+rewritten. Terminal content above the origin and content below the last
+materialized row belong to whatever produced it.
 
 Three rules govern the region.
 
@@ -49,10 +71,10 @@ erase every row the failed frame could have touched, and no row outside the
 region. Where the region's extent cannot be established, cleanup must erase
 nothing.
 
-### The origin is anchored after scrolling, never before
+### Anchoring the origin
 
-The saved origin is an absolute screen position (`DECSC`). A line feed at the
-bottom of the screen scrolls the display: the region's content moves up by one
+The saved origin is an absolute screen position saved with DEC Save Cursor
+(`DECSC`). A line feed at the bottom of the screen scrolls the display: the region's content moves up by one
 row while the saved position does not. The origin is then stale, and restoring
 to it lands below the region.
 
@@ -81,16 +103,14 @@ it, the region is **unanchored**: its extent cannot be established. Growth
 happens only when the prompt's height changes, so this window does not exist on
 the ordinary redraw path.
 
-### A region that cannot be located is abandoned, not erased
+### Losing a region
 
 Two situations leave the region's extent unknown: a write failure inside an
 unanchored window, and a terminal resize, which may reflow existing content and
 invalidate both the origin and the row count.
 
 In both, the region is **lost**: `anchored`, `reserved_rows`, and `owned_rows`
-are reset, and the previously drawn rows are forgotten. Nothing is erased. A
-prompt's remains left on screen are a smaller harm than erasing rows belonging
-to another writer.
+are reset, and the previously drawn rows are forgotten. Nothing is erased.
 
 `drawn` is the one field a loss does not reset. It records that this prompt has
 put something on screen at some point, which stays true however many regions
@@ -103,70 +123,61 @@ the prompt must keep drawing. The next frame re-establishes the region at the
 cursor's current row: it begins with `MoveToColumn(0)` and proceeds as a first
 frame. It does **not** emit a line feed first. Starting on the current row
 overwrites it, so the only rows left behind are those above the cursor's row at
-the moment of loss — none at all for a prompt whose cursor sits on its first
-row, which is the common case.
+the moment of loss.
 
 **The prompt is finishing.** Cleanup restores the cursor to visible and emits a
-carriage return and line feed, so subsequent output starts below the remains
-rather than on top of them. It emits that line feed when `drawn` is true; a
+carriage return and line feed, so subsequent output starts below the residue
+rather than on top of it. It emits that line feed when `drawn` is true; a
 prompt that failed before putting anything on screen must not leave a blank row
 behind.
 
-The gate is `drawn`, not `owned_rows`. The two answer different questions and a
-loss separates them: a resize immediately followed by a cancellation leaves
-`owned_rows` at zero while remains are on screen, and gating on `owned_rows`
-would then skip the line feed and let subsequent output land on top of them —
-the exact outcome this continuation exists to prevent.
+The two fields answer different questions, and a loss separates them:
 
 - `owned_rows > 0` — whether there are rows to erase, and how many.
 - `drawn` — whether anything of this prompt is on screen at all.
 
+The gate is `drawn`, not `owned_rows`.
+
 The layer above is responsible for coalescing resize events. Dragging a window
 edge produces a stream of them, and re-establishing the region once per event
-would multiply whatever remains are left behind. One re-establishment per
-settled size is the requirement; the plan stage cannot enforce it.
+would multiply the residue left behind. One re-establishment per settled size is
+the requirement; the plan stage cannot enforce it.
 
-The breadth of treating every resize as a loss, the residue this accepts, and
-why the two continuations are asymmetric are argued in [`design/inline-prompt-rendering.md`](design/inline-prompt-rendering.md).
+The breadth of treating every resize as a loss, the residue this accepts, why
+the two continuations are asymmetric, and why the gate is `drawn` are argued in
+[`design/inline-prompt-rendering.md`](design/inline-prompt-rendering.md).
 
 ## Stages
 
-Rendering is four stages. Only the third is shared logic; it is the stage this
-design exists to make identical.
+Rendering is four stages. Only the third is pure logic with no I/O and no
+prompt policy of its own; it is the stage this design exists to pin down.
 
 | Stage | Input → output | Concern |
 | --- | --- | --- |
 | Resolve | `View` + `Available` → `ResolvedView` | Generic. Size content into a box under the available area. No prompt policy. |
-| Frame | `ResolvedView` + policy → `FramedView` | Prompt-specific. Choose which rows a bounded viewport shows. |
-| Plan | `FramedView` + `InlinePresentation` + geometry → `InlineRenderPlan` | Pure. Decide which commands reach the terminal. **Shared.** |
+| Frame | `ResolvedView` + policy → `FramedView` | Prompt-specific. Choose which rows a bounded viewport shows, and emit their runs in canonical form. |
+| Plan | `FramedView` + `InlinePresentation` + geometry → `InlineRenderPlan` | Pure. Decide which commands reach the terminal. |
 | Execute | `InlineRenderPlan` → terminal | I/O and byte encoding only. |
 
 **Resolve** is not prompt-specific and is shared with any other consumer of the
-view model.
+view model defined in [`view-model.md`](view-model.md).
 
 **Frame** carries the policy a prompt needs when its content does not fit:
 scroll the viewport so the focused row stays visible, and reinstate the
-validation error and the help line when scrolling has pushed them out of view. A prompt's usefulness depends on
-these; they are not layout details. Keeping them in their own stage stops them
-from being entangled with wrapping and clipping, and keeps the plan stage free
-of prompt semantics.
-
-**Plan** and **Execute** are described below.
+validation error and the help line when scrolling has pushed them out of view.
+A prompt's usefulness depends on these; they are not layout details. Keeping them in their own stage stops them from
+being entangled with wrapping and clipping, and keeps the plan stage free of
+prompt semantics.
 
 ### The cursor's horizontal window is chosen before Resolve
 
 A text cursor can sit beyond the viewport width, and following it there is
-horizontal scrolling. That needs the part of the line the viewport width would
-have removed — which Resolve has already absorbed by the time Frame runs,
-reflowing it under `Wrap` or discarding it under `Clip`.
-
-The window is therefore chosen where the knowledge already is, before a `View`
+horizontal scrolling. The window that follows it is chosen before a `View`
 exists. A text field holds its value and its cursor; the view function that
 places that field knows the available width and the structure it is placing the
 field into. It puts the **visible window of the value** into the `View`, with
-the cursor's column expressed within that window. Cutting an already-rendered
-string at a column is a text-layer utility rather than a box-model operation,
-which is where this belongs.
+the cursor's column expressed within that window. Choosing that window is a
+text-layer operation, not a box-model one.
 
 Consequences:
 
@@ -177,9 +188,9 @@ Consequences:
 - The cursor reaches Plan as a position inside an already-windowed row.
 
 This puts one layout fact — how much width a field ends up with — in the view
-function as well as in Resolve. Why that cost is preferred to resolving the
-prompt unbounded, which [`design/inline-prompt-rendering.md`](design/inline-prompt-rendering.md) argues, is that an unbounded axis is a
-measurement rather than a looser layout.
+function as well as in Resolve. What that was chosen over, and what it costs, is
+argued in
+[`design/inline-prompt-rendering.md`](design/inline-prompt-rendering.md).
 
 ## The row unit
 
@@ -202,8 +213,9 @@ Two boundaries follow from this shape:
 - **Theme and role resolution happens above the plan.** A run carries a
   resolved `Style`, not a semantic role. The plan stage has no access to a
   theme.
-- **SGR encoding happens below the plan.** A run carries text and a style, not
-  escape sequences. The executor turns a run into bytes.
+- **Select Graphic Rendition (SGR) encoding happens below the plan.** A run
+  carries text and a style, not escape sequences. The executor turns a run into
+  bytes.
 
 Runs rather than individual cells: the plan writes whole rows and never
 addresses a cell, so per-grapheme granularity would cost an allocation per
@@ -212,77 +224,21 @@ remains internal to Resolve.
 
 ### Runs have a canonical form
 
-A row is the unit the plan compares to decide whether to redraw, and the unit a
-shared conformance corpus compares across implementations. Both break if the
-same visible row can be represented by more than one sequence of runs. The Frame
-stage therefore emits runs in a canonical form:
+A row is the unit the plan compares to decide whether to redraw. That
+comparison breaks if the same visible row can be represented by more than one
+sequence of runs. The Frame stage therefore emits runs in a canonical form:
 
 - adjacent runs with equal styles are merged, greedily and left to right;
 - no run is empty; and
 - a run's style is the style **as it will be emitted** — resolved for the
-  output profile, in a representation where equal appearance means equal value.
+  terminal profile, in a representation where equal appearance means equal
+  value, and in the canonical form
+  [`style-model.md`](style-model.md#canonical-form) defines.
 
-Without the third rule a row can differ structurally while rendering
-identically, and every frame redraws every row. It has two distinct failure
-modes, and a style type must rule out both:
-
-- **Redundant spellings.** If a default color can be written either as "absent"
-  or as an explicit reset, or if modifiers are carried as an add set and a
-  subtract set, one appearance has several values. The style a run carries must
-  be a normalized form with neither. `TextStyle`, defined in
-  [`style-model.md`](style-model.md), is that form, which is why no separate
-  "effective" style type is needed alongside it.
-- **Capability degradation.** Two colors a terminal profile collapses to the
-  same output are equal on screen and unequal in a logical style. The style a
-  run carries must therefore already be resolved against the profile, not left
-  logical for the executor to resolve.
-
-This matters most where rows are aggregated from grapheme-level content on each
-frame, because the aggregation is what establishes the form.
-
-#### What a style type cannot rule out
-
-A third failure mode survives the type. It is a duplication *between* fields,
-so no signature makes it unrepresentable, and it is closed by normalization
-instead:
-
-| Rule | Condition | Applied |
-| --- | --- | --- |
-| Fold an underline colour to *absent* | the foreground is a concrete colour and the underline colour is **the same value** | once the style is final — after a profile stage if there is one, otherwise at run aggregation |
-
-An underline is drawn in the foreground colour unless one is set, so stating
-the colour a run already has changes nothing but the bytes. The values must be
-compared as values: a palette red and a true-colour red look different on
-screen and must not be folded together.
-
-Normalization runs **after the style is final**, not when it is built. A style
-value is immutable and its builder returns a new value, so folding earlier is
-always undone by a later change:
-
-```text
-new().underline(Single, colour = red)   // foreground absent; nothing to fold
-     .foreground(red)                   // the duplication appears here
-```
-
-A profile stage is one instance of "final", not the reason for the rule.
-
-The rule for admitting any future fold is narrow:
-
-> **Fold only what is inert.** A value may be dropped when doing so cannot
-> change the output, whatever the terminal does. An equivalence that holds only
-> because a terminal is assumed to implement an attribute a particular way is
-> not a fold.
-
-Reversed video is the case this excludes; [`design/inline-prompt-rendering.md`](design/inline-prompt-rendering.md) shows why an
-appearance-based rule would have admitted it.
-
-One residue is not closable: when the foreground is absent, its concrete colour
-is the terminal's default and unknown here, so an underline colour equal to it
-cannot be recognized. This weakens only the first purpose of a canonical form —
-not redrawing a row that has not changed. The second — two implementations
-answering the same input with the same value — holds regardless, because the
-rule is the same on both sides. A canonical form owes the corpus determinism,
-not minimality.
+The style a run carries is a `TextStyle`, defined in
+[`style-model.md`](style-model.md). Run aggregation is where the form is
+established, because rows are aggregated from grapheme-level content on each
+frame.
 
 ## Commands
 
@@ -304,24 +260,22 @@ Command =
 
 The vocabulary is the prompt's own, not a terminal library's. Reserving a row
 is a bare line feed, which terminal libraries generally do not model as a
-command, and the vocabulary is the artifact kept identical across
-implementations.
+command.
 
-These variants need not be the whole of an implementation's command type. A
-project that also drives a full-screen surface may keep one terminal-command
-vocabulary and make these a subset of it, rather than maintaining a second
-vocabulary for prompts; whether that applies depends on what else the project
-owns below the prompt. What must hold either way is that **the plan stage emits
-nothing outside this set** — no alternate screen, no full-screen clear, no
-absolute cursor addressing — and that the exclusion is asserted, not assumed.
+These variants need not be the whole of the crate's command type: the
+full-screen runtime may keep one terminal-command vocabulary and make these a
+subset of it, rather than maintaining a second vocabulary for prompts. What
+must hold either way is that **the plan stage emits nothing outside this set**
+— no alternate screen, no full-screen clear, no absolute cursor addressing —
+and that the exclusion is asserted, not assumed.
 
 `LineFeed` and `CarriageReturnLineFeed` are distinct because their purposes
 differ: the first materializes a row inside the region, the second releases the
 region. Relative cursor movement stops at the terminal boundary instead of
 scrolling, so neither can be replaced by a `MoveDown`.
 
-Two invariants make a command list canonical, so that two implementations
-given the same input produce the same list:
+Two invariants make a command list canonical, so that the same input always
+produces the same list:
 
 - **A movement command with a count of zero is never emitted.** A caller that
   computes a zero distance omits the command.
@@ -333,35 +287,11 @@ given the same input produce the same list:
 Columns are zero-based and are converted at encoding time.
 
 There is no "clear to end of line". Because the region starts at column zero
-and spans the full width, no row contains content that is not the prompt's, so
-every row is cleared the same way. Every row is therefore handled uniformly:
-position, `ClearLine`, `Write`. Implementations that special-case the first row
-are compensating for a non-zero left edge, which this design does not have.
-
-## Presentation state
-
-```text
-InlinePresentation {
-  anchored       : bool        // a valid origin is saved
-  reserved_rows  : int         // rows materialized below the origin
-  owned_rows     : int         // rows cleanup must erase
-  rows           : [Row]       // last drawn content, for diffing
-  drawn          : bool        // this prompt has put something on screen
-}
-```
-
-`anchored` is a single predicate covering both "no origin has been saved yet"
-and "the origin is stale because we are mid-growth". Cleanup treats them
-identically, so they are one field.
-
-`reserved_rows` never decreases while a prompt runs. `owned_rows` is the extent
-cleanup must erase; after a successful frame it equals that frame's height,
-because stale rows were cleared during the frame.
-
-`drawn` is set by the first successful write and is never cleared for the
-lifetime of the prompt. Every other field describes the region currently being
-tracked and is reset when that region is lost; `drawn` describes the screen,
-which a loss does not undo.
+and a region row spans the full terminal width, no row contains content that is
+not the prompt's, so every row is cleared the same way. Every row is therefore
+handled uniformly: position, `ClearLine`, `Write`. Implementations that
+special-case the first row are compensating for a non-zero left edge, which this
+design does not have.
 
 ## The plan and its recovery contract
 
@@ -393,6 +323,15 @@ for command in plan.commands:
 state = plan.next
 ```
 
+Failure is observed where the writer reports it. An executor that buffers and
+flushes several commands at once observes it at the flush, so *k* is the first
+command of the flush that failed, and the state is the fold up to the last flush
+that succeeded. Commands of the failed flush may have reached the terminal in
+part; whatever they drew is residue the next frame or cleanup does not know
+about, and it is accepted on the same ground as the residue a lost region
+leaves: understating what was touched risks residue, overstating it risks
+erasing rows the prompt does not own.
+
 `step` maintains `anchored`, `reserved_rows`, `owned_rows`, and the cursor's
 row within the region. It does not maintain `rows`: after a failure the drawn
 content is indeterminate, cleanup erases the region regardless, and the field
@@ -401,13 +340,13 @@ is reset.
 This replaces per-command recovery state and a pessimistic claim made before
 writing; [`design/inline-prompt-rendering.md`](design/inline-prompt-rendering.md) records why both were dropped.
 
-### Recovery depends on clearing a row before writing it
+### Clearing before writing
 
 `fold` applies only commands that succeeded, so a `Write` that fails partway
 does not raise `owned_rows` — yet its bytes may already be on screen. That row
 is nevertheless covered, because the uniform row form places a `ClearLine` on
 the row immediately before the `Write`, and the successful `ClearLine` has
-already raised the mark.
+already raised `owned_rows` to cover that row.
 
 The accuracy of recovery therefore rests on an invariant, not on `step` alone:
 
@@ -429,32 +368,9 @@ A prompt region is a rectangle whose left edge is column zero. If the cursor is
 not at column zero when a prompt starts, the prompt emits a carriage return and
 line feed to reach a fresh row before establishing the region.
 
-This is a deliberate reduction in capability and is the design's most
-reversible decision: reinstating a non-zero left edge means threading one
-value through the Frame and Plan stages. [`design/inline-prompt-rendering.md`](design/inline-prompt-rendering.md) records what it
-was chosen over.
-
-## What must be identical
-
-Identical across implementations:
-
-- the command variants a prompt plan emits, and their meaning;
-- the two canonicalization invariants on command lists;
-- the canonical form of runs within a row;
-- `InlinePresentation` and its fields' invariants;
-- `step`, and the fold that derives recovery state;
-- the clear-before-write invariant that recovery depends on;
-- the plan function: same input, same command list, same `next`;
-- the region rules, including reserve-before-anchor, region loss, and both
-  continuations after a loss; and
-- the concept names above, modulo module qualification.
-
-Free to differ:
-
-- byte encoding and the writer interface;
-- error representation;
-- how a view is expressed before Resolve; and
-- module and package layout.
+This is a deliberate reduction in capability.
+[`design/inline-prompt-rendering.md`](design/inline-prompt-rendering.md) records
+what it was chosen over and what reversing it would cost.
 
 ## Verification
 
@@ -475,8 +391,3 @@ requires no failure injection.
 
 Byte-level assertions belong to the executor and cover encoding only. Style
 assertions belong to the renderer that produces `Style`, not to any stage here.
-
-Because the plan stage is identical across implementations, a shared corpus of
-`(previous, framed, geometry) → (commands, next)` cases can be executed by
-both. That corpus is worth introducing once both sides implement this design;
-it cannot be written before the stages and the row unit agree.

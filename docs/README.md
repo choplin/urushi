@@ -15,9 +15,11 @@ Top-level documents explain what the codebase is and how it works.
 document covers one coherent unit — a component, a module, a subsystem — and is
 reachable by following links from `architecture.md`.
 
-A top-level document describes the code as it exists today. A document that
-instead defines a target architecture for planned work must say so explicitly
-and defer to `architecture.md` as the source of truth for the current state.
+A top-level document describes the architecture Urushi is built toward, not
+the state of the code on a given day. Where the implementation has not reached
+that architecture, the document is not annotated with the gap; closing the gap
+is work on the code, and tracking it belongs to the issue tracker, not to
+`docs/`.
 
 A top-level document carries the background and goals a reader needs to
 understand the shape it defines — the problem the unit solves and what it must

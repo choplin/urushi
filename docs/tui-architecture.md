@@ -1,17 +1,13 @@
 # TUI Runtime Architecture
 
-This document defines the target architecture for a full-screen TUI runtime in
-Urushi.
-It is a normative design for planned work, not a description of code that is
-already implemented.
-[`architecture.md`](architecture.md) remains the source of truth for the
-repository as it exists today.
+This document defines the architecture of Urushi's full-screen TUI runtime,
+the subsystem [`architecture.md`](architecture.md) places in `urushi-tui`.
 
-The runtime adds a TEA-style application framework above Ratatui while leaving
-Ratatui responsible for widgets, layout, buffers, backends, and cell-level
-diffing.
-It extends the existing `urushi-tui` Ratatui adapter without making
-the existing renderer-neutral view model depend on Ratatui.
+The runtime adds an application framework in the style of The Elm Architecture
+(TEA) above Ratatui while leaving Ratatui responsible for widgets, layout,
+buffers, backends, and cell-level diffing.
+It extends the `urushi-tui` Ratatui adapter without making the
+renderer-neutral view model depend on Ratatui.
 
 ## Goals
 
@@ -33,33 +29,32 @@ The initial design does not provide application semantics such as focus,
 navigation, modal stacks, key bindings, or commands.
 Those remain ordinary model and message logic.
 
-## Relationship to the implemented architecture
+## Relationship to the rest of the architecture
 
-The current architecture has three boundaries that the TUI subsystem must
-preserve.
+Three boundaries in [`architecture.md`](architecture.md) constrain the TUI
+subsystem.
 
-First, `style`, `text`, `theme`, the existing `view`, and reusable
-components remain semantic modules without terminal lifecycle ownership.
-The TUI runtime may consume their values but they must not depend on the
+First, `style`, `text`, `theme`, `view`, and reusable components are
+semantic modules without terminal lifecycle ownership.
+The TUI runtime may consume their values, but they must not depend on the
 runtime.
 
-Second, the existing modules in [`urushi-tui`](../urushi-tui/) remain output adapters.
+Second, the adapter modules in [`urushi-tui`](../urushi-tui/) are output adapters.
 They convert Urushi styles and box-model values into Ratatui representations
 and draw into a supplied buffer.
 The runtime orchestrates those adapters; the adapters do not acquire
 application state, event handling, or terminal ownership.
 
-Third, [`urushi-prompt`](../urushi-prompt/) remains a prompt-specific crate.
+Third, [`urushi-prompt`](../urushi-prompt/) is a prompt-specific crate.
 Its line-oriented editing, submission, viewport, cursor, and cleanup policy do
 not become the default policy for full-screen applications.
 Sharing lower-level terminal facilities in the future must not merge the two
-interaction models.
+interaction models, prompt-style line editing and full-screen application.
 
-`urushi-tui` is the provisional crate boundary for this subsystem. Runtime
-implementation may refine its internal modules without moving Ratatui concerns
-back into the core `urushi` crate.
+`urushi-tui` is the crate boundary for this subsystem. Its internal modules may
+be refined without moving Ratatui concerns back into the core `urushi` crate.
 
-## Architecture at a glance
+## From event to terminal output
 
 The application describes state transitions and declarations.
 The runtime owns execution and terminal resources.
@@ -89,9 +84,8 @@ subscription events ---> admission policies ----+              |
 ```
 
 `Application` and `Runtime` are deliberately separate.
-An application can be composed, passed around, and tested as a description of
-a program.
-The runtime interprets that description and owns all live execution state.
+An application can be composed, passed around, and tested as a description of a
+program; the runtime interprets it and owns all live execution state.
 
 ## Application model
 
@@ -112,8 +106,9 @@ but `Application` remains a pure value rather than a mutable object with
 lifecycle methods.
 
 The runtime owns the live `Model`.
-It invokes `update` once for every accepted message in delivery order and
-replaces the live model with the returned value.
+It invokes `update` once for every accepted message in the runtime-wide accepted
+order defined in [Admission and delivery](#admission-and-delivery) and replaces
+the live model with the returned value.
 `update` does not perform terminal I/O or mutate runtime resources.
 
 `subscriptions` declares long-lived message sources as a function of the
@@ -122,8 +117,8 @@ The runtime reconciles the declaration with running sources and delivers their
 events through the same admission and ordering path as other messages.
 
 `view` returns a declarative value that a renderer can draw with Ratatui.
-It must be cheap enough to evaluate at a normal drawing opportunity because
-expensive preparation belongs in effects.
+It must be cheap enough to evaluate at a normal drawing opportunity; expensive
+preparation belongs in effects.
 
 ### Meaning of View
 
@@ -178,36 +173,10 @@ document names, and it has no runtime to ask. The public surface of
 `urushi-tui` therefore grows with the runtime rather than shrinking into it,
 and the cell-writing path is shared between the widget and the `Renderer`.
 
-## Effects and expensive preparation
-
-An `Effect<Message>` describes work to be interpreted by the runtime.
-It cannot update the model directly.
-Its observable result returns as a message and passes through normal delivery.
-
-Effects include filesystem and Git access, syntax highlighting, document
-layout, image rasterization, and other work that would make `update` or `view`
-too expensive.
-This separation allows every key input to advance the logical model without
-starting physical rendering or heavy preparation for every intermediate state.
-
-The runtime must support at least these execution policies:
-
-- ordinary one-shot work whose completion is delivered in source order;
-- long-lived work represented as a subscription; and
-- keyed latest-only work for replaceable preparation.
-
-For latest-only work, the runtime may suppress a completion only when the
-runtime itself knows that the corresponding execution was cancelled or
-replaced.
-For ordinary effects, the application decides in `update` whether a completion
-still applies to the current model.
-A generation identifier in the application's message and model is one possible
-way to make that decision; it is not a runtime-wide damage model.
-
-In a document viewer, for example, changing the document or theme can start a
-new keyed layout or rasterization effect.
-Moving the viewport can reuse the prepared asset already stored in the model
-and render it at a new position without starting that preparation again.
+Whatever the TUI `View` becomes, it is `urushi::view::View` or a value that
+embeds it; Urushi does not introduce a second, independent resolved render tree
+beside the one `resolve` already produces merely because Ratatui or another TUI
+framework has one.
 
 ## Admission and delivery
 
@@ -215,11 +184,11 @@ Message handling has two distinct stages.
 
 An admission policy belongs to a message source and decides whether an incoming
 item is accepted, delayed with backpressure, replaced, or rejected.
-Once accepted, a delivery receives one position in a single runtime-wide
-order.
 The runtime never inspects application message variants to infer admission
 policy.
 
+Once accepted, a delivery receives one position in a single runtime-wide
+order.
 A delivery contains one or more messages and a delivery mode:
 
 ```text
@@ -240,14 +209,48 @@ Initial source policies should support these common cases:
 | Terminal key and text input | Bounded FIFO with reader backpressure |
 | Surface observations | Latest value may replace an unaccepted observation |
 | Ordinary effect completion | FIFO |
-| Cancelled latest-only effect | Suppress the known-cancelled completion |
+| Canceled latest-only effect | Suppress the known-canceled completion |
 | Shutdown | Separate runtime control path |
 
-Key repeat is not aggregated by default.
+By default the runtime delivers every key repeat separately.
 Each accepted key event reaches `update`, so selection, cursor, viewport, and
 other logical state stay responsive and deterministic.
 An application or source-specific policy may aggregate input when its own
 semantics permit that optimization.
+
+## Effects and expensive preparation
+
+An `Effect<Message>` describes work to be interpreted by the runtime.
+It cannot update the model directly.
+Its observable result returns as a message and passes through normal delivery.
+
+Effects include filesystem and Git access, syntax highlighting, document
+layout, image rasterization, and other work that would make `update` or `view`
+too expensive.
+This separation allows every key input to advance the logical model without
+starting physical rendering or heavy preparation for every intermediate state.
+
+The runtime must support at least these execution policies:
+
+- ordinary one-shot work whose completion is delivered in source order;
+- long-lived work represented as a subscription; and
+- keyed latest-only work for replaceable preparation.
+
+Deciding whether a completion is still relevant is split between the runtime and
+the application.
+For latest-only work, the runtime may suppress a completion only when the
+runtime itself knows that the corresponding execution was canceled or
+replaced.
+For ordinary effects, the application decides in `update` whether a completion
+still applies to the current model.
+
+A generation identifier in the application's message and model is one possible
+way to make that decision; it is not a runtime-wide damage model.
+
+In a document viewer, for example, changing the document or theme can start a
+new keyed layout or rasterization effect.
+Moving the viewport can reuse the prepared asset already stored in the model
+and render it at a new position without starting that preparation again.
 
 ## Async delivery and draw scheduling
 
@@ -293,17 +296,21 @@ When the runtime accepts a `Sync` delivery, it:
 
 If another `Sync` delivery arrives during a draw, the runtime does not interrupt
 the draw already in progress.
-It queues the new delivery as the next generation in the global order.
+It queues the new delivery at the next position in the global order.
 
 This barrier guarantees agreement among the delivered environment facts, the
-model after `update`, and the logical snapshot used to build the frame.
+model after `update`, and the logical rendering-environment snapshot used to
+build the frame. `Terminal` therefore does not let the backend resize the frame
+on its own at draw time: a size change the backend reports while drawing is
+not applied to that draw but enters admission as a `Sync` delivery, so the next
+barrier draws with a snapshot and a frame that agree.
 It does not freeze the operating system's physical terminal surface during the
 draw and does not claim that terminal output is an atomic transaction.
 
-### Surface information belongs in state transitions
+### How surface information reaches the application
 
-Physical rendering constraints are handled by the runtime, terminal, Ratatui,
-and backend.
+The runtime, terminal, Ratatui, and backend handle physical rendering
+constraints.
 An application only needs surface information when that information affects
 application semantics, such as layout choices or a viewport measured in cells.
 
@@ -313,7 +320,7 @@ reads them from that model like any other state.
 `view` does not receive an implicit `ViewContext` or physical `Surface` input.
 
 The runtime cannot use a revision number alone to decide whether an application
-has handled a surface change because the runtime does not understand arbitrary
+has handled a surface change, because it does not understand arbitrary
 application messages.
 The `Sync` delivery contract provides the required coordination without
 inspecting those messages.
@@ -335,13 +342,14 @@ During startup, the runtime:
 5. repeats until no new initial `Sync` delivery is produced; and
 6. evaluates `view` once and performs the first draw.
 
-Initial `Async` items are staged during this process.
+Initial `Async` deliveries are staged during this process.
 They enter normal admission and receive global ordering only after the first
 draw, so they cannot make the initial rendering environment inconsistent.
 
 The concrete implementation must bound startup reconciliation and detect a
 cycle or budget exhaustion.
-The public failure behavior for such a case remains an API design decision.
+The public failure behavior when startup reconciliation cycles or exhausts its
+budget remains an API design decision.
 
 ## Rendering ownership
 
@@ -381,14 +389,17 @@ Either choice must preserve this borrowed ownership model.
 `Terminal` owns or delegates ownership of working and committed presentation
 state, the backend, cell diffing, output, and flushing.
 It treats a presentation as committed only after output succeeds.
-The implementation must verify Ratatui's exact failure behavior and add local
-recovery state if Ratatui does not provide this guarantee at the required
-boundary.
+Ratatui does not give this guarantee — it swaps its buffers before the backend
+flush, so a failed flush leaves it believing the frame was shown — so `Terminal`
+keeps the local recovery state that restores it: the last committed
+presentation is retained, and a failed output leaves the next draw to redraw
+against it rather than against the frame that never reached the terminal.
 
 Cursor position and visibility requested for one frame belong to the frame and
 terminal path.
-They are not application effects and are not restoration obligations by
-themselves.
+They are not application effects. Where drawing a frame changes terminal state
+— hiding the cursor for a frame that requests none — restoring it is
+`Terminal`'s or `TerminalSession`'s obligation, never the application's.
 
 ### TerminalSession
 
@@ -407,7 +418,7 @@ That limitation must remain explicit in the public contract.
 `Backend` is the physical terminal-output boundary.
 Backend-specific types and failure rules stay behind adapters so applications
 remain expressed in Urushi-owned concepts.
-Clock, event source, and backend boundaries must be replaceable in tests.
+Clock, message source, and backend boundaries must be replaceable in tests.
 
 ## Runtime ownership and control
 
@@ -435,19 +446,22 @@ exposing a particular executor's task handles throughout application types.
 
 ### Lightweight Ratatui application
 
-For a Revia-like application, every accepted key event advances the model.
+For a lightweight Ratatui application, every accepted key event advances the
+model.
 The runtime may process many such updates before the next draw, at which point
-`view` reflects the latest model and Ratatui emits the cell diff.
+`view` reflects the latest model, and Ratatui emits the cell diff.
 Filesystem work or syntax highlighting runs as effects, so key handling does
 not wait for them.
 
 ### Prepared assets and viewport movement
 
-For a Raden-like application, document changes start replaceable preparation
-effects whose completed assets enter the model through messages.
+For an application with prepared assets, document changes start replaceable
+preparation effects whose completed assets enter the model through messages.
 Viewport movement remains a lightweight logical update.
 The next draw reuses the existing prepared asset with the new viewport instead
 of treating every movement as damage that requires preparation.
+
+## Cell output and terminal graphics
 
 Cell output plus terminal graphics remains an extension boundary.
 The first implementation should prove the cell-only runtime before promoting a
@@ -492,15 +506,14 @@ guarantee is observed.
 | Pure state transitions | Unit tests for `init`, `update`, and `view` without a terminal |
 | Global ordering | Deterministic tests with interleaved input, subscription, and effect sources |
 | Bounded admission | Saturation tests for bounded FIFO, backpressure, replacement, and cancellation |
-| Async draw coalescing | Tests proving every update occurs while fewer latest-state draws are allowed |
+| Async draw coalescing | Tests proving every update reaches `update` while the runtime draws only the latest model |
 | Sync barrier | Tests proving no intermediate draw and no later delivery before the barrier draw |
 | Startup | Tests for multiple initial `Sync` batches, staged `Async` input, and subscription convergence |
 | Effect freshness | Tests for ordinary stale results and runtime-known latest-only cancellation |
 | Terminal failures | Tests proving committed state advances only after successful output |
 | Session restoration | Integration tests for normal exit, error, interruption, and partial setup failure |
-| Real application fit | Revia-like and Raden-like dogfood scenarios |
 
-The runtime test harness should provide deterministic event sources, a
+The runtime test harness should provide deterministic message sources, a
 controllable clock, an in-memory backend, and observable effect scheduling.
 Tests should assert externally meaningful ordering and presentation behavior,
 not private task structure.
@@ -513,20 +526,14 @@ choices open until implementation planning:
 - the concrete generic and closure representation of `Application`;
 - the concrete `Renderer` type, and the anchor node, key type, and placement-
   returning `resolve` signature the view model needs to serve it;
-- whether `Frame` is Ratatui's type or a narrow Urushi adapter;
+- the choice between Ratatui's `Frame` and a narrow Urushi adapter;
 - the public form of source admission policies and keyed latest-only effects;
 - executor integration without making one executor mandatory;
+- the mechanism by which an application requests shutdown and how that request
+  composes with effects and cleanup;
 - error and shutdown behavior during `Sync` processing;
 - startup reconciliation limits and error reporting; and
 - the graphics presentation and recovery model.
 
 These decisions may refine representation but must not collapse the ownership
 boundaries or ordering guarantees defined above.
-
-## Keeping this document current
-
-Update this document whenever implementation changes an application/runtime
-responsibility, delivery guarantee, rendering owner, or lifecycle invariant.
-As parts of this design become implemented, update
-[`architecture.md`](architecture.md) in the same change so that its description
-of the current repository remains accurate.
