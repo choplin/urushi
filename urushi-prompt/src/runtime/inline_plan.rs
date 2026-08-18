@@ -8,15 +8,35 @@
 //!
 //! # Recovery contract
 //!
-//! A plan claims pessimistically and commits optimistically:
+//! The plan carries no per-command state. Recovery is derived instead, by
+//! folding [`step`] over the commands:
 //!
-//! - [`InlineRenderPlan::claimed_rows`] is applied *before* the first command
-//!   is written. It over-states the rows the plan may touch so that, if any
-//!   write fails midway, error cleanup erases the whole partially drawn view.
-//! - [`CommandStep::committed`] is applied *after* its command is written. It
-//!   records what has actually become true of the terminal, so a failure leaves
-//!   behind state that describes what was really emitted.
-//! - [`InlineRenderPlan::next`] is applied only once every command succeeded.
+//! - **On success**, the executor adopts [`InlineRenderPlan::next`]. Only the
+//!   planner knows that a completed frame collapses `owned_rows` to the new
+//!   height, so the planner declares it rather than deriving it.
+//! - **On failure** at command *k*, the state is `fold(previous, &commands[..k])`,
+//!   which is exactly what reached the terminal.
+//!
+//! `step` maintains `anchored`, `reserved_rows`, `owned_rows`, `drawn`, and the
+//! cursor's row within the region. It does not maintain the drawn rows: after a
+//! failure their content is indeterminate and cleanup erases the region anyway.
+//!
+//! ## Clear before write
+//!
+//! A [`InlineCommand::WriteLine`] that fails partway does not reach the fold,
+//! so it does not raise `owned_rows` — yet its bytes may already be on screen.
+//! That row is covered regardless, because every row is positioned, *cleared*,
+//! and only then written, and the clear that succeeded has already raised
+//! `owned_rows` past that row.
+//!
+//! > Every row is cleared before it is written, in the same frame.
+//!
+//! The accuracy of recovery rests on that invariant, not on `step` alone.
+//! Dropping the clear for rows believed to be empty, or for content believed to
+//! be appended rather than replaced, is a plausible optimization that would
+//! silently leave residue behind a failed write. Any change to the uniform row
+//! form must preserve the invariant or replace it with something that covers a
+//! partially completed write.
 
 use super::{
     RenderFinish,
@@ -54,60 +74,79 @@ pub(crate) enum InlineCommand {
     WriteLine(FramedRow),
 }
 
-/// State that becomes true once its command has been written.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum Checkpoint {
-    /// The origin is anchored, and the row it sits on is reserved.
-    OriginAnchored,
-    /// Rows scrolled into existence below the origin.
-    ReservedRows(u16),
+/// What a fold over a command list maintains.
+///
+/// The cursor's row within the region is frame-local rather than presentation
+/// state: every plan begins with the region either unestablished — the cursor
+/// is at the region top by definition — or repositioned by a `RestoreOrigin`
+/// before any command that depends on position. That precondition is what makes
+/// [`step`] total.
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
+pub(crate) struct RenderState {
+    pub presentation: InlinePresentation,
+    /// Rows below the origin, as the commands so far have left the cursor.
+    pub cursor_row: u16,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct CommandStep {
-    pub command: InlineCommand,
-    pub committed: Option<Checkpoint>,
+impl RenderState {
+    pub(crate) fn resuming(presentation: InlinePresentation) -> Self {
+        Self {
+            presentation,
+            cursor_row: 0,
+        }
+    }
 }
 
-impl CommandStep {
-    fn plain(command: InlineCommand) -> Self {
-        Self {
-            command,
-            committed: None,
+/// The state one command leaves behind once it has been written.
+///
+/// Total: no input state and no command combination panics, and unknown cursor
+/// arithmetic saturates rather than wrapping.
+pub(crate) fn step(mut state: RenderState, command: &InlineCommand) -> RenderState {
+    match command {
+        InlineCommand::HideCursor
+        | InlineCommand::ShowCursor
+        | InlineCommand::MoveRight(_)
+        | InlineCommand::MoveToColumn(_) => {}
+        InlineCommand::SaveOrigin => {
+            // Every plan saves the origin at the region top, so the row the
+            // cursor is on becomes row zero and the region is at least one row
+            // tall.
+            state.presentation.anchored = true;
+            state.presentation.reserved_rows = state.presentation.reserved_rows.max(1);
+            state.cursor_row = 0;
+        }
+        InlineCommand::RestoreOrigin => state.cursor_row = 0,
+        InlineCommand::MoveUp(rows) => state.cursor_row = state.cursor_row.saturating_sub(*rows),
+        InlineCommand::MoveDown(rows) => state.cursor_row = state.cursor_row.saturating_add(*rows),
+        InlineCommand::ClearToEndOfLine | InlineCommand::ClearLine => {
+            state.presentation.owned_rows =
+                touched(state.presentation.owned_rows, state.cursor_row);
+        }
+        InlineCommand::Newline | InlineCommand::CarriageReturnNewline => {
+            // A line feed scrolls a row into existence below the cursor, so the
+            // region has grown to hold it.
+            state.cursor_row = state.cursor_row.saturating_add(1);
+            state.presentation.reserved_rows =
+                touched(state.presentation.reserved_rows, state.cursor_row);
+        }
+        InlineCommand::WriteLine(_) => {
+            state.presentation.owned_rows =
+                touched(state.presentation.owned_rows, state.cursor_row);
+            state.presentation.drawn = true;
         }
     }
+    state
+}
 
-    fn committing(command: InlineCommand, checkpoint: Checkpoint) -> Self {
-        Self {
-            command,
-            committed: Some(checkpoint),
-        }
-    }
+/// The high-water mark of a row count that must cover `row`.
+fn touched(rows: u16, row: u16) -> u16 {
+    rows.max(row.saturating_add(1))
 }
 
 pub(crate) struct InlineRenderPlan {
-    /// Rows to claim before the first write. See the recovery contract above.
-    pub claimed_rows: Option<u16>,
-    pub steps: Vec<CommandStep>,
+    pub commands: Vec<InlineCommand>,
     /// The presentation once every command has been written.
     pub next: InlinePresentation,
-}
-
-impl InlineRenderPlan {
-    /// The planned commands, for tests that assert on ordering.
-    #[cfg(test)]
-    pub(crate) fn commands(&self) -> Vec<InlineCommand> {
-        self.steps.iter().map(|step| step.command.clone()).collect()
-    }
-
-    /// The planned checkpoints in order, for tests that assert on recovery.
-    #[cfg(test)]
-    pub(crate) fn checkpoints(&self) -> Vec<Checkpoint> {
-        self.steps
-            .iter()
-            .filter_map(|step| step.committed)
-            .collect()
-    }
 }
 
 /// Plan the commands that bring the owned region from `previous` to `view`.
@@ -127,88 +166,82 @@ pub(crate) fn plan_draw(
         cursor,
     } = view;
     let rows_to_touch = previous
-        .previous_lines
+        .rows
         .len()
         .max(lines.len())
         .min(usize::from(max_rows)) as u16;
 
-    let mut steps = vec![CommandStep::plain(InlineCommand::HideCursor)];
+    let mut commands = vec![InlineCommand::HideCursor];
 
     let mut reserved_rows = previous.reserved_rows;
-    if !previous.origin_saved {
-        steps.push(CommandStep::committing(
-            InlineCommand::SaveOrigin,
-            Checkpoint::OriginAnchored,
-        ));
+    if !previous.anchored {
+        commands.push(InlineCommand::SaveOrigin);
         reserved_rows = 1;
     }
 
     let wanted_rows = (lines.len() as u16).max(1);
     if wanted_rows > reserved_rows {
-        steps.push(CommandStep::plain(InlineCommand::RestoreOrigin));
+        commands.push(InlineCommand::RestoreOrigin);
         if reserved_rows > 1 {
-            steps.push(CommandStep::plain(InlineCommand::MoveDown(
-                reserved_rows - 1,
-            )));
+            commands.push(InlineCommand::MoveDown(reserved_rows - 1));
         }
         for _ in reserved_rows..wanted_rows {
-            steps.push(CommandStep::plain(InlineCommand::Newline));
+            commands.push(InlineCommand::Newline);
         }
         if wanted_rows > 1 {
-            steps.push(CommandStep::plain(InlineCommand::MoveUp(wanted_rows - 1)));
+            commands.push(InlineCommand::MoveUp(wanted_rows - 1));
         }
-        steps.push(CommandStep::committing(
-            InlineCommand::SaveOrigin,
-            Checkpoint::ReservedRows(wanted_rows),
-        ));
+        commands.push(InlineCommand::SaveOrigin);
         reserved_rows = wanted_rows;
     }
 
+    let mut drawn = previous.drawn;
     for row in 0..usize::from(rows_to_touch) {
         let current = lines.get(row);
-        if previous.previous_lines.get(row) == current {
+        if previous.rows.get(row) == current {
             continue;
         }
 
-        steps.push(CommandStep::plain(InlineCommand::RestoreOrigin));
+        commands.push(InlineCommand::RestoreOrigin);
         if row > 0 {
-            steps.push(CommandStep::plain(InlineCommand::MoveDown(
-                row.min(usize::from(u16::MAX)) as u16,
-            )));
-            steps.push(CommandStep::plain(InlineCommand::MoveToColumn(0)));
+            commands.push(InlineCommand::MoveDown(
+                row.min(usize::from(u16::MAX)) as u16
+            ));
+            commands.push(InlineCommand::MoveToColumn(0));
         }
-        steps.push(CommandStep::plain(if row == 0 {
+        // Positioned, cleared, then written: the clear-before-write invariant
+        // this module's recovery contract rests on.
+        commands.push(if row == 0 {
             InlineCommand::ClearToEndOfLine
         } else {
             InlineCommand::ClearLine
-        }));
+        });
         if let Some(line) = current {
-            steps.push(CommandStep::plain(InlineCommand::WriteLine(line.clone())));
+            commands.push(InlineCommand::WriteLine(line.clone()));
+            drawn = true;
         }
     }
 
-    steps.push(CommandStep::plain(InlineCommand::RestoreOrigin));
+    commands.push(InlineCommand::RestoreOrigin);
     if let Some(mut cursor) = cursor {
         cursor.column = cursor.column.min(max_columns.max(1) - 1);
         if cursor.row == 0 {
-            steps.push(CommandStep::plain(InlineCommand::MoveRight(cursor.column)));
+            commands.push(InlineCommand::MoveRight(cursor.column));
         } else {
-            steps.push(CommandStep::plain(InlineCommand::MoveDown(cursor.row)));
-            steps.push(CommandStep::plain(InlineCommand::MoveToColumn(
-                cursor.column,
-            )));
+            commands.push(InlineCommand::MoveDown(cursor.row));
+            commands.push(InlineCommand::MoveToColumn(cursor.column));
         }
-        steps.push(CommandStep::plain(InlineCommand::ShowCursor));
+        commands.push(InlineCommand::ShowCursor);
     }
 
     InlineRenderPlan {
-        claimed_rows: Some(rows_to_touch),
-        steps,
+        commands,
         next: InlinePresentation {
-            origin_saved: true,
+            anchored: true,
             reserved_rows,
-            previous_rows: lines.len() as u16,
-            previous_lines: lines,
+            owned_rows: lines.len() as u16,
+            rows: lines,
+            drawn,
         },
     }
 }
@@ -221,63 +254,52 @@ pub(crate) fn plan_finish(
     outcome: RenderFinish,
     previous: &InlinePresentation,
 ) -> InlineRenderPlan {
-    let mut steps = Vec::new();
-    let mut next = InlinePresentation {
-        origin_saved: previous.origin_saved,
-        reserved_rows: previous.reserved_rows,
-        previous_rows: previous.previous_rows,
-        // Cloned rather than borrowed: finish runs once per prompt session, so
-        // the copy is not on any redraw path.
-        previous_lines: previous.previous_lines.clone(),
-    };
+    let mut commands = Vec::new();
+    // Cloned rather than borrowed: finish runs once per prompt session, so the
+    // copy is not on any redraw path.
+    let mut next = previous.clone();
 
     match outcome {
         RenderFinish::Submitted => {
-            if previous.origin_saved {
-                steps.push(CommandStep::plain(InlineCommand::RestoreOrigin));
-                if previous.previous_rows > 1 {
-                    steps.push(CommandStep::plain(InlineCommand::MoveDown(
-                        previous.previous_rows - 1,
-                    )));
+            if previous.anchored {
+                commands.push(InlineCommand::RestoreOrigin);
+                if previous.owned_rows > 1 {
+                    commands.push(InlineCommand::MoveDown(previous.owned_rows - 1));
                 }
-                steps.push(CommandStep::plain(InlineCommand::CarriageReturnNewline));
-                steps.push(CommandStep::plain(InlineCommand::ShowCursor));
+                commands.push(InlineCommand::CarriageReturnNewline);
+                commands.push(InlineCommand::ShowCursor);
             }
         }
         RenderFinish::Cancelled | RenderFinish::Error | RenderFinish::Panicking => {
-            steps.extend(plan_clear_owned_rows(previous));
-            next.previous_lines.clear();
-            if previous.origin_saved {
-                steps.push(CommandStep::plain(InlineCommand::RestoreOrigin));
+            commands.extend(plan_clear_owned_rows(previous));
+            next.rows.clear();
+            if previous.anchored {
+                commands.push(InlineCommand::RestoreOrigin);
             }
         }
     }
 
-    InlineRenderPlan {
-        claimed_rows: None,
-        steps,
-        next,
-    }
+    InlineRenderPlan { commands, next }
 }
 
-fn plan_clear_owned_rows(previous: &InlinePresentation) -> Vec<CommandStep> {
-    let rows = previous.previous_rows;
-    if !previous.origin_saved || rows == 0 {
+fn plan_clear_owned_rows(previous: &InlinePresentation) -> Vec<InlineCommand> {
+    let rows = previous.owned_rows;
+    if !previous.anchored || rows == 0 {
         return Vec::new();
     }
 
-    let mut steps = vec![CommandStep::plain(InlineCommand::RestoreOrigin)];
+    let mut commands = vec![InlineCommand::RestoreOrigin];
     for row in 0..rows {
         if row == 0 {
-            steps.push(CommandStep::plain(InlineCommand::ClearToEndOfLine));
+            commands.push(InlineCommand::ClearToEndOfLine);
         } else {
-            steps.push(CommandStep::plain(InlineCommand::MoveToColumn(0)));
-            steps.push(CommandStep::plain(InlineCommand::ClearLine));
+            commands.push(InlineCommand::MoveToColumn(0));
+            commands.push(InlineCommand::ClearLine);
         }
         if row + 1 < rows {
-            steps.push(CommandStep::plain(InlineCommand::MoveDown(1)));
+            commands.push(InlineCommand::MoveDown(1));
         }
     }
-    steps.push(CommandStep::plain(InlineCommand::RestoreOrigin));
-    steps
+    commands.push(InlineCommand::RestoreOrigin);
+    commands
 }

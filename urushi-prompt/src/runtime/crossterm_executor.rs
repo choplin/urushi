@@ -12,41 +12,38 @@ use crossterm::{
 };
 
 use super::{
-    inline_plan::{Checkpoint, InlineCommand, InlineRenderPlan},
+    inline_plan::{InlineCommand, InlineRenderPlan, RenderState, step},
     presentation::InlinePresentation,
 };
 
 /// Write `plan` to `writer`, keeping `presentation` in step with what has
-/// actually reached the terminal. See the recovery contract on
+/// actually reached the terminal.
+///
+/// Every command that succeeds is folded into the presentation, so a failure
+/// partway leaves behind exactly what was emitted; `plan.next` is adopted only
+/// once every command has been written. See the recovery contract on
 /// [`super::inline_plan`].
 pub(crate) fn execute<W: Write>(
     writer: &mut W,
     presentation: &mut InlinePresentation,
     plan: InlineRenderPlan,
 ) -> io::Result<()> {
-    if let Some(rows) = plan.claimed_rows {
-        presentation.previous_rows = rows;
-    }
+    let mut state = RenderState::resuming(std::mem::take(presentation));
 
-    for step in plan.steps {
-        write_command(writer, &step.command)?;
-        if let Some(checkpoint) = step.committed {
-            commit(presentation, checkpoint);
+    for command in &plan.commands {
+        if let Err(error) = write_command(writer, command) {
+            // The drawn content is indeterminate past a failed write, and
+            // cleanup erases the region regardless, so the rows are dropped
+            // rather than folded.
+            state.presentation.rows.clear();
+            *presentation = state.presentation;
+            return Err(error);
         }
+        state = step(state, command);
     }
 
     *presentation = plan.next;
     writer.flush()
-}
-
-fn commit(presentation: &mut InlinePresentation, checkpoint: Checkpoint) {
-    match checkpoint {
-        Checkpoint::OriginAnchored => {
-            presentation.origin_saved = true;
-            presentation.reserved_rows = 1;
-        }
-        Checkpoint::ReservedRows(rows) => presentation.reserved_rows = rows,
-    }
 }
 
 fn write_command<W: Write>(writer: &mut W, command: &InlineCommand) -> io::Result<()> {

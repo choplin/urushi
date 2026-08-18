@@ -1372,7 +1372,7 @@ mod tests {
     };
 
     use super::*;
-    use crate::runtime::inline_plan::{Checkpoint, InlineCommand};
+    use crate::runtime::inline_plan::{InlineCommand, RenderState, step};
     use crate::{Confirm, ConfirmAnswer, ConfirmSource, Input, Select, SelectOption};
 
     /// The plan the renderer would execute for `view`, without writing it.
@@ -1384,6 +1384,16 @@ mod tests {
             renderer.columns,
             renderer.rows,
         )
+    }
+
+    /// The state a partially written plan leaves behind: the fold of the
+    /// commands that succeeded. Testing recovery this way needs no failure
+    /// injection.
+    fn fold(previous: &InlinePresentation, commands: &[InlineCommand]) -> InlinePresentation {
+        commands
+            .iter()
+            .fold(RenderState::resuming(previous.clone()), step)
+            .presentation
     }
 
     /// The rows a `columns` x `rows` terminal box shows of `view`.
@@ -2096,13 +2106,13 @@ mod tests {
         // only to the end of that row, and leaves the cursor inside the row.
         let plan = draw_plan(&renderer, &view);
         assert_eq!(
-            plan.commands(),
+            plan.commands,
             [
                 InlineCommand::HideCursor,
                 InlineCommand::SaveOrigin,
                 InlineCommand::RestoreOrigin,
                 InlineCommand::ClearToEndOfLine,
-                InlineCommand::WriteLine(plan.next.previous_lines[0].clone()),
+                InlineCommand::WriteLine(plan.next.rows[0].clone()),
                 InlineCommand::RestoreOrigin,
                 InlineCommand::MoveRight(2),
                 InlineCommand::ShowCursor,
@@ -2135,7 +2145,7 @@ mod tests {
         // returns to the top of them, and only then is the origin re-anchored.
         let plan = draw_plan(&renderer, &view);
         assert_eq!(
-            plan.commands()[..6],
+            plan.commands[..6],
             [
                 InlineCommand::HideCursor,
                 InlineCommand::SaveOrigin,
@@ -2145,11 +2155,15 @@ mod tests {
                 InlineCommand::MoveUp(2),
             ]
         );
-        assert_eq!(plan.commands()[6], InlineCommand::SaveOrigin);
-        assert_eq!(
-            plan.checkpoints(),
-            [Checkpoint::OriginAnchored, Checkpoint::ReservedRows(3)]
-        );
+        assert_eq!(plan.commands[6], InlineCommand::SaveOrigin);
+        // No command carries the anchor or the row count: folding the prefix
+        // that ends at the closing SaveOrigin derives both. Nothing has been
+        // written yet, so the region is reserved but not yet owned.
+        let reserved = fold(&renderer.presentation, &plan.commands[..7]);
+        assert!(reserved.anchored);
+        assert_eq!(reserved.reserved_rows, 3);
+        assert_eq!(reserved.owned_rows, 0);
+        assert!(!reserved.drawn);
 
         renderer
             .draw(&view)
@@ -2173,7 +2187,7 @@ mod tests {
         // cursor back.
         let plan = draw_plan(&renderer, &view);
         assert_eq!(
-            plan.commands(),
+            plan.commands,
             [
                 InlineCommand::HideCursor,
                 InlineCommand::RestoreOrigin,
@@ -2181,7 +2195,14 @@ mod tests {
                 InlineCommand::ShowCursor,
             ]
         );
-        assert_eq!(plan.checkpoints(), []);
+        // A frame that only repositions leaves the region exactly as it was,
+        // whichever command it failed on.
+        for k in 0..=plan.commands.len() {
+            assert_eq!(
+                fold(&renderer.presentation, &plan.commands[..k]),
+                renderer.presentation
+            );
+        }
 
         let first_frame_bytes = renderer.writer.len();
         renderer.draw(&view).expect("unchanged frame renders");
@@ -2212,7 +2233,7 @@ mod tests {
         // MoveDown-style command.
         let plan = inline_plan::plan_finish(RenderFinish::Submitted, &renderer.presentation);
         assert_eq!(
-            plan.commands(),
+            plan.commands,
             [
                 InlineCommand::RestoreOrigin,
                 InlineCommand::MoveDown(1),
@@ -2399,7 +2420,97 @@ mod tests {
     }
 
     #[test]
-    fn error_cleanup_clears_rows_claimed_before_a_partial_first_draw() {
+    fn recovery_state_is_the_fold_of_the_commands_that_succeeded() {
+        let theme = test_theme();
+        let profile = TerminalProfile::new(ColorProfile::Monochrome, AnsiPolicy::Disabled);
+        let styles = PromptStyles::resolve(&theme, &profile);
+        let renderer = CrosstermRenderer::new(Vec::new(), (20, 4));
+        let plan = draw_plan(
+            &renderer,
+            &renderer_view(
+                vec![
+                    view_line("first", &styles.question),
+                    view_line("second", &styles.option),
+                    view_line("third", &styles.help).with_kind(LineKind::Help),
+                ],
+                None,
+            ),
+        );
+
+        // The state at any failure point is the fold of the prefix that
+        // succeeded, so it can be asserted without injecting a failure. Rows
+        // are reserved before anything is owned, and each row becomes owned by
+        // the clear that precedes its write.
+        let expected = [
+            (0, false, 0, 0, false),
+            (2, true, 1, 0, false),
+            (5, true, 3, 0, false),
+            (10, true, 3, 1, true),
+            (15, true, 3, 2, true),
+            (20, true, 3, 3, true),
+            (plan.commands.len(), true, 3, 3, true),
+        ];
+        for (prefix, anchored, reserved_rows, owned_rows, drawn) in expected {
+            let state = fold(&renderer.presentation, &plan.commands[..prefix]);
+            assert_eq!(
+                (
+                    state.anchored,
+                    state.reserved_rows,
+                    state.owned_rows,
+                    state.drawn
+                ),
+                (anchored, reserved_rows, owned_rows, drawn),
+                "fold of the first {prefix} commands"
+            );
+        }
+
+        // A completed frame collapses the owned extent to its own height, which
+        // the commands do not carry; only the planner knows it.
+        assert_eq!(plan.next.owned_rows, 3);
+        assert!(plan.next.drawn);
+    }
+
+    #[test]
+    fn every_row_is_cleared_before_it_is_written_in_the_same_frame() {
+        let theme = test_theme();
+        let profile = TerminalProfile::new(ColorProfile::Monochrome, AnsiPolicy::Disabled);
+        let styles = PromptStyles::resolve(&theme, &profile);
+        let mut renderer = CrosstermRenderer::new(Vec::new(), (20, 4));
+        let tall = renderer_view(
+            vec![
+                view_line("first", &styles.question),
+                view_line("second", &styles.option),
+                view_line("third", &styles.help).with_kind(LineKind::Help),
+            ],
+            Some(ViewCursor { row: 1, column: 3 }),
+        );
+        let short = renderer_view(vec![view_line("only", &styles.question)], None);
+
+        // A write that fails partway never reaches the fold, so it cannot raise
+        // owned_rows itself. It is covered because the clear on its own row
+        // already did — the invariant the recovery contract rests on. Dropping
+        // a clear for a row believed to be empty or merely appended to would
+        // fail here rather than silently leaving residue behind a failed write.
+        for view in [&tall, &short, &tall] {
+            let plan = draw_plan(&renderer, view);
+            let mut state = RenderState::resuming(renderer.presentation.clone());
+            for command in &plan.commands {
+                if matches!(command, InlineCommand::WriteLine(_)) {
+                    assert!(
+                        state.presentation.owned_rows > state.cursor_row,
+                        "row {} is written while cleanup owns only {} rows",
+                        state.cursor_row,
+                        state.presentation.owned_rows
+                    );
+                }
+                state = step(state, command);
+            }
+            renderer.draw(view).expect("renderer writes to a buffer");
+        }
+    }
+
+    #[test]
+    fn error_cleanup_clears_the_rows_a_partial_first_draw_touched() {
         let theme = test_theme();
         let profile = TerminalProfile::new(ColorProfile::Monochrome, AnsiPolicy::Disabled);
         let styles = PromptStyles::resolve(&theme, &profile);
@@ -2415,21 +2526,18 @@ mod tests {
         );
 
         assert!(renderer.draw(&view).is_err());
-        // All three rows were claimed before the first fallible write, so
-        // cleanup erases the whole partially drawn view rather than the one row
-        // that happened to be written.
-        assert_eq!(renderer.presentation.previous_rows, 3);
+        // Three rows were scrolled into existence, but the write that failed
+        // had reached only the first of them. The fold owns exactly that row:
+        // its ClearToEndOfLine succeeded, so the bytes the partial write left
+        // there are covered, while the two rows below are still the blank ones
+        // the line feeds scrolled in and there is nothing on them to erase.
+        assert_eq!(renderer.presentation.reserved_rows, 3);
+        assert_eq!(renderer.presentation.owned_rows, 1);
         assert_eq!(
-            inline_plan::plan_finish(RenderFinish::Error, &renderer.presentation).commands(),
+            inline_plan::plan_finish(RenderFinish::Error, &renderer.presentation).commands,
             [
                 InlineCommand::RestoreOrigin,
                 InlineCommand::ClearToEndOfLine,
-                InlineCommand::MoveDown(1),
-                InlineCommand::MoveToColumn(0),
-                InlineCommand::ClearLine,
-                InlineCommand::MoveDown(1),
-                InlineCommand::MoveToColumn(0),
-                InlineCommand::ClearLine,
                 InlineCommand::RestoreOrigin,
                 InlineCommand::RestoreOrigin,
             ]
@@ -2445,7 +2553,7 @@ mod tests {
     }
 
     #[test]
-    fn error_cleanup_clears_growth_beyond_previous_rows_after_partial_draw() {
+    fn error_cleanup_after_partial_growth_owns_only_the_rows_the_frame_reached() {
         let theme = test_theme();
         let profile = TerminalProfile::new(ColorProfile::Monochrome, AnsiPolicy::Disabled);
         let styles = PromptStyles::resolve(&theme, &profile);
@@ -2456,7 +2564,7 @@ mod tests {
                 None,
             ))
             .expect("initial draw succeeds");
-        assert_eq!(renderer.presentation.previous_rows, 1);
+        assert_eq!(renderer.presentation.owned_rows, 1);
 
         let growth = renderer_view(
             vec![
@@ -2467,20 +2575,16 @@ mod tests {
             None,
         );
         assert!(renderer.draw(&growth).is_err());
-        // The claim grew from one row to three before the failing write, so
-        // cleanup covers the rows the failed draw scrolled into existence.
-        assert_eq!(renderer.presentation.previous_rows, 3);
+        // The region grew from one row to three before the failing write, and
+        // reserved_rows records that. What cleanup must erase is narrower: the
+        // rows below the first were scrolled in blank and never written.
+        assert_eq!(renderer.presentation.reserved_rows, 3);
+        assert_eq!(renderer.presentation.owned_rows, 1);
         assert_eq!(
-            inline_plan::plan_finish(RenderFinish::Error, &renderer.presentation).commands(),
+            inline_plan::plan_finish(RenderFinish::Error, &renderer.presentation).commands,
             [
                 InlineCommand::RestoreOrigin,
                 InlineCommand::ClearToEndOfLine,
-                InlineCommand::MoveDown(1),
-                InlineCommand::MoveToColumn(0),
-                InlineCommand::ClearLine,
-                InlineCommand::MoveDown(1),
-                InlineCommand::MoveToColumn(0),
-                InlineCommand::ClearLine,
                 InlineCommand::RestoreOrigin,
                 InlineCommand::RestoreOrigin,
             ]
@@ -2519,7 +2623,7 @@ mod tests {
         // is the stage the geometry is an input to, and the frame stage
         // chooses rows and has no horizontal concern at all.
         let plan = draw_plan(&renderer, &narrow);
-        assert!(!plan.commands().iter().any(|command| matches!(
+        assert!(!plan.commands.iter().any(|command| matches!(
             command,
             InlineCommand::MoveRight(column) | InlineCommand::MoveToColumn(column)
                 if *column >= renderer.columns
@@ -2532,11 +2636,11 @@ mod tests {
                 None,
             ))
             .expect("redraw succeeds");
-        assert_eq!(renderer.presentation.previous_rows, 1);
+        assert_eq!(renderer.presentation.owned_rows, 1);
         // A shrunk viewport leaves the region one row tall, so cancelling
         // erases exactly that row — never the screen.
         assert_eq!(
-            inline_plan::plan_finish(RenderFinish::Cancelled, &renderer.presentation).commands(),
+            inline_plan::plan_finish(RenderFinish::Cancelled, &renderer.presentation).commands,
             [
                 InlineCommand::RestoreOrigin,
                 InlineCommand::ClearToEndOfLine,
