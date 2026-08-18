@@ -3,7 +3,7 @@ use std::any::Any;
 use crate::{
     FieldKey, Form, Group,
     runtime::{
-        self, FieldAction, FieldEntry, PromptStyles, PromptView, RuntimeField, ViewLine, ViewSpan,
+        self, FieldAction, FieldEntry, PromptLine, PromptStyles, PromptView, RuntimeField, ViewSpan,
     },
 };
 
@@ -34,9 +34,9 @@ impl RuntimeField for SiblingField {
         Box::new(String::new())
     }
 
-    fn view(&self, styles: &PromptStyles, _focused: bool) -> PromptView {
+    fn view(&self, styles: &PromptStyles, _focused: bool, _width: usize) -> PromptView {
         PromptView {
-            lines: vec![ViewLine::new(vec![ViewSpan::new(
+            lines: vec![PromptLine::spans(vec![ViewSpan::new(
                 self.key.name().to_owned(),
                 &styles.body,
             )])],

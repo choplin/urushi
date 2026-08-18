@@ -3,11 +3,11 @@ use std::any::Any;
 use crate::{
     FieldConfigError, FieldKey,
     runtime::{
-        self, Event, FieldAction, FieldEntry, KeyCode, LineKind, PromptStyles, PromptView,
-        RuntimeField, ViewLine, ViewSpan,
+        self, Event, FieldAction, FieldEntry, KeyCode, LineKind, PromptLine, PromptStyles,
+        PromptView, RuntimeField, ViewSpan, clipped_line_view, fixed_view, line_view,
     },
 };
-use urushi::PrintableText;
+use urushi::{PrintableText, VerticalAlign, View};
 
 /// The provenance of a submitted confirmation value.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -178,13 +178,13 @@ impl RuntimeField for Confirm {
         })
     }
 
-    fn view(&self, styles: &PromptStyles, focused: bool) -> PromptView {
-        let mut lines = vec![ViewLine::new(vec![ViewSpan::new(
+    fn view(&self, styles: &PromptStyles, focused: bool, _width: usize) -> PromptView {
+        let mut lines = vec![PromptLine::spans(vec![ViewSpan::new(
             self.question.clone(),
             styles.question(focused),
         )])];
         if let Some(description) = &self.description {
-            lines.push(ViewLine::new(vec![ViewSpan::new(
+            lines.push(PromptLine::spans(vec![ViewSpan::new(
                 description.clone(),
                 &styles.muted,
             )]));
@@ -203,13 +203,8 @@ impl RuntimeField for Confirm {
                 question_width.max(PrintableText::new(description).width())
             });
         let left_padding = header_width.saturating_sub(button_width) / 2;
-        lines.push(ViewLine::blank());
-        let mut buttons = ViewLine::blank();
-        if left_padding > 0 {
-            buttons
-                .spans
-                .push(ViewSpan::new(" ".repeat(left_padding), &styles.body));
-        }
+        lines.push(PromptLine::blank());
+        let mut buttons = Vec::new();
         for (index, (value, label)) in [(true, &self.yes_label), (false, &self.no_label)]
             .into_iter()
             .enumerate()
@@ -221,28 +216,53 @@ impl RuntimeField for Confirm {
                 &styles.button
             };
             if index > 0 {
-                buttons.spans.push(ViewSpan::new(" ", &styles.body));
+                buttons.push(ViewSpan::new(" ", &styles.body));
             }
-            buttons
-                .spans
-                .push(ViewSpan::new(format!("  {label}  "), style));
+            buttons.push(ViewSpan::new(format!("  {label}  "), style));
         }
-        buttons.kind = LineKind::Choice {
-            focused: self.selected.is_some(),
+        // The buttons reflow rather than being cut: a viewport too narrow for
+        // them should cost a row, not a label. Which rows survive after that
+        // is the frame stage's decision, and a button row is one it never
+        // displaces.
+        //
+        // Centring is a decision about where the group starts, so the leading
+        // blank is a column of its own rather than text the group could be
+        // reflowed away from.
+        let buttons = if left_padding > 0 {
+            View::row(
+                VerticalAlign::Top,
+                [
+                    fixed_view(
+                        left_padding,
+                        vec![ViewSpan::new(" ".repeat(left_padding), &styles.body)],
+                    ),
+                    line_view(buttons),
+                ],
+            )
+        } else {
+            line_view(buttons)
         };
-        lines.push(buttons);
+        lines.push(PromptLine::new(buttons).with_kind(LineKind::Choice {
+            focused: self.selected.is_some(),
+        }));
         if self.show_unanswered {
             lines.push(
-                ViewLine::new(vec![
-                    ViewSpan::new("! ", &styles.error),
-                    ViewSpan::new(self.unanswered_message.clone(), &styles.error),
-                ])
+                PromptLine::new(View::row(
+                    VerticalAlign::Top,
+                    [
+                        fixed_view(2, vec![ViewSpan::new("! ", &styles.error)]),
+                        View::text(self.unanswered_message.clone(), styles.error.clone()),
+                    ],
+                ))
                 .with_kind(LineKind::Error),
             );
         }
         lines.push(
-            ViewLine::new(vec![ViewSpan::new(self.help.clone(), &styles.help)])
-                .with_kind(LineKind::Help),
+            PromptLine::new(clipped_line_view(vec![ViewSpan::new(
+                self.help.clone(),
+                &styles.help,
+            )]))
+            .with_kind(LineKind::Help),
         );
 
         PromptView {
@@ -277,12 +297,12 @@ mod tests {
         let mut confirm = Confirm::new(FieldKey::new("confirm"), "Continue?", Some(false))
             .expect("confirm is valid");
         let styles = test_styles();
-        let initial = confirm.view(&styles, true);
+        let initial = confirm.view(&styles, true, 80);
         assert_eq!(initial.cursor, None);
-        assert_eq!(initial.lines[0].spans[0].style, styles.question);
+        assert_eq!(initial.lines[0].runs()[0].style, styles.question);
         assert!(
             initial.lines[2]
-                .spans
+                .runs()
                 .iter()
                 .any(|span| span.style == styles.button_focused && span.text == "  No  ")
         );
@@ -324,21 +344,24 @@ mod tests {
             .help("Choose, then press Enter.")
             .unanswered_message("Choose an answer.");
         let styles = test_styles();
-        let initial = confirm.view(&styles, true);
-        assert_eq!(initial.lines[2].spans[0].style, styles.button);
-        assert_eq!(initial.lines[2].spans[2].style, styles.button);
-        assert_eq!(initial.lines[2].spans[0].text, "  Proceed  ");
-        assert_eq!(initial.lines[2].spans[2].text, "  Stop  ");
+        let initial = confirm.view(&styles, true, 80);
+        assert_eq!(initial.lines[2].runs()[0].style, styles.button);
+        assert_eq!(initial.lines[2].runs()[2].style, styles.button);
+        assert_eq!(initial.lines[2].runs()[0].text, "  Proceed  ");
+        assert_eq!(initial.lines[2].runs()[2].text, "  Stop  ");
         assert_eq!(confirm.event(key(KeyCode::Enter)), FieldAction::Stay);
-        let answered = confirm.view(&styles, true);
+        let answered = confirm.view(&styles, true, 80);
         assert_eq!(answered.lines[3].kind, LineKind::Error);
-        assert_eq!(answered.lines[3].spans[0].style, styles.error);
+        assert_eq!(answered.lines[3].runs()[0].style, styles.error);
         assert_eq!(answered.lines[4].kind, LineKind::Help);
-        assert_eq!(answered.lines[4].spans[0].style, styles.help);
-        assert_eq!(answered.lines[3].spans[1].text, "Choose an answer.");
-        assert_eq!(answered.lines[4].spans[0].text, "Choose, then press Enter.");
+        assert_eq!(answered.lines[4].runs()[0].style, styles.help);
+        assert_eq!(answered.lines[3].runs()[0].text, "! Choose an answer.");
+        assert_eq!(
+            answered.lines[4].runs()[0].text,
+            "Choose, then press Enter."
+        );
         assert_eq!(confirm.event(key(KeyCode::Right)), FieldAction::Stay);
-        assert_eq!(confirm.view(&styles, true).lines.len(), 4);
+        assert_eq!(confirm.view(&styles, true, 80).lines.len(), 4);
         assert_eq!(confirm.event(key(KeyCode::Enter)), FieldAction::Accept);
     }
 
@@ -352,11 +375,11 @@ mod tests {
         .expect("confirm is valid");
 
         let styles = test_styles();
-        let view = confirm.view(&styles, true);
-        assert!(view.lines[1].spans.is_empty());
-        assert_eq!(view.lines[2].spans[0].style, styles.body);
-        assert_eq!(view.lines[2].spans[0].text, "          ");
-        assert_eq!(view.lines[2].spans[1].style, styles.button_focused);
-        assert_eq!(view.lines[2].spans[1].text, "  Yes  ");
+        let view = confirm.view(&styles, true, 80);
+        assert!(view.lines[1].runs().is_empty());
+        assert_eq!(view.lines[2].runs()[0].style, styles.body);
+        assert_eq!(view.lines[2].runs()[0].text, "          ");
+        assert_eq!(view.lines[2].runs()[1].style, styles.button_focused);
+        assert_eq!(view.lines[2].runs()[1].text, "  Yes  ");
     }
 }

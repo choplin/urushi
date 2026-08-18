@@ -2,7 +2,7 @@
 //!
 //! Everything here is translation and I/O: an [`InlineRenderPlan`] in, bytes
 //! out, plus the presentation updates the plan prescribes. Deciding *what* to
-//! draw belongs to [`super::layout`] and [`super::inline_plan`].
+//! draw belongs to [`super::frame`] and [`super::inline_plan`].
 
 use std::io::{self, Write};
 
@@ -63,9 +63,9 @@ fn write_command<W: Write>(writer: &mut W, command: &InlineCommand) -> io::Resul
         InlineCommand::ClearLine => queue!(writer, Clear(ClearType::CurrentLine)),
         InlineCommand::Newline => writer.write_all(b"\n"),
         InlineCommand::CarriageReturnNewline => writer.write_all(b"\r\n"),
-        InlineCommand::WriteLine(line) => {
-            for span in &line.spans {
-                writer.write_all(span.style.paint(&span.text).as_bytes())?;
+        InlineCommand::WriteLine(row) => {
+            for run in &row.runs {
+                writer.write_all(run.style.paint(&run.text).as_bytes())?;
             }
             Ok(())
         }

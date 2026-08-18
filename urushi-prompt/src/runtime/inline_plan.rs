@@ -20,7 +20,7 @@
 
 use super::{
     RenderFinish,
-    layout::{LaidOutView, RenderedLine},
+    frame::{FramedRow, FramedView},
     presentation::InlinePresentation,
 };
 
@@ -50,8 +50,8 @@ pub(crate) enum InlineCommand {
     /// A real carriage return plus line feed. Unlike relative cursor movement,
     /// this scrolls at the terminal boundary instead of stopping there.
     CarriageReturnNewline,
-    /// Write one laid-out row, styled by the executor.
-    WriteLine(RenderedLine),
+    /// Write one framed row, styled by the executor.
+    WriteLine(FramedRow),
 }
 
 /// State that becomes true once its command has been written.
@@ -112,13 +112,20 @@ impl InlineRenderPlan {
 
 /// Plan the commands that bring the owned region from `previous` to `view`.
 ///
-/// `max_rows` is the terminal height; the plan never claims more than that.
+/// `max_columns` and `max_rows` are the terminal box; the plan never claims
+/// more rows than that, and never moves the cursor past the last column. The
+/// column bound belongs here rather than in the frame stage, which chooses
+/// rows and has no horizontal concern.
 pub(crate) fn plan_draw(
-    view: LaidOutView,
+    view: FramedView,
     previous: &InlinePresentation,
+    max_columns: u16,
     max_rows: u16,
 ) -> InlineRenderPlan {
-    let LaidOutView { lines, cursor } = view;
+    let FramedView {
+        rows: lines,
+        cursor,
+    } = view;
     let rows_to_touch = previous
         .previous_lines
         .len()
@@ -181,7 +188,8 @@ pub(crate) fn plan_draw(
     }
 
     steps.push(CommandStep::plain(InlineCommand::RestoreOrigin));
-    if let Some(cursor) = cursor {
+    if let Some(mut cursor) = cursor {
+        cursor.column = cursor.column.min(max_columns.max(1) - 1);
         if cursor.row == 0 {
             steps.push(CommandStep::plain(InlineCommand::MoveRight(cursor.column)));
         } else {

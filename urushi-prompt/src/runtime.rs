@@ -15,12 +15,16 @@ use crossterm::{
     execute,
     terminal::{self},
 };
-use urushi::{ComponentRole, TerminalProfile, TextStyle, Theme};
+use urushi::{
+    BlockStyle, ComponentRole, Overflow, PrintableText, TerminalProfile, TextStyle, Theme,
+    VerticalAlign, View,
+};
 
 mod crossterm_executor;
+mod frame;
 mod inline_plan;
-mod layout;
 mod presentation;
+mod resolve;
 
 use inline_plan::InlineRenderPlan;
 use presentation::InlinePresentation;
@@ -334,7 +338,8 @@ impl Form {
         self.groups[0].fields[0].activate();
 
         loop {
-            if let Err(source) = session.renderer.draw(&self.view(&state, styles)) {
+            let columns = session.renderer.columns();
+            if let Err(source) = session.renderer.draw(&self.view(&state, styles, columns)) {
                 return Err(session.fail(IoOperation::Render, source));
             }
 
@@ -461,7 +466,7 @@ impl Form {
         }
     }
 
-    fn view(&self, state: &FormState, styles: &PromptStyles) -> PromptView {
+    fn view(&self, state: &FormState, styles: &PromptStyles, columns: u16) -> PromptView {
         let FormState::Running { group, field } = *state else {
             return PromptView {
                 lines: Vec::new(),
@@ -469,79 +474,59 @@ impl Form {
             };
         };
 
+        // Every field row sits beside a marker gutter, so the width a field
+        // lays itself out in is the terminal's less that gutter.
+        let field_width = usize::from(columns.max(1)).saturating_sub(GUTTER);
+
         let mut lines = Vec::new();
         let mut cursor = None;
         let mut footer = None;
         if let Some(title) = &self.groups[group].title {
-            lines.push(ViewLine::new(vec![ViewSpan::new(
+            lines.push(PromptLine::spans(vec![ViewSpan::new(
                 title.clone(),
                 &styles.question,
             )]));
         }
         if let Some(description) = &self.groups[group].description {
-            lines.push(ViewLine::new(vec![ViewSpan::new(
+            lines.push(PromptLine::spans(vec![ViewSpan::new(
                 description.clone(),
                 &styles.muted,
             )]));
         }
         if !lines.is_empty() {
-            lines.push(ViewLine::blank());
+            lines.push(PromptLine::blank());
         }
         for (index, entry) in self.groups[group].fields.iter().enumerate() {
             let focused = index == field;
-            let mut field_view = entry.view(styles, focused);
-            if field_view.lines.last().is_some_and(is_help_line) {
-                let help = field_view
-                    .lines
-                    .pop()
-                    .expect("a detected help line is present");
-                if focused {
-                    footer = Some(help);
-                }
+            let mut field_view = entry.view(styles, focused, field_width);
+            if let Some(help) = field_view.lines.pop_if(|line| line.kind == LineKind::Help)
+                && focused
+            {
+                footer = Some(help);
             }
 
             let row_offset = lines.len();
             for mut line in field_view.lines {
                 line.active = focused;
-                line.spans.insert(
-                    0,
-                    ViewSpan::new(
-                        if focused { "┃ " } else { "  " },
-                        if focused {
-                            &styles.accent
-                        } else {
-                            &styles.body
-                        },
-                    ),
-                );
+                line.view = gutter_view(styles, focused, line.view);
                 lines.push(line);
             }
             if focused {
                 cursor = field_view.cursor.map(|field_cursor| ViewCursor {
                     row: (row_offset + usize::from(field_cursor.row)).min(usize::from(u16::MAX))
                         as u16,
-                    column: field_cursor.column.saturating_add(2),
+                    column: field_cursor.column.saturating_add(GUTTER as u16),
                 });
             }
             if index + 1 < self.groups[group].fields.len() {
-                lines.push(ViewLine::blank());
+                lines.push(PromptLine::blank());
             }
         }
 
         if let Some(help) = footer {
-            lines.push(ViewLine::blank());
+            lines.push(PromptLine::blank());
             lines.push(
-                ViewLine::new(vec![
-                    ViewSpan::new("  ", &styles.body),
-                    ViewSpan::new(
-                        help.spans
-                            .into_iter()
-                            .map(|span| span.text)
-                            .collect::<String>(),
-                        &styles.help,
-                    ),
-                ])
-                .with_kind(LineKind::Help),
+                PromptLine::new(gutter_view(styles, false, help.view)).with_kind(LineKind::Help),
             );
         }
 
@@ -674,6 +659,14 @@ pub(crate) trait Renderer {
     fn draw(&mut self, view: &PromptView) -> io::Result<()>;
     fn finish(&mut self, outcome: RenderFinish) -> io::Result<()>;
 
+    /// The width the next view must be built for.
+    ///
+    /// The view function chooses the visible window of a value wider than the
+    /// terminal, so it needs the width before it composes anything.
+    fn columns(&self) -> u16 {
+        80
+    }
+
     fn resize(&mut self, _columns: u16, _rows: u16) {}
 }
 
@@ -769,8 +762,8 @@ impl FieldEntry {
         self.field.take_value()
     }
 
-    fn view(&self, styles: &PromptStyles, focused: bool) -> PromptView {
-        self.field.view(styles, focused)
+    fn view(&self, styles: &PromptStyles, focused: bool, width: usize) -> PromptView {
+        self.field.view(styles, focused, width)
     }
 
     fn captures_tab(&self) -> bool {
@@ -787,7 +780,12 @@ pub(crate) trait RuntimeField {
     /// a span carries a resolved style, an unfocused field's rows cannot be
     /// derived from a focused field's rows without guessing which role a
     /// style came from.
-    fn view(&self, styles: &PromptStyles, focused: bool) -> PromptView;
+    ///
+    /// `width` is the cells this field will be laid out in. A field that
+    /// carries a cursor needs it: the visible window of a value that is wider
+    /// than the terminal is chosen here, before a `View` exists, so that
+    /// resolution can be called with the real available area.
+    fn view(&self, styles: &PromptStyles, focused: bool, width: usize) -> PromptView;
 
     fn validation_error(&self) -> Option<&str> {
         None
@@ -802,26 +800,216 @@ pub(crate) trait RuntimeField {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// The width a marker gutter takes from the terminal, in cells.
+pub(crate) const GUTTER: usize = 2;
+
+/// The marker beside the field the form has focused.
+const FOCUS_MARKER: &str = "┃ ";
+
+/// The marker beside every other field, which keeps their text aligned with
+/// the focused field's.
+const BLANK_MARKER: &str = "  ";
+
+/// A prompt's content, as logical lines the frame stage can classify.
+///
+/// Each line is an ordinary [`View`]: the prompt owns no layout of its own.
+/// What it does own is why a line exists, which is what [`LineKind`] and
+/// `active` carry and what a single flattened rectangle could not.
+#[derive(Debug, Clone, PartialEq)]
 pub(crate) struct PromptView {
-    pub lines: Vec<ViewLine>,
+    pub lines: Vec<PromptLine>,
+    /// Where the terminal cursor sits: `row` is an index into `lines`, and
+    /// `column` a cell column inside that line's own rectangle.
     pub cursor: Option<ViewCursor>,
 }
 
 impl PromptView {
+    /// The focused field's name, read back off the built view.
     #[cfg(test)]
-    fn active_name(&self) -> Option<&str> {
-        self.lines
+    fn active_name(&self) -> Option<String> {
+        let line = self.lines.iter().find(|line| line.active)?;
+        let resolved = urushi::resolve(&line.view, urushi::Available::NONE);
+        let text: String = resolved
+            .rows()
+            .first()?
             .iter()
-            .find(|line| line.spans.first().is_some_and(|span| span.text == "┃ "))?
-            .spans
-            .get(1)
-            .map(|span| span.text.as_str())
+            .map(urushi::StyledGrapheme::symbol)
+            .collect();
+        Some(
+            text.trim_start_matches(FOCUS_MARKER)
+                .trim_start_matches(BLANK_MARKER)
+                .trim_end()
+                .to_owned(),
+        )
     }
 }
 
-fn is_help_line(line: &ViewLine) -> bool {
-    !line.spans.is_empty() && line.kind == LineKind::Help
+/// One logical line of a prompt, and what the frame stage must know about it.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct PromptLine {
+    pub view: View,
+    pub kind: LineKind,
+    /// Whether this line belongs to the field the form has focused.
+    pub active: bool,
+}
+
+impl PromptLine {
+    pub(crate) fn new(view: View) -> Self {
+        Self {
+            view,
+            kind: LineKind::Content,
+            active: false,
+        }
+    }
+
+    /// A line laid out as one horizontal flow of styled runs.
+    pub(crate) fn spans(spans: Vec<ViewSpan>) -> Self {
+        Self::new(line_view(spans))
+    }
+
+    /// A row that occupies its height and nothing else.
+    pub(crate) fn blank() -> Self {
+        Self::spans(Vec::new())
+    }
+
+    #[must_use]
+    pub(crate) fn with_kind(mut self, kind: LineKind) -> Self {
+        self.kind = kind;
+        self
+    }
+
+    /// The runs this line draws when nothing bounds its width.
+    #[cfg(test)]
+    pub(crate) fn runs(&self) -> Vec<frame::StyledRun> {
+        urushi::resolve(&self.view, urushi::Available::NONE)
+            .rows()
+            .first()
+            .map(|row| frame::FramedRow::aggregate(row).runs)
+            .unwrap_or_default()
+    }
+
+    #[cfg(test)]
+    pub(crate) fn text(&self) -> String {
+        self.runs().into_iter().map(|run| run.text).collect()
+    }
+}
+
+/// Composes styled runs into one line of a prompt.
+///
+/// A line is always a [`View::Row`], never a bare text leaf: a leaf resolves
+/// to the whole available width and pads what it does not use, which would
+/// make every row a full-width write. A row resolves to the width its children
+/// actually take.
+pub(crate) fn line_view(spans: Vec<ViewSpan>) -> View {
+    if spans.is_empty() {
+        // An empty row has no height at all, and a blank line is a row that
+        // draws nothing rather than a line that does not exist.
+        return View::row(VerticalAlign::Top, [View::text("", TextStyle::new())]);
+    }
+    View::row(
+        VerticalAlign::Top,
+        spans
+            .into_iter()
+            .map(|span| View::text(span.text, span.style)),
+    )
+}
+
+/// Composes styled runs into a line that is cut, not reflowed, when it is
+/// wider than the terminal.
+pub(crate) fn clipped_line_view(spans: Vec<ViewSpan>) -> View {
+    if spans.is_empty() {
+        return line_view(spans);
+    }
+    View::row(
+        VerticalAlign::Top,
+        spans.into_iter().map(|span| {
+            View::block(
+                BlockStyle::new().overflow(Overflow::clip()),
+                View::text(span.text, span.style),
+            )
+        }),
+    )
+}
+
+/// A run of fixed width, placed beside content that may reflow.
+///
+/// Sizing it in cells is what pins it: a row shrinks its `Fill` children
+/// first, then its auto children, and only then the ones that stated a size.
+/// An unpinned marker would be reflowed away with the text it marks.
+pub(crate) fn fixed_view(width: usize, spans: Vec<ViewSpan>) -> View {
+    View::block(
+        BlockStyle::new().width(width.min(usize::from(u16::MAX)) as u16),
+        line_view(spans),
+    )
+}
+
+/// Places `inner` beside the marker that shows whether its field is focused.
+///
+/// The marker is a column of its own rather than the first run of the line's
+/// text, because a line wider than the terminal reflows: as text the marker
+/// would be reflowed with it, and rows that continue a wrapped line would
+/// start under the marker instead of beside it.
+pub(crate) fn gutter_view(styles: &PromptStyles, focused: bool, inner: View) -> View {
+    let (marker, style) = if focused {
+        (FOCUS_MARKER, &styles.accent)
+    } else {
+        (BLANK_MARKER, &styles.body)
+    };
+    View::row(
+        VerticalAlign::Top,
+        [
+            fixed_view(GUTTER, vec![ViewSpan::new(marker, style)]),
+            inner,
+        ],
+    )
+}
+
+/// Windows `spans` so that the cell at `cursor` stays visible in `width`
+/// cells, returning the visible runs and the cursor's column inside them.
+///
+/// This is the prompt's horizontal scroll, and it is a text-layer operation:
+/// cutting an already-composed run of text at a column is not part of the box
+/// model. Doing it here is what lets Resolve be called with the terminal's
+/// real width and leaves the Frame stage with no horizontal concern at all.
+pub(crate) fn window_spans(
+    spans: Vec<ViewSpan>,
+    cursor: usize,
+    width: usize,
+) -> (Vec<ViewSpan>, usize) {
+    if width == 0 {
+        return (Vec::new(), 0);
+    }
+    let offset = cursor.saturating_sub(width - 1);
+    let mut windowed: Vec<ViewSpan> = Vec::new();
+    let mut seen = 0;
+    let mut start = None;
+    let mut used = 0;
+    for span in &spans {
+        for grapheme in PrintableText::new(span.text.as_str()).graphemes() {
+            let grapheme_width = grapheme.width();
+            if seen + grapheme_width <= offset {
+                seen += grapheme_width;
+                continue;
+            }
+            // A grapheme wider than the window can never be shown whole, and
+            // half of one is not a cell a terminal can draw.
+            if grapheme_width > width {
+                seen += grapheme_width;
+                continue;
+            }
+            let start = *start.get_or_insert(seen);
+            if used + grapheme_width > width {
+                return (windowed, cursor.saturating_sub(start));
+            }
+            match windowed.last_mut() {
+                Some(last) if last.style == span.style => last.text.push_str(grapheme.as_str()),
+                _ => windowed.push(ViewSpan::new(grapheme.as_str(), &span.style)),
+            }
+            used += grapheme_width;
+            seen += grapheme_width;
+        }
+    }
+    (windowed, cursor.saturating_sub(start.unwrap_or(seen)))
 }
 
 /// What the frame policy must know about a row beyond the text it draws.
@@ -829,7 +1017,7 @@ fn is_help_line(line: &ViewLine) -> bool {
 /// Spans carry a resolved [`TextStyle`], so the semantics a row is selected,
 /// windowed, or reinstated by cannot be recovered from them: a terminal
 /// profile may collapse two roles onto the same style. The classification
-/// therefore lives on the row.
+/// therefore lives on the line.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub(crate) enum LineKind {
     /// An ordinary row with no policy meaning.
@@ -847,34 +1035,7 @@ pub(crate) enum LineKind {
     Help,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct ViewLine {
-    pub spans: Vec<ViewSpan>,
-    pub kind: LineKind,
-    /// Whether this row belongs to the field the form has focused.
-    pub active: bool,
-}
-
-impl ViewLine {
-    pub(crate) fn new(spans: Vec<ViewSpan>) -> Self {
-        Self {
-            spans,
-            kind: LineKind::Content,
-            active: false,
-        }
-    }
-
-    pub(crate) fn blank() -> Self {
-        Self::new(Vec::new())
-    }
-
-    #[must_use]
-    pub(crate) fn with_kind(mut self, kind: LineKind) -> Self {
-        self.kind = kind;
-        self
-    }
-}
-
+/// A run of text before it becomes a [`View::Text`] leaf.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct ViewSpan {
     pub text: String,
@@ -1077,9 +1238,14 @@ impl<W: Write> CrosstermRenderer<W> {
 
 impl<W: Write> Renderer for CrosstermRenderer<W> {
     fn draw(&mut self, view: &PromptView) -> io::Result<()> {
-        let view = layout::lay_out(self.columns, self.rows, view);
-        let plan = inline_plan::plan_draw(view, &self.presentation, self.rows);
+        let resolved = resolve::resolve_prompt(self.columns, view);
+        let framed = frame::frame(&resolved, self.rows);
+        let plan = inline_plan::plan_draw(framed, &self.presentation, self.columns, self.rows);
         self.present(plan)
+    }
+
+    fn columns(&self) -> u16 {
+        self.columns
     }
 
     fn finish(&mut self, outcome: RenderFinish) -> io::Result<()> {
@@ -1207,13 +1373,22 @@ mod tests {
 
     use super::*;
     use crate::runtime::inline_plan::{Checkpoint, InlineCommand};
-    use crate::runtime::layout::{clip_line, wrap_line};
     use crate::{Confirm, ConfirmAnswer, ConfirmSource, Input, Select, SelectOption};
 
     /// The plan the renderer would execute for `view`, without writing it.
     fn draw_plan<W>(renderer: &CrosstermRenderer<W>, view: &PromptView) -> InlineRenderPlan {
-        let laid_out = layout::lay_out(renderer.columns, renderer.rows, view);
-        inline_plan::plan_draw(laid_out, &renderer.presentation, renderer.rows)
+        let framed = lay_out(renderer.columns, renderer.rows, view);
+        inline_plan::plan_draw(
+            framed,
+            &renderer.presentation,
+            renderer.columns,
+            renderer.rows,
+        )
+    }
+
+    /// The rows a `columns` x `rows` terminal box shows of `view`.
+    fn lay_out(columns: u16, rows: u16, view: &PromptView) -> frame::FramedView {
+        frame::frame(&resolve::resolve_prompt(columns, view), rows)
     }
     use urushi::{AnsiPolicy, Color, ColorProfile, ComponentStyles, SemanticTokens};
 
@@ -1267,9 +1442,9 @@ mod tests {
             Box::new(self.value.clone())
         }
 
-        fn view(&self, styles: &PromptStyles, _focused: bool) -> PromptView {
+        fn view(&self, styles: &PromptStyles, _focused: bool, _width: usize) -> PromptView {
             PromptView {
-                lines: vec![ViewLine::new(vec![ViewSpan::new(
+                lines: vec![PromptLine::spans(vec![ViewSpan::new(
                     self.key.name().to_owned(),
                     &styles.body,
                 )])],
@@ -1309,7 +1484,7 @@ mod tests {
 
     impl Renderer for RecordingRenderer {
         fn draw(&mut self, view: &PromptView) -> io::Result<()> {
-            self.views.push(view.active_name().map(str::to_owned));
+            self.views.push(view.active_name());
             if self.fail_draw == Some(self.views.len()) {
                 return Err(io::Error::other("draw failed"));
             }
@@ -1850,20 +2025,18 @@ mod tests {
         Theme::new(tokens, components)
     }
 
-    fn renderer_view(lines: Vec<ViewLine>, cursor: Option<ViewCursor>) -> PromptView {
+    fn renderer_view(lines: Vec<PromptLine>, cursor: Option<ViewCursor>) -> PromptView {
         PromptView { lines, cursor }
     }
 
-    fn view_line(text: &str, style: &TextStyle) -> ViewLine {
-        ViewLine::new(vec![ViewSpan::new(text, style)])
+    fn view_line(text: &str, style: &TextStyle) -> PromptLine {
+        PromptLine::spans(vec![ViewSpan::new(text, style)])
     }
 
     /// A row belonging to the focused field, as `Form::view` marks them.
-    fn active_line(line: ViewLine) -> ViewLine {
-        ViewLine {
-            active: true,
-            ..line
-        }
+    fn active_line(mut line: PromptLine) -> PromptLine {
+        line.active = true;
+        line
     }
 
     struct PrefixThenFailWriter {
@@ -1912,7 +2085,7 @@ mod tests {
         let styles = PromptStyles::resolve(&theme, &profile);
         let mut renderer = CrosstermRenderer::new(Vec::new(), (20, 4));
         let view = renderer_view(
-            vec![ViewLine::new(vec![
+            vec![PromptLine::spans(vec![
                 ViewSpan::new("質問", &styles.question),
                 ViewSpan::new("＊", &styles.cursor),
             ])],
@@ -2088,11 +2261,11 @@ mod tests {
 
         let styles = test_styles();
         for rows in 3..=6 {
-            let laid_out = layout::lay_out(20, rows, &form.view(&state, &styles));
+            let laid_out = lay_out(20, rows, &form.view(&state, &styles, 20));
             let drawn = laid_out
-                .lines
+                .rows
                 .iter()
-                .map(layout::RenderedLine::text)
+                .map(frame::FramedRow::text)
                 .collect::<Vec<_>>();
             assert!(
                 drawn.iter().any(|line| line.contains("Not acceptable")),
@@ -2103,6 +2276,63 @@ mod tests {
                 "help row dropped at {rows} rows: {drawn:?}"
             );
         }
+    }
+
+    #[test]
+    fn a_validation_error_wider_than_the_terminal_is_wrapped_not_cut() {
+        // The regression guard for resolving against the terminal's real
+        // width. Resolving unbounded would make the error row as wide as its
+        // message and silently lose everything past the last column.
+        const MESSAGE: &str = "That value is not one this field will accept.";
+        let mut form = Form::builder()
+            .group(
+                Group::builder()
+                    .field(
+                        Input::new(FieldKey::new("name"), "Name", "value")
+                            .expect("input")
+                            .validate(Box::new(|_| Err(crate::ValidationError::new(MESSAGE)))),
+                    )
+                    .build()
+                    .expect("group"),
+            )
+            .build()
+            .expect("form");
+        let mut state = FormState::Running { group: 0, field: 0 };
+        // Enter is refused, which is what raises the validation error row.
+        assert_eq!(form.reduce(&mut state, enter()), ReducerResult::Running);
+
+        let styles = test_styles();
+        let view = form.view(&state, &styles, 20);
+        let error = view
+            .lines
+            .iter()
+            .find(|line| line.kind == LineKind::Error)
+            .expect("the refused field shows its validation error");
+        let framed = lay_out(20, 20, &view);
+        let drawn = framed
+            .rows
+            .iter()
+            .map(frame::FramedRow::text)
+            .collect::<Vec<_>>();
+
+        assert!(
+            error.text().contains(MESSAGE),
+            "the error line lost its message before layout: {:?}",
+            error.text()
+        );
+        assert!(
+            drawn.iter().all(|row| row.chars().count() < MESSAGE.len()),
+            "the error row was never wrapped: {drawn:?}"
+        );
+        let joined = drawn
+            .iter()
+            .map(|row| row.trim().to_owned())
+            .collect::<Vec<_>>()
+            .join(" ");
+        assert!(
+            joined.contains(MESSAGE),
+            "wrapping lost part of the message: {joined:?}"
+        );
     }
 
     #[test]
@@ -2136,7 +2366,11 @@ mod tests {
         let profile = TerminalProfile::new(ColorProfile::Monochrome, AnsiPolicy::Disabled);
         let styles = PromptStyles::resolve(&theme, &profile);
         let renderer = CrosstermRenderer::new(Vec::new(), (80, 10));
-        let before = layout::lay_out(renderer.columns, renderer.rows, &form.view(&state, &styles));
+        let before = lay_out(
+            renderer.columns,
+            renderer.rows,
+            &form.view(&state, &styles, renderer.columns),
+        );
         assert_eq!(
             form.reduce(
                 &mut state,
@@ -2147,11 +2381,15 @@ mod tests {
             ),
             ReducerResult::Running
         );
-        let after = layout::lay_out(renderer.columns, renderer.rows, &form.view(&state, &styles));
+        let after = lay_out(
+            renderer.columns,
+            renderer.rows,
+            &form.view(&state, &styles, renderer.columns),
+        );
         let unchanged = before
-            .lines
+            .rows
             .iter()
-            .zip(&after.lines)
+            .zip(&after.rows)
             .filter(|(before, after)| before == after)
             .count();
         assert!(
@@ -2262,7 +2500,7 @@ mod tests {
         renderer
             .draw(&renderer_view(
                 vec![
-                    ViewLine::new(vec![
+                    PromptLine::spans(vec![
                         ViewSpan::new("名前 ", &styles.question),
                         ViewSpan::new("あいうえ", &styles.answer),
                     ]),
@@ -2271,16 +2509,21 @@ mod tests {
                 Some(ViewCursor { row: 0, column: 11 }),
             ))
             .expect("narrow draw succeeds");
-        let layout = layout::lay_out(
-            renderer.columns,
-            renderer.rows,
-            &renderer_view(
-                vec![view_line("名前 あいうえ", &styles.answer)],
-                Some(ViewCursor { row: 0, column: 11 }),
-            ),
+        let narrow = renderer_view(
+            vec![view_line("名前 あいうえ", &styles.answer)],
+            Some(ViewCursor { row: 0, column: 11 }),
         );
-        assert!(layout.lines.len() <= 2);
-        assert!(layout.cursor.is_some_and(|cursor| cursor.column < 4));
+        let layout = lay_out(renderer.columns, renderer.rows, &narrow);
+        assert!(layout.rows.len() <= 2);
+        // Bounding the cursor to the terminal box is the plan stage's job: it
+        // is the stage the geometry is an input to, and the frame stage
+        // chooses rows and has no horizontal concern at all.
+        let plan = draw_plan(&renderer, &narrow);
+        assert!(!plan.commands().iter().any(|command| matches!(
+            command,
+            InlineCommand::MoveRight(column) | InlineCommand::MoveToColumn(column)
+                if *column >= renderer.columns
+        )));
 
         renderer.resize(3, 1);
         renderer
@@ -2313,17 +2556,17 @@ mod tests {
         let profile = TerminalProfile::new(ColorProfile::TrueColor, AnsiPolicy::Enabled);
         let styles = PromptStyles::resolve(&theme, &profile);
         let cjk_line = view_line("あ", &styles.cursor);
-        assert!(wrap_line(&cjk_line, 1)[0].spans.is_empty());
-        assert!(clip_line(&cjk_line, 0, 1).0.spans.is_empty());
         for columns in [0, 1] {
             let mut renderer = CrosstermRenderer::new(Vec::new(), (columns, 1));
             let view = renderer_view(
                 vec![cjk_line.clone()],
                 Some(ViewCursor { row: 0, column: 0 }),
             );
-            let layout = layout::lay_out(renderer.columns, renderer.rows, &view);
-            assert_eq!(layout.lines.len(), 1);
-            assert!(layout.lines[0].spans.is_empty());
+            let layout = lay_out(renderer.columns, renderer.rows, &view);
+            assert_eq!(layout.rows.len(), 1);
+            // A wide grapheme that cannot be shown whole leaves blank cells:
+            // half of one is not something a terminal can draw.
+            assert!(!layout.rows[0].text().contains('あ'));
             assert_eq!(layout.cursor, Some(ViewCursor { row: 0, column: 0 }));
 
             renderer.draw(&view).expect("narrow draw succeeds");
@@ -2346,7 +2589,7 @@ mod tests {
                     view_line("previous answer", &styles.answer),
                     view_line("", &styles.body),
                     active_line(view_line("┃ current question", &styles.accent)),
-                    active_line(ViewLine::new(vec![
+                    active_line(PromptLine::spans(vec![
                         ViewSpan::new("┃ ", &styles.accent),
                         ViewSpan::new("› current answer", &styles.cursor),
                     ])),
@@ -2356,22 +2599,22 @@ mod tests {
                 Some(ViewCursor { row: 4, column: 18 }),
             );
 
-            let layout = layout::lay_out(renderer.columns, renderer.rows, &view);
+            let layout = lay_out(renderer.columns, renderer.rows, &view);
 
-            assert_eq!(layout.lines.len(), usize::from(rows));
+            assert_eq!(layout.rows.len(), usize::from(rows));
             assert!(layout.cursor.is_some_and(|cursor| cursor.row < rows));
             // Monochrome collapses every role onto one style, so the row a
             // frame decision selected is identifiable only by its content.
             assert!(
                 layout
-                    .lines
+                    .rows
                     .iter()
                     .any(|line| line.text().contains("current answer")),
                 "active input missing at {rows} rows"
             );
             assert_eq!(
                 layout
-                    .lines
+                    .rows
                     .iter()
                     .any(|line| line.text().contains("enter continue")),
                 rows >= 3,
@@ -2394,7 +2637,7 @@ mod tests {
                         .with_kind(LineKind::Choice { focused: false }),
                 ),
                 active_line(
-                    ViewLine::new(vec![
+                    PromptLine::spans(vec![
                         ViewSpan::new("┃ ", &styles.accent),
                         ViewSpan::new("› English", &styles.option_selected),
                     ])
@@ -2406,17 +2649,17 @@ mod tests {
             None,
         );
 
-        let layout = layout::lay_out(renderer.columns, renderer.rows, &view);
+        let layout = lay_out(renderer.columns, renderer.rows, &view);
 
-        assert_eq!(layout.lines.len(), 1);
-        assert_eq!(layout.lines[0].text(), "┃ › English");
+        assert_eq!(layout.rows.len(), 1);
+        assert_eq!(layout.rows[0].text(), "┃ › English");
 
         let confirm_view = renderer_view(
             vec![
                 active_line(view_line("┃ continue?", &styles.accent)),
                 active_line(view_line("┃", &styles.accent)),
                 active_line(
-                    ViewLine::new(vec![
+                    PromptLine::spans(vec![
                         ViewSpan::new("┃ ", &styles.accent),
                         ViewSpan::new("  Yes  ", &styles.button_focused),
                         ViewSpan::new("   No  ", &styles.button),
@@ -2428,10 +2671,10 @@ mod tests {
             None,
         );
 
-        let confirm_layout = layout::lay_out(renderer.columns, renderer.rows, &confirm_view);
+        let confirm_layout = lay_out(renderer.columns, renderer.rows, &confirm_view);
 
-        assert_eq!(confirm_layout.lines.len(), 1);
-        assert_eq!(confirm_layout.lines[0].text(), "┃   Yes     No  ");
+        assert_eq!(confirm_layout.rows.len(), 1);
+        assert_eq!(confirm_layout.rows[0].text(), "┃   Yes     No  ");
     }
 
     #[test]
@@ -2514,13 +2757,13 @@ mod tests {
         // every frame.
         assert_eq!(monochrome.question, monochrome.answer);
 
-        let line = ViewLine::new(vec![
+        let line = PromptLine::spans(vec![
             ViewSpan::new("ab", &monochrome.question),
             ViewSpan::new("cd", &monochrome.answer),
         ]);
-        let rendered = wrap_line(&line, 10);
-        assert_eq!(rendered[0].spans.len(), 1);
-        assert_eq!(rendered[0].text(), "abcd");
+        let framed = lay_out(10, 1, &renderer_view(vec![line], None));
+        assert_eq!(framed.rows[0].runs.len(), 1);
+        assert_eq!(framed.rows[0].text(), "abcd");
     }
 
     fn assert_io_operation(result: Result<FormOutcome, RunError>, expected: IoOperation) {

@@ -1,13 +1,14 @@
 use std::any::Any;
 
 use unicode_segmentation::UnicodeSegmentation;
-use urushi::PrintableText;
+use urushi::{PrintableText, VerticalAlign, View};
 
 use crate::{
     FieldConfigError, FieldKey,
     runtime::{
-        self, Event, FieldAction, FieldEntry, KeyCode, LineKind, PromptStyles, PromptView,
-        RuntimeField, ViewCursor, ViewLine, ViewSpan,
+        self, Event, FieldAction, FieldEntry, KeyCode, LineKind, PromptLine, PromptStyles,
+        PromptView, RuntimeField, ViewCursor, ViewSpan, clipped_line_view, fixed_view, line_view,
+        window_spans,
     },
 };
 
@@ -306,18 +307,39 @@ impl RuntimeField for Input {
         Box::new(std::mem::take(&mut self.value))
     }
 
-    fn view(&self, styles: &PromptStyles, focused: bool) -> PromptView {
+    fn view(&self, styles: &PromptStyles, focused: bool, width: usize) -> PromptView {
+        // The prompt marker keeps its cells whatever the value does, so the
+        // window the value scrolls in is the field's width less the marker.
         let answer_start = 2_usize;
         let cursor_prefix = &self.value[..self.byte_index(self.cursor)];
-        let cursor_column = answer_start.saturating_add(PrintableText::new(cursor_prefix).width());
-        let mut answer = ViewLine::new(vec![ViewSpan::new("› ", &styles.answer)]);
-        answer.spans.extend(self.answer_spans(styles, focused));
-        let mut lines = vec![ViewLine::new(vec![ViewSpan::new(
+        let cursor_column = PrintableText::new(cursor_prefix).width();
+        let answer_spans = self.answer_spans(styles, focused);
+        // A value wider than the terminal is windowed here, before a `View`
+        // exists: choosing which cells of an already-composed run are visible
+        // is a text-layer operation, and doing it here is what lets the view
+        // be resolved against the width the terminal really has.
+        let (answer_spans, cursor_column) = if focused {
+            window_spans(
+                answer_spans,
+                cursor_column,
+                width.saturating_sub(answer_start),
+            )
+        } else {
+            (answer_spans, cursor_column)
+        };
+        let answer = PromptLine::new(View::row(
+            VerticalAlign::Top,
+            [
+                fixed_view(answer_start, vec![ViewSpan::new("› ", &styles.answer)]),
+                line_view(answer_spans),
+            ],
+        ));
+        let mut lines = vec![PromptLine::spans(vec![ViewSpan::new(
             self.question.clone(),
             styles.question(focused),
         )])];
         if let Some(description) = &self.description {
-            lines.push(ViewLine::new(vec![ViewSpan::new(
+            lines.push(PromptLine::spans(vec![ViewSpan::new(
                 description.clone(),
                 &styles.muted,
             )]));
@@ -326,23 +348,31 @@ impl RuntimeField for Input {
         lines.push(answer);
         if let Some(message) = &self.validation_error {
             lines.push(
-                ViewLine::new(vec![
-                    ViewSpan::new("! ", &styles.error),
-                    ViewSpan::new(message.clone(), &styles.error),
-                ])
+                PromptLine::new(View::row(
+                    VerticalAlign::Top,
+                    [
+                        fixed_view(2, vec![ViewSpan::new("! ", &styles.error)]),
+                        View::text(message.clone(), styles.error.clone()),
+                    ],
+                ))
                 .with_kind(LineKind::Error),
             );
         }
         lines.push(
-            ViewLine::new(vec![ViewSpan::new(self.help.clone(), &styles.help)])
-                .with_kind(LineKind::Help),
+            PromptLine::new(clipped_line_view(vec![ViewSpan::new(
+                self.help.clone(),
+                &styles.help,
+            )]))
+            .with_kind(LineKind::Help),
         );
 
         PromptView {
             lines,
             cursor: focused.then(|| ViewCursor {
                 row: answer_row.min(usize::from(u16::MAX)) as u16,
-                column: cursor_column.min(usize::from(u16::MAX)) as u16,
+                column: answer_start
+                    .saturating_add(cursor_column)
+                    .min(usize::from(u16::MAX)) as u16,
             }),
         }
     }
@@ -422,29 +452,27 @@ mod tests {
         assert_eq!(input.event(key(KeyCode::Home)), FieldAction::Stay);
 
         let styles = test_styles();
-        let view = input.view(&styles, true);
-        assert_eq!(
-            view.lines[0].spans,
-            vec![ViewSpan::new("名前", &styles.question)]
-        );
-        assert_eq!(view.lines[1].spans[0].text, "› ");
-        assert_eq!(view.lines[1].spans[1].style, styles.cursor);
+        let view = input.view(&styles, true, 80);
+        assert_eq!(view.lines[0].runs()[0].text, "名前");
+        assert_eq!(view.lines[0].runs()[0].style, styles.question);
+        assert_eq!(view.lines[1].runs()[0].text, "› ");
+        assert_eq!(view.lines[1].runs()[1].style, styles.cursor);
         assert_eq!(view.cursor, Some(ViewCursor { row: 1, column: 2 }));
         assert_eq!(view.lines[2].kind, LineKind::Help);
-        assert_eq!(view.lines[2].spans[0].style, styles.help);
+        assert_eq!(view.lines[2].runs()[0].style, styles.help);
 
         let empty = Input::new(FieldKey::new("empty"), "Name", "")
             .expect("input is valid")
             .placeholder("Example");
-        let empty_view = empty.view(&styles, true);
-        assert_eq!(empty_view.lines[1].spans[1].style, styles.cursor);
-        assert_eq!(empty_view.lines[1].spans[2].style, styles.placeholder);
+        let empty_view = empty.view(&styles, true, 80);
+        assert_eq!(empty_view.lines[1].runs()[1].style, styles.cursor);
+        assert_eq!(empty_view.lines[1].runs()[2].style, styles.placeholder);
 
         assert_eq!(input.event(key(KeyCode::End)), FieldAction::Stay);
-        assert_eq!(
-            input.view(&styles, true).lines[1].spans.last(),
-            Some(&ViewSpan::new(" ", &styles.cursor))
-        );
+        let trailing = input.view(&styles, true, 80).lines[1].runs();
+        let trailing = trailing.last().expect("the answer row has runs");
+        assert_eq!(trailing.text, " ");
+        assert_eq!(trailing.style, styles.cursor);
     }
 
     #[test]
@@ -452,17 +480,17 @@ mod tests {
         let styles = test_styles();
         let input = Input::new(FieldKey::new("name"), "Name", "value").expect("input is valid");
 
-        let unfocused = input.view(&styles, false);
-        assert_eq!(unfocused.lines[0].spans[0].style, styles.muted);
+        let unfocused = input.view(&styles, false, 80);
+        assert_eq!(unfocused.lines[0].runs()[0].style, styles.muted);
         assert!(
             unfocused.lines[1]
-                .spans
+                .runs()
                 .iter()
                 .all(|span| span.style != styles.cursor)
         );
         assert_eq!(
             unfocused.lines[1]
-                .spans
+                .runs()
                 .iter()
                 .map(|span| span.text.as_str())
                 .collect::<String>(),
@@ -470,7 +498,7 @@ mod tests {
         );
 
         let empty = Input::new(FieldKey::new("empty"), "Name", "").expect("input is valid");
-        assert!(empty.view(&styles, false).lines[1].spans[1..].is_empty());
+        assert!(empty.view(&styles, false, 80).lines[1].runs()[1..].is_empty());
     }
 
     #[test]
@@ -487,10 +515,10 @@ mod tests {
             assert_eq!(input.event(key(KeyCode::Right)), FieldAction::Stay);
         }
 
-        let unfocused = input.view(&styles, false);
+        let unfocused = input.view(&styles, false, 80);
         assert_eq!(
             unfocused.lines[1]
-                .spans
+                .runs()
                 .iter()
                 .map(|span| span.text.as_str())
                 .collect::<String>(),
@@ -623,16 +651,16 @@ mod tests {
         assert_eq!(renderer.views.len(), 4);
         assert_eq!(renderer.views[1].lines.len(), 8);
         assert!(renderer.views[1].lines.iter().any(|line| {
-            line.spans
+            line.runs()
                 .iter()
-                .any(|span| span.style == test_styles().error)
+                .any(|run| run.style == test_styles().error)
         }));
         assert_eq!(renderer.views[2].lines.len(), 7);
-        assert_eq!(renderer.views[3].lines[3].spans[0].text, "┃ ");
-        assert_eq!(renderer.views[3].lines[3].spans[1].text, "Second");
+        assert_eq!(renderer.views[3].lines[3].runs()[0].text, "┃ ");
+        assert_eq!(renderer.views[3].lines[3].runs()[1].text, "Second");
         assert_eq!(
             renderer.views[3].lines[1]
-                .spans
+                .runs()
                 .iter()
                 .map(|span| span.text.as_str())
                 .collect::<String>(),
@@ -642,8 +670,8 @@ mod tests {
             renderer.views[3]
                 .lines
                 .iter()
-                .flat_map(|line| &line.spans)
-                .filter(|span| span.style == test_styles().help)
+                .flat_map(PromptLine::runs)
+                .filter(|run| run.style == test_styles().help)
                 .count(),
             1
         );

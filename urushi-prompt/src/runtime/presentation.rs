@@ -4,7 +4,7 @@
 //! saved on first draw. [`InlinePresentation`] is everything the renderer must
 //! remember to keep claiming, redrawing, and finally releasing that region.
 
-use super::layout::RenderedLine;
+use super::frame::FramedRow;
 
 #[derive(Default)]
 pub(crate) struct InlinePresentation {
@@ -15,5 +15,5 @@ pub(crate) struct InlinePresentation {
     /// Rows the prompt currently claims; error cleanup erases exactly these.
     pub previous_rows: u16,
     /// The rows as last drawn, used to skip unchanged rows on redraw.
-    pub previous_lines: Vec<RenderedLine>,
+    pub previous_lines: Vec<FramedRow>,
 }
