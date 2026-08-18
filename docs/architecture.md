@@ -120,7 +120,7 @@ The surfaces above the foundation, and the layer Urushi provides for each, are:
 | --- | --- | --- |
 | Plain CLI output | Direct box-model `BlockStyle::render`; reusable components producing `View`; `AnsiRenderer`; `StderrTerminal`; optional spinner and progress-bar lifecycles | The application owns its command workflow and stdout policy. `StderrTerminal` and progress handles own the stderr resources they acquire. |
 | Interactive prompt | `Form` / `Group`; typed `Input`, `Select`, and `Confirm`; synchronous validation; the prompt-specific render stages; inline redraw; terminal session setup and cleanup | `urushi-prompt` owns the blocking prompt session and the resources it acquires. The application owns when the form runs and what submitted values mean. |
-| Full-screen TUI | `urushi-tui`: the runtime and its adapters — logical-style conversion, and widgets that resolve a `View` and draw it into a Ratatui `Buffer` | The `urushi-tui` runtime owns event delivery, frame scheduling, terminal entry and restoration. The application owns its model, update, and view. |
+| Full-screen TUI | `urushi-tui`: the runtime and its `ratatui` adapter — logical-style conversion, widgets that resolve a `View` and draw it into a Ratatui `Buffer`, and the cell-writing path the runtime's renderer takes with a view it resolved itself | The `urushi-tui` runtime owns event delivery, frame scheduling, terminal entry and restoration. The application owns its model, update, and view. |
 
 The surfaces are intentionally partial. Sharing the foundation does not require
 one surface to adopt another's application model or lifecycle, so the flows are
@@ -168,7 +168,7 @@ a role are documented with the extension point itself, in
 | --- | --- | --- |
 | [`urushi`](../urushi/) | Logical styles, themes, renderer-neutral views and components, output adapters, terminal capability resolution, and the progress lifecycle. Stderr ownership and live progress sit behind the optional `terminal` Cargo feature. | None |
 | [`urushi-prompt`](../urushi-prompt/) | Typed input, select, and confirm forms; prompt state transitions; inline drawing; terminal session setup and cleanup. | `urushi` |
-| [`urushi-tui`](../urushi-tui/) | Ratatui style conversion, widgets that draw a resolved view into a caller-owned buffer, and the full-screen TUI runtime. | `urushi` |
+| [`urushi-tui`](../urushi-tui/) | The Ratatui backend adapter in [`ratatui`](../urushi-tui/src/ratatui/) — style conversion, widgets, and the cell-writing path they share with the renderer — and the full-screen TUI runtime behind the default-on `runtime` Cargo feature. | `urushi` |
 
 `urushi-prompt` owns interactive prompt behavior. The core crate must not gain
 prompt-specific navigation, validation, cursor, or form-submission policy merely

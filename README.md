@@ -88,7 +88,7 @@ Colors and modifiers stay in the Theme; the TUI layer does not define a second
 palette.
 
 ```rust
-use urushi_tui::RatatuiStyleExt as _;
+use urushi_tui::ratatui::RatatuiStyleExt as _;
 
 let panel = profile.resolve_block_style(&theme.block_style(PanelRole::PanelFocused));
 frame.render_widget(panel.widget("保存しました"), frame.area());
@@ -100,7 +100,7 @@ ANSI strings and ratatui. Detect the profile for the writer owned by your
 terminal setup, or construct an explicit profile when the application already
 knows the backend capability.
 
-`urushi_tui::RatatuiStyleExt::widget` carries margin, border, padding, dimensions, and alignment
+`urushi_tui::ratatui::RatatuiStyleExt::widget` carries margin, border, padding, dimensions, and alignment
 into the ratatui `Buffer`: the target `Rect` is the area the box resolves under, so the frame
 closes inside it and wide graphemes are never split. It is stateless and
 does not initialize or restore the terminal. `RatatuiStyle::from(&style)` converts a

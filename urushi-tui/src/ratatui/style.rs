@@ -1,6 +1,6 @@
 //! Conversion of logical text styles to ratatui styles.
 
-use ratatui::style::{Color as RatatuiColor, Modifier as RatatuiModifier, Style as InnerStyle};
+use ::ratatui::style::{Color as RatatuiColor, Modifier as RatatuiModifier, Style as InnerStyle};
 
 use urushi::{Color, Modifier, TextStyle};
 

@@ -11,7 +11,7 @@ use urushi::{
     Modifier as UrushiModifier, Overflow, PanelRole, PrintableText, SemanticTokens,
     TerminalProfile, TextStyle, Theme, VerticalAlign, View, measure,
 };
-use urushi_tui::{RatatuiStyle, RatatuiStyleExt as _, ViewWidget};
+use urushi_tui::ratatui::{RatatuiStyle, RatatuiStyleExt as _, ViewWidget};
 
 #[test]
 fn one_theme_component_renders_to_plain_cli_and_ratatui() {

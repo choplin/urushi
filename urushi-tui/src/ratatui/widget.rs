@@ -7,7 +7,7 @@
 //! alignment, and dimension resolution live in `urushi` alone, so the Ratatui
 //! output and the ANSI output cannot drift apart.
 
-use ratatui::{buffer::Buffer, layout::Rect, widgets::Widget};
+use ::ratatui::{buffer::Buffer, layout::Rect, widgets::Widget};
 
 use super::RatatuiStyle;
 use urushi::{Available, BlockStyle, ResolvedView, StyledGrapheme, View, resolve};
@@ -99,23 +99,33 @@ impl Widget for &RatatuiWidget<'_> {
 
 /// Resolves `view` for `area` and writes the resulting rectangle.
 fn draw(view: &View, area: Rect, buffer: &mut Buffer) {
+    draw_resolved(&resolve(view, available(area)), area, buffer);
+}
+
+/// Writes an already resolved view into `buffer`, anchored at `area`'s origin.
+///
+/// This is the cell-writing path the widgets take, exposed for a caller that
+/// resolves the view itself — a renderer that needs the resolution as well as
+/// the cells, and resolves exactly once per frame. Resolve under
+/// [`available`] to reproduce what the widgets draw.
+///
+/// The part of `area` outside `buffer` masks which cells are written; it never
+/// moves the rectangle. A grapheme that would straddle the mask is dropped
+/// rather than split, matching how the layout pass crops.
+pub fn draw_resolved(resolved: &ResolvedView, area: Rect, buffer: &mut Buffer) {
     let clip = area.intersection(buffer.area);
     if clip.is_empty() {
         return;
     }
-    write_cells(&resolve(view, available(area)), area, clip, buffer);
+    write_cells(resolved, area, clip, buffer);
 }
 
 /// Translates a target rectangle into the area the layout pass resolves under.
-fn available(area: Rect) -> Available {
+pub fn available(area: Rect) -> Available {
     Available::size(usize::from(area.width), usize::from(area.height))
 }
 
-/// Writes a resolved rectangle, anchored at `area`'s origin.
-///
-/// `clip` masks which cells may be written; it never moves the rectangle. A
-/// grapheme that would straddle the mask is dropped rather than split, matching
-/// how the layout pass crops.
+/// Writes a resolved rectangle, anchored at `area`'s origin, under `clip`.
 fn write_cells(resolved: &ResolvedView, area: Rect, clip: Rect, buffer: &mut Buffer) {
     for (row, graphemes) in resolved.rows().iter().enumerate() {
         let Some(y) = offset(area.y, row) else {
@@ -173,7 +183,7 @@ fn offset(origin: u16, cells: usize) -> Option<u16> {
 
 #[cfg(test)]
 mod tests {
-    use ratatui::style::{Color as RatatuiColor, Modifier};
+    use ::ratatui::style::{Color as RatatuiColor, Modifier};
     use urushi::{Align, Border, Color, TextStyle, VerticalAlign};
 
     use super::*;
@@ -593,6 +603,42 @@ mod tests {
             buffer.cell((8, 0)).expect("border cell").fg,
             RatatuiColor::Green
         );
+    }
+
+    /// A caller that resolves the view itself — the renderer, which needs the
+    /// resolution as well as the cells — reaches the same buffer the widget
+    /// draws, because both take one cell-writing path.
+    #[test]
+    fn resolving_first_and_drawing_reaches_the_same_cells_as_the_widget() {
+        let view = View::row(
+            VerticalAlign::Center,
+            [
+                View::text("status: ", TextStyle::new()),
+                View::block(
+                    BlockStyle::new()
+                        .border(Border::ROUNDED)
+                        .border_foreground(Color::GREEN),
+                    View::text("日本", TextStyle::new().foreground(Color::GREEN)),
+                ),
+            ],
+        );
+        // A buffer narrower than the target rectangle also masks the cells, so
+        // the two paths have to agree on the crop as well as the content.
+        let area = Rect::new(1, 0, 14, 3);
+        let mut through_widget = Buffer::empty(Rect::new(0, 0, 10, 3));
+        let mut through_resolved = Buffer::empty(Rect::new(0, 0, 10, 3));
+
+        ViewWidget::new(&view).render(area, &mut through_widget);
+        draw_resolved(
+            &resolve(&view, available(area)),
+            area,
+            &mut through_resolved,
+        );
+
+        assert_eq!(through_resolved, through_widget);
+        // The comparison is only meaningful because cells were written and the
+        // buffer cropped the block's right half.
+        assert_eq!(buffer_line(&through_widget, 1), " status: │");
     }
 
     /// Asserts the widget reproduces `BlockStyle::render` in a `Rect` sized to
