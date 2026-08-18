@@ -329,6 +329,7 @@ fn align_row(
     let gap = width.saturating_sub(row_width(&row));
     let (left, right) = match align {
         Align::Left => (0, gap),
+        // The odd extra cell goes right, as in Lip Gloss; the test below pins it.
         Align::Center => (gap / 2, gap - gap / 2),
         Align::Right => (gap, 0),
     };

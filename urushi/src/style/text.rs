@@ -174,23 +174,17 @@ impl TextStyle {
     /// why reversed video, whose equivalence assumes how a terminal implements
     /// `dim`, stays as written.
     ///
-    /// Call this once the style is final. A `TextStyle` is an immutable value
-    /// built by consuming builders, so any earlier fold is undone by the next
-    /// call that changes the foreground:
-    ///
-    /// ```
-    /// use urushi::{Color, TextStyle};
-    ///
-    /// let style = TextStyle::new().underline_color(Color::RED).foreground(Color::RED);
-    ///
-    /// assert!(style.clone().canonical().underline_value().unwrap().color.is_none());
-    /// assert!(style.underline_value().unwrap().color.is_some());
-    /// ```
+    /// Applied once the style is final: [`TerminalProfile`](crate::TerminalProfile)
+    /// calls it as its last step, after degradation, because degradation is what
+    /// makes two logical colors equal. A `TextStyle` is an immutable value built
+    /// by consuming builders, so any earlier fold is undone by the next call that
+    /// changes the foreground, which is why this is not part of the public
+    /// builder surface.
     ///
     /// One residue is not closable: when the foreground is absent its concrete
     /// color is the terminal's default and unknown here, so an underline color
     /// equal to it cannot be recognized.
-    pub fn canonical(mut self) -> Self {
+    pub(crate) fn canonical(mut self) -> Self {
         if let Some(underline) = self.underline
             && underline.color.is_some()
             && underline.color == self.fg
