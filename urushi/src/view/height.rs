@@ -18,7 +18,7 @@
 //!   the fitted lines and never fits them again.
 
 use crate::text::{PrintableLines, PrintableText, wrap_text};
-use crate::{Align, BlockStyle, Overflow, Sides, TextStyle, VerticalAlign};
+use crate::{Align, BlockStyle, Key, Overflow, Sides, TextStyle, VerticalAlign};
 
 use super::sizing::{
     Claim, Kind, border_extent, degrade, distribute, height_axis, text_lines, vertical,
@@ -44,6 +44,7 @@ enum FittedNode<'a> {
     },
     Block {
         style: &'a BlockStyle,
+        anchor: Option<Key>,
         padding: Sides,
         margin: Sides,
         content_width: usize,
@@ -87,6 +88,7 @@ pub(super) fn fit(widths: Widths<'_>) -> Fitted<'_> {
         }
         WidthNode::Block(block) => FittedNode::Block {
             style: block.style,
+            anchor: block.anchor,
             padding: block.padding,
             margin: block.margin,
             content_width: block.content_width,
@@ -150,6 +152,7 @@ pub(super) enum SizedNode<'f> {
     },
     Block {
         style: &'f BlockStyle,
+        anchor: Option<Key>,
         padding: Sides,
         margin: Sides,
         content_width: usize,
@@ -183,6 +186,7 @@ pub(super) fn heights<'f>(fitted: &'f Fitted<'_>, area: Option<usize>) -> Sized<
         },
         FittedNode::Block {
             style,
+            anchor,
             padding,
             margin,
             content_width,
@@ -226,6 +230,7 @@ pub(super) fn heights<'f>(fitted: &'f Fitted<'_>, area: Option<usize>) -> Sized<
                 height: used + vertical(margin),
                 node: SizedNode::Block {
                     style,
+                    anchor: *anchor,
                     padding,
                     margin,
                     content_width: *content_width,

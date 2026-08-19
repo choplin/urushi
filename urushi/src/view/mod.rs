@@ -16,4 +16,4 @@ pub use geometry::{Available, Size};
 pub use join::{join_horizontal, join_vertical};
 pub use model::View;
 pub use rendered::RenderedBlock;
-pub use resolve::{ResolvedView, StyledGrapheme, measure, resolve};
+pub use resolve::{AnchoredRect, ResolvedView, StyledGrapheme, measure, resolve};

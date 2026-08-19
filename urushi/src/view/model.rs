@@ -1,6 +1,6 @@
 //! Renderer-neutral terminal output.
 
-use crate::{Align, BlockStyle, TextStyle, VerticalAlign};
+use crate::{Align, BlockStyle, Key, TextStyle, VerticalAlign};
 
 /// A fully composed, renderer-neutral terminal view.
 ///
@@ -8,6 +8,10 @@ use crate::{Align, BlockStyle, TextStyle, VerticalAlign};
 /// box around something, place things beside each other, and stack them. Every
 /// node resolves to a rectangle, so a bordered block composes inside a row the
 /// same way a word does.
+///
+/// A fifth node adds nothing to that list: an anchor is a box that also
+/// reports where its content landed, for a caller that draws there something
+/// this crate does not produce.
 ///
 /// Components return a `View`; output adapters resolve it once
 /// ([`resolve`](crate::resolve)) and serialize the resulting
@@ -36,6 +40,13 @@ pub enum View {
     Row(VerticalAlign, Vec<View>),
     /// Children stacked, aligned horizontally.
     Column(Align, Vec<View>),
+    /// A block that also reports where it landed, named by a key.
+    ///
+    /// It is a [`Block`](Self::Block) in every respect layout cares about —
+    /// the same one child, the same style, the same sizing — and the name says
+    /// so. [`resolve`](crate::resolve) reports its content rectangle beside
+    /// the resolved rows, for the caller that knows what belongs there.
+    AnchorBlock(Key, BlockStyle, Box<View>),
 }
 
 impl Default for View {
@@ -69,6 +80,60 @@ impl View {
     /// Stacks children.
     pub fn column(align: Align, children: impl IntoIterator<Item = Self>) -> Self {
         Self::Column(align, children.into_iter().collect())
+    }
+
+    /// Wraps one child in a block that reports where its content landed.
+    ///
+    /// An anchor carries no geometry of its own: it is a block, so its size is
+    /// whatever `style` and its content decide, by the rules every other block
+    /// follows. What the key adds is a report — an
+    /// [`AnchoredRect`](crate::AnchoredRect) of the rectangle inside the frame
+    /// — for a caller that draws there something this crate does not produce.
+    ///
+    /// The key is opaque here; this crate never looks at what belongs in the
+    /// region. One key names one region: two anchors carrying the same key are
+    /// a contract violation, which debug builds assert.
+    ///
+    /// ```
+    /// use urushi::{Available, BlockStyle, Length, View, resolve};
+    ///
+    /// // A region for a foreign renderer: the box states the size, and the
+    /// // empty content resolves to the blanks a backend without one draws.
+    /// let chart = View::anchor_block(
+    ///     "chart",
+    ///     BlockStyle::new().width(Length::Cells(20)).height(Length::Cells(8)),
+    ///     View::empty(),
+    /// );
+    /// let resolved = resolve(&chart, Available::NONE);
+    ///
+    /// let region = resolved.anchor("chart").expect("the anchor resolved");
+    /// assert_eq!((region.width(), region.height()), (20, 8));
+    /// ```
+    pub fn anchor_block(key: impl Into<Key>, style: BlockStyle, child: Self) -> Self {
+        Self::AnchorBlock(key.into(), style, Box::new(child))
+    }
+
+    /// Creates an anchor with no box around it: an empty region, named.
+    ///
+    /// This is the cursor case of [`anchor_block`](Self::anchor_block). The
+    /// region covers no cells, so it changes no layout and draws nothing; what
+    /// the caller reads is its origin.
+    ///
+    /// ```
+    /// use urushi::{Available, TextStyle, VerticalAlign, View, resolve};
+    ///
+    /// let prompt = View::row(
+    ///     VerticalAlign::Top,
+    ///     [View::text("> ", TextStyle::new()), View::anchor("cursor")],
+    /// );
+    /// let resolved = resolve(&prompt, Available::NONE);
+    ///
+    /// let cursor = resolved.anchor("cursor").expect("the anchor resolved");
+    /// assert_eq!((cursor.x(), cursor.y()), (2, 0));
+    /// assert!(cursor.is_empty());
+    /// ```
+    pub fn anchor(key: impl Into<Key>) -> Self {
+        Self::anchor_block(key, BlockStyle::new(), Self::empty())
     }
 
     /// Creates a view that resolves to an empty rectangle.

@@ -22,6 +22,12 @@ use urushi::{Available, BlockStyle, ResolvedView, StyledGrapheme, View, resolve}
 /// constraint the view is re-fitted into: the view resolves at its intrinsic
 /// size and whatever falls outside the `Rect` is cropped, exactly as a terminal
 /// width crops the ANSI backend.
+///
+/// The widget keeps the cells and discards the anchors, so an anchor in the
+/// view draws as the blanks it resolved to. A caller that needs them resolves
+/// the view itself and reads [`ResolvedView::anchors`]: they belong to one
+/// resolution, and resolving again here to hand them back would be a second
+/// one.
 #[derive(Debug, Clone, Copy)]
 pub struct ViewWidget<'a> {
     view: &'a View,

@@ -12,13 +12,19 @@ use crate::{Align, Sides, TextStyle, VerticalAlign};
 
 use super::geometry::Size;
 use super::height::{Sized, SizedNode};
-use super::resolve::StyledGrapheme;
+use super::resolve::{AnchoredRect, StyledGrapheme};
 
 /// A rectangle under construction: every row is exactly `width` cells wide.
+///
+/// It carries the anchors resolved inside it, at positions relative to its own
+/// top-left cell. A parent that nests this rectangle translates them by the
+/// offset it introduces, which is why assembly is where anchors are
+/// collected: it is the phase that knows every offset.
 #[derive(Debug, Clone, Default)]
 pub(super) struct Rect {
     pub width: usize,
     pub rows: Vec<Vec<StyledGrapheme>>,
+    pub anchors: Vec<AnchoredRect>,
 }
 
 impl Rect {
@@ -51,6 +57,24 @@ impl Rect {
     }
 }
 
+/// Moves `anchors` by the offset a parent nests their rectangle at.
+fn shift(anchors: Vec<AnchoredRect>, x: usize, y: usize) -> Vec<AnchoredRect> {
+    anchors
+        .into_iter()
+        .map(|anchor| anchor.offset(x, y))
+        .collect()
+}
+
+/// The cells `align` leaves before a `gap`-cell shortfall.
+const fn align_offset(gap: usize, align: Align) -> usize {
+    match align {
+        Align::Left => 0,
+        // The odd extra cell goes right, as in Lip Gloss.
+        Align::Center => gap / 2,
+        Align::Right => gap,
+    }
+}
+
 /// Builds the rectangle `sized` describes.
 pub(super) fn assemble(sized: &Sized<'_>) -> Rect {
     let rect = match &sized.node {
@@ -65,6 +89,7 @@ pub(super) fn assemble(sized: &Sized<'_>) -> Rect {
                 .iter()
                 .map(|line| align_row(graphemes(line, style), sized.width, *align, fill))
                 .collect(),
+            anchors: Vec::new(),
         },
         SizedNode::Block { .. } => block(sized),
         SizedNode::Row(align, children) => row(*align, children, sized.width),
@@ -90,6 +115,7 @@ fn fill_style(sized: &Sized<'_>) -> TextStyle {
 fn block(sized: &Sized<'_>) -> Rect {
     let SizedNode::Block {
         style,
+        anchor,
         padding,
         margin,
         content_width,
@@ -115,7 +141,17 @@ fn block(sized: &Sized<'_>) -> Rect {
         content.width
     );
 
-    // 1. The content, aligned inside the width the box left it.
+    // 1. The content, aligned inside the width the box left it. The alignment
+    //    shifts every row by the same cells, so the anchors inside move with
+    //    them.
+    let inner_anchors = shift(
+        content.anchors,
+        align_offset(
+            content_width.saturating_sub(content.width),
+            style.horizontal_alignment(),
+        ),
+        0,
+    );
     let mut content_rows: Vec<Vec<StyledGrapheme>> = content
         .rows
         .into_iter()
@@ -134,11 +170,27 @@ fn block(sized: &Sized<'_>) -> Rect {
         VerticalAlign::Bottom => (gap, 0),
     };
 
-    // 3. Padding, applied with the block's own fill.
+    // 3. Padding, applied with the block's own fill. An anchor reports the
+    //    rectangle the frame leaves, which is where a caller that fills it
+    //    draws — inside the border and the padding, and before the content
+    //    alignment moves anything within it. It comes first, because a box
+    //    encloses what it reports.
     let total = pl + content_width + pr;
+    let mut anchors = Vec::with_capacity(inner_anchors.len() + 1);
+    if let Some(key) = anchor {
+        anchors.push(AnchoredRect::new(
+            *key,
+            pl,
+            pt,
+            content_width,
+            content_height,
+        ));
+    }
+    anchors.extend(shift(inner_anchors, pl, above + pt));
     let mut rect = Rect {
         width: total,
         rows: Vec::with_capacity(content_height + pt + pb),
+        anchors,
     };
     let blank_row = blank(total, &fill);
     for _ in 0..above + pt {
@@ -162,6 +214,11 @@ fn block(sized: &Sized<'_>) -> Rect {
         let mut bordered = Rect {
             width: rect.width + usize::from(left) + usize::from(right),
             rows: Vec::with_capacity(rect.rows.len() + 2),
+            anchors: shift(
+                std::mem::take(&mut rect.anchors),
+                usize::from(left),
+                usize::from(style.is_border_top_enabled()),
+            ),
         };
         if style.is_border_top_enabled() {
             bordered.rows.push(edge_row(
@@ -214,6 +271,7 @@ fn spaced(rect: Rect, margin: Sides) -> Rect {
     let mut out = Rect {
         width: outer,
         rows: Vec::with_capacity(rect.rows.len() + usize::from(margin.top + margin.bottom)),
+        anchors: shift(rect.anchors, ml, usize::from(margin.top)),
     };
     for _ in 0..margin.top {
         out.rows.push(blank(outer, &plain));
@@ -243,7 +301,11 @@ fn row(align: VerticalAlign, children: &[Sized<'_>], width: usize) -> Rect {
         .unwrap_or(0);
 
     let mut rows: Vec<Vec<StyledGrapheme>> = vec![Vec::new(); height];
-    for (rect, fill) in rects {
+    let mut anchors = Vec::new();
+    // Each child starts where the ones before it ended, which is the offset its
+    // anchors move by.
+    let mut left = 0;
+    for (mut rect, fill) in rects {
         let gap = height - rect.rows.len();
         // Lip Gloss places the odd extra row of a Center alignment above the
         // shorter child; a BlockStyle's vertical_align places it below.
@@ -252,6 +314,7 @@ fn row(align: VerticalAlign, children: &[Sized<'_>], width: usize) -> Rect {
             VerticalAlign::Center => gap.div_ceil(2),
             VerticalAlign::Bottom => gap,
         };
+        anchors.extend(shift(std::mem::take(&mut rect.anchors), left, above));
         let blank_row = rect.blank_row(&fill);
         for (index, row) in rows.iter_mut().enumerate() {
             match index
@@ -262,21 +325,40 @@ fn row(align: VerticalAlign, children: &[Sized<'_>], width: usize) -> Rect {
                 None => row.extend(blank_row.iter().cloned()),
             }
         }
+        left += rect.width;
     }
 
-    Rect { width, rows }
+    Rect {
+        width,
+        rows,
+        anchors,
+    }
 }
 
 /// Stacks children, padding the narrower ones to `width` by `align`.
 fn column(align: Align, children: &[Sized<'_>], width: usize) -> Rect {
     let mut rows = Vec::new();
+    let mut anchors = Vec::new();
     for child in children {
         let fill = fill_style(child);
-        for row in assemble(child).rows {
+        let rect = assemble(child);
+        // Every row of a child is padded to the column's width by the same
+        // alignment, so its anchors shift by that same offset, and by the
+        // rows already stacked above it.
+        anchors.extend(shift(
+            rect.anchors,
+            align_offset(width.saturating_sub(rect.width), align),
+            rows.len(),
+        ));
+        for row in rect.rows {
             rows.push(align_row(row, width, align, &fill));
         }
     }
-    Rect { width, rows }
+    Rect {
+        width,
+        rows,
+        anchors,
+    }
 }
 
 /// Truncates one row to `max_width` cells.
@@ -327,12 +409,10 @@ fn align_row(
     fill: &TextStyle,
 ) -> Vec<StyledGrapheme> {
     let gap = width.saturating_sub(row_width(&row));
-    let (left, right) = match align {
-        Align::Left => (0, gap),
-        // The odd extra cell goes right, as in Lip Gloss; the test below pins it.
-        Align::Center => (gap / 2, gap - gap / 2),
-        Align::Right => (gap, 0),
-    };
+    // The same offset an anchor inside this row moves by; the test below pins
+    // where the odd cell of a Center alignment goes.
+    let left = align_offset(gap, align);
+    let right = gap - left;
     let mut output = blank(left, fill);
     output.append(&mut row);
     output.extend(blank(right, fill));

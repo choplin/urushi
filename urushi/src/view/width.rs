@@ -23,7 +23,7 @@
 //! changed.
 
 use crate::text::Grapheme;
-use crate::{Align, BlockStyle, Length, Overflow, Sides, TextStyle, VerticalAlign, View};
+use crate::{Align, BlockStyle, Key, Length, Overflow, Sides, TextStyle, VerticalAlign, View};
 
 use super::sizing::{
     Claim, Kind, border_extent, degrade, distribute, horizontal, kind_of, text_lines, vertical,
@@ -78,7 +78,9 @@ fn metrics(view: &View) -> Metrics {
                 children: Vec::new(),
             }
         }
-        View::Block(style, child) => {
+        // An anchor measures as the block it is: the key says where to report,
+        // never how large to be.
+        View::Block(style, child) | View::AnchorBlock(_, style, child) => {
             let inner = metrics(child);
             let frame = style.frame_size();
             let margin = style.margin_sides();
@@ -189,6 +191,9 @@ pub(super) struct TextBox<'a> {
 #[derive(Debug)]
 pub(super) struct BlockBox<'a> {
     pub style: &'a BlockStyle,
+    /// The key to report this box's content rectangle under, if it is an
+    /// anchor.
+    pub anchor: Option<Key>,
     pub padding: Sides,
     pub margin: Sides,
     pub content_width: usize,
@@ -239,7 +244,7 @@ fn place<'a>(
                 }),
             }
         }
-        View::Block(style, child) => {
+        View::Block(style, child) | View::AnchorBlock(_, style, child) => {
             let inner = &metrics.children[0];
             let border = border_extent(style);
             let mut padding = style.padding_sides();
@@ -307,6 +312,10 @@ fn place<'a>(
                 height_floor: metrics.height_floor,
                 node: WidthNode::Block(BlockBox {
                     style,
+                    anchor: match view {
+                        View::AnchorBlock(key, _, _) => Some(*key),
+                        _ => None,
+                    },
                     padding,
                     margin,
                     content_width,

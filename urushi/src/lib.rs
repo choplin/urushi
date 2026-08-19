@@ -79,6 +79,7 @@
 //! this core crate remains independent from full-screen TUI backends.
 
 mod component;
+mod key;
 mod render;
 mod style;
 mod terminal;
@@ -95,6 +96,7 @@ pub use component::{
     asterisk_enumerator, bullet_enumerator, dash_enumerator, default_list_indenter,
     default_table_style_func, default_tree_enumerator, default_tree_indenter, roman_enumerator,
 };
+pub use key::Key;
 pub use render::AnsiRenderer;
 pub use style::{
     Align, BlockStyle, BlockStyleProperty, BlockStylePropertyKey, Border, Color, Length, Modifier,
@@ -110,6 +112,6 @@ pub use theme::{
     SemanticTokens, TableRole, TextThemeRole, Theme, ThemeSet, TreeRole,
 };
 pub use view::{
-    Available, RenderedBlock, ResolvedView, Size, StyledGrapheme, View, join_horizontal,
-    join_vertical, measure, resolve,
+    AnchoredRect, Available, RenderedBlock, ResolvedView, Size, StyledGrapheme, View,
+    join_horizontal, join_vertical, measure, resolve,
 };

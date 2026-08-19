@@ -2,50 +2,87 @@
 
 A full-screen application's `view` function returns
 [`urushi::view::View`](../../urushi/src/view/model.rs), the same tree a plain
-CLI call site builds, and the node set carries one leaf — an anchor — for a
-region whose position layout decides but whose content this crate does not
+CLI call site builds, and a box in that tree may carry a key — an anchor — for
+a region whose position layout decides but whose content this crate does not
 produce. [`tui-architecture.md`](../tui-architecture.md) states the shape; this
 file holds the anchor's rule and records why it is that and not something else.
 
 ## The rule
 
-An anchor is a leaf that occupies a rectangle and draws nothing: layout places
-it like any other node, and `resolve` reports the rectangle it landed on beside
-the resolved rows, for the caller that knows what belongs there to fill. An
-anchor carries no geometry of its own, so a sized region is written
-structurally, as an anchor inside a block. It names no backend type: an anchor
-is a key and a rectangle, and a backend with nothing to put there draws the
-blanks it resolved to.
+An anchor is a block that carries a `Key` — an `AnchorBlock`: layout sizes it
+by the rules every block follows, and `resolve` reports the rectangle its frame left beside the
+resolved rows, for the caller that knows what belongs there to fill. An anchor
+carries no geometry of its own — the box states the size, as it does everywhere
+else — and its content is an ordinary child, so an empty one resolves to
+blanks. It names no backend type: an anchor is a key and a rectangle, and a
+backend with nothing to put there draws the blanks it resolved to.
+
+The reported rectangle is the one the box would have given a child: inside the
+border and the padding, past the margin. That is what a caller filling the
+region is filling, so a border the box stated frames the drawing rather than
+being covered by it. Anchors are reported in tree order, a box before what it
+encloses, and one key names one region: two anchors carrying one key are a
+contract violation rather than something layout resolves.
+
+A rectangle states where layout put the region, not what survived into the
+rows, and is never bounded by the resolved size; whether the resolved view
+contains it is reported alongside instead. Bounding it would round a cursor
+scrolled out of sight onto the last row, which is the one thing a caller
+placing a cursor must not be told, and a predicate answers the question
+bounding was meant to answer without destroying the position that raised it.
 
 Two things reach the frame that way:
 
-- **Cursor placement.** A zero-sized anchor's reported origin is the cell the
-  terminal cursor belongs on. The `Frame` of
+- **Cursor placement.** An anchor with no box around it covers no cells, and
+  its reported origin is the cell the terminal cursor belongs on. The `Frame` of
   [`tui-terminal-ownership.md`](tui-terminal-ownership.md) carries the request
   for a draw; this is how an application states it.
 - **Foreign widgets.** A sized anchor's rectangle is where the runtime's
   `Renderer` draws an embedded Ratatui widget, after the resolved cells are
   written. A `StatefulWidget`'s state stays in the application's model.
 
-Both are additive to the core: the node set grows by one leaf, and a resolved
-view reports an empty placement table for a tree containing no anchor.
+Both are additive to the core: adding a key to a box moves no geometry,
+`resolve` keeps its signature, and a resolved view reports no anchor for a tree
+containing none.
 
 A view carries no scroll offset, no focus, and no redraw hint. Scrolling is a
 view-model question that composes on top of height clipping, focus stays
 ordinary model and message logic, and invalidation belongs to Ratatui's cell
 diff.
 
-The runtime's `Renderer` consumes `ResolvedView` and its placements directly
-rather than going through `ViewWidget`, because it needs the placements from
-the same resolution that produced the cells and resolves exactly once per
-frame. `ViewWidget` and `RatatuiWidget` stay public: a plain Ratatui
+The runtime's `Renderer` consumes `ResolvedView` and its anchored rectangles
+directly rather than going through `ViewWidget`, because it needs them from the
+same resolution that produced the cells and resolves exactly once per frame. `ViewWidget` and `RatatuiWidget` stay public: a plain Ratatui
 application drawing an Urushi view into a `Rect` it already owns is an audience
 this design names, and it has no runtime to ask. The public surface of
 `urushi-tui` therefore grows with the runtime rather than shrinking into it,
 and the cell-writing path is shared between the widget and the `Renderer`.
 
-Open representation choices: the anchor node's spelling, the key type, and the
-placement-returning `resolve` signature.
+## Why the anchor is a keyed box rather than a node of its own
+
+"Carries no geometry of its own" is the whole difficulty of making it a leaf. A
+leaf must answer how large it is, and an anchor has no answer, because the two
+uses want opposite ones. A leaf that takes whatever area reaches it gives a
+widget its region, but then a cursor anchor under a bounded height takes that
+height and the row around it grows to match — a key that changes the layout it
+was meant to observe. A leaf that is always empty leaves the cursor right and
+gives a widget nothing, unless a box around it is read as an exception, which
+makes the leaf's meaning depend on its parent anyway.
+
+The box is already the thing that answers how large. `BlockStyle` states cells,
+fills, bounds, borders, padding, and margin, and one child is exactly what a
+region contains. So the anchor is a block that also carries a key, and the
+question never arises: it is sized by the rules every other box follows, and a
+cursor is that box with nothing stated and no content, which resolves to no
+cells and so cannot disturb what surrounds it.
+
+The key belongs to the node rather than to `BlockStyle`. A style is an
+immutable presentation value that a theme produces and call sites share, as
+[`style-value-model.md`](style-value-model.md) records; a key is identity, and a
+themed style carrying one would name the same region at every place it was
+used. It is the `Key` of [`tui-application.md`](tui-application.md) rather than
+a name of its own, because an application already identifies its subscriptions
+that way and a region is one more thing it names.
 
 ## Why the one view tree
 
@@ -128,7 +165,7 @@ describing the draw rather than the frame.
 `ViewWidget` resolves a view inside its own `render` and keeps nothing but the
 cells. That is the right shape for a plain Ratatui application, which owns its
 `Rect` and wants a rectangle drawn into it. It is the wrong shape for the
-runtime, which needs the placements from that same resolution and must resolve
+runtime, which needs the anchored rectangles from that same resolution and must resolve
 exactly once per frame; going through the widget would mean resolving twice, or
 resolving and then discarding what the cursor and the embedded widgets depend
 on.

@@ -101,8 +101,9 @@ backpressure. The policies, and what a `Sender` does under each, are defined in
 
 ### Key
 
-A `Key` is built from any hashable value and carries the value's type as well
-as its hash:
+A `Key` is a core Urushi type, not a runtime one: an anchor in a view is named
+by the same keys, as [`tui-view.md`](tui-view.md) records. It is built from any
+hashable value and carries the value's type as well as its hash:
 
 ```rust
 Key::of(&value)      // value: Hash + 'static

@@ -148,13 +148,13 @@ row, and column nodes that one layout pass resolves into a rectangle under an
 available area. A TUI application's `view` returns the same value a plain-CLI
 call site builds, and the runtime resolves it under the terminal's area.
 
-The tree carries one node full-screen use requires beyond what plain output
-needs: an **anchor**, a leaf that occupies a rectangle and draws nothing, whose
-resolved position the caller that knows what belongs there fills. It serves the
-two things a grapheme rectangle cannot express — where the terminal cursor
-belongs, and where an embedded Ratatui widget draws. A view carries no scroll
-offset, no focus, and no redraw hint. The anchor's rule, and why one leaf serves
-both needs, are recorded in [`design/tui-view.md`](design/tui-view.md).
+The tree carries one thing full-screen use requires beyond what plain output
+needs: an **anchor**, a box that also carries a key, whose resolved rectangle
+the caller that knows what belongs there fills. It serves the two things a
+grapheme rectangle cannot express — where the terminal cursor belongs, and
+where an embedded Ratatui widget draws. A view carries no scroll offset, no
+focus, and no redraw hint. The anchor's rule, and why one keyed box serves both
+needs, are recorded in [`design/tui-view.md`](design/tui-view.md).
 
 Whatever the TUI `View` becomes, it is `urushi::view::View` or a value that
 embeds it; Urushi does not introduce a second, independent resolved render tree
@@ -233,7 +233,7 @@ them.
 
 | Name | Owns |
 | --- | --- |
-| `Renderer` | Resolving the view once per frame, writing the `ResolvedView` into the frame's buffer, and serving the placements that resolution reported. Not the model, scheduling, a backend, or session restoration. |
+| `Renderer` | Resolving the view once per frame, writing the `ResolvedView` into the frame's buffer, and serving the anchored rectangles that resolution reported. Not the model, scheduling, a backend, or session restoration. |
 | `Frame` | A borrowed, draw-scoped handle to the current cell buffer and the cursor request. Not the previous buffer, backend, diff, output stream, or flush. |
 | `Terminal` | Working and committed presentation state, the backend, cell diffing, output, and flushing. A presentation is committed only after output succeeds. |
 | `TerminalSession` | Restoration obligations caused by entering the session — raw mode, alternate screen, cursor visibility — on normal exit and on supported error and interruption paths. |

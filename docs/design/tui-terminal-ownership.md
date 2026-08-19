@@ -14,7 +14,7 @@ boundaries.
 A `Renderer` translates a TUI `View` into drawing operations during
 `Terminal.draw`. It resolves the view once against the frame's area, writes the
 resulting `ResolvedView` into the frame's cell buffer, and then serves the
-placements that resolution reported: the cursor request, and any Ratatui widget
+anchored rectangles that resolution reported: the cursor request, and any Ratatui widget
 an application placed at a sized anchor. It reuses the cell-writing path of the
 existing Urushi Ratatui adapters rather than drawing through `ViewWidget`, which
 resolves internally and keeps nothing but the cells; why is recorded in

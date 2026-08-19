@@ -38,7 +38,7 @@ rectangle. `TextStyleProperty` converts into `BlockStyleProperty`; there is no
 conversion in the other direction, so no geometry property can be applied to a
 `TextStyle`.
 
-A view is a tree of five nodes:
+A view is a tree of five nodes, and a keyed form of one of them:
 
 ```rust
 pub enum View {
@@ -47,6 +47,7 @@ pub enum View {
     Row(VerticalAlign, Vec<View>),
     Column(Align, Vec<View>),
     Grid(GridStyle, Vec<Vec<View>>),
+    AnchorBlock(Key, BlockStyle, Box<View>),
 }
 ```
 
@@ -55,10 +56,11 @@ pub enum View {
 - `Row` places children side by side.
 - `Column` stacks children.
 - `Grid` lines cells up in columns and draws the lines between them.
+- `AnchorBlock` is a `Block` that also reports where its content landed.
 
-These are the five things terminal output does: carry text, put a box around
-something, place things beside each other, stack them, and line them up in
-columns. Components construct views through `View::text`, `View::block`,
+The first five are the five things terminal output does: carry text, put a box
+around something, place things beside each other, stack them, and line them up
+in columns. Components construct views through `View::text`, `View::block`,
 `View::row`, `View::column`, and `View::grid`; there is one way to express each
 node.
 
@@ -68,6 +70,15 @@ holds no box geometry — a grid that needs a border of its own, a margin, or a
 stated size is placed inside a `Block`. What a grid computes, and why the lines
 between cells belong to it rather than to the cells, are defined in
 [`design/grid.md`](design/grid.md).
+
+`AnchorBlock` adds no sixth thing. It is a box in every respect sizing reasons
+about — one child, one `BlockStyle`, the same rules — and the key adds only a
+report, for a caller that draws in that rectangle content this crate does not
+produce. `View::anchor_block` builds one; `View::anchor` is the boxless case,
+an empty region that covers no cells and so changes no layout. The `Key` naming
+it is the one [`design/tui-application.md`](design/tui-application.md) defines,
+and the anchor's rule and the reasoning behind it are recorded in
+[`design/tui-view.md`](design/tui-view.md).
 
 Alignment belongs to the `Row` or `Column`, not to its children: a child cannot
 align itself inside a height that is only known once its siblings are measured.
@@ -93,7 +104,18 @@ pub struct Available { width: Option<usize>, height: Option<usize> }
 /// One grapheme, the width it occupies, and its logical style.
 pub struct StyledGrapheme { symbol: String, width: usize, style: TextStyle }
 
-pub struct ResolvedView { size: Size, rows: Vec<Vec<StyledGrapheme>> }
+/// One anchor's rectangle, stated from the resolved view's top-left cell.
+pub struct AnchoredRect {
+    key: Key,
+    x: usize, y: usize, width: usize, height: usize,
+    within_resolved_view: bool,
+}
+
+pub struct ResolvedView {
+    size: Size,
+    rows: Vec<Vec<StyledGrapheme>>,
+    anchors: Vec<AnchoredRect>,
+}
 
 /// The intrinsic size: what the view asks for when nothing bounds it.
 pub fn measure(view: &View) -> Size;
@@ -110,6 +132,24 @@ renderer serializes it, so terminal capability resolution stays at the output
 boundary. Rows hold per-grapheme tokens rather than styled text runs, so a
 renderer never sees text below grapheme granularity and receives every width
 from the layout pass instead of re-deriving it.
+
+Anchored rectangles come from the same resolution as the rows: `anchors`
+returns them all in tree order, a box before what it encloses, and
+`anchor(key)` returns the one named. One key names one region; two anchors
+carrying one key are a contract violation, asserted in debug builds and left
+unresolved in release ones, as escape sequences in a `Text` node are.
+
+A rectangle states where layout put the region, not what survived into the
+rows, and is never bounded by the resolved size. Whether the rectangle contains
+it is reported instead, by `is_within_resolved_view`: false when layout put the
+region where the rectangle does not reach, as a cursor below content taller
+than the area is. An empty region one cell past the content is still within it,
+because that is where a cursor belongs when it follows the last grapheme.
+
+Bounding a region inwards would report a cursor scrolled ten rows out of sight
+as sitting on the last row. What being outside means is the caller's: a
+full-screen runtime hides a cursor it cannot show or scrolls to it, and a
+caller drawing into a region intersects it with the resolved size first.
 
 The same pass covers the single-block case: `BlockStyle::render` resolves
 `Block(style, Text(content, style.text))` with unbounded `Available`. There is
