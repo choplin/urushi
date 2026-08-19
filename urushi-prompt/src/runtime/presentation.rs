@@ -25,3 +25,24 @@ pub(crate) struct InlinePresentation {
     /// decision it exists to gate; see `docs/design/prompt-region.md`.
     pub drawn: bool,
 }
+
+impl InlinePresentation {
+    /// Abandon the region whose extent can no longer be established.
+    ///
+    /// A resize may reflow content and move the saved origin, and a write that
+    /// fails while the origin is being re-anchored leaves the region mid-growth
+    /// with nothing to restore to. Both leave the extent unknown, and the
+    /// design abandons such a region rather than erasing rows whose position
+    /// was inferred: residue is ugly and bounded, erasure is invisible and
+    /// unbounded.
+    ///
+    /// `drawn` survives. It records that this prompt put something on screen at
+    /// some point, which stays true however many regions have been abandoned
+    /// since; see `docs/design/prompt-region.md`.
+    pub(crate) fn lose_region(&mut self) {
+        self.anchored = false;
+        self.reserved_rows = 0;
+        self.owned_rows = 0;
+        self.rows.clear();
+    }
+}

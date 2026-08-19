@@ -4,6 +4,7 @@ use std::{
     fmt,
     io::{self, IsTerminal, Write},
     marker::PhantomData,
+    time::Duration,
 };
 
 use crossterm::{
@@ -337,16 +338,41 @@ impl Form {
         let mut state = FormState::Running { group: 0, field: 0 };
         self.groups[0].fields[0].activate();
 
+        // An event drained while coalescing a resize burst, held over to the
+        // next iteration rather than dropped.
+        let mut deferred: Option<Event> = None;
+
         loop {
             let columns = session.renderer.columns();
             if let Err(source) = session.renderer.draw(&self.view(&state, styles, columns)) {
                 return Err(session.fail(IoOperation::Render, source));
             }
 
-            let event = match events.read_event() {
-                Ok(event) => event,
-                Err(source) => return Err(session.fail(IoOperation::ReadEvent, source)),
+            let mut event = match deferred.take() {
+                Some(event) => event,
+                None => match events.read_event() {
+                    Ok(event) => event,
+                    Err(source) => return Err(session.fail(IoOperation::ReadEvent, source)),
+                },
             };
+            if matches!(event, Event::Resize { .. }) {
+                // Dragging a window edge emits a resize per intermediate size.
+                // Each one loses the region, so acting on every one multiplies
+                // the residue left behind. Only the size the burst settled on
+                // is acted upon, which is the layer above's responsibility: the
+                // plan stage sees one geometry at a time and cannot enforce it.
+                loop {
+                    match events.poll_event() {
+                        Ok(Some(waiting @ Event::Resize { .. })) => event = waiting,
+                        Ok(Some(waiting)) => {
+                            deferred = Some(waiting);
+                            break;
+                        }
+                        Ok(None) => break,
+                        Err(source) => return Err(session.fail(IoOperation::ReadEvent, source)),
+                    }
+                }
+            }
             if let Event::Resize { columns, rows } = &event {
                 session.renderer.resize(*columns, *rows);
             }
@@ -653,6 +679,15 @@ pub(crate) struct KeyModifiers {
 
 pub(crate) trait EventSource {
     fn read_event(&mut self) -> io::Result<Event>;
+
+    /// The next event if one is already waiting, without blocking for it.
+    ///
+    /// This exists so the session can coalesce a burst of resize events into
+    /// the size the burst settled on. The default reports nothing waiting,
+    /// which makes coalescing a no-op rather than a wrong answer.
+    fn poll_event(&mut self) -> io::Result<Option<Event>> {
+        Ok(None)
+    }
 }
 
 pub(crate) trait Renderer {
@@ -1160,21 +1195,33 @@ struct CrosstermEventSource;
 impl EventSource for CrosstermEventSource {
     fn read_event(&mut self) -> io::Result<Event> {
         loop {
-            match event::read()? {
-                CrosstermEvent::Key(key)
-                    if matches!(key.kind, KeyEventKind::Press | KeyEventKind::Repeat) =>
-                {
-                    if let Some(event) = translate_key(key.code, key.modifiers) {
-                        return Ok(Event::Key(event));
-                    }
-                }
-                CrosstermEvent::Resize(columns, rows) => {
-                    return Ok(Event::Resize { columns, rows });
-                }
-                CrosstermEvent::Paste(text) => return Ok(Event::Paste(text)),
-                _ => {}
+            if let Some(event) = translate_event(event::read()?) {
+                return Ok(event);
             }
         }
+    }
+
+    fn poll_event(&mut self) -> io::Result<Option<Event>> {
+        while event::poll(Duration::ZERO)? {
+            if let Some(event) = translate_event(event::read()?) {
+                return Ok(Some(event));
+            }
+        }
+        Ok(None)
+    }
+}
+
+/// The prompt's own event, for the crossterm events it has a use for.
+fn translate_event(event: CrosstermEvent) -> Option<Event> {
+    match event {
+        CrosstermEvent::Key(key)
+            if matches!(key.kind, KeyEventKind::Press | KeyEventKind::Repeat) =>
+        {
+            translate_key(key.code, key.modifiers).map(Event::Key)
+        }
+        CrosstermEvent::Resize(columns, rows) => Some(Event::Resize { columns, rows }),
+        CrosstermEvent::Paste(text) => Some(Event::Paste(text)),
+        _ => None,
     }
 }
 
@@ -1256,6 +1303,11 @@ impl<W: Write> Renderer for CrosstermRenderer<W> {
     fn resize(&mut self, columns: u16, rows: u16) {
         self.columns = columns.max(1);
         self.rows = rows.max(1);
+        // A resize may reflow existing content and push rows past the top of
+        // the screen, which invalidates both the saved origin and the row
+        // count. Neither can be recovered by inspection, so the region is
+        // abandoned; the next frame re-establishes on the cursor's own row.
+        self.presentation.lose_region();
     }
 }
 
@@ -1466,21 +1518,46 @@ mod tests {
     #[derive(Default)]
     struct ScriptedEvents {
         events: VecDeque<io::Result<Event>>,
+        /// How many leading events the source reports as already waiting when
+        /// it is polled. Everything past them is reachable only by a blocking
+        /// read, which is what separates a burst from what the user typed
+        /// after it.
+        waiting: usize,
     }
 
     impl ScriptedEvents {
         fn new(events: impl IntoIterator<Item = io::Result<Event>>) -> Self {
             Self {
                 events: events.into_iter().collect(),
+                waiting: 0,
             }
+        }
+
+        /// The same script, with its first `waiting` events arriving as one
+        /// burst.
+        fn arriving_together(mut self, waiting: usize) -> Self {
+            self.waiting = waiting;
+            self
+        }
+
+        fn take(&mut self) -> io::Result<Event> {
+            self.waiting = self.waiting.saturating_sub(1);
+            self.events
+                .pop_front()
+                .unwrap_or_else(|| Err(io::Error::other("event script exhausted")))
         }
     }
 
     impl EventSource for ScriptedEvents {
         fn read_event(&mut self) -> io::Result<Event> {
-            self.events
-                .pop_front()
-                .unwrap_or_else(|| Err(io::Error::other("event script exhausted")))
+            self.take()
+        }
+
+        fn poll_event(&mut self) -> io::Result<Option<Event>> {
+            if self.waiting == 0 {
+                return Ok(None);
+            }
+            self.take().map(Some)
         }
     }
 
@@ -1488,6 +1565,7 @@ mod tests {
     struct RecordingRenderer {
         views: Vec<Option<String>>,
         finishes: Vec<RenderFinish>,
+        resizes: Vec<(u16, u16)>,
         fail_draw: Option<usize>,
         fail_finish: bool,
     }
@@ -1507,6 +1585,10 @@ mod tests {
                 return Err(io::Error::other("finish failed"));
             }
             Ok(())
+        }
+
+        fn resize(&mut self, columns: u16, rows: u16) {
+            self.resizes.push((columns, rows));
         }
     }
 
@@ -2049,6 +2131,41 @@ mod tests {
         line
     }
 
+    /// Fails the `nth` bare line feed, which lands the failure inside the
+    /// window where a frame is re-anchoring its origin.
+    struct FailOnLineFeedWriter {
+        bytes: Vec<u8>,
+        line_feeds: usize,
+        fail_at: usize,
+    }
+
+    impl FailOnLineFeedWriter {
+        fn new(nth: usize) -> Self {
+            Self {
+                bytes: Vec::new(),
+                line_feeds: 0,
+                fail_at: nth,
+            }
+        }
+    }
+
+    impl io::Write for FailOnLineFeedWriter {
+        fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+            if bytes == b"\n" {
+                self.line_feeds += 1;
+                if self.line_feeds == self.fail_at {
+                    return Err(io::Error::other("planned line feed failure"));
+                }
+            }
+            self.bytes.extend_from_slice(bytes);
+            Ok(bytes.len())
+        }
+
+        fn flush(&mut self) -> io::Result<()> {
+            Ok(())
+        }
+    }
+
     struct PrefixThenFailWriter {
         bytes: Vec<u8>,
         trigger: Vec<u8>,
@@ -2142,24 +2259,36 @@ mod tests {
         );
 
         // Two bare line feeds scroll the extra rows into existence, the cursor
-        // returns to the top of them, and only then is the origin re-anchored.
+        // returns to the top of them, and only then is the origin anchored. No
+        // origin is saved before the line feeds: a first frame has nothing to
+        // return to, and a position saved ahead of them would be the very one
+        // a line feed at the bottom of the screen invalidates.
         let plan = draw_plan(&renderer, &view);
         assert_eq!(
-            plan.commands[..6],
+            plan.commands[..4],
             [
                 InlineCommand::HideCursor,
-                InlineCommand::SaveOrigin,
-                InlineCommand::RestoreOrigin,
                 InlineCommand::Newline,
                 InlineCommand::Newline,
                 InlineCommand::MoveUp(2),
             ]
         );
-        assert_eq!(plan.commands[6], InlineCommand::SaveOrigin);
+        assert_eq!(plan.commands[4], InlineCommand::SaveOrigin);
+        assert_eq!(
+            plan.commands
+                .iter()
+                .position(|command| *command == InlineCommand::SaveOrigin),
+            Some(4),
+            "the frame saves the origin once, after the rows are reserved"
+        );
+        // Mid-growth the region is unanchored: the line feeds may have
+        // scrolled the display, and no saved position survives that.
+        let growing = fold(&renderer.presentation, &plan.commands[..2]);
+        assert!(!growing.anchored);
         // No command carries the anchor or the row count: folding the prefix
         // that ends at the closing SaveOrigin derives both. Nothing has been
         // written yet, so the region is reserved but not yet owned.
-        let reserved = fold(&renderer.presentation, &plan.commands[..7]);
+        let reserved = fold(&renderer.presentation, &plan.commands[..5]);
         assert!(reserved.anchored);
         assert_eq!(reserved.reserved_rows, 3);
         assert_eq!(reserved.owned_rows, 0);
@@ -2443,11 +2572,11 @@ mod tests {
         // the clear that precedes its write.
         let expected = [
             (0, false, 0, 0, false),
-            (2, true, 1, 0, false),
+            (2, false, 2, 0, false),
             (5, true, 3, 0, false),
-            (10, true, 3, 1, true),
-            (15, true, 3, 2, true),
-            (20, true, 3, 3, true),
+            (8, true, 3, 1, true),
+            (13, true, 3, 2, true),
+            (18, true, 3, 3, true),
             (plan.commands.len(), true, 3, 3, true),
         ];
         for (prefix, anchored, reserved_rows, owned_rows, drawn) in expected {
@@ -2468,6 +2597,232 @@ mod tests {
         // the commands do not carry; only the planner knows it.
         assert_eq!(plan.next.owned_rows, 3);
         assert!(plan.next.drawn);
+    }
+
+    #[test]
+    fn a_failure_while_the_origin_is_being_anchored_abandons_the_region() {
+        let theme = test_theme();
+        let profile = TerminalProfile::new(ColorProfile::Monochrome, AnsiPolicy::Disabled);
+        let styles = PromptStyles::resolve(&theme, &profile);
+        let mut renderer = CrosstermRenderer::new(FailOnLineFeedWriter::new(2), (20, 4));
+
+        assert!(
+            renderer
+                .draw(&renderer_view(
+                    vec![
+                        view_line("first", &styles.question),
+                        view_line("second", &styles.option),
+                        view_line("third", &styles.help).with_kind(LineKind::Help),
+                    ],
+                    None,
+                ))
+                .is_err()
+        );
+
+        // The failure landed between the first line feed and the SaveOrigin
+        // that would have ended the window, so no origin is saved and the rows
+        // the first line feed scrolled in cannot be located again. The region
+        // is abandoned rather than erased at a guessed position.
+        assert!(!renderer.presentation.anchored);
+        assert_eq!(renderer.presentation.reserved_rows, 0);
+        assert_eq!(renderer.presentation.owned_rows, 0);
+        assert!(renderer.presentation.rows.is_empty());
+        // Nothing was written, so there is no residue either: cleanup emits
+        // nothing at all, not even the closing line feed that a lost region
+        // with content on screen would need.
+        assert!(!renderer.presentation.drawn);
+        for outcome in [
+            RenderFinish::Submitted,
+            RenderFinish::Cancelled,
+            RenderFinish::Error,
+            RenderFinish::Panicking,
+        ] {
+            assert_eq!(
+                inline_plan::plan_finish(outcome, &renderer.presentation).commands,
+                [],
+                "{outcome:?} cleanup after a region that was never anchored"
+            );
+        }
+
+        renderer
+            .finish(RenderFinish::Error)
+            .expect("cleanup of an abandoned region writes nothing");
+    }
+
+    #[test]
+    fn a_resize_abandons_the_region_and_cleanup_pushes_below_the_residue() {
+        let theme = test_theme();
+        let profile = TerminalProfile::new(ColorProfile::Monochrome, AnsiPolicy::Disabled);
+        let styles = PromptStyles::resolve(&theme, &profile);
+        let mut renderer = CrosstermRenderer::new(Vec::new(), (20, 4));
+        renderer
+            .draw(&renderer_view(
+                vec![
+                    view_line("first", &styles.question),
+                    view_line("second", &styles.option),
+                    view_line("third", &styles.help).with_kind(LineKind::Help),
+                ],
+                None,
+            ))
+            .expect("first draw succeeds");
+        assert_eq!(renderer.presentation.owned_rows, 3);
+
+        renderer.resize(30, 6);
+        // A resize may reflow content and move everything the origin pointed
+        // at, so the region goes with it. `drawn` is the one field that
+        // survives, because the residue on screen is not undone by a resize.
+        assert!(!renderer.presentation.anchored);
+        assert_eq!(renderer.presentation.reserved_rows, 0);
+        assert_eq!(renderer.presentation.owned_rows, 0);
+        assert!(renderer.presentation.drawn);
+
+        // Cancelling immediately afterwards has no rows to erase, yet the
+        // residue is still on screen. Gating the closing line feed on
+        // owned_rows would skip it and let the next output land on top of that
+        // residue; the gate is drawn, which the loss did not reset.
+        for outcome in [
+            RenderFinish::Submitted,
+            RenderFinish::Cancelled,
+            RenderFinish::Error,
+            RenderFinish::Panicking,
+        ] {
+            assert_eq!(
+                inline_plan::plan_finish(outcome, &renderer.presentation).commands,
+                [
+                    InlineCommand::ShowCursor,
+                    InlineCommand::CarriageReturnNewline,
+                ],
+                "{outcome:?} cleanup after a lost region"
+            );
+        }
+
+        renderer
+            .finish(RenderFinish::Cancelled)
+            .expect("cleanup after a resize succeeds");
+    }
+
+    #[test]
+    fn a_redraw_after_a_resize_re_establishes_on_the_cursor_row() {
+        let theme = test_theme();
+        let profile = TerminalProfile::new(ColorProfile::Monochrome, AnsiPolicy::Disabled);
+        let styles = PromptStyles::resolve(&theme, &profile);
+        let mut renderer = CrosstermRenderer::new(Vec::new(), (20, 4));
+        let tall = renderer_view(
+            vec![
+                view_line("first", &styles.question),
+                view_line("second", &styles.option),
+                view_line("third", &styles.help).with_kind(LineKind::Help),
+            ],
+            None,
+        );
+        renderer.draw(&tall).expect("first draw succeeds");
+        renderer.resize(20, 4);
+
+        // A prompt that is still running re-establishes on the cursor's own
+        // row, overwriting it. It does not push below the residue first: that
+        // is what a finishing prompt does, and doing it here would add a blank
+        // row on every resize.
+        let plan = draw_plan(&renderer, &tall);
+        assert_eq!(
+            plan.commands[..5],
+            [
+                InlineCommand::HideCursor,
+                InlineCommand::MoveToColumn(0),
+                InlineCommand::Newline,
+                InlineCommand::Newline,
+                InlineCommand::MoveUp(2),
+            ]
+        );
+        assert_eq!(plan.commands[5], InlineCommand::SaveOrigin);
+        assert!(
+            !plan
+                .commands
+                .contains(&InlineCommand::CarriageReturnNewline),
+            "a redraw never releases the terminal below the region"
+        );
+        // The old origin is gone, so nothing restores to it before the frame
+        // has saved a new one.
+        assert!(
+            !plan.commands[..5].contains(&InlineCommand::RestoreOrigin),
+            "a lost region has no origin to return to"
+        );
+
+        // A single-row prompt overwrites the whole of what it had, so it leaves
+        // no residue at all: the re-established region is exactly the cursor's
+        // row.
+        renderer.resize(20, 4);
+        let short = draw_plan(
+            &renderer,
+            &renderer_view(vec![view_line("only", &styles.question)], None),
+        );
+        assert_eq!(
+            short.commands[..3],
+            [
+                InlineCommand::HideCursor,
+                InlineCommand::MoveToColumn(0),
+                InlineCommand::SaveOrigin,
+            ]
+        );
+
+        renderer
+            .draw(&tall)
+            .expect("redraw after a resize succeeds");
+        assert!(renderer.presentation.anchored);
+        assert_eq!(renderer.presentation.owned_rows, 3);
+    }
+
+    #[test]
+    fn a_burst_of_resize_events_re_establishes_the_region_once() {
+        let mut events = ScriptedEvents::new([
+            Ok(Event::Resize {
+                columns: 10,
+                rows: 5,
+            }),
+            Ok(Event::Resize {
+                columns: 20,
+                rows: 6,
+            }),
+            Ok(Event::Resize {
+                columns: 30,
+                rows: 7,
+            }),
+            Ok(enter()),
+        ])
+        .arriving_together(3);
+        let mut renderer = RecordingRenderer::default();
+        let mut terminal = RecordingTerminal::interactive();
+
+        let outcome = form([TestField::new("field", "value")])
+            .run_with(&mut events, &mut renderer, &mut terminal, &test_styles())
+            .expect("the form submits");
+
+        // Dragging a window edge emits a resize per intermediate size, and each
+        // one loses the region. Acting on every one would re-establish the
+        // region — and leave residue — as many times as the drag reported.
+        assert!(matches!(outcome, FormOutcome::Submitted(_)));
+        assert_eq!(renderer.resizes, [(30, 7)]);
+    }
+
+    #[test]
+    fn coalescing_a_resize_burst_keeps_the_event_that_ended_it() {
+        let mut events = ScriptedEvents::new([
+            Ok(Event::Resize {
+                columns: 10,
+                rows: 5,
+            }),
+            Ok(enter()),
+        ])
+        .arriving_together(2);
+        let mut renderer = RecordingRenderer::default();
+        let mut terminal = RecordingTerminal::interactive();
+
+        // Draining the burst reads one event past its end. That event is what
+        // the user typed, and it is held over rather than dropped.
+        let outcome = form([TestField::new("field", "value")])
+            .run_with(&mut events, &mut renderer, &mut terminal, &test_styles())
+            .expect("the form submits");
+        assert!(matches!(outcome, FormOutcome::Submitted(_)));
+        assert_eq!(renderer.resizes, [(10, 5)]);
     }
 
     #[test]

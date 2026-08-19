@@ -21,6 +21,23 @@
 //! cursor's row within the region. It does not maintain the drawn rows: after a
 //! failure their content is indeterminate and cleanup erases the region anyway.
 //!
+//! ## Anchoring, and the window where recovery cannot reach
+//!
+//! The saved origin is an absolute screen position, so a line feed at the
+//! bottom of the screen invalidates it: the region scrolls up while the saved
+//! position stays. A frame that grows the region therefore emits every line
+//! feed *first*, returns to the region top, and only then saves the origin, so
+//! no saved origin is ever invalidated by a later command in the same frame.
+//! A first frame saves no origin before reserving its rows; it has nothing to
+//! return to.
+//!
+//! Between the first line feed of such a sequence and the [`InlineCommand::SaveOrigin`]
+//! that ends it the region is unanchored, and a failure there leaves its extent
+//! unknown. So does a terminal resize. In both the region is *lost*: it is
+//! abandoned rather than erased, because erasing from an origin that no longer
+//! locates the region would destroy output the prompt does not own. See
+//! [`InlinePresentation::lose_region`] and `docs/design/prompt-region.md`.
+//!
 //! ## Clear before write
 //!
 //! A [`InlineCommand::WriteLine`] that fails partway does not reach the fold,
@@ -128,6 +145,13 @@ pub(crate) fn step(mut state: RenderState, command: &InlineCommand) -> RenderSta
             state.cursor_row = state.cursor_row.saturating_add(1);
             state.presentation.reserved_rows =
                 touched(state.presentation.reserved_rows, state.cursor_row);
+            // At the bottom of the screen the same line feed scrolls the
+            // display instead, moving the region up while the saved origin
+            // stays put. Which of the two happened is not observable from
+            // here, so the origin is treated as stale until the frame saves it
+            // again. This is what makes `anchored` false for exactly the
+            // growth window, and it is the condition region loss keys on.
+            state.presentation.anchored = false;
         }
         InlineCommand::WriteLine(_) => {
             state.presentation.owned_rows =
@@ -173,19 +197,39 @@ pub(crate) fn plan_draw(
 
     let mut commands = vec![InlineCommand::HideCursor];
 
-    let mut reserved_rows = previous.reserved_rows;
-    if !previous.anchored {
-        commands.push(InlineCommand::SaveOrigin);
-        reserved_rows = 1;
-    }
+    // An unanchored region has no extent to build on: whatever it once
+    // reserved was abandoned with it, and there is no origin to restore to.
+    let mut reserved_rows = if previous.anchored {
+        previous.reserved_rows
+    } else {
+        0
+    };
+    // Rows that already exist from the region top down. The cursor is standing
+    // on a row whichever state the region is in, and that row costs no line
+    // feed; an unanchored region has nothing beyond it.
+    let existing_rows = reserved_rows.max(1);
 
     let wanted_rows = (lines.len() as u16).max(1);
     if wanted_rows > reserved_rows {
-        commands.push(InlineCommand::RestoreOrigin);
-        if reserved_rows > 1 {
-            commands.push(InlineCommand::MoveDown(reserved_rows - 1));
+        if previous.anchored {
+            commands.push(InlineCommand::RestoreOrigin);
+            if existing_rows > 1 {
+                commands.push(InlineCommand::MoveDown(existing_rows - 1));
+            }
+        } else if previous.drawn {
+            // Re-establishing after a loss. The cursor's own row becomes the
+            // new region top: starting there overwrites it, so the residue left
+            // behind is bounded to the rows above it, and a single-row prompt
+            // leaves none. A line feed first would push the region below the
+            // residue instead, which is what a finishing prompt does and not
+            // what a redrawing one does.
+            commands.push(InlineCommand::MoveToColumn(0));
         }
-        for _ in reserved_rows..wanted_rows {
+        // Every line feed is emitted before the origin is saved, so all the
+        // scrolling a frame can cause has already happened by the time the
+        // anchor is taken. A bare line feed preserves the column, so the
+        // MoveUp lands back where the sequence started.
+        for _ in existing_rows..wanted_rows {
             commands.push(InlineCommand::Newline);
         }
         if wanted_rows > 1 {
@@ -259,32 +303,53 @@ pub(crate) fn plan_finish(
     // copy is not on any redraw path.
     let mut next = previous.clone();
 
+    if !previous.anchored {
+        // The region was lost, or was never established. Its extent cannot be
+        // located, so nothing is erased and there is nothing to return to. All
+        // that is left is to push below the residue, and the gate for that is
+        // `drawn`, not `owned_rows`: a loss resets the row count while the
+        // residue stays on screen, and gating on the count would let later
+        // output land on top of it. A prompt that never drew anything must not
+        // leave a blank row behind either, which is the other half of the same
+        // gate.
+        if previous.drawn {
+            commands.push(InlineCommand::ShowCursor);
+            commands.push(InlineCommand::CarriageReturnNewline);
+        }
+        next.rows.clear();
+        return InlineRenderPlan { commands, next };
+    }
+
+    // Past here the region is anchored, so its extent is known and the origin
+    // can be returned to.
     match outcome {
         RenderFinish::Submitted => {
-            if previous.anchored {
-                commands.push(InlineCommand::RestoreOrigin);
-                if previous.owned_rows > 1 {
-                    commands.push(InlineCommand::MoveDown(previous.owned_rows - 1));
-                }
-                commands.push(InlineCommand::CarriageReturnNewline);
-                commands.push(InlineCommand::ShowCursor);
+            commands.push(InlineCommand::RestoreOrigin);
+            if previous.owned_rows > 1 {
+                commands.push(InlineCommand::MoveDown(previous.owned_rows - 1));
             }
+            commands.push(InlineCommand::CarriageReturnNewline);
+            commands.push(InlineCommand::ShowCursor);
         }
         RenderFinish::Cancelled | RenderFinish::Error | RenderFinish::Panicking => {
             commands.extend(plan_clear_owned_rows(previous));
             next.rows.clear();
-            if previous.anchored {
-                commands.push(InlineCommand::RestoreOrigin);
-            }
+            commands.push(InlineCommand::RestoreOrigin);
         }
     }
 
     InlineRenderPlan { commands, next }
 }
 
+/// Erase the rows the region is known to own, from an anchored origin.
+///
+/// The caller has already established that the region is anchored: an
+/// unanchored one is abandoned rather than erased, because erasing from an
+/// origin that no longer locates the region would destroy output the prompt
+/// does not own.
 fn plan_clear_owned_rows(previous: &InlinePresentation) -> Vec<InlineCommand> {
     let rows = previous.owned_rows;
-    if !previous.anchored || rows == 0 {
+    if rows == 0 {
         return Vec::new();
     }
 

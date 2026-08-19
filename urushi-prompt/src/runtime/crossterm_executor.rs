@@ -36,6 +36,13 @@ pub(crate) fn execute<W: Write>(
             // cleanup erases the region regardless, so the rows are dropped
             // rather than folded.
             state.presentation.rows.clear();
+            if !state.presentation.anchored {
+                // The failure landed where no origin is saved: before the first
+                // frame anchored one, or inside a growth window that had not
+                // re-saved it yet. Either way the region's extent cannot be
+                // established, so it is abandoned rather than erased.
+                state.presentation.lose_region();
+            }
             *presentation = state.presentation;
             return Err(error);
         }
