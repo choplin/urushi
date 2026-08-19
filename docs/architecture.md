@@ -279,6 +279,21 @@ capabilities before data reaches the private backend. This keeps backend
 replacement local and prevents backend lifecycle rules from becoming core
 application contracts.
 
+Replacement is not hypothetical. Urushi is built toward owning the layer that
+writes to and reads from the terminal, because a rule this documentation states
+about that layer — which stream a request goes to, which reader consumes a
+reply, when the terminal is entered and restored — can only be guaranteed by
+the code that performs it. An adapted backend is a means to that layer, not the
+definition of it.
+
+One rule follows for every document here: **a design states what the terminal
+layer must do, never what a current backend happens to do.** Where a backend
+cannot express a requirement, the requirement is still what gets written down.
+The deviation is recorded at the code that deviates, so a reader of that code
+sees it, and in the issue tracker, so it is scheduled. Softening a rule to
+match a backend removes the only record of what the backend owes, and makes it
+permanent by making it invisible.
+
 ## Architectural invariants
 
 Changes must preserve these invariants unless the architecture itself is being
