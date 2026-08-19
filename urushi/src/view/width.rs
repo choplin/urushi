@@ -382,18 +382,20 @@ fn place<'a>(
 /// The width a text leaf uses, without fitting a single line.
 ///
 /// Fitting cannot widen a leaf past what the policy and the graphemes already
-/// fix. `Overflow::Clip` cuts to the target, so the target is the width. Under
-/// `Overflow::Wrap` a line is at most the target, except where one grapheme is
-/// wider than that — and a grapheme that cannot be split is exactly the floor
-/// pass A measured. With no target at all, the leaf takes its own lines.
+/// fix, and the area only caps: an area wider than the text never widens it, so
+/// both policies stay at or below the natural width. `Overflow::Clip` cuts to
+/// the area, with no floor, because a clip may cut a grapheme it cannot split.
+/// Under `Overflow::Wrap` a line is at most the area, except where one grapheme
+/// is wider than that — and a grapheme that cannot be split is exactly the
+/// floor pass A measured. With no area at all, the leaf takes its own lines.
 ///
 /// This is what keeps the phase order honest: the width of a text leaf is
 /// decided from the text, never from what wrapping is about to do with it.
-fn text_width(target: Option<usize>, overflow: &Overflow, metrics: &Metrics) -> usize {
-    match (target, overflow) {
+fn text_width(area: Option<usize>, overflow: &Overflow, metrics: &Metrics) -> usize {
+    match (area, overflow) {
         (None, _) => metrics.natural,
-        (Some(target), Overflow::Wrap) => target.max(metrics.floor),
-        (Some(target), Overflow::Clip(_)) => target,
+        (Some(area), Overflow::Wrap) => area.min(metrics.natural).max(metrics.floor),
+        (Some(area), Overflow::Clip(_)) => area.min(metrics.natural),
     }
 }
 
@@ -501,20 +503,30 @@ mod tests {
     }
 
     #[test]
-    fn a_text_leaf_takes_the_width_it_was_given_unless_a_grapheme_exceeds_it() {
+    fn a_text_leaf_is_capped_by_its_area_and_never_widened_by_it() {
         let wide = metrics(&text("日本"));
 
         assert_eq!(text_width(None, &Overflow::Wrap, &wide), 4, "its own lines");
         assert_eq!(text_width(Some(3), &Overflow::Wrap, &wide), 3);
         assert_eq!(
+            text_width(Some(10), &Overflow::Wrap, &wide),
+            4,
+            "an area wider than the text is a cap, not a size to take"
+        );
+        assert_eq!(
+            text_width(Some(10), &Overflow::clip(), &wide),
+            4,
+            "nor is there anything for a clip to cut"
+        );
+        assert_eq!(
             text_width(Some(1), &Overflow::Wrap, &wide),
             2,
-            "one unsplittable grapheme is wider than the target"
+            "one unsplittable grapheme is wider than the area"
         );
         assert_eq!(
             text_width(Some(1), &Overflow::clip(), &wide),
             1,
-            "a clip cuts to the target instead of widening"
+            "a clip cuts to the area instead of widening"
         );
     }
 

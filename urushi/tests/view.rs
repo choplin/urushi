@@ -142,6 +142,49 @@ fn a_column_pads_its_children_to_one_width() {
 }
 
 #[test]
+fn an_area_wider_than_a_text_leaf_leaves_it_at_its_own_width() {
+    // The clamp only caps. A leaf offered more columns than it needs keeps the
+    // width its lines need, so nothing downstream sees phantom trailing cells.
+    let view = View::text("hi", TextStyle::new());
+
+    assert_eq!(resolve(&view, Available::columns(20)).size().width(), 2);
+}
+
+#[test]
+fn a_stated_block_width_still_lays_its_text_out_across_that_width() {
+    // Padding a narrow child out to its container is assembly's job, not the
+    // text's width. A leaf that stops at 2 is still placed inside 20.
+    let view = View::block(
+        BlockStyle::new().width(20).align(Align::Center),
+        View::text("hi", TextStyle::new()),
+    );
+
+    assert_eq!(
+        view_rows(&view, Available::NONE),
+        vec!["         hi         "]
+    );
+}
+
+#[test]
+fn a_centered_column_offsets_a_narrow_child_against_a_wide_one() {
+    // The offset is the difference between the child's width and the column's.
+    // The area reaches every child, so a child that read it as a size to take
+    // would come out as wide as its sibling and leave nothing to centre.
+    let view = View::column(
+        Align::Center,
+        [
+            View::text("hi", TextStyle::new()),
+            View::text("long text", TextStyle::new()),
+        ],
+    );
+
+    assert_eq!(
+        view_rows(&view, Available::columns(20)),
+        vec!["   hi    ", "long text"]
+    );
+}
+
+#[test]
 fn a_resolved_view_carries_logical_styles_and_grapheme_widths() {
     let accent = TextStyle::new().foreground(Color::CYAN).bold();
     let view = View::row(
