@@ -97,47 +97,39 @@ interprets it and owns all live execution state.
 
 ## Application model
 
-An application is a value implementing one trait:
+Conceptually, an application is a value made of four functions:
 
-```rust
-pub trait Application {
-    type Model;
-    type Message: Send + 'static;
-
-    fn init(&self) -> (Self::Model, Effect<Self::Message>);
-    fn update(&self, model: &mut Self::Model, message: Self::Message)
-        -> Effect<Self::Message>;
-    fn view(&self, model: &Self::Model) -> View;
-    fn subscriptions(&self, model: &Self::Model) -> Subscription<Self::Message>;
-}
+```text
+init          : () -> (Model, Effect)
+update        : (&mut Model, Message) -> Effect
+view          : (&Model) -> View
+subscriptions : (&Model) -> Subscription
 ```
 
-`Self` is the description of the program — its configuration, its theme, the
-roots it operates on — and `Model` is the state the runtime owns; the two are
-distinct types. `Application` is a pure value rather than a mutable object with
-lifecycle methods: every method takes `&self`, and nothing an application does
-mutates runtime resources.
+The application is the description of a program — its configuration, its
+theme, the roots it operates on — and the `Model` is the state the runtime
+owns; the two are distinct. An application is a pure value rather than a
+mutable object with lifecycle methods, and nothing it does mutates runtime
+resources.
 
 The runtime owns the live `Model`. It invokes `update` once for every accepted
 message in the runtime-wide accepted order, lending the model mutably for that
 call. `update` does not perform terminal I/O or mutate runtime resources;
-everything it wants done outside the model it returns as an `Effect`, including
-the request to shut down.
+everything it wants done outside the model it returns as an `Effect`,
+including the request to shut down.
 
 `subscriptions` declares long-lived message sources as a function of the
-current model — terminal input and surface facts among them, each with the
-function that turns the source's value into the application's `Message`. The
-runtime reconciles the declaration with running sources and delivers their
-events through the same admission and ordering path as other messages.
+current model — terminal input and surface facts among them. The runtime
+reconciles the declaration with running sources and delivers their events
+through the same admission and ordering path as other messages.
 
 `view` returns a declarative value that a renderer can draw with Ratatui. It
 must be cheap enough to evaluate at a normal drawing opportunity; expensive
 preparation belongs in effects.
 
-The exact forms of `Effect` and `Subscription`, the `Key` that identifies a
-replaceable effect or a running subscription, the bounds on each type, and why
-the shape is this one are defined in
-[`design/tui-application.md`](design/tui-application.md).
+The Rust shape of the application, of `Effect` and `Subscription`, and of the
+`Key` that identifies a replaceable effect or a running subscription is
+defined in [`design/tui-application.md`](design/tui-application.md).
 
 ### Meaning of View
 
@@ -153,8 +145,9 @@ needs: an **anchor**, a box that also carries a key, whose resolved rectangle
 the caller that knows what belongs there fills. It serves the two things a
 grapheme rectangle cannot express — where the terminal cursor belongs, and
 where a caller holding the buffer draws what this crate does not produce. A
-view carries no scroll offset, no focus, and no redraw hint. The anchor's rule, and why one keyed box serves both
-needs, are recorded in [`design/tui-view.md`](design/tui-view.md).
+view carries no scroll offset, no focus, and no redraw hint. The anchor's
+rule, and why one keyed box serves both needs, are recorded in
+[`design/tui-view.md`](design/tui-view.md).
 
 Whatever the TUI `View` becomes, it is `urushi::view::View` or a value that
 embeds it; Urushi does not introduce a second, independent resolved render tree
@@ -215,14 +208,12 @@ highlighting, document layout, image rasterization, and other work that would
 make `update` or `view` too expensive, so that every key input can advance the
 logical model without starting heavy preparation for every intermediate state.
 
-An effect carries either blocking work or a future, names no executor, and
-composes by `batch` and `map`; the runtime supports one-shot work, long-lived
-work as a subscription, and keyed latest-only work for replaceable preparation.
-Whether a completion is still relevant is split: the runtime suppresses a
-completion only when it knows the execution was canceled or replaced; otherwise
-the application decides in `update`. The policies, the freshness rule, and the
-representative flows are defined in [`design/tui-effects.md`](design/tui-
-effects.md).
+The runtime supports one-shot work, long-lived work as a subscription, and
+keyed latest-only work for replaceable preparation. Whether a completion is
+still relevant is split: the runtime suppresses a completion only when it knows
+the execution was canceled or replaced; otherwise the application decides in
+`update`. The policies, the freshness rule, and the representative flows are
+defined in [`design/tui-effects.md`](design/tui-effects.md).
 
 ## Rendering and runtime ownership
 
@@ -234,9 +225,9 @@ and the runtime core and the application see no backend type.
 
 | Name | Owns |
 | --- | --- |
-| `Renderer` | Resolving the view once per frame, writing the `ResolvedView` into the frame, and placing the cursor where the view's cursor anchor landed. A runtime-internal function, not a public type. Not the model, scheduling, a terminal, or session restoration. |
+| `Renderer` | Resolving the view once per frame, writing the `ResolvedView` into the frame, and placing the cursor where the view's cursor anchor landed. Not the model, scheduling, a terminal, or session restoration. |
 | `Frame` | A borrowed, draw-scoped handle to the working presentation state: its area, its cells, and the cursor request. Not the previous buffer, backend, diff, output stream, or flush. |
-| `Terminal` | Working and committed presentation state, cell diffing, output, and flushing. A presentation is committed only after output succeeds, and the size changes only through the `Sync` barrier, never at draw time. |
+| `Terminal` | Working and committed presentation state, cell diffing, output, and flushing. A presentation is committed only after output succeeds. |
 | `TerminalSession` | Restoration obligations caused by entering the session — raw mode, alternate screen, the input modes, cursor visibility — on shutdown, on error, on panic, and after a partial entry. |
 | `Backend` | The physical terminal-output boundary, owned by the backend implementation behind `Terminal`; replaceable in tests. |
 | `Clock` | The runtime's one source of time, behind a trait; replaceable in tests. |
@@ -245,20 +236,16 @@ The runtime itself owns the live model; source admission and the accepted
 delivery order; subscription reconciliation; effect execution and cancellation
 known to the runtime; draw scheduling and pending-draw cancellation; the
 terminal and terminal session; and runtime control such as shutdown. Shutdown
-is a control-path concern rather than a privileged application message variant:
-an application requests it by returning `Effect::shutdown()` from `update`, and
-the runtime reads the request from that return value.
+is a control-path concern rather than a privileged application message
+variant: an application requests it through an effect it returns from
+`update`, never through a message.
 
-An application is started with `run(app)`, which blocks the calling thread,
-drives `update` and `view` there, and returns the final model; a builder
-behind it lets the executor, terminal, and clock be supplied, and is how tests
-replace them. Effects run behind an executor boundary the runtime owns, with
-Tokio as its one shipped implementation; no executor type appears in an
-application. An error the runtime cannot hand to the application — a draw
-failure it did not subscribe to, a startup that does not converge — ends the
-run with the session restored. The entry point, the executor boundary, and the
-error rule are defined in
-[`design/tui-runtime-entry.md`](design/tui-runtime-entry.md).
+An application is started with one call that blocks the calling thread, drives
+`update` and `view` there, and returns the final model. The executor that runs
+effects, the terminal, and the clock sit behind boundaries the runtime owns,
+which is how tests replace them and how a backend is replaced. The entry point,
+the executor boundary, and what the runtime does with an error of its own are
+defined in [`design/tui-runtime-entry.md`](design/tui-runtime-entry.md).
 
 Cell output plus terminal graphics remains an extension boundary: the first
 implementation proves the cell-only runtime before promoting a shared graphics
