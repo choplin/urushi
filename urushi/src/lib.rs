@@ -99,9 +99,9 @@ pub use component::{
 pub use key::Key;
 pub use render::AnsiRenderer;
 pub use style::{
-    Align, BlockStyle, BlockStyleProperty, BlockStylePropertyKey, Border, Color, Length, Modifier,
-    Overflow, Sides, TextStyle, TextStyleProperty, TextStylePropertyKey, Underline, UnderlineStyle,
-    VerticalAlign,
+    Align, BlockStyle, BlockStyleProperty, BlockStylePropertyKey, Border, Color, GridStyle,
+    GridStyleProperty, GridStylePropertyKey, Length, Modifier, Overflow, Sides, TextStyle,
+    TextStyleProperty, TextStylePropertyKey, Underline, UnderlineStyle, VerticalAlign,
 };
 pub use terminal::{AnsiPolicy, ColorProfile, TerminalProfile};
 #[cfg(feature = "terminal")]

@@ -23,7 +23,11 @@
 //! changed.
 
 use crate::text::Grapheme;
-use crate::{Align, BlockStyle, Key, Length, Overflow, Sides, TextStyle, VerticalAlign, View};
+use crate::{
+    Align, BlockStyle, GridStyle, Key, Length, Overflow, Sides, TextStyle, VerticalAlign, View,
+};
+
+use super::grid;
 
 use super::sizing::{
     Claim, Kind, border_extent, degrade, distribute, horizontal, kind_of, text_lines, vertical,
@@ -144,7 +148,88 @@ fn metrics(view: &View) -> Metrics {
                 children,
             }
         }
+        View::Grid(style, rows) => {
+            let columns = grid::columns(rows);
+            let mut cells = Vec::with_capacity(rows.len() * columns);
+            for row in 0..rows.len() {
+                for column in 0..columns {
+                    cells.push(metrics(grid::cell(rows, row, column)));
+                }
+            }
+            let lines = grid::line_extent(style, columns, rows.len());
+            let claims = column_claims(style, rows, &cells, columns);
+            Metrics {
+                natural: claims.iter().map(|claim| claim.demand).sum::<usize>() + lines.width(),
+                floor: claims.iter().map(|claim| claim.floor).sum::<usize>() + lines.width(),
+                height_floor: (0..rows.len())
+                    .map(|row| row_floor(style, rows, &cells, columns, row))
+                    .sum::<usize>()
+                    + lines.height(),
+                fills: cells.iter().any(|cell| cell.fills)
+                    || (0..columns)
+                        .any(|column| matches!(style.column_length(column), Some(Length::Fill(_)))),
+                width_kind: Kind::Auto,
+                height_kind: Kind::Auto,
+                children: cells,
+            }
+        }
     }
+}
+
+/// The claim each column of a grid makes on the grid's width.
+///
+/// The kind comes from the column's stated [`Length`], the demand and the
+/// floor from the cells beneath it, each measured with the padding that cell
+/// takes. Only per-cell metrics are read, so a column's claim never depends on
+/// what a sibling resolved to — the no-solver boundary
+/// `docs/design/layout-resolution.md` fixes.
+fn column_claims(
+    style: &GridStyle,
+    rows: &[Vec<View>],
+    cells: &[Metrics],
+    columns: usize,
+) -> Vec<Claim> {
+    (0..columns)
+        .map(|column| {
+            let (mut demand, mut floor) = (0, 0);
+            for row in 0..rows.len() {
+                let padding = horizontal(grid::cell_padding(style, grid::cell(rows, row, column)));
+                let cell = &cells[row * columns + column];
+                demand = demand.max(cell.natural + padding);
+                floor = floor.max(cell.floor + padding);
+            }
+            let length = style.column_length(column);
+            Claim {
+                kind: kind_of(length),
+                // A stated size is a demand of its own, and the floor still
+                // wins over it — the clamp a `Row` child applies to itself,
+                // applied here from outside, because a cell cannot know the
+                // length its column states.
+                demand: match length {
+                    Some(Length::Cells(cells)) => usize::from(cells).max(floor),
+                    _ => demand,
+                },
+                floor,
+            }
+        })
+        .collect()
+}
+
+/// The height below which one row of a grid cannot be shrunk.
+fn row_floor(
+    style: &GridStyle,
+    rows: &[Vec<View>],
+    cells: &[Metrics],
+    columns: usize,
+    row: usize,
+) -> usize {
+    (0..columns)
+        .map(|column| {
+            let padding = vertical(grid::cell_padding(style, grid::cell(rows, row, column)));
+            cells[row * columns + column].height_floor + padding
+        })
+        .max()
+        .unwrap_or(0)
 }
 
 /// One node with its width settled, and what the later phases still need.
@@ -165,6 +250,34 @@ pub(super) enum WidthNode<'a> {
     Block(BlockBox<'a>),
     Row(VerticalAlign, Vec<Widths<'a>>),
     Column(Align, Vec<Widths<'a>>),
+    Grid(GridBox<'a>),
+}
+
+/// A grid whose column widths are settled.
+///
+/// `columns` is one width per column, padding included, and every cell of
+/// column `j` was resolved under `columns[j]` less its own padding. The two
+/// cannot disagree: the second is what the first was handed down as.
+#[derive(Debug)]
+pub(super) struct GridBox<'a> {
+    pub style: &'a GridStyle,
+    pub columns: Vec<usize>,
+    pub rows: Vec<Vec<GridCell<'a>>>,
+}
+
+/// One cell of a grid, with the padding it takes around it.
+#[derive(Debug)]
+pub(super) struct GridCell<'a> {
+    /// The cell's own padding where it states one, the grid's otherwise. Its
+    /// horizontal sides carry this phase's degradation; the vertical ones are
+    /// still as stated, because only the height phase knows the area that
+    /// degrades those.
+    pub padding: Sides,
+    /// How the cell places itself in a column or a row wider than it is. A
+    /// cell that is not a box states none of this and takes the defaults.
+    pub align: Align,
+    pub vertical_align: VerticalAlign,
+    pub child: Widths<'a>,
 }
 
 /// A text leaf and everything needed to fit its lines, once a width exists.
@@ -374,6 +487,68 @@ fn place<'a>(
                 height_kind: metrics.height_kind,
                 height_floor: metrics.height_floor,
                 node: WidthNode::Column(*align, children),
+            }
+        }
+        View::Grid(style, rows) => {
+            let columns = grid::columns(rows);
+            let lines = grid::line_extent(style, columns, rows.len());
+            let claims = column_claims(style, rows, &metrics.children, columns);
+
+            // The lines are part of the grid, not of a column, so they come
+            // off the area before the columns divide what is left. One
+            // `distribute` settles every column, and column j's width is what
+            // every cell of column j resolves under.
+            let mut widths: Vec<usize> = match area {
+                Some(area) => distribute(area.saturating_sub(lines.width()), &claims),
+                None => claims.iter().map(|claim| claim.demand).collect(),
+            };
+
+            let mut placed = Vec::with_capacity(rows.len());
+            for row in 0..rows.len() {
+                let mut cells = Vec::with_capacity(columns);
+                for (column, width) in widths.iter_mut().enumerate() {
+                    let view = grid::cell(rows, row, column);
+                    let inner = &metrics.children[row * columns + column];
+                    let share = *width;
+
+                    let mut padding = grid::cell_padding(style, view);
+                    let across = degrade(Some(share), 0, 0, horizontal(padding), inner.floor);
+                    if across.padding {
+                        padding.left = 0;
+                        padding.right = 0;
+                    }
+
+                    let child = place(
+                        view,
+                        inner,
+                        Some(share.saturating_sub(horizontal(padding))),
+                        None,
+                    );
+                    // A cell wider than its share is a grapheme that could not
+                    // be split, and it widens the column exactly as such a
+                    // child widens a `Row`. Every cell of the column is placed
+                    // in the wider one, so they still line up.
+                    *width = (*width).max(child.width + horizontal(padding));
+                    let (align, vertical_align) = grid::cell_alignment(view);
+                    cells.push(GridCell {
+                        padding,
+                        align,
+                        vertical_align,
+                        child,
+                    });
+                }
+                placed.push(cells);
+            }
+
+            Widths {
+                width: widths.iter().sum::<usize>() + lines.width(),
+                height_kind: metrics.height_kind,
+                height_floor: metrics.height_floor,
+                node: WidthNode::Grid(GridBox {
+                    style,
+                    columns: widths,
+                    rows: placed,
+                }),
             }
         }
     }

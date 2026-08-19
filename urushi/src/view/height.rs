@@ -18,8 +18,9 @@
 //!   the fitted lines and never fits them again.
 
 use crate::text::{PrintableLines, PrintableText, wrap_text};
-use crate::{Align, BlockStyle, Key, Overflow, Sides, TextStyle, VerticalAlign};
+use crate::{Align, BlockStyle, GridStyle, Key, Overflow, Sides, TextStyle, VerticalAlign};
 
+use super::grid;
 use super::sizing::{
     Claim, Kind, border_extent, degrade, distribute, height_axis, text_lines, vertical,
 };
@@ -52,6 +53,20 @@ enum FittedNode<'a> {
     },
     Row(VerticalAlign, Vec<Fitted<'a>>),
     Column(Align, Vec<Fitted<'a>>),
+    Grid {
+        style: &'a GridStyle,
+        columns: Vec<usize>,
+        rows: Vec<Vec<FittedCell<'a>>>,
+    },
+}
+
+/// One cell of a grid, with its text already fitted to its column's width.
+#[derive(Debug)]
+pub(super) struct FittedCell<'a> {
+    padding: Sides,
+    align: Align,
+    vertical_align: VerticalAlign,
+    child: Fitted<'a>,
 }
 
 /// Fits every text leaf to its settled width.
@@ -100,6 +115,24 @@ pub(super) fn fit(widths: Widths<'_>) -> Fitted<'_> {
         WidthNode::Column(align, children) => {
             FittedNode::Column(align, children.into_iter().map(fit).collect())
         }
+        WidthNode::Grid(box_) => FittedNode::Grid {
+            style: box_.style,
+            columns: box_.columns,
+            rows: box_
+                .rows
+                .into_iter()
+                .map(|row| {
+                    row.into_iter()
+                        .map(|cell| FittedCell {
+                            padding: cell.padding,
+                            align: cell.align,
+                            vertical_align: cell.vertical_align,
+                            child: fit(cell.child),
+                        })
+                        .collect()
+                })
+                .collect(),
+        },
     };
     Fitted {
         width,
@@ -162,6 +195,26 @@ pub(super) enum SizedNode<'f> {
     },
     Row(VerticalAlign, Vec<Sized<'f>>),
     Column(Align, Vec<Sized<'f>>),
+    Grid {
+        style: &'f GridStyle,
+        /// One width per column, padding included.
+        columns: &'f [usize],
+        /// One height per row, the padding of its cells included.
+        heights: Vec<usize>,
+        rows: Vec<Vec<SizedCell<'f>>>,
+    },
+}
+
+/// One cell of a grid, with both of its sizes settled.
+#[derive(Debug)]
+pub(super) struct SizedCell<'f> {
+    /// Both axes of the cell's padding, degraded to what its column and its
+    /// row could hold.
+    pub padding: Sides,
+    /// How the cell places itself in a column or a row wider than it is.
+    pub align: Align,
+    pub vertical_align: VerticalAlign,
+    pub child: Sized<'f>,
 }
 
 /// Counts the rows every node occupies under `area`.
@@ -264,7 +317,102 @@ pub(super) fn heights<'f>(fitted: &'f Fitted<'_>, area: Option<usize>) -> Sized<
                 node: SizedNode::Column(*align, children),
             }
         }
+        FittedNode::Grid {
+            style,
+            columns,
+            rows,
+        } => {
+            let lines = grid::line_extent(style, columns.len(), rows.len());
+            let (heights, rows) =
+                rows_of(rows, area.map(|area| area.saturating_sub(lines.height())));
+            Sized {
+                width: fitted.width,
+                height: heights.iter().sum::<usize>() + lines.height(),
+                node: SizedNode::Grid {
+                    style,
+                    columns,
+                    heights,
+                    rows,
+                },
+            }
+        }
     }
+}
+
+/// Divides a grid's height among its rows and settles every cell in one.
+///
+/// A row demands the greatest height among its cells, as a `Row` does, and the
+/// rows then divide the grid's height by the rule a `Column` applies to its
+/// children — the same claim, the same shrink, the same second visit for a row
+/// assigned less than it asked for. A row wider in rows than its assignment is
+/// what a cell could not give up, and it grows the grid rather than being cut,
+/// exactly as an over-wide cell grows its column.
+fn rows_of<'f>(
+    rows: &'f [Vec<FittedCell<'_>>],
+    area: Option<usize>,
+) -> (Vec<usize>, Vec<Vec<SizedCell<'f>>>) {
+    let asked: Vec<Vec<Sized<'f>>> = rows
+        .iter()
+        .map(|row| row.iter().map(|cell| heights(&cell.child, None)).collect())
+        .collect();
+    let claims: Vec<Claim> = rows
+        .iter()
+        .zip(&asked)
+        .map(|(row, asked)| Claim {
+            kind: Kind::Auto,
+            demand: row
+                .iter()
+                .zip(asked)
+                .map(|(cell, sized)| sized.height + vertical(cell.padding))
+                .max()
+                .unwrap_or(0),
+            floor: row
+                .iter()
+                .map(|cell| cell.child.height_floor + vertical(cell.padding))
+                .max()
+                .unwrap_or(0),
+        })
+        .collect();
+    let shares: Vec<usize> = match area {
+        Some(area) => distribute(area, &claims),
+        None => claims.iter().map(|claim| claim.demand).collect(),
+    };
+
+    let mut settled_heights = shares.clone();
+    let mut settled = Vec::with_capacity(rows.len());
+    for ((index, row), asked) in rows.iter().enumerate().zip(asked) {
+        let share = shares[index];
+        let mut cells = Vec::with_capacity(row.len());
+        for (cell, asked) in row.iter().zip(asked) {
+            let mut padding = cell.padding;
+            let down = degrade(
+                Some(share),
+                0,
+                0,
+                vertical(padding),
+                cell.child.height_floor,
+            );
+            if down.padding {
+                padding.top = 0;
+                padding.bottom = 0;
+            }
+            let inner = share.saturating_sub(vertical(padding));
+            let child = if asked.height <= inner {
+                asked
+            } else {
+                heights(&cell.child, Some(inner))
+            };
+            settled_heights[index] = settled_heights[index].max(child.height + vertical(padding));
+            cells.push(SizedCell {
+                padding,
+                align: cell.align,
+                vertical_align: cell.vertical_align,
+                child,
+            });
+        }
+        settled.push(cells);
+    }
+    (settled_heights, settled)
 }
 
 /// Divides `area` among a column's children and settles each at its share.

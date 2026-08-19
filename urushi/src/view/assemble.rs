@@ -8,10 +8,11 @@
 //! them saw it.
 
 use crate::text::PrintableText;
-use crate::{Align, Sides, TextStyle, VerticalAlign};
+use crate::{Align, Border, GridStyle, Sides, TextStyle, VerticalAlign};
 
 use super::geometry::Size;
-use super::height::{Sized, SizedNode};
+use super::grid;
+use super::height::{Sized, SizedCell, SizedNode};
 use super::resolve::{AnchoredRect, StyledGrapheme};
 
 /// A rectangle under construction: every row is exactly `width` cells wide.
@@ -94,6 +95,7 @@ pub(super) fn assemble(sized: &Sized<'_>) -> Rect {
         SizedNode::Block { .. } => block(sized),
         SizedNode::Row(align, children) => row(*align, children, sized.width),
         SizedNode::Column(align, children) => column(*align, children, sized.width),
+        SizedNode::Grid { .. } => grid_rect(sized),
     };
     debug_assert_eq!(
         rect.size(),
@@ -359,6 +361,260 @@ fn column(align: Align, children: &[Sized<'_>], width: usize) -> Rect {
         rows,
         anchors,
     }
+}
+
+/// One horizontal stretch of a grid row: either a line the grid draws, or the
+/// cells of one column.
+enum Segment {
+    /// A vertical line, drawn with this glyph where it does not turn.
+    Rule(char),
+    /// One column, this many cells wide.
+    Span(usize),
+}
+
+/// Builds a grid: place every cell, then draw the lines between them.
+///
+/// Every width and every height already exists, which is what lets the lines
+/// be drawn at all: a line and the cells beside it cannot disagree, because
+/// neither was decided here.
+fn grid_rect(sized: &Sized<'_>) -> Rect {
+    let SizedNode::Grid {
+        style,
+        columns,
+        heights,
+        rows,
+    } = &sized.node
+    else {
+        unreachable!("a grid")
+    };
+    let Some(border) = style.border_kind() else {
+        let (body, anchors) = bands(rows, columns, heights, None, &TextStyle::new());
+        return Rect {
+            width: sized.width,
+            rows: body,
+            anchors,
+        };
+    };
+
+    let line = style.border_style();
+    let segments = segments(&border, style, columns);
+    let banded = !rows.is_empty();
+    let top = usize::from(style.is_border_top_enabled());
+    let (body, anchors) = bands(rows, columns, heights, Some((&border, style)), &line);
+
+    let mut rect = Rect {
+        width: sized.width,
+        rows: Vec::with_capacity(sized.height),
+        // The lines are drawn around the cells, so only the top edge moves
+        // what they contain; `bands` already accounted for the rest.
+        anchors: shift(anchors, 0, top),
+    };
+    if style.is_border_top_enabled() {
+        rect.rows.push(rule_row(
+            &border, &segments, false, banded, border.top, &line,
+        ));
+    }
+    let mut body = body.into_iter();
+    for (index, height) in heights.iter().enumerate() {
+        if index > 0 && style.is_border_row_enabled() {
+            rect.rows.push(rule_row(
+                &border,
+                &segments,
+                true,
+                true,
+                border.middle_horizontal,
+                &line,
+            ));
+        }
+        for _ in 0..*height {
+            rect.rows
+                .push(body.next().expect("one row per counted row"));
+        }
+    }
+    if style.is_border_bottom_enabled() {
+        rect.rows.push(rule_row(
+            &border,
+            &segments,
+            banded,
+            false,
+            border.bottom,
+            &line,
+        ));
+    }
+    rect
+}
+
+/// The horizontal stretches one grid row is made of, left to right.
+fn segments(border: &Border, style: &GridStyle, columns: &[usize]) -> Vec<Segment> {
+    let mut segments = Vec::with_capacity(columns.len() * 2 + 2);
+    if style.is_border_left_enabled() {
+        segments.push(Segment::Rule(border.left));
+    }
+    for (index, width) in columns.iter().enumerate() {
+        if index > 0 && style.is_border_column_enabled() {
+            segments.push(Segment::Rule(border.left));
+        }
+        segments.push(Segment::Span(*width));
+    }
+    if style.is_border_right_enabled() {
+        segments.push(Segment::Rule(border.right));
+    }
+    segments
+}
+
+/// One row of horizontal line, with a derived glyph at every vertical it
+/// crosses.
+///
+/// `up` and `down` say whether the verticals continue past this row; a
+/// vertical's own neighbours say whether the horizontal continues past it.
+/// Those four facts are the whole of what chooses each glyph.
+fn rule_row(
+    border: &Border,
+    segments: &[Segment],
+    up: bool,
+    down: bool,
+    horizontal: char,
+    style: &TextStyle,
+) -> Vec<StyledGrapheme> {
+    let mut text = String::new();
+    for (index, segment) in segments.iter().enumerate() {
+        match segment {
+            Segment::Span(width) => text.extend(std::iter::repeat_n(horizontal, *width)),
+            Segment::Rule(vertical) => text.push(grid::junction(
+                border,
+                up,
+                down,
+                index > 0,
+                index + 1 < segments.len(),
+                horizontal,
+                *vertical,
+            )),
+        }
+    }
+    graphemes(&text, style)
+}
+
+/// Every content row of a grid, with the vertical lines drawn between cells.
+///
+/// The anchors come back positioned against the first content row, so the
+/// caller only has to add the top edge. Every other offset a grid introduces —
+/// the left edge, the columns before a cell, the rules between them, and the
+/// rows above — is known here and applied here.
+fn bands(
+    rows: &[Vec<SizedCell<'_>>],
+    columns: &[usize],
+    heights: &[usize],
+    lines: Option<(&Border, &GridStyle)>,
+    style: &TextStyle,
+) -> (Vec<Vec<StyledGrapheme>>, Vec<AnchoredRect>) {
+    let drawn = |enabled: fn(&GridStyle) -> bool| lines.is_some_and(|(_, style)| enabled(style));
+    let left = usize::from(drawn(GridStyle::is_border_left_enabled));
+    let rule = usize::from(drawn(GridStyle::is_border_column_enabled));
+
+    let mut out = Vec::new();
+    let mut anchors = Vec::new();
+    let mut top = 0;
+    for (index, (cells, height)) in rows.iter().zip(heights).enumerate() {
+        if index > 0 {
+            top += usize::from(drawn(GridStyle::is_border_row_enabled));
+        }
+        let rects: Vec<Rect> = cells
+            .iter()
+            .zip(columns)
+            .map(|(cell, width)| cell_rect(cell, *width, *height))
+            .collect();
+
+        let mut x = left;
+        for (column, rect) in rects.iter().enumerate() {
+            if column > 0 {
+                x += rule;
+            }
+            anchors.extend(shift(rect.anchors.clone(), x, top));
+            x += rect.width;
+        }
+
+        for offset in 0..*height {
+            let mut row = Vec::new();
+            if let Some((border, grid_style)) = lines
+                && grid_style.is_border_left_enabled()
+            {
+                row.extend(graphemes(&border.left.to_string(), style));
+            }
+            for (column, rect) in rects.iter().enumerate() {
+                if column > 0
+                    && let Some((border, grid_style)) = lines
+                    && grid_style.is_border_column_enabled()
+                {
+                    row.extend(graphemes(&border.left.to_string(), style));
+                }
+                row.extend(rect.rows[offset].iter().cloned());
+            }
+            if let Some((border, grid_style)) = lines
+                && grid_style.is_border_right_enabled()
+            {
+                row.extend(graphemes(&border.right.to_string(), style));
+            }
+            out.push(row);
+        }
+        top += *height;
+    }
+    (out, anchors)
+}
+
+/// One cell, padded and placed inside the column and row it was assigned.
+fn cell_rect(cell: &SizedCell<'_>, width: usize, height: usize) -> Rect {
+    let (pl, pr, pt, pb) = (
+        usize::from(cell.padding.left),
+        usize::from(cell.padding.right),
+        usize::from(cell.padding.top),
+        usize::from(cell.padding.bottom),
+    );
+    let content_width = width.saturating_sub(pl + pr);
+    let content_height = height.saturating_sub(pt + pb);
+    let fill = fill_style(&cell.child);
+
+    let content = assemble(&cell.child);
+    let kept = content.rows.len().min(content_height);
+    let gap = content_height - kept;
+    let (above, below) = match cell.vertical_align {
+        VerticalAlign::Top => (0, gap),
+        VerticalAlign::Center => (gap / 2, gap - gap / 2),
+        VerticalAlign::Bottom => (gap, 0),
+    };
+
+    // The cell's own alignment places it in the column and the row, so the
+    // anchors inside it move by exactly what that placement introduced.
+    let anchors = shift(
+        content.anchors,
+        pl + align_offset(content_width.saturating_sub(content.width), cell.align),
+        pt + above,
+    );
+    let mut content_rows: Vec<Vec<StyledGrapheme>> = content
+        .rows
+        .into_iter()
+        .map(|row| align_row(row, content_width, cell.align, &fill))
+        .collect();
+    content_rows.truncate(content_height);
+
+    let mut rect = Rect {
+        width,
+        rows: Vec::with_capacity(height),
+        anchors,
+    };
+    let blank_row = blank(width, &fill);
+    for _ in 0..pt + above {
+        rect.rows.push(blank_row.clone());
+    }
+    for row in content_rows {
+        let mut padded = blank(pl, &fill);
+        padded.extend(row);
+        padded.extend(blank(pr, &fill));
+        rect.rows.push(padded);
+    }
+    for _ in 0..pb + below {
+        rect.rows.push(blank_row.clone());
+    }
+    rect
 }
 
 /// Truncates one row to `max_width` cells.

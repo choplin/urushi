@@ -4,6 +4,7 @@
 mod ansi;
 mod assemble;
 mod geometry;
+mod grid;
 mod height;
 mod join;
 mod model;

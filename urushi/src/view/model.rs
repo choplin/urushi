@@ -1,15 +1,15 @@
 //! Renderer-neutral terminal output.
 
-use crate::{Align, BlockStyle, Key, TextStyle, VerticalAlign};
+use crate::{Align, BlockStyle, GridStyle, Key, TextStyle, VerticalAlign};
 
 /// A fully composed, renderer-neutral terminal view.
 ///
-/// A view is a tree of the four things terminal output does: carry text, put a
-/// box around something, place things beside each other, and stack them. Every
-/// node resolves to a rectangle, so a bordered block composes inside a row the
-/// same way a word does.
+/// A view is a tree of the five things terminal output does: carry text, put a
+/// box around something, place things beside each other, stack them, and line
+/// them up in columns. Every node resolves to a rectangle, so a bordered block
+/// composes inside a row the same way a word does.
 ///
-/// A fifth node adds nothing to that list: an anchor is a box that also
+/// A sixth node adds nothing to that list: an anchor is a box that also
 /// reports where its content landed, for a caller that draws there something
 /// this crate does not produce.
 ///
@@ -40,6 +40,14 @@ pub enum View {
     Row(VerticalAlign, Vec<View>),
     /// Children stacked, aligned horizontally.
     Column(Align, Vec<View>),
+    /// A rectangle of cells sharing one width per column, and the lines drawn
+    /// between them.
+    ///
+    /// Every row holds the same number of cells: a grid has no style to fill
+    /// an invented one with, so whatever composes it supplies the empty cell.
+    /// Debug builds panic on a ragged grid; release builds resolve a missing
+    /// cell as an empty view.
+    Grid(GridStyle, Vec<Vec<View>>),
     /// A block that also reports where it landed, named by a key.
     ///
     /// It is a [`Block`](Self::Block) in every respect layout cares about —
@@ -134,6 +142,21 @@ impl View {
     /// ```
     pub fn anchor(key: impl Into<Key>) -> Self {
         Self::anchor_block(key, BlockStyle::new(), Self::empty())
+    }
+
+    /// Lines cells up in columns and draws the lines between them.
+    ///
+    /// Every row must hold the same number of cells; see [`View::Grid`].
+    pub fn grid<R>(style: GridStyle, rows: impl IntoIterator<Item = R>) -> Self
+    where
+        R: IntoIterator<Item = Self>,
+    {
+        Self::Grid(
+            style,
+            rows.into_iter()
+                .map(|row| row.into_iter().collect())
+                .collect(),
+        )
     }
 
     /// Creates a view that resolves to an empty rectangle.

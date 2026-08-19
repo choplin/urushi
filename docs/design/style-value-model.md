@@ -11,7 +11,8 @@ closes the one duplication the vocabulary cannot
 
 ## The vocabulary
 
-The generic API uses one closed enum pair per type. The text vocabulary:
+The generic API uses one closed enum pair per style type. The text
+vocabulary:
 
 ```rust
 enum TextStyleProperty {
@@ -78,7 +79,42 @@ enum BlockStylePropertyKey {
 }
 ```
 
-Both types may store the values in typed fields rather than allocating an enum
+The grid vocabulary is the lines a grid draws and the width its columns claim.
+A grid carries no box geometry and no fill style — a grid that needs a border
+of its own, a margin, or a stated size is placed inside a block — so it has
+neither the box properties nor a `Text` variant:
+
+```rust
+enum GridStyleProperty {
+    Border(Border),
+    BorderTop(bool),
+    BorderRight(bool),
+    BorderBottom(bool),
+    BorderLeft(bool),
+    BorderColumn(bool),
+    BorderRow(bool),
+    BorderForeground(Color),
+    BorderBackground(Color),
+    Columns(Vec<Option<Length>>),
+    CellPadding(Sides),
+}
+
+enum GridStylePropertyKey {
+    Border,
+    BorderTop,
+    BorderRight,
+    BorderBottom,
+    BorderLeft,
+    BorderColumn,
+    BorderRow,
+    BorderForeground,
+    BorderBackground,
+    Columns,
+    CellPadding,
+}
+```
+
+Every type may store the values in typed fields rather than allocating an enum
 collection; all mutation still passes through the closed `add` and `remove`
 operations.
 
@@ -99,8 +135,8 @@ anywhere.
 
 ## Why a closed vocabulary and one generic `remove`
 
-Urushi exposes a closed enum pair per type and one generic `remove`, while
-retaining named builders for common construction. Lip Gloss, which likewise
+Urushi exposes a closed enum pair per style type and one generic `remove`,
+while retaining named builders for common construction. Lip Gloss, which likewise
 treats a style as an immutable value containing a set of rules, instead tracks
 property presence separately and exposes many property-specific `Unset*`
 methods. The enums make the complete property vocabulary discoverable and give
