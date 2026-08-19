@@ -9,7 +9,7 @@ use std::borrow::Cow;
 
 use unicode_segmentation::UnicodeSegmentation;
 
-use crate::text::{PrintableText, width};
+use crate::text::{Grapheme, PrintableText, width};
 
 /// The column interval a horizontal tab advances to.
 pub(super) const TAB_WIDTH: usize = 8;
@@ -94,7 +94,7 @@ pub(super) fn resolve_row(row: &str) -> (Cow<'_, str>, usize) {
             continue;
         }
 
-        let width = width::grapheme(PrintableText::new(grapheme));
+        let width = width::grapheme(Grapheme::new(grapheme));
         if width == 0 {
             // A zero-width grapheme claims no column of its own: a lone
             // combining mark, a zero-width space, a byte-order mark. It joins

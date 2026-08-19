@@ -9,5 +9,5 @@ mod printable;
 pub(crate) mod width;
 mod wrap;
 
-pub use printable::{PrintableLines, PrintableText};
+pub use printable::{Grapheme, PrintableLines, PrintableText};
 pub(crate) use wrap::wrap_text;

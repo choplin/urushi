@@ -134,7 +134,7 @@ impl PrintableText {
         let mut end = 0;
         let mut consumed = 0;
         for (offset, grapheme) in self.0.grapheme_indices(true) {
-            let grapheme_width = width::grapheme(Self::adopt(grapheme));
+            let grapheme_width = width::grapheme(Grapheme::adopt(grapheme));
             if consumed + grapheme_width > width {
                 break;
             }
@@ -145,8 +145,69 @@ impl PrintableText {
     }
 
     /// Splits into grapheme clusters, the unit a cell boundary may fall on.
-    pub fn graphemes(&self) -> impl Iterator<Item = &Self> {
-        self.0.graphemes(true).map(Self::adopt)
+    pub fn graphemes(&self) -> impl Iterator<Item = &Grapheme> {
+        self.0.graphemes(true).map(Grapheme::adopt)
+    }
+}
+
+/// One grapheme cluster: the smallest run of text a cell boundary may fall on.
+///
+/// [`PrintableText`] is one row and [`PrintableLines`] spans rows, but neither
+/// says how far a single cell reaches. A cluster does, and that is the unit the
+/// layout pass turns into a token: a
+/// [`StyledGrapheme`](crate::StyledGrapheme) holds one of these and the cells
+/// it occupies, so a renderer that cannot split a cluster is a renderer that
+/// cannot disagree about a width.
+///
+/// The distinction is not decorative. A row of tokens whose widths sum to the
+/// rectangle's width still renders wrong if one token holds three clusters,
+/// because a backend writes a token into the single cell its width starts at.
+#[derive(Debug, PartialEq, Eq)]
+#[repr(transparent)]
+pub struct Grapheme(str);
+
+impl Grapheme {
+    /// Adopts one grapheme cluster.
+    ///
+    /// # Panics
+    ///
+    /// In debug builds, panics when `text` is not exactly one printable
+    /// grapheme cluster — empty text, several clusters, or a control
+    /// character. Release builds do not check.
+    pub fn new(text: &str) -> &Self {
+        debug_assert!(
+            !text.chars().any(char::is_control),
+            "a grapheme must not carry control characters: {text:?}"
+        );
+        debug_assert!(
+            text.graphemes(true).count() == 1,
+            "a grapheme must be exactly one cluster: {text:?}"
+        );
+        Self::adopt(text)
+    }
+
+    /// Wraps a string already known to satisfy the invariant.
+    fn adopt(text: &str) -> &Self {
+        // SAFETY: `Grapheme` is `repr(transparent)` over `str`, so the two
+        // have the same layout and the cast only changes the type.
+        unsafe { &*(std::ptr::from_ref::<str>(text) as *const Self) }
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+
+    /// Returns the terminal cells this cluster occupies.
+    ///
+    /// Defined by [`width`](super::width), the crate's one definition, exactly
+    /// as [`PrintableText::width`] is.
+    pub fn width(&self) -> usize {
+        width::grapheme(self)
+    }
+
+    /// The one-cell blank the layout pass pads a rectangle with.
+    pub(crate) fn space() -> &'static Self {
+        Self::adopt(" ")
     }
 }
 
@@ -176,10 +237,30 @@ mod tests {
     }
 
     #[test]
+    fn a_grapheme_measures_the_cells_of_its_own_cluster() {
+        assert_eq!(Grapheme::new("a").width(), 1);
+        assert_eq!(Grapheme::new("\u{3042}").width(), 2);
+        assert_eq!(Grapheme::new("\u{1F469}\u{200D}\u{1F4BB}").width(), 2);
+        assert_eq!(Grapheme::new("e\u{301}").width(), 1);
+    }
+
+    #[test]
+    #[should_panic(expected = "exactly one cluster")]
+    fn rejects_several_clusters_handed_to_a_grapheme() {
+        let _ = Grapheme::new("ab");
+    }
+
+    #[test]
+    #[should_panic(expected = "exactly one cluster")]
+    fn rejects_empty_text_handed_to_a_grapheme() {
+        let _ = Grapheme::new("");
+    }
+
+    #[test]
     fn graphemes_keep_clusters_whole() {
         let clusters: Vec<&str> = PrintableText::new("👩‍💻x")
             .graphemes()
-            .map(PrintableText::as_str)
+            .map(Grapheme::as_str)
             .collect();
         assert_eq!(clusters, ["👩‍💻", "x"]);
     }

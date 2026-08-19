@@ -104,7 +104,7 @@ pub use style::{
 pub use terminal::{AnsiPolicy, ColorProfile, TerminalProfile};
 #[cfg(feature = "terminal")]
 pub use terminal::{OutputMode, ProgressBar, Spinner, StderrTerminal};
-pub use text::{PrintableLines, PrintableText};
+pub use text::{Grapheme, PrintableLines, PrintableText};
 pub use theme::{
     BlockThemeRole, ColorScheme, ComponentRole, ComponentStyles, ListRole, PanelRole,
     SemanticTokens, TableRole, TextThemeRole, Theme, ThemeSet, TreeRole,

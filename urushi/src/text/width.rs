@@ -13,13 +13,13 @@
 
 use unicode_width::UnicodeWidthStr;
 
-use super::PrintableText;
+use super::{Grapheme, PrintableText};
 
 /// The cells one grapheme cluster occupies.
 ///
 /// CJK ideographs take two, an emoji ZWJ sequence takes two, and a combining
 /// mark takes none.
-pub(crate) fn grapheme(cluster: &PrintableText) -> usize {
+pub(crate) fn grapheme(cluster: &Grapheme) -> usize {
     UnicodeWidthStr::width(cluster.as_str())
 }
 

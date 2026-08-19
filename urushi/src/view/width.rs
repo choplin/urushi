@@ -22,7 +22,7 @@
 //! a table is what makes the phase linear; nothing about what they answer
 //! changed.
 
-use crate::text::PrintableText;
+use crate::text::Grapheme;
 use crate::{Align, BlockStyle, Length, Overflow, Sides, TextStyle, VerticalAlign, View};
 
 use super::sizing::{
@@ -68,7 +68,7 @@ fn metrics(view: &View) -> Metrics {
                 natural: lines.iter().map(|line| line.width()).max().unwrap_or(0),
                 floor: lines
                     .iter()
-                    .flat_map(|line| line.graphemes().map(PrintableText::width))
+                    .flat_map(|line| line.graphemes().map(Grapheme::width))
                     .max()
                     .unwrap_or(0),
                 height_floor: 0,

@@ -311,7 +311,7 @@ fn blank(width: usize, style: &TextStyle) -> Vec<StyledGrapheme> {
 fn graphemes(text: &str, style: &TextStyle) -> Vec<StyledGrapheme> {
     PrintableText::new(text)
         .graphemes()
-        .map(|grapheme| StyledGrapheme::new(grapheme.as_str(), grapheme.width(), style.clone()))
+        .map(|grapheme| StyledGrapheme::new(grapheme, style.clone()))
         .collect()
 }
 

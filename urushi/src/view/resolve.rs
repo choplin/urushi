@@ -15,6 +15,7 @@
 //! entry point that runs them and the degenerate-case safety net that bounds
 //! the result.
 
+use crate::text::Grapheme;
 use crate::{TextStyle, View};
 
 use super::assemble::assemble;
@@ -36,15 +37,22 @@ pub struct StyledGrapheme {
 }
 
 impl StyledGrapheme {
-    /// Creates one styled grapheme.
+    /// Creates one styled grapheme, measuring the cells it occupies.
     ///
-    /// `symbol` is one plain-text grapheme cluster and `width` the cells it
-    /// occupies. A `ResolvedView` holds no escape sequences, so a symbol
-    /// carrying one would reach the backend as ordinary characters.
-    pub fn new(symbol: impl Into<String>, width: usize, style: TextStyle) -> Self {
+    /// The width is derived rather than supplied, so a token cannot claim a
+    /// width its symbol does not have. Taking a [`Grapheme`] rather than a
+    /// string closes the other half: a token holds one cluster, which is what
+    /// a backend assumes when it writes the symbol into the cell its width
+    /// starts at.
+    ///
+    /// Where a terminal-dependent measure would enter is
+    /// [`text::width`](crate::text), the crate's one definition, and not this
+    /// constructor. The pass still decides the width once and the renderers
+    /// still read it here rather than measuring again.
+    pub(crate) fn new(symbol: &Grapheme, style: TextStyle) -> Self {
         Self {
-            symbol: symbol.into(),
-            width,
+            symbol: symbol.as_str().to_owned(),
+            width: symbol.width(),
             style,
         }
     }
@@ -62,7 +70,7 @@ impl StyledGrapheme {
     }
 
     pub(super) fn space(style: TextStyle) -> Self {
-        Self::new(" ", 1, style)
+        Self::new(Grapheme::space(), style)
     }
 
     pub(crate) fn map_style(mut self, map: impl FnOnce(&TextStyle) -> TextStyle) -> Self {
