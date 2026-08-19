@@ -57,17 +57,16 @@ fn write_command<W: Write>(writer: &mut W, command: &InlineCommand) -> io::Resul
     match command {
         InlineCommand::HideCursor => queue!(writer, cursor::Hide),
         InlineCommand::ShowCursor => queue!(writer, cursor::Show),
-        InlineCommand::SaveOrigin => queue!(writer, cursor::SavePosition),
-        InlineCommand::RestoreOrigin => queue!(writer, cursor::RestorePosition),
+        InlineCommand::SavePosition => queue!(writer, cursor::SavePosition),
+        InlineCommand::RestorePosition => queue!(writer, cursor::RestorePosition),
         InlineCommand::MoveUp(rows) => queue!(writer, cursor::MoveUp(*rows)),
         InlineCommand::MoveDown(rows) => queue!(writer, cursor::MoveDown(*rows)),
         InlineCommand::MoveRight(columns) => queue!(writer, cursor::MoveRight(*columns)),
         InlineCommand::MoveToColumn(column) => queue!(writer, cursor::MoveToColumn(*column)),
-        InlineCommand::ClearToEndOfLine => queue!(writer, Clear(ClearType::UntilNewLine)),
         InlineCommand::ClearLine => queue!(writer, Clear(ClearType::CurrentLine)),
-        InlineCommand::Newline => writer.write_all(b"\n"),
-        InlineCommand::CarriageReturnNewline => writer.write_all(b"\r\n"),
-        InlineCommand::WriteLine(row) => {
+        InlineCommand::LineFeed => writer.write_all(b"\n"),
+        InlineCommand::CarriageReturnLineFeed => writer.write_all(b"\r\n"),
+        InlineCommand::Write(row) => {
             for run in &row.runs {
                 writer.write_all(run.style.paint(&run.text).as_bytes())?;
             }

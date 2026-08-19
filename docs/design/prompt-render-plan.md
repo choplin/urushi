@@ -157,7 +157,7 @@ presentation transitions, without a terminal:
 ```text
 plan(framed, previous, geometry).commands == [
     HideCursor, LineFeed, MoveUp(1), SavePosition,
-    ClearLine, Write(row0),
+    RestorePosition, ClearLine, Write(row0),
     RestorePosition, MoveDown(1), ClearLine, Write(row1),
     RestorePosition,
 ]

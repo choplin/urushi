@@ -1260,12 +1260,55 @@ struct CrosstermRenderer<W> {
     presentation: InlinePresentation,
     columns: u16,
     rows: u16,
+    /// Whether the terminal cursor was at column zero when the prompt started.
+    /// The region's left edge is column zero, so a prompt that starts mid-line
+    /// reaches a fresh row before anchoring; only the first frame consults it.
+    at_line_start: bool,
 }
 
 impl CrosstermRenderer<io::Stderr> {
     fn stderr(size: (u16, u16)) -> Self {
-        Self::new(io::stderr(), size)
+        let mut renderer = Self::new(io::stderr(), size);
+        renderer.at_line_start = cursor_at_line_start();
+        renderer
     }
+}
+
+/// Whether the terminal cursor is at column zero, as far as it can be
+/// established.
+///
+/// The region's left edge is column zero, so a prompt that starts mid-line
+/// reaches a fresh row first; this is how it finds out. Only the terminal
+/// knows, and the answer costs a round trip: a Device Status Report goes out,
+/// and the reply arrives on the terminal's input beside the user's keystrokes.
+///
+/// # Known limitation: the request goes to stdout
+///
+/// `docs/design/prompt-region.md` puts the request on the stream the prompt
+/// already draws to, which is stderr. crossterm writes it to **stdout**
+/// instead, and its reply is filtered out of the public event API, so reading
+/// the reply from a request this crate sent itself would mean opening the
+/// terminal a second time and racing crossterm's reader for the user's
+/// keystrokes. Until this crate owns its terminal layer, the request goes
+/// where crossterm sends it.
+///
+/// The cost lands on a program whose stdout is redirected: the request reaches
+/// a file, the reply cannot arrive, and the call blocks until it times out.
+/// Asking only when stdout is a terminal keeps that cost off the redirected
+/// path, at the price of assuming column zero there. That assumption is also
+/// what a failed request falls back to — the row a prompt starts on is almost
+/// always fresh, and assuming otherwise would put a blank row above every
+/// prompt in a redirected run.
+///
+/// Moving the request to stderr, and dropping the stdout test with it, is part
+/// of replacing the terminal layer rather than a fix that can be made here.
+fn cursor_at_line_start() -> bool {
+    if !io::stdout().is_terminal() {
+        return true;
+    }
+    cursor::position()
+        .map(|(column, _)| column == 0)
+        .unwrap_or(true)
 }
 
 impl<W: Write> CrosstermRenderer<W> {
@@ -1275,6 +1318,7 @@ impl<W: Write> CrosstermRenderer<W> {
             presentation: InlinePresentation::default(),
             columns: size.0.max(1),
             rows: size.1.max(1),
+            at_line_start: true,
         }
     }
 
@@ -1287,7 +1331,13 @@ impl<W: Write> Renderer for CrosstermRenderer<W> {
     fn draw(&mut self, view: &PromptView) -> io::Result<()> {
         let resolved = resolve::resolve_prompt(self.columns, view);
         let framed = frame::frame(&resolved, self.rows);
-        let plan = inline_plan::plan_draw(framed, &self.presentation, self.columns, self.rows);
+        let plan = inline_plan::plan_draw(
+            framed,
+            &self.presentation,
+            self.at_line_start,
+            self.columns,
+            self.rows,
+        );
         self.present(plan)
     }
 
@@ -1433,6 +1483,7 @@ mod tests {
         inline_plan::plan_draw(
             framed,
             &renderer.presentation,
+            renderer.at_line_start,
             renderer.columns,
             renderer.rows,
         )
@@ -2206,7 +2257,7 @@ mod tests {
     }
 
     #[test]
-    fn inline_renderer_uses_resolved_theme_styles_and_preserves_mid_line_origin() {
+    fn inline_renderer_uses_resolved_theme_styles_and_anchors_on_the_current_row() {
         let theme = test_theme();
         let profile = TerminalProfile::new(ColorProfile::TrueColor, AnsiPolicy::Enabled);
         let styles = PromptStyles::resolve(&theme, &profile);
@@ -2219,18 +2270,19 @@ mod tests {
             Some(ViewCursor { row: 0, column: 2 }),
         );
 
-        // The first draw anchors the origin where the cursor already is, erases
-        // only to the end of that row, and leaves the cursor inside the row.
+        // Started at column zero, the first draw anchors the origin on the row
+        // the cursor is already on: no row has to be reached first, and the row
+        // is erased whole because the region owns all of it.
         let plan = draw_plan(&renderer, &view);
         assert_eq!(
             plan.commands,
             [
                 InlineCommand::HideCursor,
-                InlineCommand::SaveOrigin,
-                InlineCommand::RestoreOrigin,
-                InlineCommand::ClearToEndOfLine,
-                InlineCommand::WriteLine(plan.next.rows[0].clone()),
-                InlineCommand::RestoreOrigin,
+                InlineCommand::SavePosition,
+                InlineCommand::RestorePosition,
+                InlineCommand::ClearLine,
+                InlineCommand::Write(plan.next.rows[0].clone()),
+                InlineCommand::RestorePosition,
                 InlineCommand::MoveRight(2),
                 InlineCommand::ShowCursor,
             ]
@@ -2241,6 +2293,224 @@ mod tests {
         let output = String::from_utf8(renderer.writer).expect("renderer writes UTF-8 commands");
         assert!(output.contains("\x1b[1m質問\x1b[0m"));
         assert!(output.contains("\x1b[4m＊\x1b[0m"));
+    }
+
+    #[test]
+    fn a_prompt_starting_mid_line_comes_out_to_a_fresh_row_first() {
+        let theme = test_theme();
+        let profile = TerminalProfile::new(ColorProfile::Monochrome, AnsiPolicy::Disabled);
+        let styles = PromptStyles::resolve(&theme, &profile);
+        let mut renderer = CrosstermRenderer::new(Vec::new(), (20, 4));
+        renderer.at_line_start = false;
+        let view = renderer_view(
+            vec![view_line("question", &styles.question)],
+            Some(ViewCursor { row: 0, column: 2 }),
+        );
+
+        // The region's left edge is column zero, so it cannot begin on a row
+        // another writer has already put content on. A carriage return plus
+        // line feed reaches a fresh row, and that row is what gets anchored.
+        let plan = draw_plan(&renderer, &view);
+        assert_eq!(
+            plan.commands,
+            [
+                InlineCommand::HideCursor,
+                InlineCommand::CarriageReturnLineFeed,
+                InlineCommand::SavePosition,
+                InlineCommand::RestorePosition,
+                InlineCommand::ClearLine,
+                InlineCommand::Write(plan.next.rows[0].clone()),
+                InlineCommand::RestorePosition,
+                InlineCommand::MoveRight(2),
+                InlineCommand::ShowCursor,
+            ]
+        );
+
+        // The row the carriage return and line feed reached is the region top,
+        // so the fold counts one reserved row rather than the two it passed
+        // through.
+        let anchored = fold(&renderer.presentation, &plan.commands[..3]);
+        assert!(anchored.anchored);
+        assert_eq!(anchored.reserved_rows, 1);
+        assert_eq!(plan.next.reserved_rows, 1);
+
+        renderer.draw(&view).expect("renderer writes to a buffer");
+        let output = String::from_utf8(renderer.writer).expect("renderer writes UTF-8 commands");
+        assert!(output.starts_with("\x1b[?25l\r\n"), "{output:?}");
+    }
+
+    /// Every plan the inline renderer can produce, named for failure messages.
+    ///
+    /// The canonical-list invariants below hold for the vocabulary as a whole,
+    /// not for one frame, so they are asserted over the whole set rather than
+    /// re-derived per test.
+    fn every_plan_shape() -> Vec<(&'static str, Vec<InlineCommand>)> {
+        let theme = test_theme();
+        let profile = TerminalProfile::new(ColorProfile::Monochrome, AnsiPolicy::Disabled);
+        let styles = PromptStyles::resolve(&theme, &profile);
+        let one_row = |cursor| renderer_view(vec![view_line("only", &styles.question)], cursor);
+        let three_rows = |cursor| {
+            renderer_view(
+                vec![
+                    view_line("first", &styles.question),
+                    view_line("second", &styles.answer),
+                    view_line("third", &styles.help).with_kind(LineKind::Help),
+                ],
+                cursor,
+            )
+        };
+
+        let mut plans = Vec::new();
+
+        let mut renderer = CrosstermRenderer::new(Vec::new(), (20, 4));
+        plans.push((
+            "first frame, cursor at the origin",
+            draw_plan(&renderer, &one_row(Some(ViewCursor { row: 0, column: 0 }))).commands,
+        ));
+        plans.push((
+            "first frame, three rows",
+            draw_plan(
+                &renderer,
+                &three_rows(Some(ViewCursor { row: 2, column: 4 })),
+            )
+            .commands,
+        ));
+
+        renderer.at_line_start = false;
+        plans.push((
+            "first frame, started mid-line",
+            draw_plan(&renderer, &one_row(Some(ViewCursor { row: 0, column: 3 }))).commands,
+        ));
+        renderer.at_line_start = true;
+
+        renderer
+            .draw(&one_row(Some(ViewCursor { row: 0, column: 1 })))
+            .expect("first frame renders");
+        plans.push((
+            "growth from one row to three",
+            draw_plan(
+                &renderer,
+                &three_rows(Some(ViewCursor { row: 1, column: 2 })),
+            )
+            .commands,
+        ));
+
+        renderer
+            .draw(&three_rows(Some(ViewCursor { row: 1, column: 2 })))
+            .expect("grown frame renders");
+        plans.push((
+            "redraw of a changed middle row",
+            draw_plan(
+                &renderer,
+                &renderer_view(
+                    vec![
+                        view_line("first", &styles.question),
+                        view_line("changed", &styles.answer),
+                        view_line("third", &styles.help).with_kind(LineKind::Help),
+                    ],
+                    Some(ViewCursor { row: 2, column: 0 }),
+                ),
+            )
+            .commands,
+        ));
+        for outcome in [
+            RenderFinish::Submitted,
+            RenderFinish::Cancelled,
+            RenderFinish::Error,
+        ] {
+            plans.push((
+                match outcome {
+                    RenderFinish::Submitted => "finish: submitted",
+                    RenderFinish::Cancelled => "finish: cancelled",
+                    _ => "finish: error",
+                },
+                inline_plan::plan_finish(outcome, &renderer.presentation).commands,
+            ));
+        }
+
+        renderer.resize(20, 4);
+        plans.push((
+            "re-establishing after a lost region",
+            draw_plan(
+                &renderer,
+                &three_rows(Some(ViewCursor { row: 0, column: 0 })),
+            )
+            .commands,
+        ));
+
+        plans
+    }
+
+    #[test]
+    fn no_plan_emits_a_movement_of_zero_distance() {
+        for (name, commands) in every_plan_shape() {
+            for command in &commands {
+                let zero = matches!(
+                    command,
+                    InlineCommand::MoveUp(0)
+                        | InlineCommand::MoveDown(0)
+                        | InlineCommand::MoveRight(0)
+                );
+                assert!(!zero, "{name}: {commands:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn every_write_is_positioned_and_cleared_the_same_way() {
+        let mut writes = 0;
+        for (name, commands) in every_plan_shape() {
+            for (index, command) in commands.iter().enumerate() {
+                if !matches!(command, InlineCommand::Write(_)) {
+                    continue;
+                }
+                writes += 1;
+                // Position, clear, write — the same three steps for every row,
+                // with no column command and no first-row special case. The
+                // clear immediately before the write is what the recovery
+                // contract rests on.
+                let positioning = matches!(
+                    commands[..index],
+                    [.., InlineCommand::RestorePosition, InlineCommand::ClearLine]
+                        | [
+                            ..,
+                            InlineCommand::RestorePosition,
+                            InlineCommand::MoveDown(_),
+                            InlineCommand::ClearLine,
+                        ]
+                );
+                assert!(positioning, "{name}: row form at {index} in {commands:?}");
+            }
+        }
+        assert!(writes >= 8, "the shapes must actually write rows: {writes}");
+    }
+
+    #[test]
+    fn a_write_is_always_followed_by_an_absolute_reposition() {
+        for (name, commands) in every_plan_shape() {
+            let mut written = false;
+            for command in &commands {
+                match command {
+                    InlineCommand::Write(_) => written = true,
+                    // The cursor's position after a write that reaches the
+                    // right margin is terminal-dependent, so nothing relative
+                    // may follow one until an absolute command has removed the
+                    // ambiguity.
+                    InlineCommand::MoveUp(_)
+                    | InlineCommand::MoveDown(_)
+                    | InlineCommand::MoveRight(_) => {
+                        assert!(
+                            !written,
+                            "{name}: relative move after a write in {commands:?}"
+                        )
+                    }
+                    InlineCommand::RestorePosition
+                    | InlineCommand::MoveToColumn(_)
+                    | InlineCommand::CarriageReturnLineFeed => written = false,
+                    _ => {}
+                }
+            }
+        }
     }
 
     #[test]
@@ -2268,16 +2538,16 @@ mod tests {
             plan.commands[..4],
             [
                 InlineCommand::HideCursor,
-                InlineCommand::Newline,
-                InlineCommand::Newline,
+                InlineCommand::LineFeed,
+                InlineCommand::LineFeed,
                 InlineCommand::MoveUp(2),
             ]
         );
-        assert_eq!(plan.commands[4], InlineCommand::SaveOrigin);
+        assert_eq!(plan.commands[4], InlineCommand::SavePosition);
         assert_eq!(
             plan.commands
                 .iter()
-                .position(|command| *command == InlineCommand::SaveOrigin),
+                .position(|command| *command == InlineCommand::SavePosition),
             Some(4),
             "the frame saves the origin once, after the rows are reserved"
         );
@@ -2286,7 +2556,7 @@ mod tests {
         let growing = fold(&renderer.presentation, &plan.commands[..2]);
         assert!(!growing.anchored);
         // No command carries the anchor or the row count: folding the prefix
-        // that ends at the closing SaveOrigin derives both. Nothing has been
+        // that ends at the closing SavePosition derives both. Nothing has been
         // written yet, so the region is reserved but not yet owned.
         let reserved = fold(&renderer.presentation, &plan.commands[..5]);
         assert!(reserved.anchored);
@@ -2319,7 +2589,7 @@ mod tests {
             plan.commands,
             [
                 InlineCommand::HideCursor,
-                InlineCommand::RestoreOrigin,
+                InlineCommand::RestorePosition,
                 InlineCommand::MoveRight(2),
                 InlineCommand::ShowCursor,
             ]
@@ -2364,9 +2634,9 @@ mod tests {
         assert_eq!(
             plan.commands,
             [
-                InlineCommand::RestoreOrigin,
+                InlineCommand::RestorePosition,
                 InlineCommand::MoveDown(1),
-                InlineCommand::CarriageReturnNewline,
+                InlineCommand::CarriageReturnLineFeed,
                 InlineCommand::ShowCursor,
             ]
         );
@@ -2575,8 +2845,8 @@ mod tests {
             (2, false, 2, 0, false),
             (5, true, 3, 0, false),
             (8, true, 3, 1, true),
-            (13, true, 3, 2, true),
-            (18, true, 3, 3, true),
+            (12, true, 3, 2, true),
+            (16, true, 3, 3, true),
             (plan.commands.len(), true, 3, 3, true),
         ];
         for (prefix, anchored, reserved_rows, owned_rows, drawn) in expected {
@@ -2690,7 +2960,7 @@ mod tests {
                 inline_plan::plan_finish(outcome, &renderer.presentation).commands,
                 [
                     InlineCommand::ShowCursor,
-                    InlineCommand::CarriageReturnNewline,
+                    InlineCommand::CarriageReturnLineFeed,
                 ],
                 "{outcome:?} cleanup after a lost region"
             );
@@ -2728,22 +2998,22 @@ mod tests {
             [
                 InlineCommand::HideCursor,
                 InlineCommand::MoveToColumn(0),
-                InlineCommand::Newline,
-                InlineCommand::Newline,
+                InlineCommand::LineFeed,
+                InlineCommand::LineFeed,
                 InlineCommand::MoveUp(2),
             ]
         );
-        assert_eq!(plan.commands[5], InlineCommand::SaveOrigin);
+        assert_eq!(plan.commands[5], InlineCommand::SavePosition);
         assert!(
             !plan
                 .commands
-                .contains(&InlineCommand::CarriageReturnNewline),
+                .contains(&InlineCommand::CarriageReturnLineFeed),
             "a redraw never releases the terminal below the region"
         );
         // The old origin is gone, so nothing restores to it before the frame
         // has saved a new one.
         assert!(
-            !plan.commands[..5].contains(&InlineCommand::RestoreOrigin),
+            !plan.commands[..5].contains(&InlineCommand::RestorePosition),
             "a lost region has no origin to return to"
         );
 
@@ -2760,7 +3030,7 @@ mod tests {
             [
                 InlineCommand::HideCursor,
                 InlineCommand::MoveToColumn(0),
-                InlineCommand::SaveOrigin,
+                InlineCommand::SavePosition,
             ]
         );
 
@@ -2850,7 +3120,7 @@ mod tests {
             let plan = draw_plan(&renderer, view);
             let mut state = RenderState::resuming(renderer.presentation.clone());
             for command in &plan.commands {
-                if matches!(command, InlineCommand::WriteLine(_)) {
+                if matches!(command, InlineCommand::Write(_)) {
                     assert!(
                         state.presentation.owned_rows > state.cursor_row,
                         "row {} is written while cleanup owns only {} rows",
@@ -2891,10 +3161,10 @@ mod tests {
         assert_eq!(
             inline_plan::plan_finish(RenderFinish::Error, &renderer.presentation).commands,
             [
-                InlineCommand::RestoreOrigin,
-                InlineCommand::ClearToEndOfLine,
-                InlineCommand::RestoreOrigin,
-                InlineCommand::RestoreOrigin,
+                InlineCommand::RestorePosition,
+                InlineCommand::ClearLine,
+                InlineCommand::RestorePosition,
+                InlineCommand::RestorePosition,
             ]
         );
 
@@ -2938,10 +3208,10 @@ mod tests {
         assert_eq!(
             inline_plan::plan_finish(RenderFinish::Error, &renderer.presentation).commands,
             [
-                InlineCommand::RestoreOrigin,
-                InlineCommand::ClearToEndOfLine,
-                InlineCommand::RestoreOrigin,
-                InlineCommand::RestoreOrigin,
+                InlineCommand::RestorePosition,
+                InlineCommand::ClearLine,
+                InlineCommand::RestorePosition,
+                InlineCommand::RestorePosition,
             ]
         );
 
@@ -2997,10 +3267,10 @@ mod tests {
         assert_eq!(
             inline_plan::plan_finish(RenderFinish::Cancelled, &renderer.presentation).commands,
             [
-                InlineCommand::RestoreOrigin,
-                InlineCommand::ClearToEndOfLine,
-                InlineCommand::RestoreOrigin,
-                InlineCommand::RestoreOrigin,
+                InlineCommand::RestorePosition,
+                InlineCommand::ClearLine,
+                InlineCommand::RestorePosition,
+                InlineCommand::RestorePosition,
             ]
         );
 

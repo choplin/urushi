@@ -39,6 +39,18 @@ well as its start, and its left edge is column zero: if the cursor is not at
 column zero when a prompt starts, the prompt emits a carriage return and line
 feed to reach a fresh row before establishing the region.
 
+Only the terminal knows which column the cursor is on, and asking costs a round
+trip: a status request goes out, and the reply arrives on the terminal's input
+beside the user's keystrokes. **The request belongs on the stream the prompt
+draws to**, so that a prompt whose output reaches the terminal can always ask,
+whatever the program has done with its other streams. Reading the reply is the
+input layer's job, because that reply and the user's keystrokes arrive on one
+stream and only one reader may consume it.
+
+When the answer cannot be obtained, the prompt assumes column zero. The row a
+prompt starts on is almost always fresh, and assuming otherwise would put a
+blank row above every prompt whose terminal declines to answer.
+
 ### Anchoring the origin
 
 The saved origin is an absolute screen position saved with DEC Save Cursor
@@ -55,13 +67,17 @@ commands in the same frame. The first frame does not save an origin before
 reserving rows; it has nothing to return to and needs nothing.
 
 ```text
-first frame, height h        growth from h1 to h2
-  HideCursor                   RestorePosition
-  LineFeed × (h - 1)           MoveDown(h1 - 1)
-  MoveUp(h - 1)                LineFeed × (h2 - h1)
-  SavePosition                 MoveUp(h2 - 1)
-                               SavePosition
+first frame, height h         growth from h1 to h2
+  HideCursor                    RestorePosition
+  CarriageReturnLineFeed?       MoveDown(h1 - 1)
+  LineFeed × (h - 1)            LineFeed × (h2 - h1)
+  MoveUp(h - 1)                 MoveUp(h2 - 1)
+  SavePosition                  SavePosition
 ```
+
+The first frame's carriage return and line feed is the one that reaches a fresh
+row, and it is emitted only when the prompt did not start at column zero. The
+row it reaches is the region top, so it costs no reserved row of its own.
 
 A bare line feed preserves the cursor column, so `LineFeed` followed by
 `MoveUp` returns to the starting column without an explicit column command.

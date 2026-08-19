@@ -6,6 +6,15 @@
 //! state transitions be tested without a terminal, and keeps the crossterm
 //! executor free of layout and diffing.
 //!
+//! # The region's left edge
+//!
+//! The region starts at column zero and spans the full terminal width, so no
+//! row it owns can hold another writer's content. Every row is therefore
+//! handled the same way — position, clear, write — with no first-row special
+//! case and no clear-to-end-of-line in the vocabulary. A prompt that starts
+//! mid-line reaches a fresh row before anchoring; see `plan_draw`'s
+//! `at_line_start` and `docs/design/prompt-region.md`.
+//!
 //! # Recovery contract
 //!
 //! The plan carries no per-command state. Recovery is derived instead, by
@@ -31,7 +40,7 @@
 //! A first frame saves no origin before reserving its rows; it has nothing to
 //! return to.
 //!
-//! Between the first line feed of such a sequence and the [`InlineCommand::SaveOrigin`]
+//! Between the first line feed of such a sequence and the [`InlineCommand::SavePosition`]
 //! that ends it the region is unanchored, and a failure there leaves its extent
 //! unknown. So does a terminal resize. In both the region is *lost*: it is
 //! abandoned rather than erased, because erasing from an origin that no longer
@@ -40,7 +49,7 @@
 //!
 //! ## Clear before write
 //!
-//! A [`InlineCommand::WriteLine`] that fails partway does not reach the fold,
+//! A [`InlineCommand::Write`] that fails partway does not reach the fold,
 //! so it does not raise `owned_rows` — yet its bytes may already be on screen.
 //! That row is covered regardless, because every row is positioned, *cleared*,
 //! and only then written, and the clear that succeeded has already raised
@@ -70,32 +79,33 @@ use super::{
 pub(crate) enum InlineCommand {
     HideCursor,
     ShowCursor,
-    /// Anchor the owned region at the current cursor position.
-    SaveOrigin,
-    /// Return to the anchored origin.
-    RestoreOrigin,
+    /// Anchor the owned region at the current cursor position, with DEC Save
+    /// Cursor.
+    SavePosition,
+    /// Return to the anchored origin, with DEC Restore Cursor.
+    RestorePosition,
     MoveUp(u16),
     MoveDown(u16),
     MoveRight(u16),
     MoveToColumn(u16),
-    /// Erase from the cursor to the end of the row.
-    ClearToEndOfLine,
-    /// Erase the whole row.
+    /// Erase the whole row. The only erase in the vocabulary: a region row
+    /// spans the full width from column zero, so no row holds content that is
+    /// not the prompt's and every row is cleared the same way.
     ClearLine,
     /// A bare line feed, which scrolls a new row into existence at the bottom.
-    Newline,
+    LineFeed,
     /// A real carriage return plus line feed. Unlike relative cursor movement,
     /// this scrolls at the terminal boundary instead of stopping there.
-    CarriageReturnNewline,
+    CarriageReturnLineFeed,
     /// Write one framed row, styled by the executor.
-    WriteLine(FramedRow),
+    Write(FramedRow),
 }
 
 /// What a fold over a command list maintains.
 ///
 /// The cursor's row within the region is frame-local rather than presentation
 /// state: every plan begins with the region either unestablished — the cursor
-/// is at the region top by definition — or repositioned by a `RestoreOrigin`
+/// is at the region top by definition — or repositioned by a `RestorePosition`
 /// before any command that depends on position. That precondition is what makes
 /// [`step`] total.
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
@@ -124,22 +134,29 @@ pub(crate) fn step(mut state: RenderState, command: &InlineCommand) -> RenderSta
         | InlineCommand::ShowCursor
         | InlineCommand::MoveRight(_)
         | InlineCommand::MoveToColumn(_) => {}
-        InlineCommand::SaveOrigin => {
+        InlineCommand::SavePosition => {
             // Every plan saves the origin at the region top, so the row the
             // cursor is on becomes row zero and the region is at least one row
-            // tall.
+            // tall. The rows counted so far were counted from wherever the
+            // fold started, which for a frame that reaches a fresh row is one
+            // row above the new origin; only the rows at or below the cursor
+            // are reserved by the region being anchored here.
             state.presentation.anchored = true;
-            state.presentation.reserved_rows = state.presentation.reserved_rows.max(1);
+            state.presentation.reserved_rows = state
+                .presentation
+                .reserved_rows
+                .saturating_sub(state.cursor_row)
+                .max(1);
             state.cursor_row = 0;
         }
-        InlineCommand::RestoreOrigin => state.cursor_row = 0,
+        InlineCommand::RestorePosition => state.cursor_row = 0,
         InlineCommand::MoveUp(rows) => state.cursor_row = state.cursor_row.saturating_sub(*rows),
         InlineCommand::MoveDown(rows) => state.cursor_row = state.cursor_row.saturating_add(*rows),
-        InlineCommand::ClearToEndOfLine | InlineCommand::ClearLine => {
+        InlineCommand::ClearLine => {
             state.presentation.owned_rows =
                 touched(state.presentation.owned_rows, state.cursor_row);
         }
-        InlineCommand::Newline | InlineCommand::CarriageReturnNewline => {
+        InlineCommand::LineFeed | InlineCommand::CarriageReturnLineFeed => {
             // A line feed scrolls a row into existence below the cursor, so the
             // region has grown to hold it.
             state.cursor_row = state.cursor_row.saturating_add(1);
@@ -153,7 +170,7 @@ pub(crate) fn step(mut state: RenderState, command: &InlineCommand) -> RenderSta
             // growth window, and it is the condition region loss keys on.
             state.presentation.anchored = false;
         }
-        InlineCommand::WriteLine(_) => {
+        InlineCommand::Write(_) => {
             state.presentation.owned_rows =
                 touched(state.presentation.owned_rows, state.cursor_row);
             state.presentation.drawn = true;
@@ -179,9 +196,19 @@ pub(crate) struct InlineRenderPlan {
 /// more rows than that, and never moves the cursor past the last column. The
 /// column bound belongs here rather than in the frame stage, which chooses
 /// rows and has no horizontal concern.
+///
+/// `at_line_start` says whether the terminal cursor is at column zero as the
+/// prompt starts. The region's left edge is column zero, so a prompt that
+/// starts mid-line reaches a fresh row first. Only the very first frame
+/// consults it; a region re-established after a loss takes the cursor's own
+/// row, and a region that is already anchored has its origin. It is one bit
+/// rather than a column because no stage below may take a non-zero left edge
+/// into a width or a position: reinstating mid-line origins means widening
+/// this into a value, deliberately.
 pub(crate) fn plan_draw(
     view: FramedView,
     previous: &InlinePresentation,
+    at_line_start: bool,
     max_columns: u16,
     max_rows: u16,
 ) -> InlineRenderPlan {
@@ -212,7 +239,7 @@ pub(crate) fn plan_draw(
     let wanted_rows = (lines.len() as u16).max(1);
     if wanted_rows > reserved_rows {
         if previous.anchored {
-            commands.push(InlineCommand::RestoreOrigin);
+            commands.push(InlineCommand::RestorePosition);
             if existing_rows > 1 {
                 commands.push(InlineCommand::MoveDown(existing_rows - 1));
             }
@@ -224,18 +251,25 @@ pub(crate) fn plan_draw(
             // residue instead, which is what a finishing prompt does and not
             // what a redrawing one does.
             commands.push(InlineCommand::MoveToColumn(0));
+        } else if !at_line_start {
+            // The first frame, starting mid-line. The region's left edge is
+            // column zero, so it cannot begin on a row another writer has
+            // already put content on: a carriage return plus line feed reaches
+            // a fresh row, and that row becomes the region top. A bare
+            // MoveToColumn(0) would claim a row that is not the prompt's.
+            commands.push(InlineCommand::CarriageReturnLineFeed);
         }
         // Every line feed is emitted before the origin is saved, so all the
         // scrolling a frame can cause has already happened by the time the
         // anchor is taken. A bare line feed preserves the column, so the
         // MoveUp lands back where the sequence started.
         for _ in existing_rows..wanted_rows {
-            commands.push(InlineCommand::Newline);
+            commands.push(InlineCommand::LineFeed);
         }
         if wanted_rows > 1 {
             commands.push(InlineCommand::MoveUp(wanted_rows - 1));
         }
-        commands.push(InlineCommand::SaveOrigin);
+        commands.push(InlineCommand::SavePosition);
         reserved_rows = wanted_rows;
     }
 
@@ -246,31 +280,34 @@ pub(crate) fn plan_draw(
             continue;
         }
 
-        commands.push(InlineCommand::RestoreOrigin);
+        // Every row takes the same form: position, clear, write. The origin is
+        // at column zero and a bare MoveDown keeps the column, so the restore
+        // already lands the cursor at the row's left edge; no row needs a
+        // column command, and none is a special case.
+        commands.push(InlineCommand::RestorePosition);
         if row > 0 {
             commands.push(InlineCommand::MoveDown(
                 row.min(usize::from(u16::MAX)) as u16
             ));
-            commands.push(InlineCommand::MoveToColumn(0));
         }
         // Positioned, cleared, then written: the clear-before-write invariant
         // this module's recovery contract rests on.
-        commands.push(if row == 0 {
-            InlineCommand::ClearToEndOfLine
-        } else {
-            InlineCommand::ClearLine
-        });
+        commands.push(InlineCommand::ClearLine);
         if let Some(line) = current {
-            commands.push(InlineCommand::WriteLine(line.clone()));
+            commands.push(InlineCommand::Write(line.clone()));
             drawn = true;
         }
     }
 
-    commands.push(InlineCommand::RestoreOrigin);
+    commands.push(InlineCommand::RestorePosition);
     if let Some(mut cursor) = cursor {
         cursor.column = cursor.column.min(max_columns.max(1) - 1);
         if cursor.row == 0 {
-            commands.push(InlineCommand::MoveRight(cursor.column));
+            // A movement of zero distance is never emitted: the restore has
+            // already put the cursor on the origin's row at column zero.
+            if cursor.column > 0 {
+                commands.push(InlineCommand::MoveRight(cursor.column));
+            }
         } else {
             commands.push(InlineCommand::MoveDown(cursor.row));
             commands.push(InlineCommand::MoveToColumn(cursor.column));
@@ -314,7 +351,7 @@ pub(crate) fn plan_finish(
         // gate.
         if previous.drawn {
             commands.push(InlineCommand::ShowCursor);
-            commands.push(InlineCommand::CarriageReturnNewline);
+            commands.push(InlineCommand::CarriageReturnLineFeed);
         }
         next.rows.clear();
         return InlineRenderPlan { commands, next };
@@ -324,17 +361,17 @@ pub(crate) fn plan_finish(
     // can be returned to.
     match outcome {
         RenderFinish::Submitted => {
-            commands.push(InlineCommand::RestoreOrigin);
+            commands.push(InlineCommand::RestorePosition);
             if previous.owned_rows > 1 {
                 commands.push(InlineCommand::MoveDown(previous.owned_rows - 1));
             }
-            commands.push(InlineCommand::CarriageReturnNewline);
+            commands.push(InlineCommand::CarriageReturnLineFeed);
             commands.push(InlineCommand::ShowCursor);
         }
         RenderFinish::Cancelled | RenderFinish::Error | RenderFinish::Panicking => {
             commands.extend(plan_clear_owned_rows(previous));
             next.rows.clear();
-            commands.push(InlineCommand::RestoreOrigin);
+            commands.push(InlineCommand::RestorePosition);
         }
     }
 
@@ -353,18 +390,16 @@ fn plan_clear_owned_rows(previous: &InlinePresentation) -> Vec<InlineCommand> {
         return Vec::new();
     }
 
-    let mut commands = vec![InlineCommand::RestoreOrigin];
+    // The origin is at column zero, a clear leaves the cursor where it is, and
+    // a bare MoveDown keeps the column, so the walk stays at each row's left
+    // edge and every row is erased the same way.
+    let mut commands = vec![InlineCommand::RestorePosition];
     for row in 0..rows {
-        if row == 0 {
-            commands.push(InlineCommand::ClearToEndOfLine);
-        } else {
-            commands.push(InlineCommand::MoveToColumn(0));
-            commands.push(InlineCommand::ClearLine);
-        }
+        commands.push(InlineCommand::ClearLine);
         if row + 1 < rows {
             commands.push(InlineCommand::MoveDown(1));
         }
     }
-    commands.push(InlineCommand::RestoreOrigin);
+    commands.push(InlineCommand::RestorePosition);
     commands
 }
