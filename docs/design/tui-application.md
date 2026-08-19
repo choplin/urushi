@@ -72,6 +72,7 @@ from a source the application did not declare — terminal input included.
 | `Subscription::stream(key, stream)` | an application-defined source that is a `Stream<Item = Message> + Send + 'static` |
 | `Subscription::run(key, f)` | an application-defined asynchronous source, `f: FnOnce(Sender<Message>) -> Fut + Send + 'static`, `Fut: Future<Output = ()> + Send` |
 | `Subscription::run_blocking(key, f)` | an application-defined blocking source, `f: FnOnce(Sender<Message>) + Send + 'static`, run on its own thread |
+| `Subscription::signal(signal, f)` | one process signal, `f: Fn(Signal) -> Message + Send + Sync + 'static`; installs a handler only for a signal that is declared |
 | `Subscription::terminal_errors(f)` | failures the terminal reports while drawing, `f: Fn(io::Error) -> Message + Send + Sync + 'static` |
 | `Subscription::batch(subscriptions)` | several sources |
 | `subscription.map(f)` | the same source with its message passed through `f: Fn(A) -> B + Send + Sync + 'static` |

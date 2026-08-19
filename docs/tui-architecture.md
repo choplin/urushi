@@ -152,8 +152,8 @@ The tree carries one thing full-screen use requires beyond what plain output
 needs: an **anchor**, a box that also carries a key, whose resolved rectangle
 the caller that knows what belongs there fills. It serves the two things a
 grapheme rectangle cannot express — where the terminal cursor belongs, and
-where an embedded Ratatui widget draws. A view carries no scroll offset, no
-focus, and no redraw hint. The anchor's rule, and why one keyed box serves both
+where a caller holding the buffer draws what this crate does not produce. A
+view carries no scroll offset, no focus, and no redraw hint. The anchor's rule, and why one keyed box serves both
 needs, are recorded in [`design/tui-view.md`](design/tui-view.md).
 
 Whatever the TUI `View` becomes, it is `urushi::view::View` or a value that
@@ -227,17 +227,19 @@ effects.md).
 ## Rendering and runtime ownership
 
 The shared rendering vocabulary is `View`, `Renderer`, `Frame`, `Terminal`,
-`TerminalSession`, and `Backend`. These names describe ownership boundaries;
-they do not require Urushi to reimplement Ratatui types that already satisfy
-them.
+`TerminalSession`, `Backend`, and `Clock`. `Terminal`, `Frame`,
+`TerminalSession`, and `Clock` are traits Urushi owns, stated in its own
+vocabulary; a backend such as Ratatui implements them inside its own module,
+and the runtime core and the application see no backend type.
 
 | Name | Owns |
 | --- | --- |
-| `Renderer` | Resolving the view once per frame, writing the `ResolvedView` into the frame's buffer, and serving the anchored rectangles that resolution reported. Not the model, scheduling, a backend, or session restoration. |
-| `Frame` | A borrowed, draw-scoped handle to the current cell buffer and the cursor request. Not the previous buffer, backend, diff, output stream, or flush. |
-| `Terminal` | Working and committed presentation state, the backend, cell diffing, output, and flushing. A presentation is committed only after output succeeds. |
-| `TerminalSession` | Restoration obligations caused by entering the session — raw mode, alternate screen, cursor visibility — on normal exit and on supported error and interruption paths. |
-| `Backend` | The physical terminal-output boundary, behind adapters, replaceable in tests. |
+| `Renderer` | Resolving the view once per frame, writing the `ResolvedView` into the frame, and placing the cursor where the view's cursor anchor landed. A runtime-internal function, not a public type. Not the model, scheduling, a terminal, or session restoration. |
+| `Frame` | A borrowed, draw-scoped handle to the working presentation state: its area, its cells, and the cursor request. Not the previous buffer, backend, diff, output stream, or flush. |
+| `Terminal` | Working and committed presentation state, cell diffing, output, and flushing. A presentation is committed only after output succeeds, and the size changes only through the `Sync` barrier, never at draw time. |
+| `TerminalSession` | Restoration obligations caused by entering the session — raw mode, alternate screen, the input modes, cursor visibility — on shutdown, on error, on panic, and after a partial entry. |
+| `Backend` | The physical terminal-output boundary, owned by the backend implementation behind `Terminal`; replaceable in tests. |
+| `Clock` | The runtime's one source of time, behind a trait; replaceable in tests. |
 
 The runtime itself owns the live model; source admission and the accepted
 delivery order; subscription reconciliation; effect execution and cancellation
@@ -249,7 +251,7 @@ the runtime reads the request from that return value.
 
 An application is started with `run(app)`, which blocks the calling thread,
 drives `update` and `view` there, and returns the final model; a builder
-behind it lets the executor, backend, and clock be supplied, and is how tests
+behind it lets the executor, terminal, and clock be supplied, and is how tests
 replace them. Effects run behind an executor boundary the runtime owns, with
 Tokio as its one shipped implementation; no executor type appears in an
 application. An error the runtime cannot hand to the application — a draw

@@ -26,17 +26,21 @@ boundary be supplied:
 ```rust
 urushi_tui::Runtime::new(app)
     .executor(executor)   // where closures and futures run
-    .backend(backend)     // where frames go
+    .terminal(terminal)   // the Terminal implementation frames go to
     .clock(clock)         // what timers and intervals read
+    .mouse(true)          // a session option; see tui-terminal-ownership.md
     .run()?
 ```
 
 The builder is the one public surface for both a program that already has an
 executor — it passes a Tokio handle — and the test harness in
 [`tui-delivery-ordering.md`](tui-delivery-ordering.md), which passes a
-deterministic executor, an in-memory backend, and a controllable clock. Every
-boundary has the real default; a program that supplies none gets what `run`
-gives.
+deterministic executor, an in-memory terminal, and a controllable clock. Every
+boundary has the real default — the Ratatui-backed terminal over Crossterm,
+Tokio, the system clock — and a program that supplies none gets what `run`
+gives. The session options — raw mode, alternate screen, the input modes, mouse
+capture — sit on the same builder; their defaults are in
+[`tui-terminal-ownership.md`](tui-terminal-ownership.md).
 
 ### The executor boundary
 

@@ -37,9 +37,12 @@ Two things reach the frame that way:
   its reported origin is the cell the terminal cursor belongs on. The `Frame` of
   [`tui-terminal-ownership.md`](tui-terminal-ownership.md) carries the request
   for a draw; this is how an application states it.
-- **Foreign widgets.** A sized anchor's rectangle is where the runtime's
-  `Renderer` draws an embedded Ratatui widget, after the resolved cells are
-  written. A `StatefulWidget`'s state stays in the application's model.
+- **Foreign regions.** A sized anchor's rectangle is where a caller that holds
+  the backend's buffer draws something this crate does not produce — a chart,
+  a canvas, a third-party widget — after writing the resolved cells. That
+  caller is an application that owns its loop and draws an Urushi view into
+  its own buffer; the runtime's renderer serves the cursor anchor only, as
+  [`tui-terminal-ownership.md`](tui-terminal-ownership.md) records.
 
 Both are additive to the core: adding a key to a box moves no geometry,
 `resolve` keeps its signature, and a resolved view reports no anchor for a tree
@@ -167,8 +170,7 @@ cells. That is the right shape for a plain Ratatui application, which owns its
 `Rect` and wants a rectangle drawn into it. It is the wrong shape for the
 runtime, which needs the anchored rectangles from that same resolution and must resolve
 exactly once per frame; going through the widget would mean resolving twice, or
-resolving and then discarding what the cursor and the embedded widgets depend
-on.
+resolving and then discarding what the cursor depends on.
 
 So the `Renderer` consumes `ResolvedView` and its placements, and the widget
 stays public rather than being absorbed. The two share a cell-writing path
