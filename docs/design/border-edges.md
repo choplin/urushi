@@ -3,7 +3,9 @@
 Which edges of a border are drawn, how the glyph set and the four edge switches
 relate, and what each enabled edge contributes to the box. [`style-model.md`](../style-model.md)
 states the rule; the sizing rules that consume the frame's contribution are
-[`box-sizing.md`](box-sizing.md).
+[`box-sizing.md`](box-sizing.md). The lines a `Grid` draws between its cells
+follow these same edge rules but belong to the grid, not to the cells —
+[`grid.md`](grid.md).
 
 ## The rule
 
@@ -35,7 +37,10 @@ Each enabled edge contributes to the box as follows:
 - An enabled top or bottom edge contributes one row.
 - An enabled left or right edge contributes one column.
 - A corner glyph represents the intersection of two enabled incident edges, so
-  it is drawn only when both those edges are enabled.
+  it is drawn only when both those edges are enabled. A box states no glyph for
+  a line arriving from outside it: a corner is where two of its *own* edges
+  meet. Where lines from several boxes meet, the container that owns them
+  chooses the glyph, which is what a `Grid` does at each of its intersections.
 - The horizontal glyph repeats across the padded content width, and every
   emitted row has the same outer width: the padded content width plus the
   enabled vertical-edge columns.

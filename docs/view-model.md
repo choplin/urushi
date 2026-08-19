@@ -38,7 +38,7 @@ rectangle. `TextStyleProperty` converts into `BlockStyleProperty`; there is no
 conversion in the other direction, so no geometry property can be applied to a
 `TextStyle`.
 
-A view is a tree of four nodes:
+A view is a tree of five nodes:
 
 ```rust
 pub enum View {
@@ -46,6 +46,7 @@ pub enum View {
     Block(BlockStyle, Box<View>),
     Row(VerticalAlign, Vec<View>),
     Column(Align, Vec<View>),
+    Grid(GridStyle, Vec<Vec<View>>),
 }
 ```
 
@@ -53,11 +54,20 @@ pub enum View {
 - `Block` applies one `BlockStyle` around exactly one child.
 - `Row` places children side by side.
 - `Column` stacks children.
+- `Grid` lines cells up in columns and draws the lines between them.
 
-These are the four things terminal output does: carry text, put a box around
-something, place things beside each other, stack them. Components construct
-views through `View::text`, `View::block`, `View::row`, and `View::column`;
-there is one way to express each node.
+These are the five things terminal output does: carry text, put a box around
+something, place things beside each other, stack them, and line them up in
+columns. Components construct views through `View::text`, `View::block`,
+`View::row`, `View::column`, and `View::grid`; there is one way to express each
+node.
+
+`GridStyle` is the grid node's own style: a glyph set, the edges and separators
+it draws, an optional `Length` per column, and the padding its cells take. It
+holds no box geometry — a grid that needs a border of its own, a margin, or a
+stated size is placed inside a `Block`. What a grid computes, and why the lines
+between cells belong to it rather than to the cells, are defined in
+[`design/grid.md`](design/grid.md).
 
 Alignment belongs to the `Row` or `Column`, not to its children: a child cannot
 align itself inside a height that is only known once its siblings are measured.
@@ -131,6 +141,16 @@ children need more than the area, they shrink in a fixed order down to their
 floors. Distribution, the remainder rule, the cross axis, shrinking, and how a
 `Fill` reaches an area through auto ancestors are defined in
 [`design/area-sharing.md`](design/area-sharing.md).
+
+**How cells line up across rows.** A `Grid` decides one width per column and
+resolves every cell of that column under it, forming each column's claim from
+the cells beneath it — the kind from an optional `Length` on the column, the
+demand and the floor from the cells — and dividing its width by the same rule.
+It also draws its own outer edges and the lines between its cells, deriving
+each intersection's glyph from the lines that meet there, after every width is
+decided. The column claim, the meaning of a `Length` on a column, cell padding,
+and why the separators belong to the container are defined in
+[`design/grid.md`](design/grid.md).
 
 **What happens to content that does not fit.** The frame always closes at the
 used size; excess is absorbed by the content under a policy the application

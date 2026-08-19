@@ -5,7 +5,8 @@ them: distribution by `Length`, the remainder rule, the cross axis, shrinking
 when the children need more than the area, and how a `Fill` reaches an area
 through auto ancestors. [`view-model.md`](../view-model.md) summarizes this
 under "Sizing at a glance"; the clamp each child applies to its own share is
-[`box-sizing.md`](box-sizing.md).
+[`box-sizing.md`](box-sizing.md). A `Grid` divides its width by this same rule,
+over columns rather than over children — [`grid.md`](grid.md).
 
 ## The rule
 
@@ -61,6 +62,12 @@ iteration over numbers only, settled before any child is assembled. When even
 the floors exceed the area, the container resolves larger than its area and the
 degenerate safety net of [`box-sizing.md`](box-sizing.md) is what finally
 bounds it.
+
+A `Grid` column makes the same claim from a different place: its kind comes
+from an optional `Length` on the column, its demand and its floor from the
+cells beneath it. What the division and the shrink then do with that claim is
+unchanged — a column stating `Cells` shrinks last, and still shrinks when
+nothing else is left to give.
 
 A `Fill` length resolves against an area, so it needs one: an auto box with a
 `Fill` anywhere among its descendants spans its own available extent (through

@@ -69,6 +69,15 @@ than a minimum: content beyond it clips inside the frame. `measure` returns
 the *max-content* size. When the floor exceeds the cap, the floor wins, and
 the degenerate rules below apply.
 
+The clamp only caps: an area wider than a node never widens it. A node
+resolved below its available area keeps its own size and is placed by its
+parent's alignment, which is what makes a resolved size mean what the content
+needs rather than what it was offered. This holds for a text leaf as much as
+for a box — a leaf takes its own lines, reflowed or cut where the area is
+narrower than they are and unchanged where it is wider. `Fill` is the one
+length that reads an area as a size to take, which is why a box containing one
+spans its own extent.
+
 A minimum states the size below which the application's layout stops making
 sense; the implicit floor below it — the widest grapheme the box cannot
 split — is not exposed as a query. Bounds are absent by default; use generic
