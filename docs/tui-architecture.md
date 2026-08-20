@@ -208,12 +208,14 @@ highlighting, document layout, image rasterization, and other work that would
 make `update` or `view` too expensive, so that every key input can advance the
 logical model without starting heavy preparation for every intermediate state.
 
-The runtime supports one-shot work, long-lived work as a subscription, and
-keyed latest-only work for replaceable preparation. Whether a completion is
-still relevant is split: the runtime suppresses a completion only when it knows
-the execution was canceled or replaced; otherwise the application decides in
-`update`. The policies, the freshness rule, and the representative flows are
-defined in [`design/tui-effects.md`](design/tui-effects.md).
+The runtime supports one-shot work, work delayed on the runtime's clock,
+long-lived work as a subscription, and keyed latest-only work for replaceable
+preparation — a delay under a key being the debounce a live preview needs.
+Whether a completion is still relevant is split: the runtime suppresses a
+completion only when it knows the execution was canceled or replaced;
+otherwise the application decides in `update`. The policies, the freshness
+rule, and the representative flows are defined in
+[`design/tui-effects.md`](design/tui-effects.md).
 
 ## Rendering and runtime ownership
 

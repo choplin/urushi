@@ -21,6 +21,7 @@ intermediate state.
 The runtime must support at least these execution policies:
 
 - ordinary one-shot work whose completion is delivered in source order;
+- one-shot work delayed by a stated duration, timed by the runtime's `Clock`;
 - long-lived work represented as a subscription; and
 - keyed latest-only work for replaceable preparation.
 
@@ -37,7 +38,9 @@ What the runtime knows is replacement, and only replacement. A `*_latest`
 effect started under a `Key` that another `*_latest` effect is still running
 under replaces it: a future is dropped, which ends it; a closure that has not
 started is not started, and one already running runs to its end and has its
-completion discarded. Nothing else suppresses a completion. There is no
+completion discarded; an unfired delay is dropped, and its wait begins again
+from the replacement's duration, which is what makes `after_latest` a
+debounce. Nothing else suppresses a completion. There is no
 `Effect::cancel(key)`: an application that no longer wants a result either
 replaces the work or lets the completion reach `update` and reads it against
 the model, which is the check it needs anyway for a completion the runtime

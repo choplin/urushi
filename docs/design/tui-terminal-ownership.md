@@ -133,7 +133,7 @@ value it passes to the builder's `terminal`.
 ### Clock
 
 `Clock` is the runtime's one source of time — what `Subscription::interval`
-and any timer read, and what they wait on. It is a trait the runtime owns,
+and `Effect::after` read, and what they wait on. It is a trait the runtime owns,
 backed by Tokio's time by default and by a clock the test advances by hand in
 the harness. An application never reads it directly.
 

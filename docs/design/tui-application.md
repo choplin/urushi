@@ -42,6 +42,8 @@ executor type appearing in the application:
 | `Effect::future(future)` | asynchronous work, `Future<Output = Message> + Send + 'static` |
 | `Effect::perform_latest(key, work)` | `perform`, replaceable under `key` |
 | `Effect::future_latest(key, future)` | `future`, replaceable under `key` |
+| `Effect::after(delay, f)` | a message sent once `delay` has passed, `f: FnOnce(Instant) -> Message + Send + 'static` |
+| `Effect::after_latest(key, delay, f)` | `after`, replaceable under `key` |
 | `Effect::batch(effects)` | several effects started concurrently |
 | `Effect::shutdown()` | the request to stop the runtime |
 | `effect.map(f)` | the same effect with its message passed through `f: Fn(A) -> B + Send + Sync + 'static` |
@@ -53,6 +55,14 @@ that receives the first completion; there is no sequencing combinator.
 Two `*_latest` effects with the same `Key` are the same replaceable work:
 starting the second replaces the first, and the runtime suppresses the replaced
 completion under the freshness rule in [`tui-effects.md`](tui-effects.md).
+`after_latest` composes those two rules into debouncing: replacing an unfired
+timer restarts its wait, so an `update` that returns one on every keystroke
+fires once the keystrokes stop.
+
+`after` waits on the runtime's `Clock`, the same source of time
+`Subscription::interval` reads, which is what keeps a waiting application free
+of an executor of its own and lets a test drive the wait rather than sleep
+through it.
 
 Which executor runs a closure or polls a future is a runtime concern behind a
 replaceable boundary; the effect value names none.
@@ -68,7 +78,7 @@ from a source the application did not declare — terminal input included.
 | `Subscription::none()` | nothing |
 | `Subscription::input(f)` | terminal key and text input, `f: Fn(Input) -> Message + Send + Sync + 'static` |
 | `Subscription::surface(f)` | surface observations, `f: Fn(Surface) -> Message + Send + Sync + 'static` |
-| `Subscription::interval(period, f)` | a timer, `f: Fn(Instant) -> Message + Send + Sync + 'static` |
+| `Subscription::interval(key, period, f)` | a repeating timer under `key`, `f: Fn(Instant) -> Message + Send + Sync + 'static` |
 | `Subscription::stream(key, stream)` | an application-defined source that is a `Stream<Item = Message> + Send + 'static` |
 | `Subscription::run(key, f)` | an application-defined asynchronous source, `f: FnOnce(Sender<Message>) -> Fut + Send + 'static`, `Fut: Future<Output = ()> + Send` |
 | `Subscription::run_blocking(key, f)` | an application-defined blocking source, `f: FnOnce(Sender<Message>) + Send + 'static`, run on its own thread |
@@ -85,10 +95,12 @@ Every subscription has an identity, a `Key`. After each `update` the runtime
 reconciles the declaration against the sources it is running: a declared
 subscription whose key is running keeps running, one whose key is not running
 starts, and a running one whose key is no longer declared stops.
-Runtime-provided constructors derive the key themselves — `input` and
-`surface` are singletons and `interval` is keyed by its period — and an
-application-defined source is given its key by the application, so a key built
-from a model value restarts the source when that value changes. The mapping
+Runtime-provided constructors that can only have one source derive the key
+themselves: `input` and `surface` are singletons, and `signal` is keyed by the
+signal it handles. An `interval` is not one of those, so it is keyed by the
+name the application gives it together with its period; an application-defined
+source is given its key by the application outright, so a key built from a
+model value restarts the source when that value changes. The mapping
 function is not part of the identity: when a running subscription is declared
 again, messages from then on pass through the function of the most recent
 declaration.
@@ -191,6 +203,31 @@ Rejected:
 - **Closures only** — bubbletea's `Cmd`; async programs block a thread per
   effect or run their own executor beside the runtime.
 
+## Why a delay is an effect the runtime owns
+
+A wait that ends in a message is one-shot work whose result is a message,
+which is what an effect is; a source that keeps producing is a subscription.
+So `Effect::after` and `Subscription::interval` are the same distinction the
+rest of the vocabulary already makes, and neither can stand in for the other:
+an interval an application stops declaring after the first tick is a timer
+plus a flag in the model, and a chain of `after`s is an interval that drifts.
+
+What the alternative costs is the reason the runtime provides it at all. An
+application could write `Effect::future(async { sleep(d).await; message })`,
+and doing so would reach for an executor by name — the one dependency the
+effect vocabulary exists to keep out of applications — and would read a clock
+the runtime does not own, so the harness that advances time by hand could not
+advance that wait. A test of a debounce would have to sleep through it.
+
+Rejected:
+
+- **No delay constructor, applications sleep** — every waiting program grows an
+  executor dependency, and every test of one grows a real wait.
+- **A delay on `Subscription`** — `Subscription::timeout(key, delay, f)`,
+  stopped by no longer declaring it. It puts a one-shot value in the vocabulary
+  of things that live as long as they are declared, and the model has to carry
+  the flag that stops it.
+
 ## Why effects and subscriptions have `map`
 
 A parent program whose `Message` wraps a child's — `Message::Editor(editor::Message)` —
@@ -221,6 +258,28 @@ Rejected:
   str>` keeps the short spelling for the cases where a name is enough.
 - **A key type parameter on the runtime** — one more type on every runtime
   type, to gain a guarantee the type-plus-hash key already gives.
+
+## Why an interval is named by the application
+
+A key answers "is this the same source as the one already running". For the
+sources the runtime provides that is settled without asking: there is one
+terminal input, one surface, and one `SIGTERM`. There is no single timer.
+Keying an interval by its period alone would make two timers of the same
+period one source, so a program declaring a one-second clock and a one-second
+poll would lose one of them silently, to the rule that the latest
+declaration's mapper wins. The application knows which timers it has, so it
+names them.
+
+The period stays part of the identity alongside the name. Reconciliation's
+rule is that a declared key already running keeps running, and a timer whose
+period changed must not: without the period in the key, a program that speeds
+up its clock would keep the old period, and the runtime would need a
+per-source comparison that exists for no other source.
+
+Rejected: keying an interval by its period alone, and adding a rule that two
+of one period is a program error. The collision is silent at the only moment
+it matters, and a rule the runtime cannot state in a type is a rule programs
+break.
 
 ## Why input is a subscription and not always on
 

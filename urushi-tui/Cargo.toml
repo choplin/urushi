@@ -8,15 +8,16 @@ keywords = ["terminal", "tui", "ratatui"]
 categories = ["command-line-interface"]
 
 [dependencies]
+futures-core = { version = "0.3", optional = true }
 ratatui = { version = "0.29", default-features = false }
 urushi = { path = "../urushi", version = "=0.1.0" }
 
 [features]
 default = ["runtime"]
-# The full-screen TUI runtime. Empty until the runtime lands; a consumer that
-# only wants the Ratatui adapter sets `default-features = false` today and
-# keeps that spelling once the runtime brings its own dependencies.
-runtime = []
+# The full-screen TUI runtime: the application value, its effects and
+# subscriptions, and the machinery that drives them. A consumer that only wants
+# the Ratatui adapter sets `default-features = false`.
+runtime = ["dep:futures-core"]
 
 [[example]]
 name = "themed_ratatui"

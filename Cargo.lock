@@ -747,6 +747,7 @@ dependencies = [
 name = "urushi-tui"
 version = "0.1.0"
 dependencies = [
+ "futures-core",
  "ratatui",
  "urushi",
 ]
