@@ -22,6 +22,7 @@ pub enum View {
 pub struct GridStyle {
     border, border_top, border_right, border_bottom, border_left,
     border_column, border_row,
+    border_header: Option<bool>,
     border_foreground, border_background,
     columns: Vec<Option<Length>>,
     cell_padding: Sides,
@@ -83,6 +84,13 @@ contributes one row or one column, a disabled one contributes nothing.
 `border_column` and `border_row` each contribute one column or row between
 neighbours and never at the ends.
 
+`border_header` is the one exception, and it is about a row rather than about
+the lines. A grid that states it declares that its first row is a header, and
+the gap below that row leaves `border_row`'s hands in both directions: a rule
+below the header where no other gap carries one, or no rule below it where
+every other gap does. A grid that states nothing has no header, and its first
+gap is an ordinary gap.
+
 The glyph at an intersection is derived, not stated. Each intersection has four
 incident directions; which of them carry a line follows from the edge
 switches and from where the intersection sits, and the glyph — corner, tee,
@@ -109,6 +117,23 @@ or a cross belongs.
 Supplying the glyph per cell closes that, and is rejected below. Deriving it in
 the container closes it without adding a property, and removes the possibility
 of a disagreement: there is no second party stating a glyph for the same cell.
+
+## Why a header is a row rather than a line
+
+A table's ordinary shape is a rule below the header and nothing between the
+rows — the two are independent, so one switch cannot carry both. Making the
+extra switch a second kind of line would misplace it: the glyph, the colour,
+and the intersections are the same as every other horizontal rule, and the only
+thing that differs is *which gap* it falls in.
+
+What is actually new is the row. A header is a row the grid knows is one, and
+naming it that way is what lets the switch be a tri-state: unstated means there
+is no header, and the first gap is an ordinary gap. That distinction is what a
+plain `bool` cannot express, and it is load-bearing — without it a grid whose
+rows all carry rules could not withhold the one below its header.
+
+The grid still learns nothing about what a header contains. It does not style
+the row, repeat it, or exclude it from the column claims; the row is a row.
 
 ## Why a column carries a `Length`
 
@@ -182,3 +207,16 @@ cells share a column and the pass decides how wide it is.
   value over another is the patch semantics the style model excludes.
 
 - **Ragged rows padded by the grid.** Argued under "Why a grid is a rectangle".
+
+- **A separate line kind for the header rule.** It would state a second glyph
+  set, a second colour, and a second set of intersections for a line that is
+  drawn exactly like the others. The header rule differs in where it falls, not
+  in what it is.
+
+- **A `bool` header switch.** It cannot distinguish "there is no header" from
+  "there is a header and no rule below it", and the two differ whenever
+  `border_row` is enabled.
+
+- **A per-gap list of switches, symmetric with `columns`.** It expresses the
+  header case and much that no caller wants, at the cost of making the ordinary
+  grid state a vector whose length tracks its row count.

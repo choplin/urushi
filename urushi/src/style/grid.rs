@@ -41,6 +41,7 @@ pub struct GridStyle {
     border_left: bool,
     border_column: bool,
     border_row: bool,
+    border_header: Option<bool>,
     border_fg: Option<Color>,
     border_bg: Option<Color>,
     columns: Vec<Option<Length>>,
@@ -57,6 +58,7 @@ impl Default for GridStyle {
             border_left: true,
             border_column: true,
             border_row: true,
+            border_header: None,
             border_fg: None,
             border_bg: None,
             columns: Vec::new(),
@@ -82,6 +84,7 @@ impl GridStyle {
             GridStyleProperty::BorderLeft(enabled) => self.border_left = enabled,
             GridStyleProperty::BorderColumn(enabled) => self.border_column = enabled,
             GridStyleProperty::BorderRow(enabled) => self.border_row = enabled,
+            GridStyleProperty::BorderHeader(enabled) => self.border_header = Some(enabled),
             GridStyleProperty::BorderForeground(color) => self.border_fg = Some(color),
             GridStyleProperty::BorderBackground(color) => self.border_bg = Some(color),
             GridStyleProperty::Columns(columns) => self.columns = columns,
@@ -100,6 +103,7 @@ impl GridStyle {
             GridStylePropertyKey::BorderLeft => self.border_left = true,
             GridStylePropertyKey::BorderColumn => self.border_column = true,
             GridStylePropertyKey::BorderRow => self.border_row = true,
+            GridStylePropertyKey::BorderHeader => self.border_header = None,
             GridStylePropertyKey::BorderForeground => self.border_fg = None,
             GridStylePropertyKey::BorderBackground => self.border_bg = None,
             GridStylePropertyKey::Columns => self.columns = Vec::new(),
@@ -150,6 +154,19 @@ impl GridStyle {
     /// the outer edges apply instead.
     pub fn border_row(self, enabled: bool) -> Self {
         self.add(GridStyleProperty::BorderRow(enabled))
+    }
+
+    /// States that the first row is a header, and whether the line below it is
+    /// drawn.
+    ///
+    /// A grid that states nothing has no header row: every gap between two
+    /// rows follows [`border_row`](Self::border_row). Stating this marks the
+    /// first row as a header and takes that one gap out of `border_row`'s
+    /// hands, in either direction — a header rule above rows that carry none
+    /// between them, or rows that carry one between them below a header that
+    /// does not.
+    pub fn border_header(self, enabled: bool) -> Self {
+        self.add(GridStyleProperty::BorderHeader(enabled))
     }
 
     /// Sets the foreground color every line is drawn in.
@@ -216,6 +233,15 @@ impl GridStyle {
         self.border_row
     }
 
+    /// Returns whether the first row is a header and carries a line below it.
+    ///
+    /// `None` is a grid with no header row, whose first gap follows
+    /// [`is_border_row_enabled`](Self::is_border_row_enabled) like every
+    /// other.
+    pub const fn border_header_enabled(&self) -> Option<bool> {
+        self.border_header
+    }
+
     /// Returns the border foreground color instruction.
     pub const fn border_foreground_color(&self) -> Option<Color> {
         self.border_fg
@@ -267,6 +293,22 @@ mod tests {
     }
 
     #[test]
+    fn a_grid_states_nothing_about_a_header_until_it_has_one() {
+        assert_eq!(GridStyle::new().border_header_enabled(), None);
+        assert_eq!(
+            GridStyle::new()
+                .border_header(false)
+                .border_header_enabled(),
+            Some(false),
+            "stating no rule below the header is not the same as having no header"
+        );
+        assert_eq!(
+            GridStyle::new().border_header(true).border_header_enabled(),
+            Some(true)
+        );
+    }
+
+    #[test]
     fn a_column_past_the_stated_list_is_auto() {
         let style = GridStyle::new().columns([Some(Length::Cells(4)), None]);
 
@@ -280,6 +322,7 @@ mod tests {
         let stated = GridStyle::new()
             .border(Border::NORMAL)
             .border_column(false)
+            .border_header(true)
             .border_foreground(Color::RED)
             .columns([Some(Length::Cells(4))])
             .cell_padding((0, 1));
@@ -289,6 +332,7 @@ mod tests {
                 .clone()
                 .remove(GridStylePropertyKey::Border)
                 .remove(GridStylePropertyKey::BorderColumn)
+                .remove(GridStylePropertyKey::BorderHeader)
                 .remove(GridStylePropertyKey::BorderForeground)
                 .remove(GridStylePropertyKey::Columns)
                 .remove(GridStylePropertyKey::CellPadding),

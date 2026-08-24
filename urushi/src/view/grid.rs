@@ -74,6 +74,18 @@ const fn box_style(cell: &View) -> Option<&BlockStyle> {
     }
 }
 
+/// Whether the gap between row `gap` and row `gap + 1` carries a line.
+///
+/// Every gap follows `border_row`, except the first one of a grid that states
+/// a header: a header row is the one row whose line below it is a statement
+/// about the header rather than about the rows in general.
+pub(super) fn draws_row_rule(style: &GridStyle, gap: usize) -> bool {
+    match style.border_header_enabled() {
+        Some(enabled) if gap == 0 => enabled,
+        _ => style.is_border_row_enabled(),
+    }
+}
+
 /// The columns and rows a grid's own lines occupy.
 ///
 /// An enabled outer edge contributes one column or one row; an enabled
@@ -83,16 +95,21 @@ pub(super) fn line_extent(style: &GridStyle, columns: usize, rows: usize) -> Siz
     if style.border_kind().is_none() {
         return Size::ZERO;
     }
-    let between = |enabled: bool, count: usize| {
-        if enabled { count.saturating_sub(1) } else { 0 }
+    let columns_between = if style.is_border_column_enabled() {
+        columns.saturating_sub(1)
+    } else {
+        0
     };
+    let rows_between = (0..rows.saturating_sub(1))
+        .filter(|gap| draws_row_rule(style, *gap))
+        .count();
     Size::new(
         usize::from(style.is_border_left_enabled())
             + usize::from(style.is_border_right_enabled())
-            + between(style.is_border_column_enabled(), columns),
+            + columns_between,
         usize::from(style.is_border_top_enabled())
             + usize::from(style.is_border_bottom_enabled())
-            + between(style.is_border_row_enabled(), rows),
+            + rows_between,
     )
 }
 
@@ -206,7 +223,39 @@ mod tests {
             Size::new(2, 2),
             "a single cell has no gap for a separator"
         );
+        assert_eq!(
+            line_extent(
+                &bordered.clone().border_row(false).border_header(true),
+                3,
+                4
+            ),
+            Size::new(4, 3),
+            "a header rule occupies its gap where no other gap carries one"
+        );
+        assert_eq!(
+            line_extent(&bordered.clone().border_header(false), 3, 4),
+            Size::new(4, 4),
+            "and a header without one takes its gap back from border_row"
+        );
         assert_eq!(line_extent(&bordered, 0, 0), Size::new(2, 2));
+    }
+
+    #[test]
+    fn a_stated_header_owns_the_first_gap_and_only_that_one() {
+        let plain = GridStyle::new().border(Border::NORMAL).border_row(false);
+        let ruled = GridStyle::new().border(Border::NORMAL);
+
+        assert!(!draws_row_rule(&plain, 0), "no header stated, no rule");
+        assert!(draws_row_rule(&plain.clone().border_header(true), 0));
+        assert!(
+            !draws_row_rule(&plain.clone().border_header(true), 1),
+            "the statement is about the header, not about the rows below it"
+        );
+        assert!(
+            !draws_row_rule(&ruled.clone().border_header(false), 0),
+            "a header that draws none takes its gap out of border_row's hands"
+        );
+        assert!(draws_row_rule(&ruled.border_header(false), 1));
     }
 
     #[test]

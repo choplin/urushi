@@ -416,7 +416,7 @@ fn grid_rect(sized: &Sized<'_>) -> Rect {
     }
     let mut body = body.into_iter();
     for (index, height) in heights.iter().enumerate() {
-        if index > 0 && style.is_border_row_enabled() {
+        if index > 0 && grid::draws_row_rule(style, index - 1) {
             rect.rows.push(rule_row(
                 &border,
                 &segments,
@@ -510,13 +510,14 @@ fn bands(
     let drawn = |enabled: fn(&GridStyle) -> bool| lines.is_some_and(|(_, style)| enabled(style));
     let left = usize::from(drawn(GridStyle::is_border_left_enabled));
     let rule = usize::from(drawn(GridStyle::is_border_column_enabled));
+    let row_rule = |gap: usize| lines.is_some_and(|(_, style)| grid::draws_row_rule(style, gap));
 
     let mut out = Vec::new();
     let mut anchors = Vec::new();
     let mut top = 0;
     for (index, (cells, height)) in rows.iter().zip(heights).enumerate() {
         if index > 0 {
-            top += usize::from(drawn(GridStyle::is_border_row_enabled));
+            top += usize::from(row_rule(index - 1));
         }
         let rects: Vec<Rect> = cells
             .iter()

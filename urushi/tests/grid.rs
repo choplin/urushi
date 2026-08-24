@@ -475,3 +475,57 @@ fn an_anchor_cell_is_placed_by_its_own_alignment_like_any_box() {
         "the column is 14 wide and the box takes 4 of them, aligned right"
     );
 }
+
+#[test]
+fn a_stated_header_decides_the_first_gap_and_border_row_the_rest() {
+    let header_only = View::grid(
+        GridStyle::new()
+            .border(Border::NORMAL)
+            .cell_padding((0, 1))
+            .border_row(false)
+            .border_header(true),
+        [
+            [text("id"), text("name")],
+            [text("1"), text("urushi")],
+            [text("2"), text("noctui")],
+        ],
+    );
+
+    assert_eq!(
+        rows(&header_only, Available::NONE),
+        vec![
+            "┌────┬────────┐",
+            "│ id │ name   │",
+            "├────┼────────┤",
+            "│ 1  │ urushi │",
+            "│ 2  │ noctui │",
+            "└────┴────────┘",
+        ],
+        "one rule below the header, none between the rows below it"
+    );
+
+    let body_only = View::grid(
+        GridStyle::new()
+            .border(Border::NORMAL)
+            .cell_padding((0, 1))
+            .border_header(false),
+        [
+            [text("id"), text("name")],
+            [text("1"), text("urushi")],
+            [text("2"), text("noctui")],
+        ],
+    );
+
+    assert_eq!(
+        rows(&body_only, Available::NONE),
+        vec![
+            "┌────┬────────┐",
+            "│ id │ name   │",
+            "│ 1  │ urushi │",
+            "├────┼────────┤",
+            "│ 2  │ noctui │",
+            "└────┴────────┘",
+        ],
+        "and the header keeps its gap even when every other gap carries a rule"
+    );
+}

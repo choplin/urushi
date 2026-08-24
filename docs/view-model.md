@@ -65,7 +65,8 @@ in columns. Components construct views through `View::text`, `View::block`,
 node.
 
 `GridStyle` is the grid node's own style: a glyph set, the edges and separators
-it draws, an optional `Length` per column, and the padding its cells take. It
+it draws, whether its first row is a header and carries a rule below it, an
+optional `Length` per column, and the padding its cells take. It
 holds no box geometry — a grid that needs a border of its own, a margin, or a
 stated size is placed inside a `Block`. What a grid computes, and why the lines
 between cells belong to it rather than to the cells, are defined in

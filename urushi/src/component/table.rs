@@ -1,8 +1,7 @@
 //! Renderer-neutral tables with an independent public model.
 
-use crate::text::{PrintableLines, PrintableText, wrap_text};
 use crate::{
-    Align, BlockStyle, BlockStylePropertyKey, Border, TableRole, TextStyle, VerticalAlign, View,
+    BlockStyle, BlockStylePropertyKey, Border, GridStyle, Length, TableRole, TextStyle, View,
 };
 
 /// Which row of a table a cell belongs to.
@@ -83,9 +82,11 @@ impl<'a> TableCell<'a> {
 ///     .style_func(numbers_right);
 /// ```
 ///
-/// A cell is a block, so the hook returns a [`BlockStyle`]. Only its colors,
-/// text modifiers, and alignment are used; the geometry — padding, dimensions,
-/// border, and margin — is supplied by the table, which owns layout.
+/// A cell is a block, so the hook returns a [`BlockStyle`]. Its colors, text
+/// modifiers, alignment, and padding are used; a cell that states its own
+/// padding replaces the table's for that cell, and its column is as wide as it
+/// needs. The rest of the geometry — border, margin, and stated sizes — is
+/// dropped, because the grid the table composes owns layout.
 ///
 /// The hook is a function pointer rather than a boxed closure, which keeps
 /// [`TableStyle`] `Clone` and comparable.
@@ -242,8 +243,8 @@ pub struct TableStyle {
     border_header: bool,
     border_column: bool,
     border_row: bool,
-    padding: usize,
-    width: Option<usize>,
+    padding: u16,
+    width: Option<u16>,
     style_func: TableStyleFunc,
 }
 
@@ -391,31 +392,36 @@ impl TableStyle {
     /// Sets the horizontal padding applied to both sides of every cell.
     #[must_use]
     pub const fn padding(mut self, padding: u16) -> Self {
-        self.padding = padding as usize;
+        self.padding = padding;
         self
     }
 
-    /// Constrains the total composed width, in terminal cells.
+    /// States the total width the table takes, in terminal cells.
     ///
-    /// Columns are widened evenly when the natural table is narrower, and the
-    /// widest column is narrowed — wrapping its content — when it is wider. A
-    /// column never shrinks below one content cell plus its padding, so a
-    /// constraint narrower than that minimum still overflows.
+    /// A total width is a statement about the box the table sits in, so
+    /// [`view`](Self::view) puts the grid in one: a block of exactly this
+    /// width. What the grid then does with it is a statement about columns,
+    /// and the vocabulary for "take a share of what is there" is
+    /// [`Length::Fill`]. Every column takes an equal share, which is why a
+    /// width much wider than the content can leave a short column wider than a
+    /// long one, and a width narrower than the content narrows every column
+    /// rather than only the widest.
     ///
-    /// Content that still does not fit its column is truncated to the column's
-    /// cells, so every composed line stays the same width. A column one cell
-    /// wide therefore drops a two-cell character entirely rather than letting
-    /// it break the frame.
+    /// Nothing is measured while composing. The columns and the lines between
+    /// them are decided together when the view resolves, so they cannot
+    /// disagree, and a column floors at the narrowest grapheme it must show:
+    /// a table given less than its floor is as wide as that floor, wrapping
+    /// its content rather than dropping it.
     ///
-    /// Surplus width levels the columns toward equal width rather than scaling
-    /// them in proportion to their content, so a constraint much wider than the
-    /// content can leave a short column wider than a long one.
+    /// Without a stated width the table is as wide as its content, and an area
+    /// narrower than that shrinks it by the same rule. This states the width
+    /// for a caller who wants one regardless of the area.
     ///
     /// The width is a `u16` for the same reason [`BlockStyle::width`] is: a
     /// terminal dimension, not an arbitrary count.
     #[must_use]
     pub const fn width(mut self, width: u16) -> Self {
-        self.width = Some(width as usize);
+        self.width = Some(width);
         self
     }
 
@@ -428,9 +434,16 @@ impl TableStyle {
 
     /// Composes table data into a renderer-neutral view.
     ///
-    /// A cell style contributes its colors, text modifiers, and alignment. Its
-    /// geometry — border, padding, width, and height — is replaced by the
-    /// table's, because the table owns layout.
+    /// The result is one [`View::Grid`]: the table states which cells share a
+    /// column and which lines are drawn, and
+    /// [`resolve`](crate::resolve) decides every width, every wrap, and the
+    /// glyph at every intersection. Nothing here is measured, so a table
+    /// re-fitted to a narrower area shrinks its columns and its lines
+    /// together.
+    ///
+    /// A cell style contributes its colors, text modifiers, alignment, and
+    /// padding. The rest of its geometry — border, margin, and stated sizes —
+    /// is dropped, because the grid owns layout.
     pub fn view(&self, table: &Table) -> View {
         if table.is_hidden() {
             return View::empty();
@@ -445,171 +458,83 @@ impl TableStyle {
         }
 
         let has_headers = !table.headers.is_empty();
-        let widths = self.column_widths(table, columns, rows);
-        self.compose(table, &widths, rows, has_headers)
-    }
-
-    /// Composes the visible rows into a view.
-    ///
-    /// Row selection happens before this point, so a future vertical viewport
-    /// only has to narrow `rows` without changing composition.
-    fn compose(
-        &self,
-        table: &Table,
-        widths: &[usize],
-        rows: &[Vec<String>],
-        has_headers: bool,
-    ) -> View {
-        let mut lines = Vec::new();
-
-        if self.border_top {
-            lines.push(self.rule(
-                widths,
-                self.border.top_left,
-                self.border.top,
-                self.border.middle_top,
-                self.border.top_right,
-            ));
-        }
-
+        let mut cells = Vec::with_capacity(rows.len() + usize::from(has_headers));
         if has_headers {
-            lines.push(self.content_row(&table.headers, widths, TableRow::Header));
-            if self.border_header && !rows.is_empty() {
-                lines.push(self.separator(widths));
-            }
+            cells.push(self.cell_row(&table.headers, columns, TableRow::Header));
         }
-
         for (index, row) in rows.iter().enumerate() {
-            lines.push(self.content_row(row, widths, TableRow::Body(index)));
-            if self.border_row && index + 1 < rows.len() {
-                lines.push(self.separator(widths));
-            }
+            cells.push(self.cell_row(row, columns, TableRow::Body(index)));
         }
 
-        if self.border_bottom {
-            lines.push(self.rule(
-                widths,
-                self.border.bottom_left,
-                self.border.bottom,
-                self.border.middle_bottom,
-                self.border.bottom_right,
-            ));
+        let grid = View::grid(self.grid_style(columns, has_headers), cells);
+        match self.width {
+            // A total width is a statement about the box the table is in, not
+            // about any one column; see `width`.
+            Some(width) => View::block(BlockStyle::new().width(Length::Cells(width)), grid),
+            None => grid,
         }
-
-        View::column(Align::Left, lines)
     }
 
-    /// Builds one horizontal rule from its corner, fill, and junction glyphs.
-    fn rule(&self, widths: &[usize], left: char, fill: char, junction: char, right: char) -> View {
-        let mut text = String::new();
-        if self.border_left {
-            text.push(left);
-        }
-        for (index, width) in widths.iter().enumerate() {
-            for _ in 0..*width {
-                text.push(fill);
-            }
-            if self.border_column && index + 1 < widths.len() {
-                text.push(junction);
-            }
-        }
-        if self.border_right {
-            text.push(right);
-        }
-        View::text(text, self.border_style.clone())
-    }
-
-    /// Builds the rule drawn between two rows.
-    fn separator(&self, widths: &[usize]) -> View {
-        self.rule(
-            widths,
-            self.border.middle_left,
-            self.border.middle_horizontal,
-            self.border.middle,
-            self.border.middle_right,
-        )
-    }
-
-    /// Lays one row of cells out as a row of blocks.
+    /// The grid style this table's policy describes.
     ///
-    /// Every cell is a block: the table supplies the column width, the padding,
-    /// and the row height, and the cell style supplies the alignment applied
-    /// inside them. The table implements no alignment of its own.
-    fn content_row(&self, cells: &[String], widths: &[usize], row: TableRow) -> View {
-        let blocks: Vec<(BlockStyle, Vec<String>)> = widths
-            .iter()
-            .enumerate()
-            .map(|(column, width)| {
+    /// `border_header` is stated only where there is a header row to state it
+    /// about: without one, the first gap is an ordinary gap between two body
+    /// rows and follows `border_row` like every other.
+    fn grid_style(&self, columns: usize, has_headers: bool) -> GridStyle {
+        let mut style = GridStyle::new()
+            .border(self.border)
+            .border_top(self.border_top)
+            .border_bottom(self.border_bottom)
+            .border_left(self.border_left)
+            .border_right(self.border_right)
+            .border_column(self.border_column)
+            .border_row(self.border_row)
+            .cell_padding((0, self.padding));
+        if has_headers {
+            style = style.border_header(self.border_header);
+        }
+        if let Some(color) = self.border_style.foreground_color() {
+            style = style.border_foreground(color);
+        }
+        if let Some(color) = self.border_style.background_color() {
+            style = style.border_background(color);
+        }
+        // A stated total width is spent on the columns, which is the only
+        // place a grid has to put it; see `width`.
+        if self.width.is_some() {
+            style = style.columns(std::iter::repeat_n(Some(Length::Fill(1)), columns));
+        }
+        style
+    }
+
+    /// Builds one row of cells, padding a short row out to the column count.
+    ///
+    /// A grid is a rectangle and supplies no cell of its own, so the empty
+    /// cell of a ragged row is composed here, where the table's own cell style
+    /// is known.
+    fn cell_row(&self, cells: &[String], columns: usize, row: TableRow) -> Vec<View> {
+        (0..columns)
+            .map(|column| {
                 let text = cells.get(column).map_or("", String::as_str);
-                let style = self.cell_style_at(TableCell { text, row, column });
-                (style, self.cell_lines(text, *width))
+                self.cell(TableCell { text, row, column })
             })
-            .collect();
-        let height = blocks
-            .iter()
-            .map(|(_, lines)| lines.len())
-            .max()
-            .unwrap_or(1);
-
-        let mut children = Vec::with_capacity(blocks.len() * 2 + 2);
-        if self.border_left {
-            children.push(self.vertical_rule(self.border.left, height));
-        }
-        for (column, ((style, lines), width)) in blocks.into_iter().zip(widths).enumerate() {
-            children.push(self.cell_block(style, lines, *width, height));
-            if self.border_column && column + 1 < widths.len() {
-                children.push(self.vertical_rule(self.border.left, height));
-            }
-        }
-        if self.border_right {
-            children.push(self.vertical_rule(self.border.right, height));
-        }
-
-        View::row(VerticalAlign::Top, children)
-    }
-
-    /// Builds one column rule, repeated over the height of its row.
-    fn vertical_rule(&self, glyph: char, height: usize) -> View {
-        let text = std::iter::repeat_n(glyph.to_string(), height)
-            .collect::<Vec<_>>()
-            .join("\n");
-        View::text(text, self.border_style.clone())
-    }
-
-    /// Fits one cell's text to its column, wrapping and then clamping.
-    ///
-    /// `wrap_text` still emits a grapheme wider than the requested width when
-    /// that grapheme starts the line, so a wide character in a narrow column
-    /// would otherwise push the row past the frame. Clamping here keeps every
-    /// composed line the same width; placing the fitted text is the block's job.
-    fn cell_lines(&self, text: &str, width: usize) -> Vec<String> {
-        let inner = self.content_width(width);
-        wrap_text(PrintableLines::new(text), inner)
-            .iter()
-            .map(|line| PrintableText::new(line).truncate(inner).as_str().to_owned())
             .collect()
     }
 
-    /// Wraps one cell's fitted lines in the block that positions them.
-    fn cell_block(
-        &self,
-        style: BlockStyle,
-        lines: Vec<String>,
-        width: usize,
-        height: usize,
-    ) -> View {
-        let mut block = style
+    /// Wraps one cell's text in the block that carries its style.
+    fn cell(&self, cell: TableCell<'_>) -> View {
+        let style = self
+            .cell_style_at(cell)
             .remove(BlockStylePropertyKey::Border)
             .remove(BlockStylePropertyKey::Margin)
+            .remove(BlockStylePropertyKey::Width)
+            .remove(BlockStylePropertyKey::Height)
+            .remove(BlockStylePropertyKey::MinWidth)
+            .remove(BlockStylePropertyKey::MinHeight)
             .remove(BlockStylePropertyKey::MaxWidth)
-            .remove(BlockStylePropertyKey::MaxHeight)
-            .padding((0, self.padding as u16))
-            .height(height as u16);
-        if self.content_width(width) > 0 {
-            block = block.width(width as u16);
-        }
-        let text = View::text(lines.join("\n"), block.text().clone());
-        View::block(block, text)
+            .remove(BlockStylePropertyKey::MaxHeight);
+        let text = View::text(cell.text.to_owned(), style.text().clone());
+        View::block(style, text)
     }
 
     /// Resolves one cell's style from the hook, falling back to its role.
@@ -618,59 +543,6 @@ impl TableStyle {
             TableRow::Header => self.header.clone(),
             _ => self.cell.clone(),
         })
-    }
-
-    /// Returns the content cells available inside one column.
-    const fn content_width(&self, width: usize) -> usize {
-        width.saturating_sub(self.padding * 2)
-    }
-
-    /// Returns the narrowest a column may become.
-    const fn minimum_width(&self) -> usize {
-        self.padding * 2 + 1
-    }
-
-    /// Computes each column's total width, honoring the width constraint.
-    fn column_widths(&self, table: &Table, columns: usize, rows: &[Vec<String>]) -> Vec<usize> {
-        let mut widths: Vec<usize> = (0..columns)
-            .map(|column| {
-                let header = table.headers.get(column);
-                let natural = rows
-                    .iter()
-                    .filter_map(|row| row.get(column))
-                    .chain(header)
-                    .map(|cell| natural_width(cell))
-                    .max()
-                    .unwrap_or_default();
-                natural + self.padding * 2
-            })
-            .collect();
-
-        let Some(target) = self.width else {
-            return widths;
-        };
-
-        let frame = usize::from(self.border_left)
-            + usize::from(self.border_right)
-            + if self.border_column { columns - 1 } else { 0 };
-        let mut total = widths.iter().sum::<usize>() + frame;
-
-        while total < target {
-            let Some(index) = index_of_min(&widths) else {
-                break;
-            };
-            widths[index] += 1;
-            total += 1;
-        }
-        while total > target {
-            let Some(index) = index_of_max(&widths, self.minimum_width()) else {
-                break;
-            };
-            widths[index] -= 1;
-            total -= 1;
-        }
-
-        widths
     }
 }
 
@@ -683,38 +555,14 @@ fn column_count(rows: &[Vec<String>], headers: usize) -> usize {
         .unwrap_or_default()
 }
 
-/// Returns the widest line of a possibly multi-line cell.
-fn natural_width(cell: &str) -> usize {
-    cell.lines()
-        .map(|line| PrintableText::new(line).width())
-        .max()
-        .unwrap_or_default()
-}
-
-/// Returns the index of the narrowest column, preferring the leftmost.
-fn index_of_min(widths: &[usize]) -> Option<usize> {
-    widths
-        .iter()
-        .enumerate()
-        .min_by_key(|(index, width)| (**width, *index))
-        .map(|(index, _)| index)
-}
-
-/// Returns the index of the widest column that may still shrink.
-fn index_of_max(widths: &[usize], minimum: usize) -> Option<usize> {
-    widths
-        .iter()
-        .enumerate()
-        .filter(|(_, width)| **width > minimum)
-        .max_by_key(|(index, width)| (**width, std::cmp::Reverse(*index)))
-        .map(|(index, _)| index)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::test_support::{plain_exact as plain, plain_rows, style_at};
-    use crate::{Color, ComponentStyles, SemanticTokens, measure};
+    use crate::{
+        Align, Available, Color, ComponentStyles, PrintableText, SemanticTokens, StyledGrapheme,
+        VerticalAlign, measure, resolve,
+    };
 
     fn styles() -> ComponentStyles {
         ComponentStyles::from_tokens(&SemanticTokens {
@@ -880,21 +728,26 @@ mod tests {
     }
 
     #[test]
-    fn a_width_constraint_keeps_cjk_rows_rectangular() {
-        // A column narrower than one wide grapheme is the case `wrap_text`
-        // alone does not handle: it emits the grapheme anyway rather than
-        // splitting it. The composed row must still match the frame.
+    fn a_width_constraint_narrower_than_a_grapheme_keeps_rows_rectangular() {
+        // A column narrower than one wide grapheme is where a constraint runs
+        // out: the grapheme cannot be split, so the column stops at it. The
+        // grid widens past the constraint rather than dropping the content,
+        // and every row still matches the frame — the table composes no width
+        // of its own, so its lines and its cells cannot disagree.
         let table = Table::new().headers(["A", "B"]).row(["日本語", "x"]);
-        let narrow = styles().table().clone().width(9);
-        let view = narrow.view(&table);
+        let view = styles().table().clone().width(9).view(&table);
 
-        for row in plain_rows(&view) {
-            assert_eq!(PrintableText::new(&row).width(), 9);
-        }
         assert_eq!(
-            plain_rows(&view)[3],
-            "│   │ x │",
-            "a cell too narrow for its content drops it rather than overflowing"
+            plain(&view),
+            "\
+┌────┬───┐
+│ A  │ B │
+├────┼───┤
+│ 日 │ x │
+│ 本 │   │
+│ 語 │   │
+└────┴───┘",
+            "the column floors at one wide grapheme and wraps the rest"
         );
 
         let padded = styles()
@@ -903,9 +756,14 @@ mod tests {
             .padding(0)
             .width(5)
             .view(&Table::new().row(["日本", "ab"]));
-        for row in plain_rows(&padded) {
-            assert_eq!(PrintableText::new(&row).width(), 5);
-        }
+        let widths: Vec<usize> = plain_rows(&padded)
+            .iter()
+            .map(|row| PrintableText::new(row).width())
+            .collect();
+        assert!(
+            widths.iter().all(|width| *width == widths[0]),
+            "rectangular at its floor: {widths:?}"
+        );
     }
 
     #[test]
@@ -1079,7 +937,7 @@ mod tests {
     }
 
     #[test]
-    fn a_hook_style_box_model_does_not_change_layout() {
+    fn a_hook_style_keeps_its_padding_and_loses_the_rest_of_the_box() {
         fn boxed(_: TableCell<'_>) -> Option<BlockStyle> {
             Some(
                 BlockStyle::new()
@@ -1090,13 +948,22 @@ mod tests {
             )
         }
 
-        let plain_default = plain(&styles().table().view(&sample()));
         let table_style = styles().table().clone().style_func(boxed);
 
+        // A cell that states its own padding replaces the grid's rather than
+        // adding to it, and its column is as wide as it needs — the rule
+        // `docs/design/grid.md` states, reached here through the hook. The
+        // frame, the stated sizes, and the margin are still the grid's to
+        // decide, so none of them survive.
         assert_eq!(
             plain(&table_style.view(&sample())),
-            plain_default,
-            "the table owns the box model; a cell style's box properties are ignored"
+            "\
+┌──────────┬──────────────┐
+│   Name   │   Location   │
+├──────────┼──────────────┤
+│   Kini   │   New York   │
+│   Iris   │   Paris      │
+└──────────┴──────────────┘"
         );
     }
 
@@ -1232,6 +1099,68 @@ mod tests {
             table_style.border_glyph_style(),
             &TextStyle::new().underline()
         );
+    }
+
+    /// A table whose natural width is 41 cells: the case #22 reproduced.
+    fn wide() -> Table {
+        Table::new()
+            .headers(["N", "Description"])
+            .row(["a", "the quick brown fox jumps again!!"])
+            .row(["b", "over the lazy dog"])
+    }
+
+    #[test]
+    fn an_area_narrower_than_the_table_shrinks_its_columns_and_its_lines() {
+        let view = styles().table().view(&wide());
+        assert_eq!(measure(&view).width(), 41, "the natural width");
+
+        let rows: Vec<String> = resolve(&view, Available::columns(18))
+            .rows()
+            .iter()
+            .map(|row| row.iter().map(StyledGrapheme::symbol).collect())
+            .collect();
+
+        for row in &rows {
+            assert_eq!(
+                PrintableText::new(row).width(),
+                18,
+                "every row fits the area: {row}"
+            );
+        }
+        // The lines and the cells were decided together, so the verticals of
+        // a rule land on the column boundaries of the rows around it.
+        let boundaries = |row: &str| -> Vec<usize> {
+            PrintableText::new(row)
+                .as_str()
+                .chars()
+                .enumerate()
+                .filter(|(_, glyph)| "│┼┬┴├┤┌┐└┘".contains(*glyph))
+                .map(|(index, _)| index)
+                .collect()
+        };
+        let expected = boundaries(&rows[0]);
+        for row in &rows {
+            assert_eq!(boundaries(row), expected, "columns line up: {row}");
+        }
+    }
+
+    #[test]
+    fn an_area_wider_than_the_table_does_not_widen_it() {
+        let view = styles().table().view(&wide());
+
+        let rows: Vec<String> = resolve(&view, Available::columns(200))
+            .rows()
+            .iter()
+            .map(|row| row.iter().map(StyledGrapheme::symbol).collect())
+            .collect();
+
+        for row in &rows {
+            assert_eq!(
+                PrintableText::new(row).width(),
+                41,
+                "an area only caps a table; it never pads one out: {row}"
+            );
+        }
     }
 
     #[test]
