@@ -18,10 +18,12 @@ use urushi::{Available, BlockStyle, ResolvedView, StyledGrapheme, View, resolve}
 /// initialize a terminal, read events, or own terminal I/O. Text in the view is
 /// plain; ANSI escape sequences are not interpreted inside a Ratatui buffer.
 ///
-/// The target `Rect` bounds the view as an outer clip, not as a layout
-/// constraint the view is re-fitted into: the view resolves at its intrinsic
-/// size and whatever falls outside the `Rect` is cropped, exactly as a terminal
-/// width crops the ANSI backend.
+/// The target `Rect` supplies the width and height constraints for layout: the
+/// view is resolved under those constraints before its cells are written. Its
+/// flexible dimensions and overflow therefore follow the layout rules for the
+/// target area instead of resolving at the intrinsic size and being cropped
+/// afterward. Any part of the target outside the caller's buffer is masked
+/// separately during cell writing.
 ///
 /// The widget keeps the cells and discards the anchors, so an anchor in the
 /// view draws as the blanks it resolved to. A caller that needs them resolves
@@ -55,9 +57,9 @@ impl Widget for &ViewWidget<'_> {
 /// A stateless Ratatui widget backed by an Urushi [`BlockStyle`].
 ///
 /// This is the single-block case of [`ViewWidget`], the counterpart of
-/// [`BlockStyle::render`]: both resolve `Block(style, Text(content, …))`, so a
-/// block drawn here and the same block rendered to ANSI differ only by the crop
-/// the target `Rect` imposes.
+/// [`BlockStyle::render`]: both resolve `Block(style, Text(content, …))`.
+/// `BlockStyle::render` resolves at the block's intrinsic size, while this
+/// widget resolves under the target `Rect`'s width and height constraints.
 #[derive(Debug, Clone, Copy)]
 pub struct RatatuiWidget<'a> {
     content: &'a str,
