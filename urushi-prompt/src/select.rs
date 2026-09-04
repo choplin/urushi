@@ -609,7 +609,12 @@ mod tests {
     }
 
     impl Renderer for RecordingRenderer {
-        fn draw(&mut self, view: &PromptView) -> io::Result<()> {
+        fn draw(
+            &mut self,
+            view: &PromptView,
+            _start: crate::PromptStart,
+            _drawing_columns: u16,
+        ) -> io::Result<()> {
             self.views.push(view.clone());
             Ok(())
         }

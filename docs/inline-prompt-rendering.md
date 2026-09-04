@@ -25,10 +25,11 @@ Inline prompt rendering must:
 
 A prompt draws inline. It never enters the alternate screen and never clears
 the terminal. It owns a *region*: a run of rows anchored at a saved cursor
-position, starting at column zero and spanning the full terminal width. Only
-rows inside that region may be erased or rewritten. Terminal content above the
-origin and content below the last materialized row belong to whatever produced
-it.
+position. The caller chooses whether that origin is on a new line, at column
+zero of the current line, or at a supplied current position. It may also cap the
+drawing width. Only the owned suffix of rows inside that region may be erased
+or rewritten. Terminal content above the origin, to the left of a non-zero
+origin, and below the last materialized row belongs to whatever produced it.
 
 Three rules govern the region.
 
@@ -145,9 +146,9 @@ The plan is a list of commands drawn from the prompt's own small vocabulary —
 cursor visibility, save and restore of the origin, relative movement, clear
 line, line feed, and write — and never anything outside it: no alternate
 screen, no full-screen clear, no absolute cursor addressing. Every row is
-handled uniformly — position, clear, write — because the region starts at
-column zero and spans the full width, so no row contains content that is not
-the prompt's.
+handled uniformly — position, clear, write — from the region's selected left
+edge. A narrower drawing width changes layout but does not narrow the owned
+suffix that clearing and recovery may touch.
 
 The plan carries no per-command state. On success the executor adopts
 `plan.next`; on failure at command *k*, the state is the fold of the commands

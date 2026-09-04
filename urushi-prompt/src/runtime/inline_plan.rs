@@ -8,12 +8,10 @@
 //!
 //! # The region's left edge
 //!
-//! The region starts at column zero and spans the full terminal width, so no
-//! row it owns can hold another writer's content. Every row is therefore
+//! The caller chooses the region's left edge and drawing width. Every row is
 //! handled the same way — position, clear, write — with no first-row special
-//! case and no clear-to-end-of-line in the vocabulary. A prompt that starts
-//! mid-line reaches a fresh row before anchoring; see `plan_draw`'s
-//! `at_line_start` and `docs/design/prompt-region.md`.
+//! case. The prompt owns each row from that left edge to the row's end; see
+//! [`PromptStart`] and `docs/design/prompt-region.md`.
 //!
 //! # Recovery contract
 //!
@@ -65,7 +63,7 @@
 //! partially completed write.
 
 use super::{
-    RenderFinish,
+    PromptStart, RenderFinish,
     frame::{FramedRow, FramedView},
     presentation::InlinePresentation,
 };
@@ -88,9 +86,9 @@ pub(crate) enum InlineCommand {
     MoveDown(u16),
     MoveRight(u16),
     MoveToColumn(u16),
-    /// Erase the whole row. The only erase in the vocabulary: a region row
-    /// spans the full width from column zero, so no row holds content that is
-    /// not the prompt's and every row is cleared the same way.
+    /// Erase from the region's left edge to the end of the row. This erases the
+    /// whole row when the left edge is column zero. It is the only erase in the
+    /// vocabulary, and every row is cleared the same way.
     ClearLine,
     /// A bare line feed, which scrolls a new row into existence at the bottom.
     LineFeed,
@@ -192,24 +190,21 @@ pub(crate) struct InlineRenderPlan {
 
 /// Plan the commands that bring the owned region from `previous` to `view`.
 ///
-/// `max_columns` and `max_rows` are the terminal box; the plan never claims
-/// more rows than that, and never moves the cursor past the last column. The
-/// column bound belongs here rather than in the frame stage, which chooses
-/// rows and has no horizontal concern.
+/// `drawing_columns` is the effective drawing width selected above Resolve;
+/// `max_rows` is the terminal height. The plan never claims more rows than the
+/// latter and never moves the cursor past the drawing width. The horizontal
+/// bound belongs here rather than in the frame stage, which chooses rows and
+/// has no horizontal concern.
 ///
-/// `at_line_start` says whether the terminal cursor is at column zero as the
-/// prompt starts. The region's left edge is column zero, so a prompt that
-/// starts mid-line reaches a fresh row first. Only the very first frame
-/// consults it; a region re-established after a loss takes the cursor's own
-/// row, and a region that is already anchored has its origin. It is one bit
-/// rather than a column because no stage below may take a non-zero left edge
-/// into a width or a position: reinstating mid-line origins means widening
-/// this into a value, deliberately.
+/// `start` chooses how the first frame reaches its left edge. A region already
+/// anchored restores its saved origin. A region re-established after a loss
+/// returns to the selected column without adding another row, bounding residue
+/// to the rows above it.
 pub(crate) fn plan_draw(
     view: FramedView,
     previous: &InlinePresentation,
-    at_line_start: bool,
-    max_columns: u16,
+    start: PromptStart,
+    drawing_columns: u16,
     max_rows: u16,
 ) -> InlineRenderPlan {
     let FramedView {
@@ -250,14 +245,17 @@ pub(crate) fn plan_draw(
             // leaves none. A line feed first would push the region below the
             // residue instead, which is what a finishing prompt does and not
             // what a redrawing one does.
-            commands.push(InlineCommand::MoveToColumn(0));
-        } else if !at_line_start {
-            // The first frame, starting mid-line. The region's left edge is
-            // column zero, so it cannot begin on a row another writer has
-            // already put content on: a carriage return plus line feed reaches
-            // a fresh row, and that row becomes the region top. A bare
-            // MoveToColumn(0) would claim a row that is not the prompt's.
-            commands.push(InlineCommand::CarriageReturnLineFeed);
+            commands.push(InlineCommand::MoveToColumn(start.column()));
+        } else {
+            match start {
+                PromptStart::NewLine => {
+                    commands.push(InlineCommand::CarriageReturnLineFeed);
+                }
+                PromptStart::CurrentLine => {
+                    commands.push(InlineCommand::MoveToColumn(0));
+                }
+                PromptStart::CurrentPosition { .. } => {}
+            }
         }
         // Every line feed is emitted before the origin is saved, so all the
         // scrolling a frame can cause has already happened by the time the
@@ -280,10 +278,9 @@ pub(crate) fn plan_draw(
             continue;
         }
 
-        // Every row takes the same form: position, clear, write. The origin is
-        // at column zero and a bare MoveDown keeps the column, so the restore
-        // already lands the cursor at the row's left edge; no row needs a
-        // column command, and none is a special case.
+        // Every row takes the same form: position, clear, write. Restore lands
+        // at the selected left edge and a bare MoveDown keeps that column, so
+        // no row needs a column command and none is a special case.
         commands.push(InlineCommand::RestorePosition);
         if row > 0 {
             commands.push(InlineCommand::MoveDown(
@@ -301,16 +298,18 @@ pub(crate) fn plan_draw(
 
     commands.push(InlineCommand::RestorePosition);
     if let Some(mut cursor) = cursor {
-        cursor.column = cursor.column.min(max_columns.max(1) - 1);
+        cursor.column = cursor.column.min(drawing_columns.max(1) - 1);
         if cursor.row == 0 {
             // A movement of zero distance is never emitted: the restore has
-            // already put the cursor on the origin's row at column zero.
+            // already put the cursor on the origin's row at its left edge.
             if cursor.column > 0 {
                 commands.push(InlineCommand::MoveRight(cursor.column));
             }
         } else {
             commands.push(InlineCommand::MoveDown(cursor.row));
-            commands.push(InlineCommand::MoveToColumn(cursor.column));
+            if cursor.column > 0 {
+                commands.push(InlineCommand::MoveRight(cursor.column));
+            }
         }
         commands.push(InlineCommand::ShowCursor);
     }
@@ -390,9 +389,9 @@ fn plan_clear_owned_rows(previous: &InlinePresentation) -> Vec<InlineCommand> {
         return Vec::new();
     }
 
-    // The origin is at column zero, a clear leaves the cursor where it is, and
-    // a bare MoveDown keeps the column, so the walk stays at each row's left
-    // edge and every row is erased the same way.
+    // A clear leaves the cursor where it is and a bare MoveDown keeps the
+    // column, so the walk stays at the selected left edge and every row is
+    // erased the same way.
     let mut commands = vec![InlineCommand::RestorePosition];
     for row in 0..rows {
         commands.push(InlineCommand::ClearLine);

@@ -186,7 +186,16 @@ nix develop --command cargo run -p urushi-prompt --example cjk_wizard
 
 The example passes one `Theme` and the terminal's `TerminalProfile` to a form
 containing `Input`, `Select`, and `Confirm`. The prompt resolves semantic roles
-from that Theme; it does not define a separate palette.
+from that Theme; it does not define a separate palette. A form starts on a new
+line and uses the remaining terminal width by default. To place it after text
+on the current line and cap its width, run:
+
+```sh
+nix develop --command cargo run -p urushi-prompt --example current_position
+```
+
+That example combines `PromptStart::CurrentPosition` with
+`FormBuilder::width`; the prefix to the left of the prompt remains untouched.
 
 Use this sequence for a terminal smoke test:
 

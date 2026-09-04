@@ -260,12 +260,70 @@ pub trait Field: private::Sealed + 'static {}
 
 impl<T> Field for T where T: private::Sealed + 'static {}
 
+/// Where a prompt establishes the left edge of its owned region.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub enum PromptStart {
+    /// Starts on a new line at column zero.
+    ///
+    /// This is the default and always emits a carriage return and line feed
+    /// before the first frame.
+    #[default]
+    NewLine,
+    /// Starts at column zero of the cursor's current line, overwriting it.
+    CurrentLine,
+    /// Starts at the cursor's current position, whose column is supplied by
+    /// the caller rather than queried from the terminal. If the terminal later
+    /// becomes narrower than that column, the prompt uses its last column.
+    CurrentPosition { column: u16 },
+}
+
+impl PromptStart {
+    const fn column(self) -> u16 {
+        match self {
+            Self::NewLine | Self::CurrentLine => 0,
+            Self::CurrentPosition { column } => column,
+        }
+    }
+
+    fn within(self, terminal_columns: u16) -> Self {
+        match self {
+            Self::CurrentPosition { column } => Self::CurrentPosition {
+                column: column.min(terminal_columns.max(1) - 1),
+            },
+            other => other,
+        }
+    }
+}
+
 /// A builder for a blocking prompt form.
 pub struct FormBuilder {
     groups: Vec<Group>,
+    start: PromptStart,
+    width: Option<u16>,
 }
 
 impl FormBuilder {
+    /// Chooses where the prompt starts.
+    ///
+    /// The default is [`PromptStart::NewLine`]. The chosen left edge applies
+    /// to every row in the prompt region.
+    #[must_use]
+    pub fn start(mut self, start: PromptStart) -> Self {
+        self.start = start;
+        self
+    }
+
+    /// Limits the prompt's drawing width in terminal cells.
+    ///
+    /// By default the prompt uses the terminal width remaining after its left
+    /// edge. A supplied width is capped at that same available width. Zero is
+    /// normalized to the renderer's one-cell minimum.
+    #[must_use]
+    pub fn width(mut self, width: u16) -> Self {
+        self.width = Some(width);
+        self
+    }
+
     /// Appends `group` in execution order.
     #[must_use]
     pub fn group(mut self, group: Group) -> Self {
@@ -290,6 +348,8 @@ impl FormBuilder {
 
         Ok(Form {
             groups: self.groups,
+            start: self.start,
+            width: self.width,
         })
     }
 }
@@ -297,12 +357,18 @@ impl FormBuilder {
 /// A blocking, ordered collection of prompt groups.
 pub struct Form {
     groups: Vec<Group>,
+    start: PromptStart,
+    width: Option<u16>,
 }
 
 impl Form {
     /// Starts building a form.
     pub fn builder() -> FormBuilder {
-        FormBuilder { groups: Vec::new() }
+        FormBuilder {
+            groups: Vec::new(),
+            start: PromptStart::default(),
+            width: None,
+        }
     }
 
     /// Runs this form using the process terminal input and standard error.
@@ -343,8 +409,14 @@ impl Form {
         let mut deferred: Option<Event> = None;
 
         loop {
-            let columns = session.renderer.columns();
-            if let Err(source) = session.renderer.draw(&self.view(&state, styles, columns)) {
+            let terminal_columns = session.renderer.columns();
+            let start = self.start.within(terminal_columns);
+            let drawing_columns = self.drawing_width(terminal_columns);
+            if let Err(source) = session.renderer.draw(
+                &self.view(&state, styles, drawing_columns),
+                start,
+                drawing_columns,
+            ) {
                 return Err(session.fail(IoOperation::Render, source));
             }
 
@@ -403,6 +475,12 @@ impl Form {
                 }
             }
         }
+    }
+
+    fn drawing_width(&self, terminal_columns: u16) -> u16 {
+        let start = self.start.within(terminal_columns);
+        let available = terminal_columns.saturating_sub(start.column()).max(1);
+        self.width.unwrap_or(available).max(1).min(available)
     }
 
     fn reduce(&mut self, state: &mut FormState, event: Event) -> ReducerResult {
@@ -691,13 +769,19 @@ pub(crate) trait EventSource {
 }
 
 pub(crate) trait Renderer {
-    fn draw(&mut self, view: &PromptView) -> io::Result<()>;
+    fn draw(
+        &mut self,
+        view: &PromptView,
+        start: PromptStart,
+        drawing_columns: u16,
+    ) -> io::Result<()>;
     fn finish(&mut self, outcome: RenderFinish) -> io::Result<()>;
 
-    /// The width the next view must be built for.
+    /// The terminal width from which the form derives its drawing width.
     ///
-    /// The view function chooses the visible window of a value wider than the
-    /// terminal, so it needs the width before it composes anything.
+    /// The view function chooses the visible window of a value wider than its
+    /// drawing area, so the form applies its left edge and optional width cap
+    /// before composing anything.
     fn columns(&self) -> u16 {
         80
     }
@@ -1260,55 +1344,12 @@ struct CrosstermRenderer<W> {
     presentation: InlinePresentation,
     columns: u16,
     rows: u16,
-    /// Whether the terminal cursor was at column zero when the prompt started.
-    /// The region's left edge is column zero, so a prompt that starts mid-line
-    /// reaches a fresh row before anchoring; only the first frame consults it.
-    at_line_start: bool,
 }
 
 impl CrosstermRenderer<io::Stderr> {
     fn stderr(size: (u16, u16)) -> Self {
-        let mut renderer = Self::new(io::stderr(), size);
-        renderer.at_line_start = cursor_at_line_start();
-        renderer
+        Self::new(io::stderr(), size)
     }
-}
-
-/// Whether the terminal cursor is at column zero, as far as it can be
-/// established.
-///
-/// The region's left edge is column zero, so a prompt that starts mid-line
-/// reaches a fresh row first; this is how it finds out. Only the terminal
-/// knows, and the answer costs a round trip: a Device Status Report goes out,
-/// and the reply arrives on the terminal's input beside the user's keystrokes.
-///
-/// # Known limitation: the request goes to stdout
-///
-/// `docs/design/prompt-region.md` puts the request on the stream the prompt
-/// already draws to, which is stderr. crossterm writes it to **stdout**
-/// instead, and its reply is filtered out of the public event API, so reading
-/// the reply from a request this crate sent itself would mean opening the
-/// terminal a second time and racing crossterm's reader for the user's
-/// keystrokes. Until this crate owns its terminal layer, the request goes
-/// where crossterm sends it.
-///
-/// The cost lands on a program whose stdout is redirected: the request reaches
-/// a file, the reply cannot arrive, and the call blocks until it times out.
-/// Asking only when stdout is a terminal keeps that cost off the redirected
-/// path, at the price of assuming column zero there. That assumption is also
-/// what a failed request falls back to — the row a prompt starts on is almost
-/// always fresh, and assuming otherwise would put a blank row above every
-/// prompt in a redirected run.
-///
-/// Moving the request to stderr, and dropping the stdout test with it, is part
-/// of replacing the terminal layer rather than a fix that can be made here.
-fn cursor_at_line_start() -> bool {
-    if !io::stdout().is_terminal() {
-        return true;
-    }
-    cursor::position()
-        .map(|(column, _)| column == 0)
-        .unwrap_or(true)
 }
 
 impl<W: Write> CrosstermRenderer<W> {
@@ -1318,24 +1359,38 @@ impl<W: Write> CrosstermRenderer<W> {
             presentation: InlinePresentation::default(),
             columns: size.0.max(1),
             rows: size.1.max(1),
-            at_line_start: true,
         }
     }
 
     fn present(&mut self, plan: InlineRenderPlan) -> io::Result<()> {
         crossterm_executor::execute(&mut self.writer, &mut self.presentation, plan)
     }
+
+    #[cfg(test)]
+    fn draw(&mut self, view: &PromptView) -> io::Result<()> {
+        <Self as Renderer>::draw(
+            self,
+            view,
+            PromptStart::CurrentPosition { column: 0 },
+            self.columns,
+        )
+    }
 }
 
 impl<W: Write> Renderer for CrosstermRenderer<W> {
-    fn draw(&mut self, view: &PromptView) -> io::Result<()> {
-        let resolved = resolve::resolve_prompt(self.columns, view);
+    fn draw(
+        &mut self,
+        view: &PromptView,
+        start: PromptStart,
+        drawing_columns: u16,
+    ) -> io::Result<()> {
+        let resolved = resolve::resolve_prompt(drawing_columns, view);
         let framed = frame::frame(&resolved, self.rows);
         let plan = inline_plan::plan_draw(
             framed,
             &self.presentation,
-            self.at_line_start,
-            self.columns,
+            start,
+            drawing_columns,
             self.rows,
         );
         self.present(plan)
@@ -1479,12 +1534,26 @@ mod tests {
 
     /// The plan the renderer would execute for `view`, without writing it.
     fn draw_plan<W>(renderer: &CrosstermRenderer<W>, view: &PromptView) -> InlineRenderPlan {
-        let framed = lay_out(renderer.columns, renderer.rows, view);
+        draw_plan_at(
+            renderer,
+            PromptStart::CurrentPosition { column: 0 },
+            renderer.columns,
+            view,
+        )
+    }
+
+    fn draw_plan_at<W>(
+        renderer: &CrosstermRenderer<W>,
+        start: PromptStart,
+        drawing_columns: u16,
+        view: &PromptView,
+    ) -> InlineRenderPlan {
+        let framed = lay_out(drawing_columns, renderer.rows, view);
         inline_plan::plan_draw(
             framed,
             &renderer.presentation,
-            renderer.at_line_start,
-            renderer.columns,
+            start,
+            drawing_columns,
             renderer.rows,
         )
     }
@@ -1612,18 +1681,39 @@ mod tests {
         }
     }
 
-    #[derive(Default)]
     struct RecordingRenderer {
         views: Vec<Option<String>>,
+        regions: Vec<(PromptStart, u16)>,
         finishes: Vec<RenderFinish>,
         resizes: Vec<(u16, u16)>,
+        columns: u16,
         fail_draw: Option<usize>,
         fail_finish: bool,
     }
 
+    impl Default for RecordingRenderer {
+        fn default() -> Self {
+            Self {
+                views: Vec::new(),
+                regions: Vec::new(),
+                finishes: Vec::new(),
+                resizes: Vec::new(),
+                columns: 80,
+                fail_draw: None,
+                fail_finish: false,
+            }
+        }
+    }
+
     impl Renderer for RecordingRenderer {
-        fn draw(&mut self, view: &PromptView) -> io::Result<()> {
+        fn draw(
+            &mut self,
+            view: &PromptView,
+            start: PromptStart,
+            drawing_columns: u16,
+        ) -> io::Result<()> {
             self.views.push(view.active_name());
+            self.regions.push((start, drawing_columns));
             if self.fail_draw == Some(self.views.len()) {
                 return Err(io::Error::other("draw failed"));
             }
@@ -1640,6 +1730,11 @@ mod tests {
 
         fn resize(&mut self, columns: u16, rows: u16) {
             self.resizes.push((columns, rows));
+            self.columns = columns.max(1);
+        }
+
+        fn columns(&self) -> u16 {
+            self.columns
         }
     }
 
@@ -1770,6 +1865,117 @@ mod tests {
             Form::builder().group(first).group(second).build(),
             Err(FormBuildError::DuplicateFieldName(name)) if name == "same"
         ));
+    }
+
+    #[test]
+    fn form_builder_defaults_and_caps_the_prompt_region_width() {
+        let group = || {
+            Group::builder()
+                .field(TestField::new("field", "value"))
+                .build()
+                .expect("test group has a field")
+        };
+        let default = Form::builder()
+            .group(group())
+            .build()
+            .expect("default form is valid");
+        assert_eq!(default.start, PromptStart::NewLine);
+        assert_eq!(default.drawing_width(20), 20);
+
+        let positioned = Form::builder()
+            .start(PromptStart::CurrentPosition { column: 7 })
+            .width(8)
+            .group(group())
+            .build()
+            .expect("positioned form is valid");
+        assert_eq!(positioned.drawing_width(20), 8);
+        assert_eq!(positioned.drawing_width(12), 5);
+
+        let oversized = Form::builder()
+            .start(PromptStart::CurrentPosition { column: 7 })
+            .width(u16::MAX)
+            .group(group())
+            .build()
+            .expect("oversized width is capped at runtime");
+        assert_eq!(oversized.drawing_width(20), 13);
+
+        let zero = Form::builder()
+            .width(0)
+            .group(group())
+            .build()
+            .expect("zero width is normalized at runtime");
+        assert_eq!(zero.drawing_width(20), 1);
+
+        let out_of_bounds = Form::builder()
+            .start(PromptStart::CurrentPosition { column: u16::MAX })
+            .group(group())
+            .build()
+            .expect("out-of-bounds start is normalized at runtime");
+        assert_eq!(
+            out_of_bounds.start.within(20),
+            PromptStart::CurrentPosition { column: 19 }
+        );
+        assert_eq!(out_of_bounds.drawing_width(20), 1);
+    }
+
+    #[test]
+    fn form_run_passes_the_selected_region_to_the_renderer() {
+        let group = Group::builder()
+            .field(TestField::new("field", "value"))
+            .build()
+            .expect("test group has a field");
+        let form = Form::builder()
+            .start(PromptStart::CurrentPosition { column: 7 })
+            .width(12)
+            .group(group)
+            .build()
+            .expect("configured form is valid");
+        let mut events = ScriptedEvents::new([Ok(cancel())]);
+        let mut renderer = RecordingRenderer::default();
+        let mut terminal = RecordingTerminal::interactive();
+
+        assert!(matches!(
+            form.run_with(&mut events, &mut renderer, &mut terminal, &test_styles(),),
+            Ok(FormOutcome::Cancelled)
+        ));
+        assert_eq!(
+            renderer.regions,
+            [(PromptStart::CurrentPosition { column: 7 }, 12)]
+        );
+    }
+
+    #[test]
+    fn form_run_clamps_the_start_after_a_narrowing_resize() {
+        let group = Group::builder()
+            .field(TestField::new("field", "value"))
+            .build()
+            .expect("test group has a field");
+        let form = Form::builder()
+            .start(PromptStart::CurrentPosition { column: 7 })
+            .group(group)
+            .build()
+            .expect("configured form is valid");
+        let mut events = ScriptedEvents::new([
+            Ok(Event::Resize {
+                columns: 3,
+                rows: 4,
+            }),
+            Ok(cancel()),
+        ]);
+        let mut renderer = RecordingRenderer::default();
+        let mut terminal = RecordingTerminal::interactive();
+
+        assert!(matches!(
+            form.run_with(&mut events, &mut renderer, &mut terminal, &test_styles()),
+            Ok(FormOutcome::Cancelled)
+        ));
+        assert_eq!(
+            renderer.regions,
+            [
+                (PromptStart::CurrentPosition { column: 7 }, 73),
+                (PromptStart::CurrentPosition { column: 2 }, 1),
+            ]
+        );
     }
 
     #[test]
@@ -2270,9 +2476,9 @@ mod tests {
             Some(ViewCursor { row: 0, column: 2 }),
         );
 
-        // Started at column zero, the first draw anchors the origin on the row
-        // the cursor is already on: no row has to be reached first, and the row
-        // is erased whole because the region owns all of it.
+        // A current-position start anchors on the row the cursor already
+        // occupies. Clearing begins at that origin and leaves its left side
+        // untouched.
         let plan = draw_plan(&renderer, &view);
         assert_eq!(
             plan.commands,
@@ -2293,24 +2499,24 @@ mod tests {
         let output = String::from_utf8(renderer.writer).expect("renderer writes UTF-8 commands");
         assert!(output.contains("\x1b[1m質問\x1b[0m"));
         assert!(output.contains("\x1b[4m＊\x1b[0m"));
+        assert!(output.contains("\x1b[K"));
+        assert!(!output.contains("\x1b[2K"));
     }
 
     #[test]
-    fn a_prompt_starting_mid_line_comes_out_to_a_fresh_row_first() {
+    fn a_new_line_prompt_comes_out_to_a_fresh_row_first() {
         let theme = test_theme();
         let profile = TerminalProfile::new(ColorProfile::Monochrome, AnsiPolicy::Disabled);
         let styles = PromptStyles::resolve(&theme, &profile);
         let mut renderer = CrosstermRenderer::new(Vec::new(), (20, 4));
-        renderer.at_line_start = false;
         let view = renderer_view(
             vec![view_line("question", &styles.question)],
             Some(ViewCursor { row: 0, column: 2 }),
         );
 
-        // The region's left edge is column zero, so it cannot begin on a row
-        // another writer has already put content on. A carriage return plus
-        // line feed reaches a fresh row, and that row is what gets anchored.
-        let plan = draw_plan(&renderer, &view);
+        // NewLine always reaches a fresh row before anchoring it, without
+        // querying where the cursor happened to be.
+        let plan = draw_plan_at(&renderer, PromptStart::NewLine, renderer.columns, &view);
         assert_eq!(
             plan.commands,
             [
@@ -2334,9 +2540,94 @@ mod tests {
         assert_eq!(anchored.reserved_rows, 1);
         assert_eq!(plan.next.reserved_rows, 1);
 
-        renderer.draw(&view).expect("renderer writes to a buffer");
+        <CrosstermRenderer<_> as Renderer>::draw(&mut renderer, &view, PromptStart::NewLine, 20)
+            .expect("renderer writes to a buffer");
         let output = String::from_utf8(renderer.writer).expect("renderer writes UTF-8 commands");
         assert!(output.starts_with("\x1b[?25l\r\n"), "{output:?}");
+    }
+
+    #[test]
+    fn every_prompt_start_has_an_explicit_first_frame_plan() {
+        let styles = test_styles();
+        let renderer = CrosstermRenderer::new(Vec::new(), (20, 4));
+        let view = renderer_view(vec![view_line("question", &styles.question)], None);
+
+        let cases = [
+            (
+                PromptStart::NewLine,
+                Some(InlineCommand::CarriageReturnLineFeed),
+            ),
+            (
+                PromptStart::CurrentLine,
+                Some(InlineCommand::MoveToColumn(0)),
+            ),
+            (PromptStart::CurrentPosition { column: 4 }, None),
+        ];
+        for (start, initial) in cases {
+            let columns = 20_u16.saturating_sub(start.column()).max(1);
+            let plan = draw_plan_at(&renderer, start, columns, &view);
+            let mut expected = vec![InlineCommand::HideCursor];
+            expected.extend(initial);
+            expected.extend([
+                InlineCommand::SavePosition,
+                InlineCommand::RestorePosition,
+                InlineCommand::ClearLine,
+                InlineCommand::Write(plan.next.rows[0].clone()),
+                InlineCommand::RestorePosition,
+            ]);
+            assert_eq!(plan.commands, expected, "{start:?}");
+        }
+    }
+
+    #[test]
+    fn start_column_and_width_change_the_wrap_bound_before_resolve() {
+        let styles = test_styles();
+        let view = renderer_view(
+            vec![view_line(
+                "a question whose words wrap at the supplied boundary",
+                &styles.question,
+            )],
+            None,
+        );
+        let group = || {
+            Group::builder()
+                .field(TestField::new("field", "value"))
+                .build()
+                .expect("test group has a field")
+        };
+        let full = Form::builder()
+            .group(group())
+            .build()
+            .expect("full-width form");
+        let positioned = Form::builder()
+            .start(PromptStart::CurrentPosition { column: 12 })
+            .group(group())
+            .build()
+            .expect("positioned form");
+        let limited = Form::builder()
+            .width(8)
+            .group(group())
+            .build()
+            .expect("width-limited form");
+        let oversized = Form::builder()
+            .width(99)
+            .group(group())
+            .build()
+            .expect("width-capped form");
+
+        let row_count = |form: &Form| {
+            let width = form.drawing_width(20);
+            resolve::resolve_prompt(width, &view).lines[0]
+                .view
+                .rows()
+                .len()
+        };
+        assert_eq!(positioned.drawing_width(20), 8);
+        assert!(row_count(&positioned) > row_count(&full));
+        assert_eq!(limited.drawing_width(20), 8);
+        assert_eq!(row_count(&limited), row_count(&positioned));
+        assert_eq!(oversized.drawing_width(20), 20);
+        assert_eq!(row_count(&oversized), row_count(&full));
     }
 
     /// Every plan the inline renderer can produce, named for failure messages.
@@ -2376,12 +2667,36 @@ mod tests {
             .commands,
         ));
 
-        renderer.at_line_start = false;
         plans.push((
-            "first frame, started mid-line",
-            draw_plan(&renderer, &one_row(Some(ViewCursor { row: 0, column: 3 }))).commands,
+            "first frame, new line",
+            draw_plan_at(
+                &renderer,
+                PromptStart::NewLine,
+                renderer.columns,
+                &one_row(Some(ViewCursor { row: 0, column: 3 })),
+            )
+            .commands,
         ));
-        renderer.at_line_start = true;
+        plans.push((
+            "first frame, current line",
+            draw_plan_at(
+                &renderer,
+                PromptStart::CurrentLine,
+                renderer.columns,
+                &one_row(Some(ViewCursor { row: 0, column: 3 })),
+            )
+            .commands,
+        ));
+        plans.push((
+            "first frame, current position",
+            draw_plan_at(
+                &renderer,
+                PromptStart::CurrentPosition { column: 4 },
+                renderer.columns - 4,
+                &one_row(Some(ViewCursor { row: 0, column: 3 })),
+            )
+            .commands,
+        ));
 
         renderer
             .draw(&one_row(Some(ViewCursor { row: 0, column: 1 })))
@@ -3153,7 +3468,7 @@ mod tests {
         assert!(renderer.draw(&view).is_err());
         // Three rows were scrolled into existence, but the write that failed
         // had reached only the first of them. The fold owns exactly that row:
-        // its ClearToEndOfLine succeeded, so the bytes the partial write left
+        // its ClearLine succeeded, so the bytes the partial write left
         // there are covered, while the two rows below are still the blank ones
         // the line feeds scrolled in and there is nothing on them to erase.
         assert_eq!(renderer.presentation.reserved_rows, 3);

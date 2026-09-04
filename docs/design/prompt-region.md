@@ -34,22 +34,37 @@ which a loss does not undo.
 
 ### The region
 
-A region row spans the full terminal width, so the prompt owns a row's end as
-well as its start, and its left edge is column zero: if the cursor is not at
-column zero when a prompt starts, the prompt emits a carriage return and line
-feed to reach a fresh row before establishing the region.
+The caller chooses how the prompt establishes its left edge `L`:
 
-Only the terminal knows which column the cursor is on, and asking costs a round
-trip: a status request goes out, and the reply arrives on the terminal's input
-beside the user's keystrokes. **The request belongs on the stream the prompt
-draws to**, so that a prompt whose output reaches the terminal can always ask,
-whatever the program has done with its other streams. Reading the reply is the
-input layer's job, because that reply and the user's keystrokes arrive on one
-stream and only one reader may consume it.
+| Start | First-frame command | `L` |
+| --- | --- | --- |
+| `NewLine` (default) | `CarriageReturnLineFeed` | 0 |
+| `CurrentLine` | `MoveToColumn(0)` | 0 |
+| `CurrentPosition { column }` | none | `column` |
 
-When the answer cannot be obtained, the prompt assumes column zero. The row a
-prompt starts on is almost always fresh, and assuming otherwise would put a
-blank row above every prompt whose terminal declines to answer.
+The caller supplies `column` because code that embeds a prompt after its own
+output already knows where that output left the cursor. The prompt never asks
+the terminal for its position.
+
+The drawing width defaults to the terminal width remaining after `L`. A caller
+may cap it, but cannot extend it past the terminal's right edge. Both the view
+function and Resolve receive this effective width, so every line wraps against
+the same rectangle.
+
+If a resize makes a `CurrentPosition` column unavailable, the left edge is
+clamped to the terminal's last column and the effective drawing width becomes
+one cell. This keeps both cursor commands and layout inside the resized
+terminal while preserving the configured column if the terminal widens again.
+
+The chosen left edge applies to every row, not only the first. Restoring the
+saved position reaches `L`, and a bare vertical move preserves it. This is what
+keeps a prompt that begins mid-row rectangular rather than laying out only its
+first row against a narrower area.
+
+A prompt owns every row it draws from `L` to the end of the row. The drawing
+width may be narrower than that owned suffix: it limits layout, not ownership.
+Clearing therefore starts at `L` and continues to the row's end. Content to the
+left of `L` survives; content to its right may not share a row with the prompt.
 
 ### Anchoring the origin
 
@@ -69,15 +84,16 @@ reserving rows; it has nothing to return to and needs nothing.
 ```text
 first frame, height h         growth from h1 to h2
   HideCursor                    RestorePosition
-  CarriageReturnLineFeed?       MoveDown(h1 - 1)
+  <start command>               MoveDown(h1 - 1)
   LineFeed × (h - 1)            LineFeed × (h2 - h1)
   MoveUp(h - 1)                 MoveUp(h2 - 1)
   SavePosition                  SavePosition
 ```
 
-The first frame's carriage return and line feed is the one that reaches a fresh
-row, and it is emitted only when the prompt did not start at column zero. The
-row it reaches is the region top, so it costs no reserved row of its own.
+For the default `NewLine` start, the carriage return and line feed reaches a
+fresh row. That row is the region top, so the command costs no reserved row of
+its own. `CurrentLine` instead moves to column zero of the current row, while
+`CurrentPosition` saves the caller-declared position directly.
 
 A bare line feed preserves the cursor column, so `LineFeed` followed by
 `MoveUp` returns to the starting column without an explicit column command.
@@ -103,11 +119,11 @@ have since been abandoned.
 A lost region has two continuations, and they are deliberately asymmetric.
 
 **The prompt is still running.** A resize arrives while the user is typing, so
-the prompt must keep drawing. The next frame re-establishes the region at the
-cursor's current row: it begins with `MoveToColumn(0)` and proceeds as a first
-frame. It does **not** emit a line feed first. Starting on the current row
-overwrites it, so the only rows left behind are those above the cursor's row at
-the moment of loss.
+the prompt must keep drawing. The next frame re-establishes the region on the
+cursor's current row at the selected left edge and proceeds as a first frame.
+It does **not** emit a line feed first. Starting on the current row overwrites
+it, so the only rows left behind are those above the cursor's row at the moment
+of loss.
 
 **The prompt is finishing.** Cleanup restores the cursor to visible and emits a
 carriage return and line feed, so subsequent output starts below the residue
@@ -158,19 +174,20 @@ what separates them. A resize immediately followed by a cancellation leaves
 residue, which is the exact outcome the finishing continuation exists to
 prevent. That is why the gate is `drawn`, which a loss does not reset.
 
-## Why the region starts at column zero
+## Why drawing width does not narrow ownership
 
-Anchoring the region at whatever column the prompt happened to start on
-propagates a starting column through every width calculation, every row's column
-command, and the cursor position. It buys the ability to place a prompt on a row
-that already contains output, which no prompt API asks for: a prompt owns the
-rows it draws.
+A width cap is useful even for a standalone prompt: a readable form need not
+stretch across a two-hundred-column terminal. That layout choice does not imply
+that unrelated output can safely share the rest of each row. Redraw, shrinking
+content, cleanup, and partial-write recovery all need one uniform rule for what
+the prompt may erase.
 
-Dropping it also removes the first row's special case. With a left edge at column
-zero, no row can have another writer's content to its left, so every row is
-cleared the same way and the command vocabulary loses its clear-to-end-of-line
-variant.
+The selected rule is that every prompt row belongs to the prompt from its left
+edge through the terminal's right edge. It preserves the uniform
+position-clear-write form and the clear-before-write recovery invariant while
+allowing content to the left of a `CurrentPosition` prompt to survive.
 
-This is a deliberate reduction in capability, and among the decisions recorded
-for the prompt it is the cheapest to reverse. Reinstating a non-zero left edge
-means threading one value through the Frame and Plan stages.
+Allowing unrelated content to the right would require a different ownership
+model: an exact-width erase operation, recovery state that tracks that narrower
+extent, and a decision about residue outside it. A width cap alone does none of
+those things.

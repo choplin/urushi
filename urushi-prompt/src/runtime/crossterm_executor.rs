@@ -63,7 +63,7 @@ fn write_command<W: Write>(writer: &mut W, command: &InlineCommand) -> io::Resul
         InlineCommand::MoveDown(rows) => queue!(writer, cursor::MoveDown(*rows)),
         InlineCommand::MoveRight(columns) => queue!(writer, cursor::MoveRight(*columns)),
         InlineCommand::MoveToColumn(column) => queue!(writer, cursor::MoveToColumn(*column)),
-        InlineCommand::ClearLine => queue!(writer, Clear(ClearType::CurrentLine)),
+        InlineCommand::ClearLine => queue!(writer, Clear(ClearType::UntilNewLine)),
         InlineCommand::LineFeed => writer.write_all(b"\n"),
         InlineCommand::CarriageReturnLineFeed => writer.write_all(b"\r\n"),
         InlineCommand::Write(row) => {

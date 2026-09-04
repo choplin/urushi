@@ -55,12 +55,13 @@ produces the same list:
 
 Columns are zero-based and are converted at encoding time.
 
-There is no "clear to end of line". Because the region starts at column zero
-and a region row spans the full terminal width, no row contains content that is
-not the prompt's, so every row is cleared the same way. Every row is therefore
-handled uniformly: position, `ClearLine`, `Write`. Implementations that
-special-case the first row are compensating for a non-zero left edge, which this
-design does not have.
+There is no separate "clear to end of line" command. `ClearLine` means clearing
+the owned part of a row: from the region's selected left edge to the terminal's
+right edge. At column zero this clears the whole row; at a non-zero left edge it
+preserves the content to the left. Every row is therefore handled uniformly:
+position, `ClearLine`, `Write`. The drawing width may stop before the terminal's
+right edge, but ownership and clearing do not; [`prompt-region.md`](prompt-region.md)
+records that deliberate assumption.
 
 ### The plan and its recovery contract
 
@@ -156,7 +157,7 @@ presentation transitions, without a terminal:
 
 ```text
 plan(framed, previous, geometry).commands == [
-    HideCursor, LineFeed, MoveUp(1), SavePosition,
+    HideCursor, CarriageReturnLineFeed, LineFeed, MoveUp(1), SavePosition,
     RestorePosition, ClearLine, Write(row0),
     RestorePosition, MoveDown(1), ClearLine, Write(row1),
     RestorePosition,
