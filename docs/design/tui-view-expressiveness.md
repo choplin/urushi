@@ -89,10 +89,11 @@ Core owns only renderer-neutral, one-frame presentation mechanics:
 
 The current `Text`, `Block`, `Row`, `Column`, `Grid`, and `AnchorBlock` remain
 valid members of this vocabulary. The list above is a capability requirement,
-not a commitment to node names or to one all-purpose `Canvas`. Issue #26 owns
-the viewport and scroll-offset contract. Issue #59 owns the Canvas feasibility
-evidence, and Issue #60 owns the binding coordinate, sizing, clipping, and
-ordering contract.
+not a commitment to node names or to one all-purpose `Canvas`. The evidence
+that an ordered positioned layer can fit the existing box model and one-pass
+resolver, and the constraints the binding contract must settle, are recorded
+in [`positioned-layout-feasibility.md`](positioned-layout-feasibility.md).
+Viewport projection remains a separate design topic.
 
 Core does not gain semantic nodes such as `View::Graph`, `View::Modal`, or
 `View::SelectedRow`. It also does not gain callbacks, events, focus movement,
