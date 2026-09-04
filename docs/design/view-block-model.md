@@ -1,11 +1,14 @@
 # View and Block Split
 
-The view model splits presentation into `TextStyle` and `BlockStyle` and
-composes views as a four-node tree resolved to per-grapheme rows. This
-document records why it does each of those, and which alternatives were
-rejected. The contract itself is defined in [`view-model.md`](../view-model.md)
-and [`style-model.md`](../style-model.md); the sizing rules the tree resolves
-under have their own files — [`box-sizing.md`](box-sizing.md),
+The view model splits primitive styling into `TextStyle` and `BlockStyle` and
+composes semantic-free layout primitives into a tree resolved to per-grapheme
+rows and placements. This document records why it does each of those, why
+semantic components are lowered before this boundary, and which alternatives
+were rejected. The contracts are defined in
+[`component-model.md`](../component-model.md),
+[`view-model.md`](../view-model.md), and
+[`style-model.md`](../style-model.md); the sizing rules the tree resolves under
+have their own files — [`box-sizing.md`](box-sizing.md),
 [`area-sharing.md`](area-sharing.md), [`overflow.md`](overflow.md),
 [`layout-resolution.md`](layout-resolution.md), and
 [`rendered-output-measurement.md`](rendered-output-measurement.md).
@@ -34,8 +37,22 @@ definition of width beside the first, and the properties stay attached to the
 text for a renderer to apply a second time.
 
 The split also makes geometry themeable on its own terms: a `panel` role is a
-`BlockStyle`, served the way `ComponentStyles::list`, `tree`, and `table` serve
-their dedicated style values, while text roles are `TextStyle` values.
+`BlockStyle`, while text roles are `TextStyle` values. Component presentations
+may contain either kind, but are not themselves style values.
+
+## Why semantic components are lowered before View
+
+`View` is the shared language of layout and rendering, not a registry of
+component kinds. A concrete component presentation is the last layer that
+knows whether a row is a Table header, a marker belongs to a List item, or two
+nodes are joined by a Graph edge. Its `compose` operation translates that
+meaning into generic primitives before `resolve` sees the tree.
+
+Keeping `View` primitive-only lets a component change independently of the
+resolver and lets Urushi and Noctui share one closed layout model without
+duplicating every component in it. It also prevents one convenient primitive,
+such as Grid, from becoming a semantic intermediate representation every
+component is forced through.
 
 ## Why neither type is named `Style`
 
@@ -81,6 +98,14 @@ consume the one `ResolvedView`, and the Ratatui adapter turns its target
 `Rect` into `Available` rather than into a second layout.
 
 ## Rejected designs
+
+- **Semantic component nodes such as `View::Table` or `View::Graph`.** They
+  move the presentation algorithm into the resolver, couple the closed layout
+  enum to an open set of component concepts, and make every backend-facing
+  implementation learn component semantics.
+- **Component presentations that receive `Available`.** A nested component's
+  share does not exist until its siblings are resolved. Giving composition the
+  root area lets it pre-wrap and pre-pad against the wrong rectangle.
 
 - **One style type, with inline text reading only the properties it can honor.**
   The illegal combination stays constructible and the constraint stays a promise.

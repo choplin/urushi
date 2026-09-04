@@ -21,36 +21,41 @@ documents record.
 
 ## Architecture at a glance
 
-Reusable components produce a renderer-neutral `View`. Terminal capabilities
-are applied only at the output boundary.
+Concrete component presentations compose semantic data into a renderer-neutral
+`View`. Terminal capabilities are applied only at the output boundary.
 
 ```text
-SemanticTokens --> Theme --> ComponentStyles
-                                  |
-Component props ------------------+
-        |
-        v
+SemanticTokens --> Theme --> ComponentTheme --> concrete Presentation
+                                                       |
+Semantic component data -------------------------------+-- compose
+Optional component-specific frame input ---------------+     |
+                                                             v
        View --> resolve --> ResolvedView + TerminalProfile --> AnsiRenderer --> ANSI text
          |
          +--> StderrTerminal (owns renderer/profile) --> stable stderr output
 ```
 
-The core [`View`](../urushi/src/view/model.rs) is a tree of four nodes — `Text`,
-`Block`, `Row`, and `Column` — carrying logical
+The core [`View`](../urushi/src/view/model.rs) is a tree of semantic-free layout
+primitives — `Text`, `Block`, `Row`, `Column`, `Grid`, and the keyed
+`AnchorBlock` form — carrying logical
 [`TextStyle`](../urushi/src/style/text.rs) and
 [`BlockStyle`](../urushi/src/style/block.rs) values rather than
-terminal-resolved ANSI strings. Components stop at this boundary.
+terminal-resolved ANSI strings. Component presentations stop at this boundary.
 [`resolve`](../urushi/src/view/resolve.rs) turns the tree into one `ResolvedView`
 rectangle of styled graphemes, and
 [`AnsiRenderer`](../urushi/src/render/ansi.rs) applies a
 [`TerminalProfile`](../urushi/src/terminal/profile.rs) to it and serializes the
-result.
+result. Components are lowered before this boundary; neither `View` nor
+`resolve` knows whether a primitive tree came from a List, Table, Tree, or a
+future Graph.
 
-Presentation splits in two, and geometry belongs to only one half: a `TextStyle`
-is everything a terminal can express about a run of text, and a `BlockStyle` is
-a rectangle plus the style filling it. [`view-model.md`](view-model.md) defines
-the view tree and the layout pass; [`style-model.md`](style-model.md) defines
-the style values themselves.
+Primitive styling splits in two, and geometry belongs to only one half: a
+`TextStyle` is everything a terminal can express about a run of text, and a
+`BlockStyle` is a rectangle plus the style filling it.
+[`component-model.md`](component-model.md) defines the semantic-to-primitive
+composition boundary, [`view-model.md`](view-model.md) defines the primitive
+tree and layout pass, and [`style-model.md`](style-model.md) defines the style
+values themselves.
 
 Direct box-model rendering of static content is the single-block case of that
 same pass:
@@ -97,6 +102,9 @@ The contracts shared across surfaces are:
   [`SemanticTokens`](../urushi/src/theme/tokens.rs), and
   [`ComponentRole`](../urushi/src/theme/role.rs), which give presentation a
   reusable semantic vocabulary;
+- concrete component presentations, whose `compose` operations lower semantic
+  data and any borrowed component-specific frame input into `View` without
+  receiving an available area;
 - the [`text`](../urushi/src/text/) implementation, which supplies one
   cell-aware definition of plain-text display width and wrapping; and
 - [`TerminalProfile`](../urushi/src/terminal/profile.rs), which resolves the
@@ -118,7 +126,7 @@ The surfaces above the foundation, and the layer Urushi provides for each, are:
 
 | Surface | Urushi-provided layer | Lifecycle owner |
 | --- | --- | --- |
-| Plain CLI output | Direct box-model `BlockStyle::render`; reusable components producing `View`; `AnsiRenderer`; `StderrTerminal`; optional spinner and progress-bar lifecycles | The application owns its command workflow and stdout policy. `StderrTerminal` and progress handles own the stderr resources they acquire. |
+| Plain CLI output | Direct box-model `BlockStyle::render`; concrete component presentations composing `View`; `AnsiRenderer`; `StderrTerminal`; optional spinner and progress-bar lifecycles | The application owns its command workflow and stdout policy. `StderrTerminal` and progress handles own the stderr resources they acquire. |
 | Interactive prompt | `Form` / `Group`; typed `Input`, `Select`, and `Confirm`; synchronous validation; the prompt-specific render stages; inline redraw; terminal session setup and cleanup | `urushi-prompt` owns the blocking prompt session and the resources it acquires. The application owns when the form runs and what submitted values mean. |
 | Full-screen TUI | `urushi-tui`: the runtime and its `ratatui` adapter — logical-style conversion, widgets that resolve a `View` and draw it into a Ratatui `Buffer`, and the cell-writing path the runtime's renderer takes with a view it resolved itself | The `urushi-tui` runtime owns event delivery, frame scheduling, terminal entry and restoration. The application owns its model, update, and view. |
 
@@ -130,13 +138,13 @@ deliberately related but not identical:
 application semantics
         |
         v
-SemanticTokens --> Theme --> ComponentRole --> logical TextStyle
-                                              |
-             +--------------------------------+-----------------------------+
+SemanticTokens --> Theme --> ComponentTheme / logical styles
+                                      |
+             +------------------------+-------------------------------------+
              |                                |                             |
              v                                v                             v
      plain CLI layer                  prompt layer                 Ratatui adapter
- Component props / text          Form / Group / Field             application view
+ data + Presentation / text      Form / Group / Field             application view
              |                                |                             |
   View or BlockStyle::render        View + prompt stages        BlockStyle / widget
              |                                |                             |
@@ -180,9 +188,9 @@ to share styling.
 | --- | --- | --- |
 | [`style`](../urushi/src/style/) | Colors, border glyphs, box spacing and alignment, the text `TextStyle` and the geometry-bearing `BlockStyle`, and the direct block render entry point. | `text`, `view` |
 | [`text`](../urushi/src/text/) | Plain-text display-width measurement and cell-aware word/CJK wrapping, over the `PrintableText` / `PrintableLines` types that carry the plain-text domain. | None |
-| [`theme`](../urushi/src/theme/) | Semantic color tokens, reusable component roles and styles, application role resolution, and explicit light/dark selection. | `style`, `component` |
+| [`theme`](../urushi/src/theme/) | Semantic color tokens, reusable component roles, canonical component presentations, application role resolution, and explicit light/dark selection. | `style`, `component` |
 | [`view`](../urushi/src/view/) | The renderer-neutral `View` tree, the one layout pass in its three phases — width, height, assembly — behind `measure` / `resolve` (`Size`, `Available`, `StyledGrapheme`, `ResolvedView`), and composition of already-rendered `RenderedBlock` values. | `style`, `text` |
-| [`component`](../urushi/src/component/) | Reusable semantic components that return `View`: summaries, warnings, owned lists, owned trees, and owned tables. | `theme`, `view`, `text` |
+| [`component`](../urushi/src/component/) | Reusable semantic data and the independent concrete presentations that compose it into primitive `View` trees. | `theme`, `view`, `text` |
 | [`render`](../urushi/src/render/) | Translation of renderer-neutral views to ANSI text. | `style`, `view`, `terminal/profile` |
 | [`terminal`](../urushi/src/terminal/) | Terminal capability detection, color degradation, stderr ownership, output-mode selection, and the progress lifecycle. | `style`, `theme`, `view`, `render` |
 
@@ -202,7 +210,8 @@ The dependency direction runs from I/O and adapters toward semantic modules:
 Three pairs reference each other by design. `style` and `view` do so because
 `BlockStyle::render` is the single-block case of the view's layout pass rather
 than a second box model. `theme` and `component` do so because `theme` stores
-the component style values and `component` resolves its roles through `theme`.
+canonical component presentations and those presentations derive their
+logical styles from the theme.
 `render` and `terminal` do so because `AnsiRenderer` applies a
 `TerminalProfile` and `StderrTerminal` owns an `AnsiRenderer`.
 
@@ -212,9 +221,10 @@ not introduce a private definition of CJK display width.
 Themes describe meaning. They do not detect `NO_COLOR`, inspect TTY state, emit
 ANSI, or retain an output writer.
 
-Reusable components separate owned, presentation-neutral data — `List`,
-`Tree`, `Table` — from the component style that composes it into a `View`. The
-contract they follow is defined in [`component-model.md`](component-model.md).
+Reusable components separate owned semantic data — `List`, `Tree`, `Table`,
+`Summary`, and `Warning` — from concrete presentations that compose it into a
+primitive `View`. The contract they follow is defined in
+[`component-model.md`](component-model.md).
 
 ## Core contracts
 
@@ -239,11 +249,14 @@ The immutable value model, closed property vocabulary, and generic
 and does not inspect terminal capabilities by itself. Callers that need
 capability degradation call `TerminalProfile::resolve_block_style` first.
 
-### Components stop at View
+### Presentations stop at View
 
-A reusable component owns semantic props, normalization, and component-local
-layout. Its output is a `View`. It must not write to stderr, choose live mode,
-construct an Indicatif object, or depend on Ratatui.
+A reusable component owns semantic data and normalization. A concrete
+presentation owns one structural interpretation and composes a `View` without
+receiving `Available`; it may also borrow component-specific immutable input
+describing the current frame. The application owns that input's transitions,
+and `resolve` alone decides area-dependent geometry. Neither layer may write to
+stderr, choose live mode, construct an Indicatif object, or depend on Ratatui.
 
 Application-specific workflow chrome remains in the application: an application
 composes its own command start and finish lines rather than Urushi growing
@@ -302,7 +315,9 @@ changed deliberately and this document is updated in the same change:
 1. `style` and `text` remain independent from I/O and external rendering
    backends.
 2. Themes contain semantic choices but no terminal detection or writer state.
-3. A reusable component returns `View` and performs no output.
+3. A reusable component owns semantic data; only a concrete presentation
+   composes that data and any borrowed current-frame input into a primitive
+   `View`, and neither performs output or owns state transitions.
 4. `AnsiRenderer` applies `TerminalProfile` at the output boundary.
 5. Display width and wrapping use the shared `text` implementation; rendered
    output is measured only by `RenderedBlock::from_ansi`.

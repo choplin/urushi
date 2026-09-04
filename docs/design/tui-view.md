@@ -48,10 +48,12 @@ Both are additive to the core: adding a key to a box moves no geometry,
 `resolve` keeps its signature, and a resolved view reports no anchor for a tree
 containing none.
 
-A view carries no scroll offset, no focus, and no redraw hint. Scrolling is a
-view-model question that composes on top of height clipping, focus stays
-ordinary model and message logic, and invalidation belongs to Ratatui's cell
-diff.
+A view carries no scroll command, focus transition, or redraw hint. Scrolling
+and focus stay ordinary model and message logic, while the current frame may
+carry the resulting viewport projection and focused appearance. Invalidation
+belongs to Ratatui's cell diff. The division between interaction ownership and
+one-frame expression is recorded in
+[`tui-view-expressiveness.md`](tui-view-expressiveness.md).
 
 The runtime's `Renderer` consumes `ResolvedView` and its anchored rectangles
 directly rather than going through `ViewWidget`, because it needs them from the
@@ -117,10 +119,11 @@ Rejected:
 
 ## Why one anchor rather than two mechanisms
 
-Adopting the tree leaves two things a rectangle of graphemes cannot express: the
-cell the terminal cursor belongs on, and a region an embedded Ratatui widget
-draws into. They look unrelated, and each has an obvious mechanism of its own —
-a cursor request on the view, a widget-bearing node in the tree.
+The anchor addresses two kinds of information a resolved rectangle of
+graphemes cannot carry: the cell the terminal cursor belongs on, and a region
+an embedded Ratatui widget draws into. They look unrelated, and each has an
+obvious mechanism of its own — a cursor request on the view, a widget-bearing
+node in the tree.
 
 They are one problem. In both, the *position* is a layout outcome the
 application cannot compute, and the *content* is not cells this crate produces.

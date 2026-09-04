@@ -1,58 +1,33 @@
 # Component Model
 
-This document defines the contract every reusable Urushi component follows:
-semantic data on one side, presentation on the other, composed into a
-[`View`](view-model.md). The reasoning behind that separation, and the criteria
-for applying it to a new component, live in
-[`design/component-data-and-style.md`](design/component-data-and-style.md).
+This document defines the boundary between reusable semantic components,
+their presentations, the primitive [`View`](view-model.md) tree, and the
+resolved scene. The reasoning behind the boundary lives in
+[`design/component-presentation.md`](design/component-presentation.md).
 
-## Component style plus component data composes a View
+## Components become views through presentations
 
-Component data describes what a component contains. A component style describes
-how that data is composed into a `View` — the renderer-neutral tree of text,
-blocks, rows, and columns, and its logical styles, that a backend later turns
-into output:
+A semantic component describes what exists. A concrete presentation describes
+one way to turn that meaning into layout primitives:
 
 ```text
-component style + component data -> View
+semantic data + presentation [+ optional frame input]
+                    --compose--> View --resolve(Available)--> ResolvedView
 ```
 
-Composition borrows both inputs and owns no terminal I/O:
+For the canonical presentation of a common component, `Theme` provides the
+short call:
 
 ```rust
 let list = List::new()
     .item("Define the API")
     .item(ListItem::new("Implement").items(["model", "view"]));
 
-let view = theme.components().list().view(&list);
+let view = theme.list(&list);
 ```
 
-A component style composes a `View`; it does not render output.
-
-## Responsibilities
-
-| Value | Owns | Does not own |
-| --- | --- | --- |
-| Component data | Semantic content, hierarchy, structural visibility, offsets, and data inspection | `TextStyle` values, marker callbacks, terminal capabilities, or output lifecycle |
-| Component style | Logical styles, marker and indentation policy, component layout, and `View` composition | Component content, writers, terminal state, or event loops |
-| `ComponentStyles` | Theme-wide default component styles | Runtime component data |
-| `View` | The composed tree of text, blocks, rows, and columns, and its logical styles | Terminal capability decisions or output |
-| Output adapter | Translation of `View` or logical styles for a concrete backend | Component semantics or application workflow |
-
-The builder that constructs component data — `List::new().item(...)` above —
-should describe content and structure rather than appearance. The same data
-value should remain usable without a theme and composable with different
-component styles.
-
-A component style may perform component-specific layout — aligning summary
-labels, composing tree branches — but it does not resolve terminal
-capabilities, emit output, or discover the terminal's size: when layout
-requires a display width, the caller supplies that constraint explicitly.
-
-## Default styles and local variation
-
-On the style side, themes expose default component styles by reference. A
-caller clones a default when one use needs a local variation:
+The shortcut delegates to the complete presentation object. A caller reaches
+that object when one use needs local variation:
 
 ```rust
 let numbered = theme
@@ -61,34 +36,121 @@ let numbered = theme
     .clone()
     .enumerator(arabic_enumerator);
 
-let view = numbered.view(&list);
+let view = numbered.compose(&list);
 ```
 
-Local presentation belongs to the component style, not to the data builder.
-Global customization, by contrast, replaces or derives the style in
-`ComponentStyles`.
+This ordinary `compose` call borrows presentation and data, performs no
+terminal I/O, and receives no `Available` area. It returns a primitive `View`;
+it does not render output. `compose` names the lowering responsibility, not one
+shared signature: a component that needs selection, a visible origin, or
+another fact about the current frame may borrow an additional
+component-specific presentation input. `urushi-tui` owns and updates that
+state; composition only reads its current value.
 
-## Naming
+## The four layers
 
-A component style is named `…Style`, not `…Renderer`, because it composes a
-`View` rather than rendering output.
+| Layer | Owns | Does not own |
+| --- | --- | --- |
+| Semantic data | Content, relationships, hierarchy, domain visibility, and semantic inspection | Presentation styles, layout primitives, available area, interaction state, terminal capabilities, or output lifecycle |
+| Concrete presentation | One structural presentation, its logical styles, markers and other presentation policy, and lowering semantic data plus any borrowed frame input into a `View` | Component content, available area, state transitions, writers, or event loops |
+| `View` | Renderer-neutral layout primitives and the logical styles attached to them | Component kinds, semantic row or node roles, terminal capabilities, or application workflow |
+| `ResolvedView` | The resolved rectangle of styled graphemes and reported placements | Semantic data, primitive nodes, terminal capability decisions, or output ownership |
 
-## Public API and internal reuse
+The presentation is the last layer that understands component meaning. It may
+choose a `Grid` for a table or another primitive for a tree, but the resulting
+tree carries only the chosen primitive structure. A backend cannot discover
+whether a `Grid` came from a table, and a resolver never branches on component
+kind.
 
-Similar components keep independent public data models; they do not share
-public aliases or traits.
+An immutable, component-specific snapshot such as selection, expansion,
+visible origin, cursor, or camera is an input to that lowering operation, not a
+fifth architectural layer. The application owns its lifetime and transitions;
+the presentation only borrows what it needs to describe one frame.
 
-What may be shared is genuinely common implementation, kept private. A private
-trait or generic function may own recursive traversal, marker alignment,
-multiline continuation, or CJK cell-width handling while each component keeps
-independent public data and callback types.
+## Area-independent composition
 
-A shared contract is promoted to a public trait only when external callers need
-to write generic code over multiple component models. Internal deduplication
-alone does not justify a public abstraction.
+A presentation states layout intent without deciding an area-dependent
+result. It must not accept terminal width, pre-wrap content for an eventual
+share, align columns by inserting measured spaces, or repeat glyphs to bake a
+line of a chosen width into a text leaf.
 
-## Reference components
+The area reaches the tree only through `resolve`. Generic primitive rules then
+decide widths, wrapping, clipping, alignment, and placement. This keeps the
+same composed component valid at the root, inside a `Row`, and under different
+backends and available areas.
 
-`List` / `ListStyle`, `Tree` / `TreeStyle`, and `Table` / `TableStyle` are the
-reference cases for the data-and-style separation. `Summary` and `Warning`
-consume `ComponentStyles` directly.
+Intrinsic, area-independent work remains valid during composition. A
+presentation may normalize a marker to one line or choose a primitive from a
+semantic role. It may not compute the final geometry that only sibling sharing
+or the available area can determine.
+
+## Styles and presentations are different values
+
+The `...Style` suffix is reserved for declarative values that do not interpret
+semantic component data. `TextStyle`, `BlockStyle`, and `GridStyle` configure
+the primitives they are attached to.
+
+A type that interprets semantic data and constructs primitives is named
+`...Presentation`. The built-in canonical types are
+`ListPresentation`, `TreePresentation`, `TablePresentation`,
+`SummaryPresentation`, and `WarningPresentation`. `ComponentTheme` stores
+their theme-derived defaults alongside shared component role styles.
+
+Each presentation is an independent concrete type. `compose` is a naming and
+responsibility convention, not a shared trait or universal signature. Internal
+reuse does not create a public `Presentation`, `PresentationInput`, or
+`Component` abstraction.
+
+## Canonical and alternate presentations
+
+An unqualified name such as `TreePresentation` denotes the canonical
+presentation Urushi ships for that component. A structurally different
+presentation receives a structural name and is introduced only together with
+an implementation:
+
+```rust
+let ordinary = theme.tree(&tree);
+let vertical = VerticalTreePresentation::from_theme(&theme).compose(&tree);
+```
+
+Both consume the same `Tree` data and produce primitive `View` trees. Neither
+is a subtype of the other. Appearance shared by two real presentations may be
+extracted later; a hypothetical second presentation does not justify a public
+style split or trait today.
+
+The same rule scales to a future graph component. Graph topology and content
+remain semantic data, while concrete choices such as layered or explicitly
+positioned presentation use named types such as `LayeredGraphPresentation` or
+`PositionedGraphPresentation`. They may lower to a future canvas primitive,
+but `View` gains neither a `Graph` node nor graph interaction semantics. No
+`theme.graph(&graph)` shortcut exists until Urushi has chosen and shipped one
+canonical graph presentation.
+
+## Theme shortcuts
+
+`Theme` exposes short methods for canonical presentations expected in ordinary
+use:
+
+```rust
+theme.list(&list);
+theme.tree(&tree);
+theme.table(&table);
+theme.summary(&summary);
+theme.warning(&warning);
+```
+
+These methods add no second implementation. Each delegates to the corresponding
+presentation in `theme.components()`. Named alternate presentations and local
+customization stay explicit through `compose`.
+
+## Component classification
+
+`List`, `Tree`, `Table`, `Summary`, and `Warning` are semantic data. Their
+presentation types own every conversion into `View`, including the current
+canonical visual structure. A table header is Table meaning until
+`TablePresentation` lowers it; a list marker and a tree branch are presentation
+policy until their presentation expresses them as generic primitives.
+
+Shared recursive traversal, marker normalization, or CJK handling may remain
+private implementation. Promote a shared public contract only when external
+callers need generic code over multiple component models.

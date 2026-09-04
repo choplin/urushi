@@ -1,10 +1,13 @@
 # View Model
 
-Urushi represents composed terminal output as two style types and a view tree
-that resolves to the single rectangle every renderer consumes.
+Urushi represents composed terminal output as primitive style values and a
+semantic-free view tree that resolves to the single scene every renderer
+consumes.
 
-This document gives the shape of that model: the two types, the four nodes,
-what the layout pass produces, and the principles sizing rests on. The precise
+This document gives the shape of that model: the primitive styles and nodes,
+what the layout pass produces, and the principles sizing rests on. Semantic
+components are lowered into this tree through the presentations defined by
+[`component-model.md`](component-model.md); they are not nodes in it. The precise
 rules — how a box's size is clamped, how siblings divide an area, how overflow
 is absorbed, the order a node resolves in, how rendered output is measured —
 each have a file under [`design/`](design/), linked from the section that
@@ -12,9 +15,10 @@ summarizes them. Why the model has this shape at all is recorded in
 [`design/view-block-model.md`](design/view-block-model.md). The value model
 governing the two style types is defined in [`style-model.md`](style-model.md).
 
-## The two style types and the view tree
+## Primitive styles and the view tree
 
-Presentation splits into two values, and geometry belongs to only one of them:
+The styles attached to the two fundamental primitives split into two values,
+and geometry belongs to only one of them:
 
 ```rust
 /// Everything a terminal can express about a run of text.
@@ -38,7 +42,7 @@ rectangle. `TextStyleProperty` converts into `BlockStyleProperty`; there is no
 conversion in the other direction, so no geometry property can be applied to a
 `TextStyle`.
 
-A view is a tree of five nodes, and a keyed form of one of them:
+A view is a tree of five primitive nodes, and a keyed form of one of them:
 
 ```rust
 pub enum View {
@@ -58,14 +62,21 @@ pub enum View {
 - `Grid` lines cells up in columns and draws the lines between them.
 - `AnchorBlock` is a `Block` that also reports where its content landed.
 
-The first five are the five things terminal output does: carry text, put a box
+These primitives cover the current common mechanics: carry text, put a box
 around something, place things beside each other, stack them, and line them up
-in columns. Components construct views through `View::text`, `View::block`,
-`View::row`, `View::column`, and `View::grid`; there is one way to express each
-node.
+in columns. They are not claimed to exhaust every renderer-neutral operation a
+full-screen frame needs. Applications and concrete presentations construct
+views through `View::text`, `View::block`, `View::row`, `View::column`, and
+`View::grid`; there is one way to express each node.
 
-`GridStyle` is the grid node's own style: a glyph set, the edges and separators
-it draws, whether its first row is a header and carries a rule below it, an
+Those nodes state layout and drawing intent only. There is no `View::List`,
+`View::Table`, `View::Tree`, or `View::Graph`: a concrete presentation reads
+that meaning and lowers it before constructing the tree. A Grid produced by a
+Table presentation is indistinguishable from a Grid written directly by an
+application, and no Grid property may name a Table header or another semantic
+row role.
+
+`GridStyle` is the grid node's own style: its generic edges and separators, an
 optional `Length` per column, and the padding its cells take. It
 holds no box geometry — a grid that needs a border of its own, a margin, or a
 stated size is placed inside a `Block`. What a grid computes, and why the lines
@@ -91,10 +102,10 @@ place their odd extra row on opposite sides; both are deliberate, and
 [`design/view-block-model.md`](design/view-block-model.md) records why the
 biases are not unified.
 
-## The layout pass and what it produces
+## The layout pass and the resolved scene
 
-One layout pass turns a tree into a rectangle, and every renderer consumes that
-rectangle:
+One layout pass turns a tree into a resolved scene, and every renderer consumes
+that scene:
 
 ```rust
 pub struct Size { width: usize, height: usize }
@@ -133,6 +144,19 @@ renderer serializes it, so terminal capability resolution stays at the output
 boundary. Rows hold per-grapheme tokens rather than styled text runs, so a
 renderer never sees text below grapheme granularity and receives every width
 from the layout pass instead of re-deriving it.
+
+`ResolvedView` carries no semantic data and no primitive nodes. It is the
+resolved scene: styled graphemes plus placements such as anchors. A future
+Canvas or Graph presentation does not create another renderer input; after
+lowering and resolution it produces the same `ResolvedView` as every other
+tree.
+
+Full-screen validation requires the same tree to express inline style changes
+within one text flow, viewport projection, and positioned overlap without
+application-computed final rectangles. These are generic capability
+requirements rather than semantic component nodes; their boundary and the
+responsibilities that remain in `urushi-tui` are recorded in
+[`design/tui-view-expressiveness.md`](design/tui-view-expressiveness.md).
 
 Anchored rectangles come from the same resolution as the rows: `anchors`
 returns them all in tree order, a box before what it encloses, and

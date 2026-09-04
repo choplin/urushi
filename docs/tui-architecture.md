@@ -16,7 +16,10 @@ ordered, and drawn, including the `Sync` and startup barriers
 effects run and how their freshness is decided
 ([`design/tui-effects.md`](design/tui-effects.md)); and who owns the terminal,
 the frame, and session restoration
-([`design/tui-terminal-ownership.md`](design/tui-terminal-ownership.md)).
+([`design/tui-terminal-ownership.md`](design/tui-terminal-ownership.md)). The
+criterion that keeps one-frame presentation in core while leaving interaction
+in the runtime is recorded in
+[`design/tui-view-expressiveness.md`](design/tui-view-expressiveness.md).
 
 ## Goals
 
@@ -135,19 +138,26 @@ defined in [`design/tui-application.md`](design/tui-application.md).
 
 Within this document, `View` means the declarative render input produced by a
 TUI application's `view` function, and that type is
-[`urushi::view::View`](../urushi/src/view/model.rs) — the tree of text, block,
-row, and column nodes that one layout pass resolves into a rectangle under an
-available area. A TUI application's `view` returns the same value a plain-CLI
-call site builds, and the runtime resolves it under the terminal's area.
+[`urushi::view::View`](../urushi/src/view/model.rs) — the renderer-neutral tree
+of styled content and layout primitives that one layout pass resolves into a
+rectangle under an available area. A TUI application's `view` returns the same
+value a plain-CLI call site builds, and the runtime resolves it under the
+terminal's area.
 
-The tree carries one thing full-screen use requires beyond what plain output
-needs: an **anchor**, a box that also carries a key, whose resolved rectangle
-the caller that knows what belongs there fills. It serves the two things a
-grapheme rectangle cannot express — where the terminal cursor belongs, and
-where a caller holding the buffer draws what this crate does not produce. A
-view carries no scroll offset, no focus, and no redraw hint. The anchor's
-rule, and why one keyed box serves both needs, are recorded in
-[`design/tui-view.md`](design/tui-view.md).
+The current tree also carries an **anchor**, a box that carries a key, whose
+resolved rectangle the caller that knows what belongs there fills. It serves
+two uses a grapheme rectangle cannot express — where the terminal cursor
+belongs, and where a caller holding the buffer draws what this crate does not
+produce. A
+view carries no focus transition, scroll command, or redraw hint. Those are
+application behavior. It does carry whatever pure projection describes the
+current frame, such as selected styling, a visible origin, or a camera supplied
+by the application to a concrete presentation. The view model must be able to
+express that frame without application-computed final rectangles or ordinary
+content written directly into a backend. The detailed criterion and division
+between core, components, and runtime are recorded in
+[`design/tui-view-expressiveness.md`](design/tui-view-expressiveness.md); the
+anchor's rule is recorded in [`design/tui-view.md`](design/tui-view.md).
 
 Whatever the TUI `View` becomes, it is `urushi::view::View` or a value that
 embeds it; Urushi does not introduce a second, independent resolved render tree

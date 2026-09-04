@@ -5,7 +5,7 @@ governing [`TextStyle`](../urushi/src/style/text.rs) and
 [`BlockStyle`](../urushi/src/style/block.rs).
 
 The two style types themselves, and the view tree they style, are defined in
-[`view-model.md`](view-model.md); why presentation splits between them is
+[`view-model.md`](view-model.md); why primitive styling splits between them is
 settled in [`design/view-block-model.md`](design/view-block-model.md); why the
 value model has this shape is recorded in
 [`design/style-value-model.md`](design/style-value-model.md). Three topics
@@ -184,10 +184,12 @@ for roles whose value is a rectangle, such as `PanelRole` and the cell roles of
 the built-in table component. An application role of either kind builds its
 value with the ordinary consuming builders.
 
-`ComponentStyles::with_text_style` replaces a text role's style,
-`ComponentStyles::with_panel` and `with_panel_focused` replace the panel
-blocks, and `Theme::components` exposes the stored built-in values as borrows
-for consumers that want to avoid the copy.
+`ComponentTheme::with_text_style` replaces a text role's style,
+`ComponentTheme::with_panel` and `with_panel_focused` replace the panel blocks,
+and `Theme::components` exposes the stored built-in styles and canonical
+presentations as borrows for consumers that want to avoid the copy. Component
+presentations are not style values: their separate role and naming are defined
+in [`component-model.md`](component-model.md).
 
 Styles do not implicitly flow from a parent view to a child: as
 [`view-model.md`](view-model.md) specifies, each child carries its own
