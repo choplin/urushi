@@ -7,7 +7,7 @@ use crate::{
         PromptView, RuntimeField, ViewSpan, clipped_line_view, fixed_view, line_view,
     },
 };
-use urushi::{PrintableText, VerticalAlign, View};
+use urushi::{Align, PrintableText, VerticalAlign, View};
 
 /// The provenance of a submitted confirmation value.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -37,6 +37,7 @@ pub struct Confirm {
     source: Option<ConfirmSource>,
     yes_label: String,
     no_label: String,
+    button_alignment: Align,
     help: String,
     unanswered_message: String,
     show_unanswered: bool,
@@ -62,6 +63,7 @@ impl Confirm {
             source: None,
             yes_label: "Yes".to_owned(),
             no_label: "No".to_owned(),
+            button_alignment: Align::Left,
             help: "←/→ choose • y yes • n no • enter submit • shift+tab back • esc cancel"
                 .to_owned(),
             unanswered_message: "Choose yes or no.".to_owned(),
@@ -77,6 +79,16 @@ impl Confirm {
     pub fn labels(mut self, yes: impl Into<String>, no: impl Into<String>) -> Self {
         self.yes_label = yes.into();
         self.no_label = no.into();
+        self
+    }
+
+    /// Sets the horizontal alignment of the yes and no buttons.
+    ///
+    /// The default is [`Align::Left`]. Center and right alignment position the
+    /// buttons within the natural width of the question and description.
+    #[must_use]
+    pub fn button_alignment(mut self, alignment: Align) -> Self {
+        self.button_alignment = alignment;
         self
     }
 
@@ -189,20 +201,30 @@ impl RuntimeField for Confirm {
                 &styles.muted,
             )]));
         }
-        let button_width = PrintableText::new(self.yes_label.as_str())
-            .width()
-            .saturating_add(4)
-            .saturating_add(1)
-            .saturating_add(PrintableText::new(self.no_label.as_str()).width())
-            .saturating_add(4);
-        let question_width = PrintableText::new(self.question.as_str()).width();
-        let header_width = self
-            .description
-            .as_deref()
-            .map_or(question_width, |description| {
-                question_width.max(PrintableText::new(description).width())
-            });
-        let left_padding = header_width.saturating_sub(button_width) / 2;
+        let left_padding = match self.button_alignment {
+            Align::Left => 0,
+            alignment @ (Align::Center | Align::Right) => {
+                let button_width = PrintableText::new(self.yes_label.as_str())
+                    .width()
+                    .saturating_add(4)
+                    .saturating_add(1)
+                    .saturating_add(PrintableText::new(self.no_label.as_str()).width())
+                    .saturating_add(4);
+                let question_width = PrintableText::new(self.question.as_str()).width();
+                let header_width = self
+                    .description
+                    .as_deref()
+                    .map_or(question_width, |description| {
+                        question_width.max(PrintableText::new(description).width())
+                    });
+                let remaining_width = header_width.saturating_sub(button_width);
+                match alignment {
+                    Align::Center => remaining_width / 2,
+                    Align::Right => remaining_width,
+                    Align::Left => unreachable!("left alignment is handled above"),
+                }
+            }
+        };
         lines.push(PromptLine::blank());
         let mut buttons = Vec::new();
         for (index, (value, label)) in [(true, &self.yes_label), (false, &self.no_label)]
@@ -225,7 +247,7 @@ impl RuntimeField for Confirm {
         // is the frame stage's decision, and a button row is one it never
         // displaces.
         //
-        // Centring is a decision about where the group starts, so the leading
+        // Alignment is a decision about where the group starts, so the leading
         // blank is a column of its own rather than text the group could be
         // reflowed away from.
         let buttons = if left_padding > 0 {
@@ -366,7 +388,7 @@ mod tests {
     }
 
     #[test]
-    fn buttons_are_centered_within_the_natural_header_width() {
+    fn buttons_are_left_aligned_by_default() {
         let confirm = Confirm::new(
             FieldKey::new("confirm"),
             "Generate the personalized greeting?",
@@ -377,8 +399,42 @@ mod tests {
         let styles = test_styles();
         let view = confirm.view(&styles, true, 80);
         assert!(view.lines[1].runs().is_empty());
+        assert_eq!(view.lines[2].runs()[0].style, styles.button_focused);
+        assert_eq!(view.lines[2].runs()[0].text, "  Yes  ");
+    }
+
+    #[test]
+    fn buttons_can_be_centered_within_the_natural_header_width() {
+        let confirm = Confirm::new(
+            FieldKey::new("confirm"),
+            "Generate the personalized greeting?",
+            Some(true),
+        )
+        .expect("confirm is valid")
+        .button_alignment(Align::Center);
+
+        let styles = test_styles();
+        let view = confirm.view(&styles, true, 80);
         assert_eq!(view.lines[2].runs()[0].style, styles.body);
         assert_eq!(view.lines[2].runs()[0].text, "          ");
+        assert_eq!(view.lines[2].runs()[1].style, styles.button_focused);
+        assert_eq!(view.lines[2].runs()[1].text, "  Yes  ");
+    }
+
+    #[test]
+    fn buttons_can_be_right_aligned_within_the_natural_header_width() {
+        let confirm = Confirm::new(
+            FieldKey::new("confirm"),
+            "Generate the personalized greeting?",
+            Some(true),
+        )
+        .expect("confirm is valid")
+        .button_alignment(Align::Right);
+
+        let styles = test_styles();
+        let view = confirm.view(&styles, true, 80);
+        assert_eq!(view.lines[2].runs()[0].style, styles.body);
+        assert_eq!(view.lines[2].runs()[0].text, "                     ");
         assert_eq!(view.lines[2].runs()[1].style, styles.button_focused);
         assert_eq!(view.lines[2].runs()[1].text, "  Yes  ");
     }
