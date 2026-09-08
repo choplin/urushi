@@ -6,6 +6,7 @@ describe the current snapshot.
 
 | Date | Decision | Recorded in |
 | --- | --- | --- |
+| 2026-09-09 | Split prompt resize ownership by display mode: default inline prompts leave the displayed snapshot to primary-buffer terminal reflow without reconstructing or erasing it, while callers needing complete application-controlled re-layout explicitly select an alternate-screen presentation. | [`inline-prompt-rendering.md`](inline-prompt-rendering.md), [`design/prompt-resize.md`](design/prompt-resize.md) |
 | 2026-09-08 | Replaced Region with one optional Canvas-wide intrinsic sizing value because both abstractions retained presentation behavior and produced the same renderer-neutral scene; default Canvas sizing remains independent of its items. | [`design/canvas.md`](design/canvas.md), [`design/component-presentation.md`](design/component-presentation.md), [`design/grid.md`](design/grid.md) |
 | 2026-09-08 | Added an anchored field-presentation boundary so prompt viewport degradation preserves semantic fields and Confirm alignment uses Grid rather than width arithmetic. | [`design/prompt-field-presentation.md`](design/prompt-field-presentation.md) |
 | 2026-09-08 | Added Canvas as a finite, content-independent drawing surface whose comparable items record `View`, `Text`, `Path`, and sparse `Cells` commands after sizing; commands compose in order through separate per-command rules. | [`design/canvas.md`](design/canvas.md) |

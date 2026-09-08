@@ -1,10 +1,11 @@
-# Inline Prompt Rendering
+# Prompt Rendering
 
-This document defines the architecture for drawing an interactive prompt
-inline in a terminal: what a prompt owns on screen, the stages a frame passes
-through, and the contract that keeps redraw and cleanup safe. Three topics have
-files under [`design/`](design/): the owned region — how it is claimed,
-anchored, lost, and released — in
+This document defines the architecture for rendering a blocking interactive
+prompt: the terminal surfaces a caller can choose, what each presentation owns,
+and the default inline rendering path. Four topics have files under
+[`design/`](design/): resize ownership and its safety boundary in
+[`design/prompt-resize.md`](design/prompt-resize.md), the inline owned region —
+how it is claimed, anchored, lost, and released — in
 [`design/prompt-region.md`](design/prompt-region.md), field presentation and
 viewport degradation in
 [`design/prompt-field-presentation.md`](design/prompt-field-presentation.md),
@@ -12,9 +13,53 @@ and the render plan — the command vocabulary, the plan's recovery contract,
 and how it is verified — in
 [`design/prompt-render-plan.md`](design/prompt-render-plan.md).
 
-## Goals
+## Display modes
 
-Inline prompt rendering must:
+A prompt has two display modes:
+
+| Mode | Surface | Resize behavior | Selection |
+| --- | --- | --- | --- |
+| `Inline` | A region in the primary buffer | The terminal owns soft-wrap reflow | Default |
+| `AlternateScreen` | The whole temporary viewport | The prompt lays out and redraws the viewport | Explicit |
+
+The modes share form state, field behavior, validation, themes, and outcomes.
+The caller chooses the terminal behavior it needs; capability detection does
+not silently move a form between surfaces. Surface-specific options belong to
+the selected mode, so an inline start position cannot be accepted and then
+ignored by an alternate-screen presentation.
+
+### Inline
+
+`Inline` keeps the active form and its submitted state in the primary buffer
+and normal scrollback. It owns only a region of rows, never the screen, and
+must leave content outside that region untouched. Terminal soft wrapping owns
+how the displayed snapshot reflows when the terminal is resized. The prompt
+does not reconstruct or erase that snapshot from its previous physical
+geometry, so this mode does not promise deterministic post-resize layout.
+
+Submission keeps the final answered prompt and moves subsequent output below
+it. Cancellation and failure erase only a region whose ownership can still be
+established; rows that can no longer be located are never erased by inference.
+
+### AlternateScreen
+
+`AlternateScreen` enters a temporary screen for the duration of the form and
+owns the complete viewport. It resolves the current form against the available
+area and redraws the viewport after every resize, so its layout remains under
+application control.
+
+Submission, cancellation, I/O failure, and panic restoration all leave the
+alternate screen and restore the primary buffer and terminal modes acquired by
+the session. The transient form is not replayed into scrollback. The returned
+form outcome and any subsequent durable output belong to the caller.
+
+The exact resize boundary and the alternatives it rules out are defined in
+[`design/prompt-resize.md`](design/prompt-resize.md).
+
+## The inline rendering path
+
+The remainder of this document defines the stages and ownership contract of
+the default `Inline` mode. Inline rendering must:
 
 - draw a prompt into a region of terminal rows without owning the screen;
 - redraw on every keystroke without visible flicker;
@@ -50,12 +95,13 @@ erase every row the failed frame could have touched, and no row outside the
 region. Where the region's extent cannot be established, cleanup must erase
 nothing.
 
-A region can be *lost* — its extent unknown — after a terminal resize or a
-write failure while the origin is being re-anchored. A lost region is
-abandoned, never erased: the prompt re-establishes on the cursor's current row
-if it is still running, and pushes below the residue if it is finishing. How
-the origin is anchored, what a loss resets, and why residue is accepted over
-erasure are defined in [`design/prompt-region.md`](design/prompt-region.md).
+A region can be *lost* when a write fails while its physical extent cannot be
+established. Such a region is abandoned, never erased. Resize is a separate
+boundary: it hands the displayed snapshot to the primary terminal buffer rather
+than inferring a new origin. The resize boundary is defined in
+[`design/prompt-resize.md`](design/prompt-resize.md); origin anchoring and
+unlocatable-write recovery are defined in
+[`design/prompt-region.md`](design/prompt-region.md).
 
 ## Presentation state
 

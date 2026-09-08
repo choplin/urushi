@@ -5,13 +5,14 @@ the workspace and module responsibilities, the dependency direction between
 them, the rendering flows, terminal ownership, and the invariants those
 boundaries rest on.
 
-Urushi spans plain CLI output, inline interactive prompts, and a full-screen
+Urushi spans plain CLI output, blocking interactive prompts, and a full-screen
 TUI runtime layered on Ratatui. The [`README`](../README.md#concept) explains
 why one library covers all three; this document explains how those surfaces
 share a foundation without being forced into one rendering model or one
 terminal lifecycle. Each surface's own design is a separate document:
 [`inline-prompt-rendering.md`](inline-prompt-rendering.md) for the prompt's
-render path, [`tui-architecture.md`](tui-architecture.md) for the full-screen
+rendering and terminal-surface choice, and
+[`tui-architecture.md`](tui-architecture.md) for the full-screen application
 runtime.
 
 What follows states rules. The reasoning behind a rule, and the alternatives it
@@ -130,7 +131,7 @@ The surfaces above the foundation, and the layer Urushi provides for each, are:
 | Surface | Urushi-provided layer | Lifecycle owner |
 | --- | --- | --- |
 | Plain CLI output | Direct box-model `BlockStyle::render`; concrete component presentations composing `View`; `AnsiRenderer`; `StderrTerminal`; optional spinner and progress-bar lifecycles | The application owns its command workflow and stdout policy. `StderrTerminal` and progress handles own the stderr resources they acquire. |
-| Interactive prompt | `Form` / `Group`; typed `Input`, `Select`, and `Confirm`; synchronous validation; the prompt-specific render stages; inline redraw; terminal session setup and cleanup | `urushi-prompt` owns the blocking prompt session and the resources it acquires. The application owns when the form runs and what submitted values mean. |
+| Interactive prompt | `Form` / `Group`; typed `Input`, `Select`, and `Confirm`; synchronous validation; selectable inline or alternate-screen presentation; terminal session setup and cleanup | `urushi-prompt` owns the blocking prompt session and the resources it acquires. The application owns when the form runs and what submitted values mean. |
 | Full-screen TUI | `urushi-tui`: the runtime and its `ratatui` adapter — logical-style conversion, widgets that resolve a `View` and draw it into a Ratatui `Buffer`, and the cell-writing path the runtime's renderer takes with a view it resolved itself | The `urushi-tui` runtime owns event delivery, frame scheduling, terminal entry and restoration. The application owns its model, update, and view. |
 
 The surfaces are intentionally partial. Sharing the foundation does not require
@@ -151,15 +152,16 @@ SemanticTokens --> Theme --> ComponentTheme / logical styles
              |                                |                             |
   View or BlockStyle::render        View + prompt stages        BlockStyle / widget
              |                                |                             |
- AnsiRenderer / terminal        inline renderer + session        caller-owned Buffer
+ AnsiRenderer / terminal       selected renderer + session       caller-owned Buffer
 ```
 
 This split prevents visual consistency from turning into lifecycle coupling.
 For example, a prompt and a Ratatui screen may resolve the same
 `PromptOptionSelected` role and use the same CJK width rules, but the prompt
-still owns validation and inline cursor restoration, while the full-screen
-runtime owns event processing and frame rendering. Likewise, plain CLI output
-can use the same theme without entering raw mode or starting an event loop.
+still owns validation and its selected terminal surface, while the full-screen
+application runtime owns event processing and frame rendering. Likewise, plain
+CLI output can use the same theme without entering raw mode or starting an
+event loop.
 
 ## Extending a theme
 
@@ -178,7 +180,7 @@ a role are documented with the extension point itself, in
 | Crate | Responsibility | Dependencies within the workspace |
 | --- | --- | --- |
 | [`urushi`](../urushi/) | Logical styles, themes, renderer-neutral views and components, output adapters, terminal capability resolution, and the progress lifecycle. Stderr ownership and live progress sit behind the optional `terminal` Cargo feature. | None |
-| [`urushi-prompt`](../urushi-prompt/) | Typed input, select, and confirm forms; prompt state transitions; inline drawing; terminal session setup and cleanup. | `urushi` |
+| [`urushi-prompt`](../urushi-prompt/) | Typed input, select, and confirm forms; prompt state transitions; inline and alternate-screen presentations; terminal session setup and cleanup. | `urushi` |
 | [`urushi-tui`](../urushi-tui/) | The Ratatui backend adapter in [`ratatui`](../urushi-tui/src/ratatui/) — style conversion, widgets, and the cell-writing path they share with the renderer — and the full-screen TUI runtime behind the default-on `runtime` Cargo feature. | `urushi` |
 
 `urushi-prompt` owns interactive prompt behavior. The core crate must not gain
@@ -279,15 +281,17 @@ line when work finishes or is interrupted.
 Non-TTY output and `TERM=dumb` use append-only plain output. Machine-readable
 stdout remains separate from human-facing progress on stderr.
 
-### A prompt owns a region of rows, never the screen
+### A prompt chooses its terminal surface
 
-An interactive prompt draws inline. It never enters the alternate screen and
-never clears the terminal. Instead, it owns a *region*: a run of rows anchored
-at the cursor position it saves on its first draw. Only rows inside that region
-may be erased or rewritten. Terminal content above the origin, and below the
-last reserved row, belongs to whatever produced it.
-[`inline-prompt-rendering.md`](inline-prompt-rendering.md) defines how the
-region is claimed, released, and recovered after a failed write.
+An interactive prompt draws inline by default. Its logical region participates
+in the primary buffer and scrollback, and terminal soft wrapping owns reflow.
+Callers that need complete application-controlled layout across resize may
+instead select an alternate-screen presentation, which owns and redraws the
+whole temporary viewport. The two presentations share form behavior, but their
+surface-specific positioning options do not mix.
+[`inline-prompt-rendering.md`](inline-prompt-rendering.md) defines both display
+contracts and the default inline rendering path; its linked design topics hold
+the exact resize and ownership rules.
 
 ### External backends stay behind adapters
 
