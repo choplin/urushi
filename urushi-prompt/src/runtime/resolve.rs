@@ -49,18 +49,21 @@ pub(crate) fn resolve_prompt(columns: u16, view: &PromptView) -> ResolvedPrompt 
                     .iter()
                     .filter_map(|region| {
                         let anchor = resolved.anchor(region.key)?;
+                        let bottom = anchor.y().saturating_add(
+                            i64::try_from(anchor.height().max(1)).unwrap_or(i64::MAX),
+                        );
                         Some(ResolvedRegion {
                             kind: region.kind,
-                            start: anchor.y(),
-                            end: anchor.y().saturating_add(anchor.height().max(1)),
+                            start: nonnegative_index(anchor.y()),
+                            end: nonnegative_index(bottom),
                         })
                     })
                     .collect();
                 let cursor = line.cursor.and_then(|key| {
                     let anchor = resolved.anchor(key)?;
                     Some(ViewCursor {
-                        row: anchor.y().min(usize::from(u16::MAX)) as u16,
-                        column: anchor.x().min(usize::from(u16::MAX)) as u16,
+                        row: terminal_coordinate(anchor.y()),
+                        column: terminal_coordinate(anchor.x()),
                     })
                 });
                 ResolvedLine {
@@ -74,5 +77,79 @@ pub(crate) fn resolve_prompt(columns: u16, view: &PromptView) -> ResolvedPrompt 
             })
             .collect(),
         cursor: view.cursor,
+    }
+}
+
+fn nonnegative_index(value: i64) -> usize {
+    usize::try_from(value).unwrap_or(if value < 0 { 0 } else { usize::MAX })
+}
+
+fn terminal_coordinate(value: i64) -> u16 {
+    value.clamp(0, i64::from(u16::MAX)) as u16
+}
+
+#[cfg(test)]
+mod tests {
+    use urushi::{
+        BlockStyle, Canvas, CanvasContext, CanvasItem, Length, Position, Size, TextStyle, View,
+    };
+
+    use super::*;
+    use crate::runtime::{FieldRegion, PromptLine};
+
+    #[derive(Debug, Clone, PartialEq)]
+    struct PartlyVisibleAnchor;
+
+    impl CanvasItem for PartlyVisibleAnchor {
+        fn draw(&self, context: &mut CanvasContext) {
+            context.view(
+                Position::new(-2, -1),
+                View::anchor_block(
+                    "region",
+                    BlockStyle::new()
+                        .width(Length::Cells(4))
+                        .height(Length::Cells(3)),
+                    View::text("x", TextStyle::new()),
+                ),
+                None,
+                None,
+            );
+        }
+    }
+
+    #[test]
+    fn signed_anchors_are_projected_into_the_nonnegative_prompt_domain() {
+        let key = urushi::Key::from("region");
+        let view = PromptView {
+            lines: vec![PromptLine {
+                view: View::canvas(
+                    Canvas::new()
+                        .extent(Size::new(4, 3))
+                        .item(PartlyVisibleAnchor),
+                ),
+                kind: LineKind::Content,
+                active: true,
+                regions: vec![FieldRegion {
+                    kind: FieldRegionKind::Focus,
+                    key,
+                }],
+                cursor: Some(key),
+                field: true,
+            }],
+            cursor: None,
+        };
+
+        let resolved = resolve_prompt(4, &view);
+        assert_eq!(
+            (
+                resolved.lines[0].regions[0].start,
+                resolved.lines[0].regions[0].end
+            ),
+            (0, 2)
+        );
+        assert_eq!(
+            resolved.lines[0].cursor,
+            Some(ViewCursor { row: 0, column: 0 })
+        );
     }
 }
