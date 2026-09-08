@@ -307,7 +307,7 @@ pub(super) struct TextBox<'a> {
     /// The area the leaf was given, which is what the policy fits against —
     /// not the width it resolved to, which a grapheme it cannot split may
     /// widen.
-    pub target: Option<usize>,
+    pub area: Option<usize>,
     pub overflow: &'a Overflow,
     /// Per-line alignment and the style filling the gap, both supplied by an
     /// enclosing block.
@@ -370,7 +370,7 @@ fn place<'a>(
                 node: WidthNode::Text(TextBox {
                     text,
                     style,
-                    target: area,
+                    area,
                     overflow: fit.overflow,
                     align: fit.align,
                     fill: fit.fill,

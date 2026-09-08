@@ -84,7 +84,7 @@ pub(super) fn fit(widths: Widths<'_>) -> Fitted<'_> {
     } = widths;
     let node = match node {
         WidthNode::Text(text) => {
-            let mut lines: Vec<String> = match (text.target, text.overflow) {
+            let mut lines: Vec<String> = match (text.area, text.overflow) {
                 (Some(width), Overflow::Wrap) => wrap_text(PrintableLines::new(text.text), width),
                 (Some(width), Overflow::Clip(marker)) => text_lines(text.text)
                     .iter()
