@@ -1,14 +1,14 @@
 use std::any::Any;
 
 use unicode_segmentation::UnicodeSegmentation;
-use urushi::{PrintableText, VerticalAlign, View};
+use urushi::{Align, PrintableText, VerticalAlign, View};
 
 use crate::{
     FieldConfigError, FieldKey,
     runtime::{
-        self, Event, FieldAction, FieldEntry, KeyCode, LineKind, PromptLine, PromptStyles,
-        PromptView, RuntimeField, ViewCursor, ViewSpan, clipped_line_view, fixed_view, line_view,
-        window_spans,
+        self, Event, FieldAction, FieldEntry, FieldPresentation, FieldRegionKind, KeyCode,
+        PromptStyles, RuntimeField, ViewSpan, clipped_line_view, field_line_view, fixed_view,
+        line_view, line_view_with_cursor, region, window_spans,
     },
 };
 
@@ -307,7 +307,7 @@ impl RuntimeField for Input {
         Box::new(std::mem::take(&mut self.value))
     }
 
-    fn view(&self, styles: &PromptStyles, focused: bool, width: usize) -> PromptView {
+    fn view(&self, styles: &PromptStyles, focused: bool, width: usize) -> FieldPresentation {
         // The prompt marker keeps its cells whatever the value does, so the
         // window the value scrolls in is the field's width less the marker.
         let answer_start = 2_usize;
@@ -327,53 +327,83 @@ impl RuntimeField for Input {
         } else {
             (answer_spans, cursor_column)
         };
-        let answer = PromptLine::new(View::row(
-            VerticalAlign::Top,
-            [
-                fixed_view(answer_start, vec![ViewSpan::new("› ", &styles.answer)]),
-                line_view(answer_spans),
-            ],
-        ));
-        let mut lines = vec![PromptLine::spans(vec![ViewSpan::new(
-            self.question.clone(),
-            styles.question(focused),
-        )])];
+        let answer_value = if focused {
+            line_view_with_cursor(answer_spans, cursor_column)
+        } else {
+            line_view(answer_spans)
+        };
+        let answer = field_line_view(
+            styles,
+            focused,
+            region(
+                FieldRegionKind::Control,
+                region(
+                    FieldRegionKind::Focus,
+                    View::row(
+                        VerticalAlign::Top,
+                        [
+                            fixed_view(answer_start, vec![ViewSpan::new("› ", &styles.answer)]),
+                            answer_value,
+                        ],
+                    ),
+                ),
+            ),
+        );
+        let mut body = vec![region(
+            FieldRegionKind::Question,
+            field_line_view(
+                styles,
+                focused,
+                line_view(vec![ViewSpan::new(
+                    self.question.clone(),
+                    styles.question(focused),
+                )]),
+            ),
+        )];
+        let mut regions = vec![
+            FieldRegionKind::Question,
+            FieldRegionKind::Control,
+            FieldRegionKind::Focus,
+        ];
         if let Some(description) = &self.description {
-            lines.push(PromptLine::spans(vec![ViewSpan::new(
-                description.clone(),
-                &styles.muted,
-            )]));
+            body.push(region(
+                FieldRegionKind::Description,
+                field_line_view(
+                    styles,
+                    focused,
+                    line_view(vec![ViewSpan::new(description.clone(), &styles.muted)]),
+                ),
+            ));
+            regions.push(FieldRegionKind::Description);
         }
-        let answer_row = lines.len();
-        lines.push(answer);
+        body.push(answer);
         if let Some(message) = &self.validation_error {
-            lines.push(
-                PromptLine::new(View::row(
-                    VerticalAlign::Top,
-                    [
-                        fixed_view(2, vec![ViewSpan::new("! ", &styles.error)]),
-                        View::text(message.clone(), styles.error.clone()),
-                    ],
-                ))
-                .with_kind(LineKind::Error),
-            );
+            body.push(region(
+                FieldRegionKind::Error,
+                field_line_view(
+                    styles,
+                    focused,
+                    View::row(
+                        VerticalAlign::Top,
+                        [
+                            fixed_view(2, vec![ViewSpan::new("! ", &styles.error)]),
+                            View::text(message.clone(), styles.error.clone()),
+                        ],
+                    ),
+                ),
+            ));
+            regions.push(FieldRegionKind::Error);
         }
-        lines.push(
-            PromptLine::new(clipped_line_view(vec![ViewSpan::new(
+        let presentation = FieldPresentation::new(View::column(Align::Left, body))
+            .with_help(clipped_line_view(vec![ViewSpan::new(
                 self.help.clone(),
                 &styles.help,
             )]))
-            .with_kind(LineKind::Help),
-        );
-
-        PromptView {
-            lines,
-            cursor: focused.then(|| ViewCursor {
-                row: answer_row.min(usize::from(u16::MAX)) as u16,
-                column: answer_start
-                    .saturating_add(cursor_column)
-                    .min(usize::from(u16::MAX)) as u16,
-            }),
+            .with_regions(regions);
+        if focused {
+            presentation.with_cursor()
+        } else {
+            presentation
         }
     }
 
@@ -394,6 +424,7 @@ mod tests {
     };
 
     use super::*;
+    use crate::runtime::PromptView;
     use crate::{
         Form, FormOutcome, Group,
         runtime::{EventSource, RenderFinish, Renderer, TerminalControl, test_styles},
@@ -453,23 +484,43 @@ mod tests {
 
         let styles = test_styles();
         let view = input.view(&styles, true, 80);
-        assert_eq!(view.lines[0].runs()[0].text, "名前");
-        assert_eq!(view.lines[0].runs()[0].style, styles.question);
-        assert_eq!(view.lines[1].runs()[0].text, "› ");
-        assert_eq!(view.lines[1].runs()[1].style, styles.cursor);
-        assert_eq!(view.cursor, Some(ViewCursor { row: 1, column: 2 }));
-        assert_eq!(view.lines[2].kind, LineKind::Help);
-        assert_eq!(view.lines[2].runs()[0].style, styles.help);
+        let rows = view.rows();
+        assert!(rows[0].text().contains("名前"));
+        assert!(
+            rows[0]
+                .runs()
+                .iter()
+                .any(|run| run.style == styles.question)
+        );
+        assert!(rows[1].text().contains("› あ"));
+        assert!(rows[1].runs().iter().any(|run| run.style == styles.cursor));
+        let resolved = urushi::resolve(&view.body, urushi::Available::NONE);
+        let cursor = resolved
+            .anchor(view.cursor.expect("focused input has a cursor anchor"))
+            .expect("cursor anchor resolves");
+        assert_eq!((cursor.y(), cursor.x()), (1, 4));
+        assert!(view.help.is_some());
 
         let empty = Input::new(FieldKey::new("empty"), "Name", "")
             .expect("input is valid")
             .placeholder("Example");
         let empty_view = empty.view(&styles, true, 80);
-        assert_eq!(empty_view.lines[1].runs()[1].style, styles.cursor);
-        assert_eq!(empty_view.lines[1].runs()[2].style, styles.placeholder);
+        assert!(
+            empty_view.rows()[1]
+                .runs()
+                .iter()
+                .any(|run| run.style == styles.cursor)
+        );
+        assert!(
+            empty_view.rows()[1]
+                .runs()
+                .iter()
+                .any(|run| run.style == styles.placeholder)
+        );
 
         assert_eq!(input.event(key(KeyCode::End)), FieldAction::Stay);
-        let trailing = input.view(&styles, true, 80).lines[1].runs();
+        let rows = input.view(&styles, true, 80).rows();
+        let trailing = rows[1].runs();
         let trailing = trailing.last().expect("the answer row has runs");
         assert_eq!(trailing.text, " ");
         assert_eq!(trailing.style, styles.cursor);
@@ -481,24 +532,29 @@ mod tests {
         let input = Input::new(FieldKey::new("name"), "Name", "value").expect("input is valid");
 
         let unfocused = input.view(&styles, false, 80);
-        assert_eq!(unfocused.lines[0].runs()[0].style, styles.muted);
         assert!(
-            unfocused.lines[1]
+            unfocused.rows()[0]
+                .runs()
+                .iter()
+                .any(|run| run.style == styles.muted)
+        );
+        assert!(
+            unfocused.rows()[1]
                 .runs()
                 .iter()
                 .all(|span| span.style != styles.cursor)
         );
         assert_eq!(
-            unfocused.lines[1]
+            unfocused.rows()[1]
                 .runs()
                 .iter()
                 .map(|span| span.text.as_str())
                 .collect::<String>(),
-            "› value"
+            "  › value"
         );
 
         let empty = Input::new(FieldKey::new("empty"), "Name", "").expect("input is valid");
-        assert!(empty.view(&styles, false, 80).lines[1].runs()[1..].is_empty());
+        assert_eq!(empty.view(&styles, false, 80).rows()[1].text(), "  ›   ");
     }
 
     #[test]
@@ -517,12 +573,12 @@ mod tests {
 
         let unfocused = input.view(&styles, false, 80);
         assert_eq!(
-            unfocused.lines[1]
+            unfocused.rows()[1]
                 .runs()
                 .iter()
                 .map(|span| span.text.as_str())
                 .collect::<String>(),
-            "› John Doe"
+            "  › John Doe"
         );
     }
 
@@ -593,6 +649,10 @@ mod tests {
         }
     }
 
+    fn rendered(view: &PromptView) -> crate::runtime::frame::FramedView {
+        crate::runtime::frame::frame(&crate::runtime::resolve::resolve_prompt(80, view), u16::MAX)
+    }
+
     struct InteractiveTerminal;
 
     impl TerminalControl for InteractiveTerminal {
@@ -654,28 +714,30 @@ mod tests {
             Some(&"done".to_owned())
         );
         assert_eq!(renderer.views.len(), 4);
-        assert_eq!(renderer.views[1].lines.len(), 8);
-        assert!(renderer.views[1].lines.iter().any(|line| {
-            line.runs()
+        let rejected = rendered(&renderer.views[1]);
+        assert!(rejected.rows.iter().any(|row| {
+            row.runs()
                 .iter()
                 .any(|run| run.style == test_styles().error)
         }));
-        assert_eq!(renderer.views[2].lines.len(), 7);
-        assert_eq!(renderer.views[3].lines[3].runs()[0].text, "┃ ");
-        assert_eq!(renderer.views[3].lines[3].runs()[1].text, "Second");
-        assert_eq!(
-            renderer.views[3].lines[1]
-                .runs()
+        let final_view = rendered(&renderer.views[3]);
+        assert!(
+            final_view
+                .rows
                 .iter()
-                .map(|span| span.text.as_str())
-                .collect::<String>(),
-            "  › 値"
+                .any(|row| row.text().contains("Second"))
+        );
+        assert!(
+            final_view
+                .rows
+                .iter()
+                .any(|row| row.text().contains("› 値"))
         );
         assert_eq!(
-            renderer.views[3]
-                .lines
+            final_view
+                .rows
                 .iter()
-                .flat_map(PromptLine::runs)
+                .flat_map(crate::runtime::frame::FramedRow::runs)
                 .filter(|run| run.style == test_styles().help)
                 .count(),
             1

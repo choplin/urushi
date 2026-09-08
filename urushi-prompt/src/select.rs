@@ -1,13 +1,14 @@
 use std::any::Any;
 
 use unicode_segmentation::UnicodeSegmentation;
-use urushi::{PrintableText, VerticalAlign, View};
+use urushi::{Align, PrintableText, VerticalAlign, View};
 
 use crate::{
     FieldConfigError, FieldKey,
     runtime::{
-        self, Event, FieldAction, FieldEntry, KeyCode, LineKind, PromptLine, PromptStyles,
-        PromptView, RuntimeField, ViewSpan, clipped_line_view, fixed_view, line_view, window_spans,
+        self, Event, FieldAction, FieldEntry, FieldPresentation, FieldRegionKind, KeyCode,
+        PromptStyles, RuntimeField, ViewSpan, clipped_line_view, field_line_view, fixed_view,
+        line_view, line_view_with_cursor, region, window_spans,
     },
 };
 
@@ -294,7 +295,7 @@ impl<T: 'static> RuntimeField for Select<T> {
         Box::new(self.options.remove(self.selected).value)
     }
 
-    fn view(&self, styles: &PromptStyles, focused: bool, width: usize) -> PromptView {
+    fn view(&self, styles: &PromptStyles, focused: bool, width: usize) -> FieldPresentation {
         let mut title_spans = vec![ViewSpan::new(
             self.question.clone(),
             styles.question(focused),
@@ -325,17 +326,31 @@ impl<T: 'static> RuntimeField for Select<T> {
         let cursor = cursor.map(|column| {
             let (windowed, column) = window_spans(title_spans.clone(), column, width);
             title_spans = windowed;
-            crate::runtime::ViewCursor {
-                row: 0,
-                column: column.min(usize::from(u16::MAX)) as u16,
-            }
+            column
         });
-        let mut lines = vec![PromptLine::spans(title_spans)];
+        let title = match cursor {
+            Some(column) => region(
+                FieldRegionKind::Focus,
+                field_line_view(styles, focused, line_view_with_cursor(title_spans, column)),
+            ),
+            None => field_line_view(styles, focused, line_view(title_spans)),
+        };
+        let mut body = vec![region(FieldRegionKind::Question, title)];
+        let mut regions = vec![
+            FieldRegionKind::Question,
+            FieldRegionKind::Control,
+            FieldRegionKind::Focus,
+        ];
         if let Some(description) = &self.description {
-            lines.push(PromptLine::spans(vec![ViewSpan::new(
-                description.clone(),
-                &styles.muted,
-            )]));
+            body.push(region(
+                FieldRegionKind::Description,
+                field_line_view(
+                    styles,
+                    focused,
+                    line_view(vec![ViewSpan::new(description.clone(), &styles.muted)]),
+                ),
+            ));
+            regions.push(FieldRegionKind::Description);
         }
         let list_height = self.visible_rows.min(self.options.len());
         let (start, end) = if self.filtered.is_empty() {
@@ -348,16 +363,27 @@ impl<T: 'static> RuntimeField for Select<T> {
             let end = (start + self.visible_rows).min(self.filtered.len());
             (start, end)
         };
+        let mut controls = Vec::new();
         if self.filtered.is_empty() {
-            lines.push(
-                PromptLine::spans(vec![ViewSpan::new(
-                    self.no_matches_message.clone(),
-                    &styles.error,
-                )])
-                .with_kind(LineKind::Error),
+            let no_matches = region(
+                FieldRegionKind::Error,
+                field_line_view(
+                    styles,
+                    focused,
+                    line_view(vec![ViewSpan::new(
+                        self.no_matches_message.clone(),
+                        &styles.error,
+                    )]),
+                ),
             );
+            controls.push(if cursor.is_some() {
+                no_matches
+            } else {
+                region(FieldRegionKind::Focus, no_matches)
+            });
+            regions.push(FieldRegionKind::Error);
         } else {
-            lines.extend(self.filtered[start..end].iter().map(|index| {
+            controls.extend(self.filtered[start..end].iter().map(|index| {
                 let option = &self.options[*index];
                 let selected = *index == self.selected;
                 let style = if selected {
@@ -365,17 +391,25 @@ impl<T: 'static> RuntimeField for Select<T> {
                 } else {
                     &styles.option
                 };
-                PromptLine::new(View::row(
-                    VerticalAlign::Top,
-                    [
-                        fixed_view(
-                            2,
-                            vec![ViewSpan::new(if selected { "› " } else { "  " }, style)],
-                        ),
-                        line_view(vec![ViewSpan::new(option.label.clone(), style)]),
-                    ],
-                ))
-                .with_kind(LineKind::Choice { focused: selected })
+                let option = field_line_view(
+                    styles,
+                    focused,
+                    View::row(
+                        VerticalAlign::Top,
+                        [
+                            fixed_view(
+                                2,
+                                vec![ViewSpan::new(if selected { "› " } else { "  " }, style)],
+                            ),
+                            line_view(vec![ViewSpan::new(option.label.clone(), style)]),
+                        ],
+                    ),
+                );
+                if selected && cursor.is_none() {
+                    region(FieldRegionKind::Focus, option)
+                } else {
+                    option
+                }
             }));
         }
         let rendered_rows = if self.filtered.is_empty() {
@@ -383,7 +417,10 @@ impl<T: 'static> RuntimeField for Select<T> {
         } else {
             end - start
         };
-        lines.extend((rendered_rows..list_height).map(|_| PromptLine::blank()));
+        controls.extend(
+            (rendered_rows..list_height)
+                .map(|_| field_line_view(styles, focused, View::text("", styles.body.clone()))),
+        );
         if self.options.len() > self.visible_rows {
             let above = start;
             let below = self.filtered.len().saturating_sub(end);
@@ -393,20 +430,27 @@ impl<T: 'static> RuntimeField for Select<T> {
                 (above, 0) => format!("  ↑ {above}"),
                 (above, below) => format!("  ↑ {above} • ↓ {below}"),
             };
-            lines.push(PromptLine::spans(vec![ViewSpan::new(
-                status,
-                &styles.muted,
-            )]));
+            controls.push(field_line_view(
+                styles,
+                focused,
+                line_view(vec![ViewSpan::new(status, &styles.muted)]),
+            ));
         }
-        lines.push(
-            PromptLine::new(clipped_line_view(vec![ViewSpan::new(
+        body.push(region(
+            FieldRegionKind::Control,
+            View::column(Align::Left, controls),
+        ));
+        let presentation = FieldPresentation::new(View::column(Align::Left, body))
+            .with_help(clipped_line_view(vec![ViewSpan::new(
                 self.current_help().to_owned(),
                 &styles.help,
             )]))
-            .with_kind(LineKind::Help),
-        );
-
-        PromptView { lines, cursor }
+            .with_regions(regions);
+        if cursor.is_some() {
+            presentation.with_cursor()
+        } else {
+            presentation
+        }
     }
 
     fn blur(&mut self) {
@@ -423,6 +467,7 @@ mod tests {
     use std::{collections::VecDeque, io};
 
     use super::*;
+    use crate::runtime::PromptView;
     use crate::{
         Confirm, ConfirmSource, Form, FormOutcome, Group, Input,
         runtime::{EventSource, RenderFinish, Renderer, TerminalControl, test_styles},
@@ -468,37 +513,47 @@ mod tests {
         .expect("single option is valid");
         let styles = test_styles();
         assert_eq!(single.event(key(KeyCode::Left)), FieldAction::Stay);
-        assert_eq!(
-            single.view(&styles, true, 80).lines[1].runs()[0].text,
-            "› Only"
+        assert!(
+            single.view(&styles, true, 80).rows()[1]
+                .text()
+                .contains("› Only")
         );
         assert_eq!(single.event(key(KeyCode::Right)), FieldAction::Stay);
-        assert_eq!(
-            single.view(&styles, true, 80).lines[1].runs()[0].text,
-            "› Only"
+        assert!(
+            single.view(&styles, true, 80).rows()[1]
+                .text()
+                .contains("› Only")
         );
 
         let mut multiple = Select::new(FieldKey::new("multiple"), "Multiple", options())
             .expect("multiple options are valid");
         assert_eq!(multiple.event(key(KeyCode::Up)), FieldAction::Stay);
-        assert_eq!(
-            multiple.view(&styles, true, 80).lines[2].runs()[0].style,
-            styles.option_selected
+        assert!(
+            multiple.view(&styles, true, 80).rows()[2]
+                .runs()
+                .iter()
+                .any(|run| run.style == styles.option_selected)
         );
         assert_eq!(multiple.event(key(KeyCode::Down)), FieldAction::Stay);
-        assert_eq!(
-            multiple.view(&styles, true, 80).lines[1].runs()[0].style,
-            styles.option_selected
+        assert!(
+            multiple.view(&styles, true, 80).rows()[1]
+                .runs()
+                .iter()
+                .any(|run| run.style == styles.option_selected)
         );
         assert_eq!(multiple.event(key(KeyCode::Right)), FieldAction::Stay);
-        assert_eq!(
-            multiple.view(&styles, true, 80).lines[2].runs()[0].style,
-            styles.option_selected
+        assert!(
+            multiple.view(&styles, true, 80).rows()[2]
+                .runs()
+                .iter()
+                .any(|run| run.style == styles.option_selected)
         );
         assert_eq!(multiple.event(key(KeyCode::Left)), FieldAction::Stay);
-        assert_eq!(
-            multiple.view(&styles, true, 80).lines[1].runs()[0].style,
-            styles.option_selected
+        assert!(
+            multiple.view(&styles, true, 80).rows()[1]
+                .runs()
+                .iter()
+                .any(|run| run.style == styles.option_selected)
         );
     }
 
@@ -510,19 +565,32 @@ mod tests {
         let styles = test_styles();
         let view = select.view(&styles, true, 80);
         assert_eq!(view.cursor, None);
-        assert_eq!(view.lines[0].runs()[0].text, "Choose");
-        assert_eq!(view.lines[0].runs()[0].style, styles.question);
-        assert_eq!(view.lines[1].runs()[0].text, "› One");
-        assert_eq!(view.lines[1].runs()[0].style, styles.option_selected);
-        assert_eq!(view.lines[1].kind, LineKind::Choice { focused: true });
-        assert_eq!(view.lines[2].runs()[0].style, styles.option);
-        assert_eq!(view.lines[2].kind, LineKind::Choice { focused: false });
-        assert_eq!(view.lines[3].kind, LineKind::Help);
-        assert_eq!(view.lines[3].runs()[0].style, styles.help);
-        assert_eq!(view.lines[3].runs()[0].text, "Use arrows, then Enter.");
-        assert_eq!(
-            select.view(&styles, false, 80).lines[0].runs()[0].style,
-            styles.muted
+        assert!(view.rows()[0].text().contains("Choose"));
+        assert!(
+            view.rows()[0]
+                .runs()
+                .iter()
+                .any(|run| run.style == styles.question)
+        );
+        assert!(view.rows()[1].text().contains("› One"));
+        assert!(
+            view.rows()[1]
+                .runs()
+                .iter()
+                .any(|run| run.style == styles.option_selected)
+        );
+        assert!(
+            view.rows()[2]
+                .runs()
+                .iter()
+                .any(|run| run.style == styles.option)
+        );
+        assert!(view.help.is_some());
+        assert!(
+            select.view(&styles, false, 80).rows()[0]
+                .runs()
+                .iter()
+                .any(|run| run.style == styles.muted)
         );
     }
 
@@ -538,7 +606,7 @@ mod tests {
         assert!(
             select
                 .view(&test_styles(), true, 80)
-                .lines
+                .rows()
                 .iter()
                 .any(|line| { line.runs().iter().any(|run| run.text == "  ↓ 9") })
         );
@@ -547,7 +615,7 @@ mod tests {
         assert!(
             select
                 .view(&test_styles(), true, 80)
-                .lines
+                .rows()
                 .iter()
                 .any(|line| { line.runs().iter().any(|run| run.text == "  ↑ 9") })
         );
@@ -573,12 +641,12 @@ mod tests {
         );
         assert!(select.filtered.is_empty());
         assert_eq!(select.event(key(KeyCode::Enter)), FieldAction::Stay);
+        let presentation = select.view(&test_styles(), true, 80);
         assert!(
-            select
-                .view(&test_styles(), true, 80)
-                .lines
+            presentation
+                .regions
                 .iter()
-                .any(|line| line.kind == LineKind::Error)
+                .any(|region| region.kind == FieldRegionKind::Error)
         );
     }
 
@@ -622,6 +690,10 @@ mod tests {
         fn finish(&mut self, _outcome: RenderFinish) -> io::Result<()> {
             Ok(())
         }
+    }
+
+    fn rendered(view: &PromptView) -> crate::runtime::frame::FramedView {
+        crate::runtime::frame::frame(&crate::runtime::resolve::resolve_prompt(80, view), u16::MAX)
     }
 
     struct InteractiveTerminal;
@@ -707,13 +779,14 @@ mod tests {
             Some(false)
         );
         assert_eq!(values.get(&tail_key), Some(&"done".to_owned()));
-        assert_eq!(
-            renderer.views[1].lines[2].runs()[1].style,
-            test_styles().option_selected
-        );
-        assert_eq!(
-            renderer.views[5].lines[2].runs()[1].style,
-            test_styles().option_selected
-        );
+        for view in [&renderer.views[1], &renderer.views[5]] {
+            assert!(rendered(view).rows.iter().any(|row| {
+                row.text().contains("Second")
+                    && row
+                        .runs()
+                        .iter()
+                        .any(|run| run.style == test_styles().option_selected)
+            }));
+        }
     }
 }

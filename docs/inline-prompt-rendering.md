@@ -2,11 +2,14 @@
 
 This document defines the architecture for drawing an interactive prompt
 inline in a terminal: what a prompt owns on screen, the stages a frame passes
-through, and the contract that keeps redraw and cleanup safe. Two topics have
+through, and the contract that keeps redraw and cleanup safe. Three topics have
 files under [`design/`](design/): the owned region — how it is claimed,
 anchored, lost, and released — in
-[`design/prompt-region.md`](design/prompt-region.md), and the render plan — the
-command vocabulary, the plan's recovery contract, and how it is verified — in
+[`design/prompt-region.md`](design/prompt-region.md), field presentation and
+viewport degradation in
+[`design/prompt-field-presentation.md`](design/prompt-field-presentation.md),
+and the render plan — the command vocabulary, the plan's recovery contract,
+and how it is verified — in
 [`design/prompt-render-plan.md`](design/prompt-render-plan.md).
 
 ## Goals
@@ -90,16 +93,19 @@ prompt policy of its own; it is the stage this design exists to pin down.
 **Resolve** is not prompt-specific and is shared with any other consumer of the
 view model defined in [`view-model.md`](view-model.md).
 
-**Frame** carries the policy a prompt needs when its content does not fit:
-scroll the viewport so the focused row stays visible, and reinstate the
-validation error and the help line when scrolling has pushed them out of view.
-A prompt's usefulness depends on these; they are not layout details. Keeping
-them in their own stage stops them from being entangled with wrapping and
-clipping, and keeps the plan stage free of prompt semantics. Frame windows rows
-vertically only: the *horizontal* window that follows a text cursor is chosen
-before Resolve, by the view function that places the field, so that Resolve
-runs with the real available area and every row keeps its overflow policy. Why
-that is so is recorded in
+**Frame** carries the policy a prompt needs when its content does not fit. Each
+field supplies one `View` body plus prompt-owned semantic regions keyed to
+anchors inside it; Resolve lays that body out once, and Frame uses the resolved
+regions to retain the active question, error, focus, and nearby Select choices
+before optional descriptions, help, or complete inactive fields. The model and
+degradation order are defined in
+[`design/prompt-field-presentation.md`](design/prompt-field-presentation.md).
+Keeping this policy in Frame stops it from being entangled with wrapping and
+clipping, and keeps both generic `View` and the plan stage free of prompt
+semantics. Frame windows rows vertically only: the *horizontal* window that
+follows a text cursor is chosen before Resolve, by the view function that
+places the field, so that Resolve runs with the real available area and every
+row keeps its overflow policy. Why that is so is recorded in
 [`design/prompt-render-plan.md`](design/prompt-render-plan.md).
 
 **Plan** and **Execute** are defined by the plan's contract, below.

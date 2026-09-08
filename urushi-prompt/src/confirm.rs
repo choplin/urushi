@@ -3,11 +3,12 @@ use std::any::Any;
 use crate::{
     FieldConfigError, FieldKey,
     runtime::{
-        self, Event, FieldAction, FieldEntry, KeyCode, LineKind, PromptLine, PromptStyles,
-        PromptView, RuntimeField, ViewSpan, clipped_line_view, fixed_view, line_view,
+        self, Event, FieldAction, FieldEntry, FieldPresentation, FieldRegionKind, KeyCode,
+        PromptStyles, RuntimeField, ViewSpan, clipped_line_view, field_line_view, fixed_view,
+        line_view, region,
     },
 };
-use urushi::{Align, PrintableText, VerticalAlign, View};
+use urushi::{Align, BlockStyle, GridStyle, Length, VerticalAlign, View};
 
 /// The provenance of a submitted confirmation value.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -190,43 +191,42 @@ impl RuntimeField for Confirm {
         })
     }
 
-    fn view(&self, styles: &PromptStyles, focused: bool, _width: usize) -> PromptView {
-        let mut lines = vec![PromptLine::spans(vec![ViewSpan::new(
-            self.question.clone(),
-            styles.question(focused),
-        )])];
+    fn view(&self, styles: &PromptStyles, focused: bool, _width: usize) -> FieldPresentation {
+        let question = region(
+            FieldRegionKind::Question,
+            field_line_view(
+                styles,
+                focused,
+                line_view(vec![ViewSpan::new(
+                    self.question.clone(),
+                    styles.question(focused),
+                )]),
+            ),
+        );
+        let mut header = vec![question];
+        let mut regions = vec![
+            FieldRegionKind::Question,
+            FieldRegionKind::Control,
+            FieldRegionKind::Focus,
+        ];
         if let Some(description) = &self.description {
-            lines.push(PromptLine::spans(vec![ViewSpan::new(
-                description.clone(),
-                &styles.muted,
-            )]));
+            header.push(region(
+                FieldRegionKind::Description,
+                field_line_view(
+                    styles,
+                    focused,
+                    line_view(vec![ViewSpan::new(description.clone(), &styles.muted)]),
+                ),
+            ));
+            regions.push(FieldRegionKind::Description);
         }
-        let left_padding = match self.button_alignment {
-            Align::Left => 0,
-            alignment @ (Align::Center | Align::Right) => {
-                let button_width = PrintableText::new(self.yes_label.as_str())
-                    .width()
-                    .saturating_add(4)
-                    .saturating_add(1)
-                    .saturating_add(PrintableText::new(self.no_label.as_str()).width())
-                    .saturating_add(4);
-                let question_width = PrintableText::new(self.question.as_str()).width();
-                let header_width = self
-                    .description
-                    .as_deref()
-                    .map_or(question_width, |description| {
-                        question_width.max(PrintableText::new(description).width())
-                    });
-                let remaining_width = header_width.saturating_sub(button_width);
-                match alignment {
-                    Align::Center => remaining_width / 2,
-                    Align::Right => remaining_width,
-                    Align::Left => unreachable!("left alignment is handled above"),
-                }
-            }
-        };
-        lines.push(PromptLine::blank());
+        header.push(field_line_view(
+            styles,
+            focused,
+            View::text("", styles.body.clone()),
+        ));
         let mut buttons = Vec::new();
+        let focused_value = self.selected.unwrap_or(true);
         for (index, (value, label)) in [(true, &self.yes_label), (false, &self.no_label)]
             .into_iter()
             .enumerate()
@@ -238,59 +238,59 @@ impl RuntimeField for Confirm {
                 &styles.button
             };
             if index > 0 {
-                buttons.push(ViewSpan::new(" ", &styles.body));
+                buttons.push(View::text(" ", styles.body.clone()));
             }
-            buttons.push(ViewSpan::new(format!("  {label}  "), style));
+            let button = View::text(format!("  {label}  "), style.clone());
+            buttons.push(if focused_value == value {
+                region(FieldRegionKind::Focus, button)
+            } else {
+                button
+            });
         }
-        // The buttons reflow rather than being cut: a viewport too narrow for
-        // them should cost a row, not a label. Which rows survive after that
-        // is the frame stage's decision, and a button row is one it never
-        // displaces.
-        //
-        // Alignment is a decision about where the group starts, so the leading
-        // blank is a column of its own rather than text the group could be
-        // reflowed away from.
-        let buttons = if left_padding > 0 {
-            View::row(
-                VerticalAlign::Top,
-                [
-                    fixed_view(
-                        left_padding,
-                        vec![ViewSpan::new(" ".repeat(left_padding), &styles.body)],
-                    ),
-                    line_view(buttons),
-                ],
-            )
-        } else {
-            line_view(buttons)
-        };
-        lines.push(PromptLine::new(buttons).with_kind(LineKind::Choice {
-            focused: self.selected.is_some(),
-        }));
+        let aligned_buttons = View::block(
+            BlockStyle::new()
+                .width(Length::Fill(1))
+                .align(self.button_alignment),
+            View::row(VerticalAlign::Top, buttons),
+        );
+        let buttons = region(
+            FieldRegionKind::Control,
+            field_line_view(styles, focused, aligned_buttons),
+        );
+        let alignment_group = View::grid(
+            GridStyle::new(),
+            [
+                [View::block(
+                    BlockStyle::new().align(Align::Left),
+                    View::column(Align::Left, header),
+                )],
+                [buttons],
+            ],
+        );
+        let mut body = vec![alignment_group];
         if self.show_unanswered {
-            lines.push(
-                PromptLine::new(View::row(
-                    VerticalAlign::Top,
-                    [
-                        fixed_view(2, vec![ViewSpan::new("! ", &styles.error)]),
-                        View::text(self.unanswered_message.clone(), styles.error.clone()),
-                    ],
-                ))
-                .with_kind(LineKind::Error),
-            );
+            body.push(region(
+                FieldRegionKind::Error,
+                field_line_view(
+                    styles,
+                    focused,
+                    View::row(
+                        VerticalAlign::Top,
+                        [
+                            fixed_view(2, vec![ViewSpan::new("! ", &styles.error)]),
+                            View::text(self.unanswered_message.clone(), styles.error.clone()),
+                        ],
+                    ),
+                ),
+            ));
+            regions.push(FieldRegionKind::Error);
         }
-        lines.push(
-            PromptLine::new(clipped_line_view(vec![ViewSpan::new(
+        FieldPresentation::new(View::column(Align::Left, body))
+            .with_help(clipped_line_view(vec![ViewSpan::new(
                 self.help.clone(),
                 &styles.help,
             )]))
-            .with_kind(LineKind::Help),
-        );
-
-        PromptView {
-            lines,
-            cursor: None,
-        }
+            .with_regions(regions)
     }
 }
 
@@ -321,9 +321,14 @@ mod tests {
         let styles = test_styles();
         let initial = confirm.view(&styles, true, 80);
         assert_eq!(initial.cursor, None);
-        assert_eq!(initial.lines[0].runs()[0].style, styles.question);
         assert!(
-            initial.lines[2]
+            initial.rows()[0]
+                .runs()
+                .iter()
+                .any(|run| run.style == styles.question)
+        );
+        assert!(
+            initial.rows()[2]
                 .runs()
                 .iter()
                 .any(|span| span.style == styles.button_focused && span.text == "  No  ")
@@ -367,23 +372,30 @@ mod tests {
             .unanswered_message("Choose an answer.");
         let styles = test_styles();
         let initial = confirm.view(&styles, true, 80);
-        assert_eq!(initial.lines[2].runs()[0].style, styles.button);
-        assert_eq!(initial.lines[2].runs()[2].style, styles.button);
-        assert_eq!(initial.lines[2].runs()[0].text, "  Proceed  ");
-        assert_eq!(initial.lines[2].runs()[2].text, "  Stop  ");
+        assert!(
+            initial.rows()[2]
+                .runs()
+                .iter()
+                .any(|run| run.style == styles.button && run.text == "  Proceed  ")
+        );
+        assert!(
+            initial.rows()[2]
+                .runs()
+                .iter()
+                .any(|run| run.style == styles.button && run.text == "  Stop  ")
+        );
         assert_eq!(confirm.event(key(KeyCode::Enter)), FieldAction::Stay);
         let answered = confirm.view(&styles, true, 80);
-        assert_eq!(answered.lines[3].kind, LineKind::Error);
-        assert_eq!(answered.lines[3].runs()[0].style, styles.error);
-        assert_eq!(answered.lines[4].kind, LineKind::Help);
-        assert_eq!(answered.lines[4].runs()[0].style, styles.help);
-        assert_eq!(answered.lines[3].runs()[0].text, "! Choose an answer.");
-        assert_eq!(
-            answered.lines[4].runs()[0].text,
-            "Choose, then press Enter."
+        assert!(
+            answered
+                .regions
+                .iter()
+                .any(|region| region.kind == FieldRegionKind::Error)
         );
+        assert!(answered.rows()[3].text().contains("! Choose an answer."));
+        assert!(answered.help.is_some());
         assert_eq!(confirm.event(key(KeyCode::Right)), FieldAction::Stay);
-        assert_eq!(confirm.view(&styles, true, 80).lines.len(), 4);
+        assert_eq!(confirm.view(&styles, true, 80).rows().len(), 3);
         assert_eq!(confirm.event(key(KeyCode::Enter)), FieldAction::Accept);
     }
 
@@ -398,9 +410,13 @@ mod tests {
 
         let styles = test_styles();
         let view = confirm.view(&styles, true, 80);
-        assert!(view.lines[1].runs().is_empty());
-        assert_eq!(view.lines[2].runs()[0].style, styles.button_focused);
-        assert_eq!(view.lines[2].runs()[0].text, "  Yes  ");
+        assert_eq!(view.rows()[1].text().trim(), "┃");
+        assert!(
+            view.rows()[2]
+                .runs()
+                .iter()
+                .any(|run| run.style == styles.button_focused && run.text == "  Yes  ")
+        );
     }
 
     #[test]
@@ -415,10 +431,14 @@ mod tests {
 
         let styles = test_styles();
         let view = confirm.view(&styles, true, 80);
-        assert_eq!(view.lines[2].runs()[0].style, styles.body);
-        assert_eq!(view.lines[2].runs()[0].text, "          ");
-        assert_eq!(view.lines[2].runs()[1].style, styles.button_focused);
-        assert_eq!(view.lines[2].runs()[1].text, "  Yes  ");
+        assert!(view.rows()[2].text().starts_with("┃ "));
+        assert_eq!(view.rows()[2].text().find("Yes"), Some(16));
+        assert!(
+            view.rows()[2]
+                .runs()
+                .iter()
+                .any(|run| run.style == styles.button_focused && run.text == "  Yes  ")
+        );
     }
 
     #[test]
@@ -433,9 +453,52 @@ mod tests {
 
         let styles = test_styles();
         let view = confirm.view(&styles, true, 80);
-        assert_eq!(view.lines[2].runs()[0].style, styles.body);
-        assert_eq!(view.lines[2].runs()[0].text, "                     ");
-        assert_eq!(view.lines[2].runs()[1].style, styles.button_focused);
-        assert_eq!(view.lines[2].runs()[1].text, "  Yes  ");
+        assert!(view.rows()[2].text().starts_with("┃ "));
+        assert_eq!(view.rows()[2].text().find("Yes"), Some(27));
+        assert!(
+            view.rows()[2]
+                .runs()
+                .iter()
+                .any(|run| run.style == styles.button_focused && run.text == "  Yes  ")
+        );
+    }
+
+    #[test]
+    fn grid_alignment_uses_the_widest_header_or_control_cell() {
+        let styles = test_styles();
+        let start = |confirm: Confirm, label: &str| {
+            confirm
+                .view(&styles, true, 80)
+                .rows()
+                .into_iter()
+                .find_map(|row| row.text().find(label))
+                .expect("button label is rendered")
+        };
+
+        let buttons_wider = |alignment| {
+            Confirm::new(FieldKey::new("confirm"), "Q", Some(true))
+                .expect("confirm")
+                .labels("A deliberately long answer", "No")
+                .button_alignment(alignment)
+        };
+        assert_eq!(
+            start(buttons_wider(Align::Left), "A deliberately"),
+            start(buttons_wider(Align::Center), "A deliberately")
+        );
+        assert_eq!(
+            start(buttons_wider(Align::Left), "A deliberately"),
+            start(buttons_wider(Align::Right), "A deliberately")
+        );
+
+        let description_wider = |alignment| {
+            Confirm::new(FieldKey::new("confirm"), "Q", Some(true))
+                .expect("confirm")
+                .description("A description wider than either button row")
+                .button_alignment(alignment)
+        };
+        let left = start(description_wider(Align::Left), "Yes");
+        let center = start(description_wider(Align::Center), "Yes");
+        let right = start(description_wider(Align::Right), "Yes");
+        assert!(left < center && center < right);
     }
 }

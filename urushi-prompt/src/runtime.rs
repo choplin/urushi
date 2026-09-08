@@ -17,15 +17,15 @@ use crossterm::{
     terminal::{self},
 };
 use urushi::{
-    BlockStyle, ComponentRole, Overflow, PrintableText, TerminalProfile, TextStyle, Theme,
+    BlockStyle, ComponentRole, Key, Overflow, PrintableText, TerminalProfile, TextStyle, Theme,
     VerticalAlign, View,
 };
 
 mod crossterm_executor;
-mod frame;
+pub(crate) mod frame;
 mod inline_plan;
 mod presentation;
-mod resolve;
+pub(crate) mod resolve;
 
 use inline_plan::InlineRenderPlan;
 use presentation::InlinePresentation;
@@ -583,7 +583,6 @@ impl Form {
         let field_width = usize::from(columns.max(1)).saturating_sub(GUTTER);
 
         let mut lines = Vec::new();
-        let mut cursor = None;
         let mut footer = None;
         if let Some(title) = &self.groups[group].title {
             lines.push(PromptLine::spans(vec![ViewSpan::new(
@@ -603,25 +602,10 @@ impl Form {
         for (index, entry) in self.groups[group].fields.iter().enumerate() {
             let focused = index == field;
             let mut field_view = entry.view(styles, focused, field_width);
-            if let Some(help) = field_view.lines.pop_if(|line| line.kind == LineKind::Help)
-                && focused
-            {
-                footer = Some(help);
-            }
-
-            let row_offset = lines.len();
-            for mut line in field_view.lines {
-                line.active = focused;
-                line.view = gutter_view(styles, focused, line.view);
-                lines.push(line);
-            }
             if focused {
-                cursor = field_view.cursor.map(|field_cursor| ViewCursor {
-                    row: (row_offset + usize::from(field_cursor.row)).min(usize::from(u16::MAX))
-                        as u16,
-                    column: field_cursor.column.saturating_add(GUTTER as u16),
-                });
+                footer = field_view.help.take().map(PromptLine::new);
             }
+            lines.push(PromptLine::field(field_view, focused));
             if index + 1 < self.groups[group].fields.len() {
                 lines.push(PromptLine::blank());
             }
@@ -634,7 +618,10 @@ impl Form {
             );
         }
 
-        PromptView { lines, cursor }
+        PromptView {
+            lines,
+            cursor: None,
+        }
     }
 
     fn into_values(mut self) -> FormValues {
@@ -881,7 +868,7 @@ impl FieldEntry {
         self.field.take_value()
     }
 
-    fn view(&self, styles: &PromptStyles, focused: bool, width: usize) -> PromptView {
+    fn view(&self, styles: &PromptStyles, focused: bool, width: usize) -> FieldPresentation {
         self.field.view(styles, focused, width)
     }
 
@@ -904,7 +891,7 @@ pub(crate) trait RuntimeField {
     /// carries a cursor needs it: the visible window of a value that is wider
     /// than the terminal is chosen here, before a `View` exists, so that
     /// resolution can be called with the real available area.
-    fn view(&self, styles: &PromptStyles, focused: bool, width: usize) -> PromptView;
+    fn view(&self, styles: &PromptStyles, focused: bool, width: usize) -> FieldPresentation;
 
     fn validation_error(&self) -> Option<&str> {
         None
@@ -929,11 +916,13 @@ const FOCUS_MARKER: &str = "┃ ";
 /// the focused field's.
 const BLANK_MARKER: &str = "  ";
 
-/// A prompt's content, as logical lines the frame stage can classify.
+/// A prompt's group context and field presentations in source order.
 ///
-/// Each line is an ordinary [`View`]: the prompt owns no layout of its own.
-/// What it does own is why a line exists, which is what [`LineKind`] and
-/// `active` carry and what a single flattened rectangle could not.
+/// Ordinary context occupies one entry per logical line. Each field occupies
+/// exactly one entry whose `view` is its complete body and whose prompt-owned
+/// region table names anchors inside that body. Resolve can therefore lay a
+/// field out once without teaching the generic [`View`] model what a question,
+/// control, or validation error means.
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct PromptView {
     pub lines: Vec<PromptLine>,
@@ -970,6 +959,9 @@ pub(crate) struct PromptLine {
     pub kind: LineKind,
     /// Whether this line belongs to the field the form has focused.
     pub active: bool,
+    pub regions: Vec<FieldRegion>,
+    pub cursor: Option<Key>,
+    pub field: bool,
 }
 
 impl PromptLine {
@@ -978,6 +970,20 @@ impl PromptLine {
             view,
             kind: LineKind::Content,
             active: false,
+            regions: Vec::new(),
+            cursor: None,
+            field: false,
+        }
+    }
+
+    pub(crate) fn field(presentation: FieldPresentation, active: bool) -> Self {
+        Self {
+            view: presentation.body,
+            kind: LineKind::Content,
+            active,
+            regions: presentation.regions,
+            cursor: presentation.cursor,
+            field: true,
         }
     }
 
@@ -995,21 +1001,6 @@ impl PromptLine {
     pub(crate) fn with_kind(mut self, kind: LineKind) -> Self {
         self.kind = kind;
         self
-    }
-
-    /// The runs this line draws when nothing bounds its width.
-    #[cfg(test)]
-    pub(crate) fn runs(&self) -> Vec<frame::StyledRun> {
-        urushi::resolve(&self.view, urushi::Available::NONE)
-            .rows()
-            .first()
-            .map(|row| frame::FramedRow::aggregate(row).runs)
-            .unwrap_or_default()
-    }
-
-    #[cfg(test)]
-    pub(crate) fn text(&self) -> String {
-        self.runs().into_iter().map(|run| run.text).collect()
     }
 }
 
@@ -1031,6 +1022,39 @@ pub(crate) fn line_view(spans: Vec<ViewSpan>) -> View {
             .into_iter()
             .map(|span| View::text(span.text, span.style)),
     )
+}
+
+/// Composes a line and places the prompt cursor anchor at one display column.
+pub(crate) fn line_view_with_cursor(spans: Vec<ViewSpan>, column: usize) -> View {
+    let mut before: Vec<ViewSpan> = Vec::new();
+    let mut after: Vec<ViewSpan> = Vec::new();
+    let mut width = 0;
+    for span in spans {
+        for grapheme in PrintableText::new(span.text.as_str()).graphemes() {
+            let target = if width < column {
+                &mut before
+            } else {
+                &mut after
+            };
+            match target.last_mut() {
+                Some(previous) if previous.style == span.style => {
+                    previous.text.push_str(grapheme.as_str());
+                }
+                _ => target.push(ViewSpan::new(grapheme.as_str(), &span.style)),
+            }
+            width = width.saturating_add(grapheme.width());
+        }
+    }
+    let children = before
+        .into_iter()
+        .map(|span| View::text(span.text, span.style))
+        .chain([View::anchor(cursor_key())])
+        .chain(
+            after
+                .into_iter()
+                .map(|span| View::text(span.text, span.style)),
+        );
+    View::row(VerticalAlign::Top, children)
 }
 
 /// Composes styled runs into a line that is cut, not reflowed, when it is
@@ -1152,6 +1176,100 @@ pub(crate) enum LineKind {
     /// The help row, clipped rather than wrapped and reinstated when scrolled
     /// out of view.
     Help,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum FieldRegionKind {
+    Question,
+    Description,
+    Control,
+    Focus,
+    Error,
+}
+
+impl FieldRegionKind {
+    fn key(self) -> Key {
+        match self {
+            Self::Question => Key::from("prompt-question"),
+            Self::Description => Key::from("prompt-description"),
+            Self::Control => Key::from("prompt-control"),
+            Self::Focus => Key::from("prompt-focus"),
+            Self::Error => Key::from("prompt-error"),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct FieldRegion {
+    pub kind: FieldRegionKind,
+    pub key: Key,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct FieldPresentation {
+    pub body: View,
+    pub help: Option<View>,
+    pub regions: Vec<FieldRegion>,
+    pub cursor: Option<Key>,
+}
+
+impl FieldPresentation {
+    pub(crate) fn new(body: View) -> Self {
+        Self {
+            body,
+            help: None,
+            regions: Vec::new(),
+            cursor: None,
+        }
+    }
+
+    #[must_use]
+    pub(crate) fn with_help(mut self, help: View) -> Self {
+        self.help = Some(help);
+        self
+    }
+
+    #[must_use]
+    pub(crate) fn with_regions(
+        mut self,
+        regions: impl IntoIterator<Item = FieldRegionKind>,
+    ) -> Self {
+        self.regions = regions
+            .into_iter()
+            .map(|kind| FieldRegion {
+                kind,
+                key: kind.key(),
+            })
+            .collect();
+        self
+    }
+
+    #[must_use]
+    pub(crate) fn with_cursor(mut self) -> Self {
+        self.cursor = Some(cursor_key());
+        self
+    }
+
+    #[cfg(test)]
+    pub(crate) fn rows(&self) -> Vec<frame::FramedRow> {
+        urushi::resolve(&self.body, urushi::Available::NONE)
+            .rows()
+            .iter()
+            .map(|row| frame::FramedRow::aggregate(row))
+            .collect()
+    }
+}
+
+pub(crate) fn region(kind: FieldRegionKind, view: View) -> View {
+    View::anchor_block(kind.key(), BlockStyle::new(), view)
+}
+
+pub(crate) fn cursor_key() -> Key {
+    Key::from("prompt-cursor")
+}
+
+pub(crate) fn field_line_view(styles: &PromptStyles, focused: bool, inner: View) -> View {
+    gutter_view(styles, focused, inner)
 }
 
 /// A run of text before it becomes a [`View::Text`] leaf.
@@ -1624,14 +1742,14 @@ mod tests {
             Box::new(self.value.clone())
         }
 
-        fn view(&self, styles: &PromptStyles, _focused: bool, _width: usize) -> PromptView {
-            PromptView {
-                lines: vec![PromptLine::spans(vec![ViewSpan::new(
+        fn view(&self, styles: &PromptStyles, _focused: bool, _width: usize) -> FieldPresentation {
+            FieldPresentation::new(
+                PromptLine::spans(vec![ViewSpan::new(
                     self.key.name().to_owned(),
                     &styles.body,
-                )])],
-                cursor: None,
-            }
+                )])
+                .view,
+            )
         }
     }
 
@@ -2962,12 +3080,7 @@ mod tests {
     }
 
     #[test]
-    fn a_wrapping_focused_field_still_leaves_room_for_the_error_and_help_rows() {
-        // A focused field's rows carry the "┃ " marker only on the row that
-        // starts each logical line. Treating every wrapped continuation as
-        // undisplaceable too would leave no spare row, and a short viewport
-        // would silently drop the validation error and the help line — the
-        // user would see Enter do nothing with no explanation.
+    fn a_wrapped_question_is_omitted_whole_before_focus_error_and_help() {
         let mut form = Form::builder()
             .group(
                 Group::builder()
@@ -2995,22 +3108,16 @@ mod tests {
         assert_eq!(form.reduce(&mut state, enter()), ReducerResult::Running);
 
         let styles = test_styles();
-        for rows in 3..=6 {
-            let laid_out = lay_out(20, rows, &form.view(&state, &styles, 20));
-            let drawn = laid_out
-                .rows
-                .iter()
-                .map(frame::FramedRow::text)
-                .collect::<Vec<_>>();
-            assert!(
-                drawn.iter().any(|line| line.contains("Not acceptable")),
-                "validation error dropped at {rows} rows: {drawn:?}"
-            );
-            assert!(
-                drawn.iter().any(|line| line.contains("enter continue")),
-                "help row dropped at {rows} rows: {drawn:?}"
-            );
-        }
+        let laid_out = lay_out(20, 3, &form.view(&state, &styles, 20));
+        let drawn = laid_out
+            .rows
+            .iter()
+            .map(frame::FramedRow::text)
+            .collect::<Vec<_>>();
+        assert!(drawn.iter().any(|line| line.contains("Not acceptable")));
+        assert!(drawn.iter().any(|line| line.contains("› value")));
+        assert!(!drawn.iter().any(|line| line.contains("A question")));
+        assert!(drawn.iter().any(|line| line.contains("enter continue")));
     }
 
     #[test]
@@ -3038,11 +3145,6 @@ mod tests {
 
         let styles = test_styles();
         let view = form.view(&state, &styles, 20);
-        let error = view
-            .lines
-            .iter()
-            .find(|line| line.kind == LineKind::Error)
-            .expect("the refused field shows its validation error");
         let framed = lay_out(20, 20, &view);
         let drawn = framed
             .rows
@@ -3050,11 +3152,6 @@ mod tests {
             .map(frame::FramedRow::text)
             .collect::<Vec<_>>();
 
-        assert!(
-            error.text().contains(MESSAGE),
-            "the error line lost its message before layout: {:?}",
-            error.text()
-        );
         assert!(
             drawn.iter().all(|row| row.chars().count() < MESSAGE.len()),
             "the error row was never wrapped: {drawn:?}"
@@ -3808,6 +3905,242 @@ mod tests {
         let framed = lay_out(10, 1, &renderer_view(vec![line], None));
         assert_eq!(framed.rows[0].runs.len(), 1);
         assert_eq!(framed.rows[0].text(), "abcd");
+    }
+
+    #[test]
+    fn compact_input_keeps_question_with_control_until_only_control_fits() {
+        let form = Form::builder()
+            .group(
+                Group::builder()
+                    .field(Input::new(FieldKey::new("name"), "Name", "value").expect("input"))
+                    .build()
+                    .expect("group"),
+            )
+            .build()
+            .expect("form");
+        let state = FormState::Running { group: 0, field: 0 };
+        let view = form.view(&state, &test_styles(), 40);
+
+        let two = lay_out(40, 2, &view);
+        let two_text = two
+            .rows
+            .iter()
+            .map(frame::FramedRow::text)
+            .collect::<Vec<_>>();
+        assert!(two_text.iter().any(|row| row.contains("Name")));
+        assert!(two_text.iter().any(|row| row.contains("› value")));
+        assert!(!two_text.iter().any(|row| row.contains("continue")));
+
+        let one = lay_out(40, 1, &view);
+        assert_eq!(one.rows.len(), 1);
+        assert!(one.rows[0].text().contains("› value"));
+        assert_eq!(one.cursor, Some(ViewCursor { row: 0, column: 9 }));
+    }
+
+    #[test]
+    fn compact_input_prioritizes_error_then_restores_question() {
+        let mut form = Form::builder()
+            .group(
+                Group::builder()
+                    .field(
+                        Input::new(FieldKey::new("name"), "Name", "value")
+                            .expect("input")
+                            .validate(Box::new(|_| {
+                                Err(crate::ValidationError::new("Not acceptable"))
+                            })),
+                    )
+                    .build()
+                    .expect("group"),
+            )
+            .build()
+            .expect("form");
+        let mut state = FormState::Running { group: 0, field: 0 };
+        assert_eq!(form.reduce(&mut state, enter()), ReducerResult::Running);
+        let view = form.view(&state, &test_styles(), 40);
+
+        let two = lay_out(40, 2, &view);
+        let two_text = two
+            .rows
+            .iter()
+            .map(frame::FramedRow::text)
+            .collect::<Vec<_>>();
+        assert!(two_text.iter().any(|row| row.contains("Not acceptable")));
+        assert!(two_text.iter().any(|row| row.contains("› value")));
+        assert!(!two_text.iter().any(|row| row.contains("Name")));
+
+        let three = lay_out(40, 3, &view);
+        let three_text = three
+            .rows
+            .iter()
+            .map(frame::FramedRow::text)
+            .collect::<Vec<_>>();
+        assert!(three_text.iter().any(|row| row.contains("Name")));
+        assert!(three_text.iter().any(|row| row.contains("Not acceptable")));
+        assert!(three_text.iter().any(|row| row.contains("› value")));
+    }
+
+    #[test]
+    fn compact_group_drops_complete_inactive_fields_before_active_essentials() {
+        let form = Form::builder()
+            .group(
+                Group::builder()
+                    .field(Input::new(FieldKey::new("first"), "First", "one").expect("input"))
+                    .field(Input::new(FieldKey::new("second"), "Second", "two").expect("input"))
+                    .build()
+                    .expect("group"),
+            )
+            .build()
+            .expect("form");
+        let state = FormState::Running { group: 0, field: 1 };
+        let compact = lay_out(40, 2, &form.view(&state, &test_styles(), 40));
+        let text = compact
+            .rows
+            .iter()
+            .map(frame::FramedRow::text)
+            .collect::<Vec<_>>();
+
+        assert!(text.iter().any(|row| row.contains("Second")));
+        assert!(text.iter().any(|row| row.contains("› two")));
+        assert!(!text.iter().any(|row| row.contains("First")));
+        assert!(!text.iter().any(|row| row.contains("› one")));
+    }
+
+    #[test]
+    fn compact_select_retains_the_focused_choice_and_nearby_control_rows() {
+        let form = Form::builder()
+            .group(
+                Group::builder()
+                    .field(
+                        Select::new(
+                            FieldKey::new("choice"),
+                            "Choose",
+                            vec![
+                                SelectOption::new("One", 1),
+                                SelectOption::new("Two", 2),
+                                SelectOption::new("Three", 3),
+                            ],
+                        )
+                        .expect("select")
+                        .visible_rows(3),
+                    )
+                    .build()
+                    .expect("group"),
+            )
+            .build()
+            .expect("form");
+        let state = FormState::Running { group: 0, field: 0 };
+        let compact = lay_out(40, 2, &form.view(&state, &test_styles(), 40));
+        let text = compact
+            .rows
+            .iter()
+            .map(frame::FramedRow::text)
+            .collect::<Vec<_>>();
+
+        assert!(text.iter().any(|row| row.contains("› One")));
+        assert!(text.iter().any(|row| row.contains("Choose")));
+        assert_eq!(text.len(), 2);
+    }
+
+    #[test]
+    fn compact_wrapped_question_uses_spare_rows_for_description_and_help() {
+        let form = Form::builder()
+            .group(
+                Group::builder()
+                    .field(
+                        Input::new(
+                            FieldKey::new("name"),
+                            "A question long enough that it wraps across several terminal rows",
+                            "value",
+                        )
+                        .expect("input")
+                        .description("Supporting detail")
+                        .help("enter continue"),
+                    )
+                    .build()
+                    .expect("group"),
+            )
+            .build()
+            .expect("form");
+        let state = FormState::Running { group: 0, field: 0 };
+        let compact = lay_out(20, 3, &form.view(&state, &test_styles(), 20));
+        let text = compact
+            .rows
+            .iter()
+            .map(frame::FramedRow::text)
+            .collect::<Vec<_>>();
+
+        assert!(text.iter().any(|row| row.contains("Supporting detail")));
+        assert!(text.iter().any(|row| row.contains("› value")));
+        assert!(text.iter().any(|row| row.contains("enter continue")));
+        assert!(!text.iter().any(|row| row.contains("A question")));
+    }
+
+    #[test]
+    fn compact_confirm_keeps_description_ahead_of_its_spacer() {
+        let form = Form::builder()
+            .group(
+                Group::builder()
+                    .field(
+                        Confirm::new(FieldKey::new("confirm"), "Continue?", Some(true))
+                            .expect("confirm")
+                            .description("This cannot be undone."),
+                    )
+                    .build()
+                    .expect("group"),
+            )
+            .build()
+            .expect("form");
+        let state = FormState::Running { group: 0, field: 0 };
+        let compact = lay_out(40, 3, &form.view(&state, &test_styles(), 40));
+        let text = compact
+            .rows
+            .iter()
+            .map(frame::FramedRow::text)
+            .collect::<Vec<_>>();
+
+        assert!(text.iter().any(|row| row.contains("Continue?")));
+        assert!(
+            text.iter()
+                .any(|row| row.contains("This cannot be undone."))
+        );
+        assert!(text.iter().any(|row| row.contains("Yes")));
+        assert!(text.iter().all(|row| !row.trim().is_empty()));
+    }
+
+    #[test]
+    fn compact_confirm_keeps_the_selected_button_row_when_buttons_wrap() {
+        let mut form = Form::builder()
+            .group(
+                Group::builder()
+                    .field(
+                        Confirm::new(FieldKey::new("confirm"), "Q", Some(true)).expect("confirm"),
+                    )
+                    .build()
+                    .expect("group"),
+            )
+            .build()
+            .expect("form");
+        let mut state = FormState::Running { group: 0, field: 0 };
+        assert_eq!(
+            form.reduce(
+                &mut state,
+                Event::Key(KeyEvent {
+                    code: KeyCode::Right,
+                    modifiers: KeyModifiers::default(),
+                }),
+            ),
+            ReducerResult::Running
+        );
+        let styles = test_styles();
+        let compact = lay_out(12, 1, &form.view(&state, &styles, 12));
+
+        assert_eq!(compact.rows.len(), 1);
+        assert!(
+            compact.rows[0]
+                .runs()
+                .iter()
+                .any(|run| run.style == styles.button_focused && run.text.contains("No"))
+        );
     }
 
     fn assert_io_operation(result: Result<FormOutcome, RunError>, expected: IoOperation) {

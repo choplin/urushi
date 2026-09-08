@@ -1,20 +1,22 @@
 //! The Frame stage: which of a resolved prompt's rows a bounded viewport
 //! shows, and the canonical runs those rows are drawn from.
 //!
-//! Frame is where prompt policy lives. Resolve has already sized every line
-//! against the terminal width, so nothing here reflows, clips, or measures
-//! text: the stage chooses rows and nothing else. Its two policies are the
-//! ones a prompt stops being usable without — keep the row the user is acting
-//! on visible, and do not let a short viewport swallow the validation error or
-//! the help line.
+//! Frame is where prompt policy lives. Resolve has already sized every field
+//! body against the terminal width, so nothing here reflows, clips, or
+//! measures text. Whole inactive fields and optional description/help content
+//! yield before the active question, validation error, and focus row.
+//! Anchor-derived region ranges provide those semantics without exposing them
+//! to the generic view tree.
 //!
 //! It is a pure function of its inputs. No terminal, no writer, no styles to
 //! resolve.
 
+use std::collections::BTreeSet;
+
 use urushi::{StyledGrapheme, TextStyle};
 
 use super::{
-    LineKind, ViewCursor,
+    FieldRegionKind, LineKind, ViewCursor,
     resolve::{ResolvedLine, ResolvedPrompt},
 };
 
@@ -71,6 +73,11 @@ impl FramedRow {
     pub(crate) fn text(&self) -> String {
         self.runs.iter().map(|run| run.text.as_str()).collect()
     }
+
+    #[cfg(test)]
+    pub(crate) fn runs(&self) -> &[StyledRun] {
+        &self.runs
+    }
 }
 
 /// The rows a terminal box shows, and where the cursor sits among them.
@@ -85,11 +92,18 @@ struct Row {
     row: FramedRow,
     kind: LineKind,
     active: bool,
+    field: bool,
+    logical_line: usize,
+    regions: Vec<FieldRegionKind>,
     /// A row produced by wrapping a longer line, other than its first.
     continued: bool,
 }
 
 impl Row {
+    fn has_region(&self, kind: FieldRegionKind) -> bool {
+        self.regions.contains(&kind)
+    }
+
     fn is_choice(&self) -> bool {
         matches!(self.kind, LineKind::Choice { .. })
     }
@@ -128,6 +142,7 @@ pub(crate) fn frame(resolved: &ResolvedPrompt, rows: u16) -> FramedView {
     let mut cursor = None;
 
     for (logical_row, line) in resolved.lines.iter().enumerate() {
+        let row_offset = framed.len();
         if let Some(value) = resolved
             .cursor
             .filter(|value| usize::from(value.row) == logical_row)
@@ -137,11 +152,29 @@ pub(crate) fn frame(resolved: &ResolvedPrompt, rows: u16) -> FramedView {
                 column: value.column,
             });
         }
-        framed.extend(line.view.rows().iter().enumerate().map(|(index, row)| Row {
-            row: FramedRow::aggregate(row),
-            kind: line.kind,
-            active: line.active,
-            continued: index > 0,
+        if let Some(value) = line.cursor {
+            cursor = Some(ViewCursor {
+                row: row_offset
+                    .saturating_add(usize::from(value.row))
+                    .min(usize::from(u16::MAX)) as u16,
+                column: value.column,
+            });
+        }
+        framed.extend(line.view.rows().iter().enumerate().map(|(index, row)| {
+            Row {
+                row: FramedRow::aggregate(row),
+                kind: line.kind,
+                active: line.active,
+                field: line.field,
+                logical_line: logical_row,
+                regions: line
+                    .regions
+                    .iter()
+                    .filter(|region| (region.start..region.end).contains(&index))
+                    .map(|region| region.kind)
+                    .collect(),
+                continued: index > 0,
+            }
         }));
     }
 
@@ -151,6 +184,9 @@ pub(crate) fn frame(resolved: &ResolvedPrompt, rows: u16) -> FramedView {
 
     let max_rows = usize::from(rows.max(1));
     if framed.len() > max_rows {
+        if framed.iter().any(|row| row.field) {
+            return frame_presentations(framed, cursor, max_rows);
+        }
         let active_start = framed.iter().position(|row| row.active).unwrap_or(0);
         let focus_row = cursor.map_or_else(
             || {
@@ -187,6 +223,9 @@ pub(crate) fn frame(resolved: &ResolvedPrompt, rows: u16) -> FramedView {
                 row: error,
                 kind: LineKind::Error,
                 active: false,
+                field: false,
+                logical_line: usize::MAX,
+                regions: Vec::new(),
                 continued: false,
             };
         }
@@ -200,6 +239,9 @@ pub(crate) fn frame(resolved: &ResolvedPrompt, rows: u16) -> FramedView {
                 row: help,
                 kind: LineKind::Help,
                 active: false,
+                field: false,
+                logical_line: usize::MAX,
+                regions: Vec::new(),
                 continued: false,
             };
         }
@@ -208,6 +250,172 @@ pub(crate) fn frame(resolved: &ResolvedPrompt, rows: u16) -> FramedView {
     FramedView {
         rows: framed.into_iter().map(|row| row.row).collect(),
         cursor,
+    }
+}
+
+fn frame_presentations(rows: Vec<Row>, cursor: Option<ViewCursor>, max_rows: usize) -> FramedView {
+    let active_line = rows
+        .iter()
+        .find(|row| row.field && row.active)
+        .map(|row| row.logical_line);
+    let Some(active_line) = active_line else {
+        return FramedView {
+            rows: rows.into_iter().take(max_rows).map(|row| row.row).collect(),
+            cursor: None,
+        };
+    };
+    let active: Vec<usize> = rows
+        .iter()
+        .enumerate()
+        .filter_map(|(index, row)| (row.logical_line == active_line).then_some(index))
+        .collect();
+    let focus = cursor
+        .map(|value| usize::from(value.row))
+        .filter(|index| active.contains(index))
+        .or_else(|| {
+            active
+                .iter()
+                .copied()
+                .find(|index| rows[*index].has_region(FieldRegionKind::Focus))
+        })
+        .or_else(|| {
+            active
+                .iter()
+                .copied()
+                .find(|index| rows[*index].has_region(FieldRegionKind::Control))
+        })
+        .unwrap_or(active[0]);
+
+    let region = |kind| {
+        active
+            .iter()
+            .copied()
+            .filter(|index| rows[*index].has_region(kind))
+            .collect::<Vec<_>>()
+    };
+    let questions = region(FieldRegionKind::Question);
+    let errors = region(FieldRegionKind::Error);
+    let controls = region(FieldRegionKind::Control);
+    let descriptions = region(FieldRegionKind::Description);
+    let mut selected = BTreeSet::from([focus]);
+
+    if errors.is_empty() {
+        insert_complete(&mut selected, &questions, max_rows)
+    } else {
+        if !insert_complete(&mut selected, &errors, max_rows)
+            && selected.len() < max_rows
+            && let Some(error) = errors.first()
+        {
+            selected.insert(*error);
+        }
+        insert_complete(&mut selected, &questions, max_rows)
+    };
+
+    let mut nearby_controls = controls;
+    nearby_controls.sort_by_key(|index| (index.abs_diff(focus), *index));
+    insert_until_full(&mut selected, nearby_controls, max_rows);
+
+    let required: BTreeSet<usize> = questions
+        .iter()
+        .chain(&errors)
+        .chain(&descriptions)
+        .copied()
+        .collect();
+    insert_until_full(&mut selected, descriptions, max_rows);
+
+    let help = rows
+        .iter()
+        .enumerate()
+        .filter_map(|(index, row)| (row.kind == LineKind::Help).then_some(index));
+    insert_until_full(&mut selected, help, max_rows);
+
+    let mut other_fields: Vec<(usize, Vec<usize>)> = rows
+        .iter()
+        .filter(|row| row.field && row.logical_line != active_line)
+        .map(|row| row.logical_line)
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .map(|line| {
+            let indices = rows
+                .iter()
+                .enumerate()
+                .filter_map(|(index, row)| (row.logical_line == line).then_some(index))
+                .collect();
+            (line.abs_diff(active_line), indices)
+        })
+        .collect();
+    other_fields.sort_by_key(|(distance, indices)| (*distance, indices[0]));
+    for (_, field) in other_fields {
+        insert_complete(&mut selected, &field, max_rows);
+    }
+
+    insert_until_full(
+        &mut selected,
+        active
+            .iter()
+            .copied()
+            .filter(|index| !required.contains(index)),
+        max_rows,
+    );
+
+    insert_until_full(
+        &mut selected,
+        rows.iter()
+            .enumerate()
+            .filter_map(|(index, row)| (!row.field).then_some(index)),
+        max_rows,
+    );
+
+    selected_rows(rows, cursor, selected)
+}
+
+fn selected_rows(
+    rows: Vec<Row>,
+    cursor: Option<ViewCursor>,
+    selected: BTreeSet<usize>,
+) -> FramedView {
+    let selected: Vec<usize> = selected.into_iter().collect();
+    let framed_cursor = cursor.and_then(|value| {
+        let source = usize::from(value.row);
+        selected
+            .iter()
+            .position(|index| *index == source)
+            .map(|row| ViewCursor {
+                row: row.min(usize::from(u16::MAX)) as u16,
+                column: value.column,
+            })
+    });
+    FramedView {
+        rows: selected
+            .into_iter()
+            .map(|index| rows[index].row.clone())
+            .collect(),
+        cursor: framed_cursor,
+    }
+}
+
+fn insert_complete(selected: &mut BTreeSet<usize>, rows: &[usize], max_rows: usize) -> bool {
+    let missing = rows
+        .iter()
+        .filter(|index| !selected.contains(index))
+        .count();
+    if selected.len().saturating_add(missing) > max_rows {
+        return false;
+    }
+    selected.extend(rows.iter().copied());
+    true
+}
+
+fn insert_until_full(
+    selected: &mut BTreeSet<usize>,
+    rows: impl IntoIterator<Item = usize>,
+    max_rows: usize,
+) {
+    for row in rows {
+        if selected.len() == max_rows {
+            break;
+        }
+        selected.insert(row);
     }
 }
 
