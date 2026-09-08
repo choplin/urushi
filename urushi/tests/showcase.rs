@@ -55,6 +55,7 @@ fn showcase_has_a_consistent_visible_width() {
         "BACKGROUND COLOR",
         "BOLD",
         "UNDERLINE",
+        "HYPERLINK",
         "INLINE STYLES",
         "INLINE BLOCK",
         "PADDING",
@@ -106,6 +107,7 @@ fn showcase_has_a_consistent_visible_width() {
         );
     }
     assert!(output.contains("reserves 20 cols"));
+    assert!(output.contains("\x1b]8;;https://docs.rs/urushi\x1b\\open docs.rs\x1b]8;;\x1b\\"));
     assert!(output.contains("reserves 3 rows"));
     assert!(output.contains("┌───┬───┐"));
     assert!(output.contains("├───┼───┤"));

@@ -478,6 +478,13 @@ pub fn showcase_view() -> View {
                     "UNDERLINE",
                     View::text("underlined text", TextStyle::new().underline()),
                 ),
+                row(
+                    "HYPERLINK",
+                    View::text(
+                        "open docs.rs",
+                        TextStyle::new().hyperlink("https://docs.rs/urushi"),
+                    ),
+                ),
                 // Styles compose by placing text beside text, not by nesting
                 // rendered output inside a style.
                 row(

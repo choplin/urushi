@@ -1,7 +1,9 @@
 //! Closed property types used by [`TextStyle`](crate::TextStyle) and
 //! [`BlockStyle`](crate::BlockStyle).
 
-use crate::{Align, Border, Color, Length, Modifier, Overflow, Sides, Underline, VerticalAlign};
+use crate::{
+    Align, Border, Color, Hyperlink, Length, Modifier, Overflow, Sides, Underline, VerticalAlign,
+};
 
 /// A value that can be added to a [`TextStyle`](crate::TextStyle).
 ///
@@ -9,11 +11,12 @@ use crate::{Align, Border, Color, Length, Modifier, Overflow, Sides, Underline, 
 /// the exhaustive, data-oriented form for code that handles properties
 /// generically. It carries text properties only; geometry belongs to
 /// [`BlockStyleProperty`].
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TextStyleProperty {
     Foreground(Color),
     Background(Color),
     Underline(Underline),
+    Hyperlink(Hyperlink),
     Modifier(Modifier),
 }
 
@@ -23,6 +26,7 @@ pub enum TextStylePropertyKey {
     Foreground,
     Background,
     Underline,
+    Hyperlink,
     Modifier(Modifier),
 }
 
@@ -35,6 +39,12 @@ impl From<Modifier> for TextStyleProperty {
 impl From<Underline> for TextStyleProperty {
     fn from(value: Underline) -> Self {
         Self::Underline(value)
+    }
+}
+
+impl From<Hyperlink> for TextStyleProperty {
+    fn from(value: Hyperlink) -> Self {
+        Self::Hyperlink(value)
     }
 }
 

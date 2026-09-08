@@ -114,7 +114,9 @@ fn detect(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{Align, Border, Color, Length, Sides, Underline, UnderlineStyle, VerticalAlign};
+    use crate::{
+        Align, Border, Color, Hyperlink, Length, Sides, Underline, UnderlineStyle, VerticalAlign,
+    };
 
     #[test]
     fn detection_obeys_precedence_and_empty_no_color() {
@@ -275,6 +277,24 @@ mod tests {
             Some(Underline::new(UnderlineStyle::Curly))
         );
         assert_eq!(monochrome.paint("t"), "\x1b[4:3mt\x1b[0m");
+    }
+
+    #[test]
+    fn hyperlink_follows_ansi_policy_but_not_color_fidelity() {
+        let hyperlink = Hyperlink::new("https://example.com").with_parameter("id", "docs");
+        let style = TextStyle::new().hyperlink(hyperlink.clone());
+
+        assert_eq!(
+            TerminalProfile::new(ColorProfile::Monochrome, AnsiPolicy::Enabled)
+                .resolve_text_style(&style)
+                .hyperlink_value(),
+            Some(&hyperlink)
+        );
+        assert_eq!(
+            detect(false, None, Some("xterm-256color"), Some("truecolor"))
+                .resolve_text_style(&style),
+            TextStyle::new()
+        );
     }
 
     #[test]

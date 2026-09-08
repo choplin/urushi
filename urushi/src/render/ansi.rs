@@ -39,7 +39,7 @@ impl AnsiRenderer {
 
 #[cfg(test)]
 mod tests {
-    use crate::{AnsiPolicy, Color, ColorProfile, TextStyle};
+    use crate::{AnsiPolicy, Color, ColorProfile, Hyperlink, TextStyle};
 
     use super::*;
 
@@ -74,5 +74,36 @@ mod tests {
                 .as_str(),
             "abc\ndef"
         );
+    }
+
+    #[test]
+    fn renderer_closes_and_reopens_a_hyperlink_at_each_line() {
+        let renderer = AnsiRenderer::new(TerminalProfile::new(
+            ColorProfile::TrueColor,
+            AnsiPolicy::Enabled,
+        ));
+        let style = TextStyle::new()
+            .hyperlink(Hyperlink::new("https://example.com").with_parameter("id", "documentation"));
+
+        assert_eq!(
+            renderer
+                .render(&View::text("first\nsecond", style))
+                .as_str(),
+            concat!(
+                "\x1b]8;id=documentation;https://example.com\x1b\\first \x1b]8;;\x1b\\\n",
+                "\x1b]8;id=documentation;https://example.com\x1b\\second\x1b]8;;\x1b\\",
+            )
+        );
+    }
+
+    #[test]
+    fn disabled_ansi_removes_a_hyperlink() {
+        let renderer = AnsiRenderer::new(TerminalProfile::new(
+            ColorProfile::TrueColor,
+            AnsiPolicy::Disabled,
+        ));
+        let view = View::text("link", TextStyle::new().hyperlink("https://example.com"));
+
+        assert_eq!(renderer.render(&view).as_str(), "link");
     }
 }

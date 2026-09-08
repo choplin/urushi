@@ -1,7 +1,9 @@
 //! The [`TextStyle`] builder: everything a terminal can express about a run of
 //! text.
 
-use crate::{Color, Modifier, TextStyleProperty, TextStylePropertyKey, Underline, UnderlineStyle};
+use crate::{
+    Color, Hyperlink, Modifier, TextStyleProperty, TextStylePropertyKey, Underline, UnderlineStyle,
+};
 
 pub(crate) const RESET: &str = "\x1b[0m";
 
@@ -42,6 +44,7 @@ pub struct TextStyle {
     fg: Option<Color>,
     bg: Option<Color>,
     underline: Option<Underline>,
+    hyperlink: Option<Hyperlink>,
     modifiers: Modifier,
 }
 
@@ -58,6 +61,7 @@ impl TextStyle {
             TextStyleProperty::Foreground(color) => self.fg = Some(color),
             TextStyleProperty::Background(color) => self.bg = Some(color),
             TextStyleProperty::Underline(underline) => self.underline = Some(underline),
+            TextStyleProperty::Hyperlink(hyperlink) => self.hyperlink = Some(hyperlink),
             TextStyleProperty::Modifier(modifier) => {
                 self.modifiers = self.modifiers.union(modifier);
             }
@@ -71,6 +75,7 @@ impl TextStyle {
             TextStylePropertyKey::Foreground => self.fg = None,
             TextStylePropertyKey::Background => self.bg = None,
             TextStylePropertyKey::Underline => self.underline = None,
+            TextStylePropertyKey::Hyperlink => self.hyperlink = None,
             TextStylePropertyKey::Modifier(modifier) => {
                 self.modifiers = self.modifiers.difference(modifier);
             }
@@ -128,6 +133,14 @@ impl TextStyle {
         self.add(TextStyleProperty::Underline(underline))
     }
 
+    /// Attaches an OSC 8 hyperlink to this text.
+    ///
+    /// A URI converts directly for the ordinary case. Use [`Hyperlink`] when
+    /// the link needs parameters such as `id`.
+    pub fn hyperlink(self, hyperlink: impl Into<Hyperlink>) -> Self {
+        self.add(TextStyleProperty::Hyperlink(hyperlink.into()))
+    }
+
     pub fn blink(self) -> Self {
         self.add(Modifier::SLOW_BLINK)
     }
@@ -157,6 +170,11 @@ impl TextStyle {
     /// Returns the underline instruction, if this style sets one.
     pub const fn underline_value(&self) -> Option<Underline> {
         self.underline
+    }
+
+    /// Returns the hyperlink attached to this text, if any.
+    pub fn hyperlink_value(&self) -> Option<&Hyperlink> {
+        self.hyperlink.as_ref()
     }
 
     /// Returns the active text modifiers.
@@ -206,11 +224,36 @@ impl TextStyle {
     /// `text` is plain. Painting already-rendered output nests SGR scopes, and
     /// the inner scope's reset ends this one early.
     pub fn paint(&self, text: &str) -> String {
-        let sgr = self.sgr_prefix();
-        if sgr.is_empty() {
-            return text.to_owned();
+        if text.is_empty() {
+            return String::new();
         }
-        format!("{sgr}{text}{RESET}")
+        let sgr = self.sgr_prefix();
+        let Some(hyperlink) = &self.hyperlink else {
+            if sgr.is_empty() {
+                return text.to_owned();
+            }
+            return format!("{sgr}{text}{RESET}");
+        };
+        let open = hyperlink.open_sequence();
+        if !text.contains('\n') {
+            return paint_hyperlink_line(text, &open, &sgr);
+        }
+
+        let mut output = String::with_capacity(text.len() + open.len());
+        for segment in text.split_inclusive('\n') {
+            let line = segment.strip_suffix('\n').unwrap_or(segment);
+            let (line, carriage_return) = line
+                .strip_suffix('\r')
+                .map_or((line, false), |line| (line, true));
+            output.push_str(&paint_hyperlink_line(line, &open, &sgr));
+            if carriage_return {
+                output.push('\r');
+            }
+            if segment.ends_with('\n') {
+                output.push('\n');
+            }
+        }
+        output
     }
 
     /// Replaces every color property while preserving the rest of the style.
@@ -281,6 +324,16 @@ impl TextStyle {
     }
 }
 
+fn paint_hyperlink_line(text: &str, open: &str, sgr: &str) -> String {
+    if text.is_empty() {
+        return String::new();
+    }
+    if sgr.is_empty() {
+        return format!("{open}{text}\x1b]8;;\x1b\\");
+    }
+    format!("{open}{sgr}{text}{RESET}\x1b]8;;\x1b\\")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -296,6 +349,53 @@ mod tests {
 
         assert_eq!(style.modifiers(), Modifier::BOLD);
         assert_eq!(style.foreground_color(), None);
+    }
+
+    #[test]
+    fn hyperlink_is_one_replaceable_and_removable_property() {
+        let style = TextStyle::new()
+            .hyperlink("https://first.example")
+            .add(Hyperlink::new("https://second.example").with_parameter("id", "docs"));
+
+        assert_eq!(
+            style.hyperlink_value(),
+            Some(&Hyperlink::new("https://second.example").with_parameter("id", "docs"))
+        );
+        assert_eq!(
+            style.remove(TextStylePropertyKey::Hyperlink).paint("link"),
+            "link"
+        );
+    }
+
+    #[test]
+    fn hyperlink_scope_contains_sgr_and_closes_after_its_reset() {
+        assert_eq!(
+            TextStyle::new()
+                .hyperlink(Hyperlink::new("https://example.com").with_parameter("id", "docs"))
+                .bold()
+                .paint("link"),
+            "\x1b]8;id=docs;https://example.com\x1b\\\x1b[1mlink\x1b[0m\x1b]8;;\x1b\\"
+        );
+    }
+
+    #[test]
+    fn hyperlink_on_empty_text_emits_nothing() {
+        assert_eq!(
+            TextStyle::new().hyperlink("https://example.com").paint(""),
+            ""
+        );
+    }
+
+    #[test]
+    fn multiline_hyperlink_closes_before_each_line_boundary() {
+        let style = TextStyle::new().hyperlink("https://example.com");
+        let open = "\x1b]8;;https://example.com\x1b\\";
+        let close = "\x1b]8;;\x1b\\";
+
+        assert_eq!(
+            style.paint("first\n\nsecond\r\nthird\n"),
+            format!("{open}first{close}\n\n{open}second{close}\r\n{open}third{close}\n")
+        );
     }
 
     #[test]

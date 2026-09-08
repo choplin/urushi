@@ -10,6 +10,8 @@ use urushi::{Color, Modifier, TextStyle};
 /// a [`ResolvedView`](urushi::ResolvedView) carries only `TextStyle` per
 /// grapheme, and a block's border colors arrive as the border graphemes' own
 /// text style, so the adapter never distinguishes a border from its content.
+/// OSC 8 hyperlinks are intentionally discarded: Ratatui's cell style has no
+/// field that can retain a link target or its parameters.
 ///
 /// The wrapper exists because `Style` and `TextStyle` are both foreign to this
 /// crate, so `impl From<&TextStyle> for ratatui::Style` is not allowed here.
@@ -147,6 +149,14 @@ mod tests {
                 .into_inner()
                 .add_modifier
                 .is_empty()
+        );
+    }
+
+    #[test]
+    fn hyperlink_is_intentionally_lost_at_the_cell_style_boundary() {
+        assert_eq!(
+            RatatuiStyle::from(&TextStyle::new().hyperlink("https://example.com")),
+            RatatuiStyle::from(&TextStyle::new())
         );
     }
 }

@@ -56,10 +56,13 @@ alignment.
 
 The generic API uses one closed enum pair per type: a `…Property` carrying a
 value, and a `…PropertyKey` naming one without it. The text vocabulary is
-foreground, background, underline, and modifier. The block vocabulary is the
-geometry — padding, margin, the border glyph set and its four edge switches
-and two colors, the six sizing properties, overflow, and the two alignments —
-plus, through a `Text` variant, every text property of the style filling it.
+foreground, background, underline, hyperlink, and modifier. A hyperlink is one
+URI plus zero or more OSC 8 parameters; construction percent-encodes control
+and delimiter characters so caller input cannot escape its field. The block
+vocabulary is the geometry — padding, margin, the border glyph set and its four
+edge switches and two colors, the six sizing properties, overflow, and the two
+alignments — plus, through a `Text` variant, every text property of the style
+filling it.
 
 `TextStyleProperty` converts into `BlockStyleProperty`, so `BlockStyle::add`
 accepts a text property directly, and `BlockStyle::foreground` reads the same
@@ -97,6 +100,8 @@ let style = TextStyle::new()
     .add(Modifier::BOLD)
     .remove(TextStylePropertyKey::Foreground)
     .remove(Modifier::BOLD);
+
+let documentation = TextStyle::new().hyperlink("https://example.com/docs");
 ```
 
 Common properties also have concise named builders for completion and
@@ -200,9 +205,13 @@ complete value, so a theme role resolves to the whole style its position uses.
 Renderers consume the values present in one `TextStyle`.
 
 - ANSI rendering emits the active colors, modifiers, and underline, in SGR
-  parameter order so that one style always spells one sequence.
+  parameter order so that one style always spells one sequence. It emits a
+  hyperlink as an OSC 8 scope around the styled run and closes the scope before
+  a line boundary.
 - The `urushi-tui` adapter maps the active modifier set to Ratatui's
-  `add_modifier`; it does not populate `sub_modifier`.
+  `add_modifier`; it does not populate `sub_modifier`. Ratatui's cell model has
+  no hyperlink target or parameter field, so the adapter intentionally discards
+  hyperlinks while retaining every representable text property.
 - `TerminalProfile::resolve_text_style` maps or removes the effective text
   values; `TerminalProfile::resolve_block_style` does the same for a block's
   fill and border colors while preserving its geometry. Both return a
