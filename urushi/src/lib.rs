@@ -112,8 +112,8 @@ pub use theme::{
     SemanticTokens, TableRole, TextThemeRole, Theme, ThemeSet, TreeRole,
 };
 pub use view::{
-    AnchoredRect, Available, Axis, Canvas, CanvasCell, CanvasContext, CanvasItem, CellContribution,
-    Composition, LayoutError, LayoutErrorKind, Path, Position, PositionedCell, RenderedBlock,
-    ResolvedView, Size, StyledGrapheme, View, join_horizontal, join_vertical, measure, resolve,
-    try_measure, try_resolve,
+    AnchoredRect, Available, Axis, Canvas, CanvasCell, CanvasContext, CanvasItem, CanvasSizing,
+    CellContribution, Composition, LayoutError, LayoutErrorKind, Path, Position, PositionedCell,
+    RenderedBlock, ResolvedView, Size, StyledGrapheme, View, join_horizontal, join_vertical,
+    measure, resolve, try_measure, try_resolve,
 };

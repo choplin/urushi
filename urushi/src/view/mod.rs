@@ -15,8 +15,8 @@ mod sizing;
 mod width;
 
 pub use canvas::{
-    Canvas, CanvasCell, CanvasContext, CanvasItem, CellContribution, Composition, Path, Position,
-    PositionedCell,
+    Canvas, CanvasCell, CanvasContext, CanvasItem, CanvasSizing, CellContribution, Composition,
+    Path, Position, PositionedCell,
 };
 pub use geometry::{Available, Size};
 pub use join::{join_horizontal, join_vertical};

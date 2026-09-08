@@ -58,7 +58,7 @@ enum FittedNode<'a> {
         columns: Vec<usize>,
         rows: Vec<Vec<FittedCell<'a>>>,
     },
-    Canvas(&'a Canvas, bool),
+    Canvas(&'a Canvas, bool, super::canvas::CanvasRequirements),
 }
 
 /// One cell of a grid, with its text already fitted to its column's width.
@@ -134,7 +134,9 @@ pub(super) fn fit(widths: Widths<'_>) -> Fitted<'_> {
                 })
                 .collect(),
         },
-        WidthNode::Canvas(canvas, width_bounded) => FittedNode::Canvas(canvas, width_bounded),
+        WidthNode::Canvas(canvas, width_bounded, height) => {
+            FittedNode::Canvas(canvas, width_bounded, height)
+        }
     };
     Fitted {
         width,
@@ -354,9 +356,11 @@ pub(super) fn heights<'f>(fitted: &'f Fitted<'_>, area: Option<usize>, bounded: 
                 },
             }
         }
-        FittedNode::Canvas(canvas, width_bounded) => Sized {
+        FittedNode::Canvas(canvas, width_bounded, height) => Sized {
             width: fitted.width,
-            height: area.or(canvas.explicit_height()).unwrap_or(0),
+            height: area
+                .map(|area| area.max(height.floor()))
+                .unwrap_or(height.demand()),
             node: SizedNode::Canvas {
                 canvas,
                 width_bounded: *width_bounded,

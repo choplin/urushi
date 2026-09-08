@@ -83,15 +83,23 @@ fn metrics(view: &View) -> Metrics {
                 children: Vec::new(),
             }
         }
-        View::Canvas(canvas) => Metrics {
-            natural: canvas.explicit_width().unwrap_or(0),
-            floor: 0,
-            height_floor: 0,
-            fills: true,
-            width_kind: Kind::Fill(1),
-            height_kind: Kind::Fill(1),
-            children: Vec::new(),
-        },
+        View::Canvas(canvas) => {
+            let width = canvas.width_requirements();
+            let kind = if canvas.uses_viewport_sizing() {
+                Kind::Fill(1)
+            } else {
+                Kind::Auto
+            };
+            Metrics {
+                natural: width.demand(),
+                floor: width.floor(),
+                height_floor: 0,
+                fills: canvas.uses_viewport_sizing(),
+                width_kind: kind,
+                height_kind: kind,
+                children: Vec::new(),
+            }
+        }
         // An anchor measures as the block it is: the key says where to report,
         // never how large to be.
         View::Block(style, child) | View::AnchorBlock(_, style, child) => {
@@ -261,7 +269,7 @@ pub(super) enum WidthNode<'a> {
     Row(VerticalAlign, Vec<Widths<'a>>),
     Column(Align, Vec<Widths<'a>>),
     Grid(GridBox<'a>),
-    Canvas(&'a Canvas, bool),
+    Canvas(&'a Canvas, bool, super::canvas::CanvasRequirements),
 }
 
 /// A grid whose column widths are settled.
@@ -369,12 +377,18 @@ fn place<'a>(
                 }),
             }
         }
-        View::Canvas(canvas) => Widths {
-            width: area.or(canvas.explicit_width()).unwrap_or(0),
-            height_kind: Kind::Fill(1),
-            height_floor: 0,
-            node: WidthNode::Canvas(canvas, bounded),
-        },
+        View::Canvas(canvas) => {
+            let width = area
+                .map(|area| area.max(metrics.floor))
+                .unwrap_or(metrics.natural);
+            let height = canvas.height_requirements(width);
+            Widths {
+                width,
+                height_kind: metrics.height_kind,
+                height_floor: height.floor(),
+                node: WidthNode::Canvas(canvas, bounded, height),
+            }
+        }
         View::Block(style, child) | View::AnchorBlock(_, style, child) => {
             let inner = &metrics.children[0];
             let border = border_extent(style);
@@ -437,11 +451,16 @@ fn place<'a>(
                  {} > {content_width}",
                 child.width
             );
+            let height_floor = style
+                .minimum_height()
+                .map_or(0, usize::from)
+                .max(border.height() + vertical(padding) + child.height_floor)
+                + vertical(margin);
 
             Widths {
                 width: used + horizontal(margin),
                 height_kind: metrics.height_kind,
-                height_floor: metrics.height_floor,
+                height_floor,
                 node: WidthNode::Block(BlockBox {
                     style,
                     anchor: match view {
@@ -490,7 +509,11 @@ fn place<'a>(
                 // its assignment leaves the remainder unused.
                 width: children.iter().map(|child| child.width).sum(),
                 height_kind: metrics.height_kind,
-                height_floor: metrics.height_floor,
+                height_floor: children
+                    .iter()
+                    .map(|child| child.height_floor)
+                    .max()
+                    .unwrap_or(0),
                 node: WidthNode::Row(*align, children),
             }
         }
@@ -505,7 +528,7 @@ fn place<'a>(
             Widths {
                 width: children.iter().map(|child| child.width).max().unwrap_or(0),
                 height_kind: metrics.height_kind,
-                height_floor: metrics.height_floor,
+                height_floor: children.iter().map(|child| child.height_floor).sum(),
                 node: WidthNode::Column(*align, children),
             }
         }
@@ -561,10 +584,21 @@ fn place<'a>(
                 placed.push(cells);
             }
 
+            let height_floor = placed
+                .iter()
+                .map(|row| {
+                    row.iter()
+                        .map(|cell| cell.child.height_floor + vertical(cell.padding))
+                        .max()
+                        .unwrap_or(0)
+                })
+                .sum::<usize>()
+                + lines.height();
+
             Widths {
                 width: widths.iter().sum::<usize>() + lines.width(),
                 height_kind: metrics.height_kind,
-                height_floor: metrics.height_floor,
+                height_floor,
                 node: WidthNode::Grid(GridBox {
                     style,
                     columns: widths,

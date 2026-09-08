@@ -421,10 +421,14 @@ fn validate_canvas_extents(sized: &super::height::Sized<'_>) -> Result<(), Layou
             width_bounded,
             height_bounded,
         } => {
-            if !width_bounded && canvas.explicit_width().is_none() {
+            if canvas.uses_viewport_sizing() && !width_bounded && canvas.explicit_width().is_none()
+            {
                 return Err(LayoutError::missing_extent(Axis::Width));
             }
-            if !height_bounded && canvas.explicit_height().is_none() {
+            if canvas.uses_viewport_sizing()
+                && !height_bounded
+                && canvas.explicit_height().is_none()
+            {
                 return Err(LayoutError::missing_extent(Axis::Height));
             }
             Ok(())

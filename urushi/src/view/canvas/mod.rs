@@ -1,5 +1,9 @@
 //! Free-positioned, renderer-neutral drawing inside a finite [`Canvas`].
 //!
+//! A Canvas carries exactly one [`CanvasSizing`] value. Ordinary canvases use
+//! viewport sizing and consume finite allocation; built-in presentations may
+//! internally bind intrinsic requirements without deriving them from items.
+//!
 //! A Canvas owns immutable [`CanvasItem`] values. Resolution first fixes the
 //! surface size, then calls each item once with a frame-scoped [`CanvasContext`].
 //! Items record `View`, text, [`Path`], or sparse-cell commands in paint order.
@@ -41,6 +45,7 @@ mod assemble;
 mod cell;
 mod context;
 mod path;
+pub(crate) mod sizing;
 
 use std::any::Any;
 use std::fmt;
@@ -50,6 +55,8 @@ use super::geometry::Size;
 pub use cell::{CanvasCell, CellContribution, Composition, PositionedCell};
 pub use context::CanvasContext;
 pub use path::Path;
+pub(crate) use sizing::CanvasRequirements;
+pub use sizing::CanvasSizing;
 
 pub(in crate::view) use assemble::canvas_rect;
 use context::CanvasCommand;
@@ -119,36 +126,56 @@ impl PartialEq for Item {
 /// A finite drawing surface and its ordered, owned frame items.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Canvas {
-    width: Option<usize>,
-    height: Option<usize>,
+    sizing: CanvasSizing,
     items: Vec<Item>,
 }
 
 impl Canvas {
     pub const fn new() -> Self {
         Self {
-            width: None,
-            height: None,
+            sizing: CanvasSizing::viewport(),
             items: Vec::new(),
         }
     }
 
-    /// States the extent used when the width axis is unbounded.
+    /// Replaces this Canvas's complete sizing policy.
+    ///
+    /// Ordinary callers use viewport sizing. Built-in presentations may bind
+    /// an opaque intrinsic value internally; sizing remains independent of the
+    /// Canvas's ordered items in either case.
+    #[must_use]
+    pub fn sizing(mut self, sizing: CanvasSizing) -> Self {
+        self.sizing = sizing;
+        self
+    }
+
+    /// States viewport sizing's extent on an unbounded width axis.
+    ///
+    /// # Panics
+    ///
+    /// Panics when a crate-provided intrinsic sizing value is already installed.
     pub const fn width(mut self, width: usize) -> Self {
-        self.width = Some(width);
+        self.sizing.set_viewport_width(width);
         self
     }
 
-    /// States the extent used when the height axis is unbounded.
+    /// States viewport sizing's extent on an unbounded height axis.
+    ///
+    /// # Panics
+    ///
+    /// Panics when a crate-provided intrinsic sizing value is already installed.
     pub const fn height(mut self, height: usize) -> Self {
-        self.height = Some(height);
+        self.sizing.set_viewport_height(height);
         self
     }
 
-    /// States both extents used when the corresponding axes are unbounded.
+    /// States both unbounded-axis extents of viewport sizing.
+    ///
+    /// # Panics
+    ///
+    /// Panics when a crate-provided intrinsic sizing value is already installed.
     pub const fn extent(mut self, size: Size) -> Self {
-        self.width = Some(size.width());
-        self.height = Some(size.height());
+        self.sizing.set_viewport_extent(size);
         self
     }
 
@@ -162,11 +189,23 @@ impl Canvas {
     }
 
     pub(in crate::view) const fn explicit_width(&self) -> Option<usize> {
-        self.width
+        self.sizing.explicit_width()
     }
 
     pub(in crate::view) const fn explicit_height(&self) -> Option<usize> {
-        self.height
+        self.sizing.explicit_height()
+    }
+
+    pub(in crate::view) const fn uses_viewport_sizing(&self) -> bool {
+        self.sizing.is_viewport()
+    }
+
+    pub(in crate::view) fn width_requirements(&self) -> sizing::Requirements {
+        self.sizing.width_requirements()
+    }
+
+    pub(in crate::view) fn height_requirements(&self, width: usize) -> sizing::Requirements {
+        self.sizing.height_requirements(width)
     }
 
     fn draw(&self, size: Size) -> CanvasContext {
@@ -175,5 +214,179 @@ impl Canvas {
             item.0.draw(&mut context);
         }
         context
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::{Arc, Mutex};
+
+    use super::sizing::{CanvasMeasure, CanvasRequirements};
+    use super::*;
+    use crate::{Align, Available, BlockStyle, Grapheme, View, measure, resolve};
+
+    #[derive(Debug, Clone, PartialEq, Eq)]
+    enum Event {
+        Width,
+        Height(usize),
+        Draw(Size),
+    }
+
+    #[derive(Debug, Clone)]
+    struct StagedMeasure {
+        width: CanvasRequirements,
+        height: CanvasRequirements,
+        events: Arc<Mutex<Vec<Event>>>,
+    }
+
+    impl PartialEq for StagedMeasure {
+        fn eq(&self, other: &Self) -> bool {
+            self.width == other.width && self.height == other.height
+        }
+    }
+
+    impl CanvasMeasure for StagedMeasure {
+        fn width_requirements(&self) -> CanvasRequirements {
+            self.events.lock().unwrap().push(Event::Width);
+            self.width
+        }
+
+        fn height_requirements(&self, width: usize) -> CanvasRequirements {
+            self.events.lock().unwrap().push(Event::Height(width));
+            self.height
+        }
+    }
+
+    #[derive(Debug, Clone)]
+    struct DrawPastHeight(Arc<Mutex<Vec<Event>>>);
+
+    impl PartialEq for DrawPastHeight {
+        fn eq(&self, _other: &Self) -> bool {
+            true
+        }
+    }
+
+    impl CanvasItem for DrawPastHeight {
+        fn draw(&self, context: &mut CanvasContext) {
+            self.0.lock().unwrap().push(Event::Draw(context.size()));
+            context.cells([PositionedCell::new(
+                Position::new(0, 2),
+                CellContribution::new().symbol(Grapheme::new("x")),
+            )]);
+        }
+    }
+
+    #[test]
+    fn intrinsic_measurement_is_staged_once_before_drawing() {
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let sizing = CanvasSizing::intrinsic(StagedMeasure {
+            width: CanvasRequirements::new(8, 3),
+            height: CanvasRequirements::new(4, 2),
+            events: Arc::clone(&events),
+        });
+        let view = View::canvas(
+            Canvas::new()
+                .sizing(sizing)
+                .item(DrawPastHeight(Arc::clone(&events))),
+        );
+
+        assert_eq!(measure(&view), Size::new(8, 4));
+        assert_eq!(
+            *events.lock().unwrap(),
+            [Event::Width, Event::Height(8)],
+            "measurement never invokes Canvas items"
+        );
+        events.lock().unwrap().clear();
+
+        let resolved = resolve(&view, Available::size(5, 2));
+
+        assert_eq!(resolved.size(), Size::new(5, 2));
+        assert_eq!(
+            *events.lock().unwrap(),
+            [Event::Width, Event::Height(5), Event::Draw(Size::new(5, 2))]
+        );
+        assert!(
+            resolved
+                .rows()
+                .iter()
+                .flatten()
+                .all(|cell| cell.symbol() != "x"),
+            "drawing beyond the selected height is cropped without reflow"
+        );
+    }
+
+    #[test]
+    fn intrinsic_equality_ignores_allocation_identity() {
+        let first = CanvasSizing::intrinsic(StagedMeasure {
+            width: CanvasRequirements::new(8, 3),
+            height: CanvasRequirements::new(4, 2),
+            events: Arc::new(Mutex::new(Vec::new())),
+        });
+        let same_value_in_another_allocation = CanvasSizing::intrinsic(StagedMeasure {
+            width: CanvasRequirements::new(8, 3),
+            height: CanvasRequirements::new(4, 2),
+            events: Arc::new(Mutex::new(Vec::new())),
+        });
+
+        assert_eq!(first, same_value_in_another_allocation);
+    }
+
+    #[test]
+    fn intrinsic_floors_win_before_the_final_safety_crop() {
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let sizing = CanvasSizing::intrinsic(StagedMeasure {
+            width: CanvasRequirements::new(8, 3),
+            height: CanvasRequirements::new(4, 3),
+            events: Arc::clone(&events),
+        });
+        let view = View::canvas(
+            Canvas::new()
+                .sizing(sizing)
+                .item(DrawPastHeight(Arc::clone(&events))),
+        );
+
+        let resolved = resolve(&view, Available::size(1, 1));
+
+        assert_eq!(resolved.size(), Size::new(1, 1));
+        assert_eq!(
+            *events.lock().unwrap(),
+            [Event::Width, Event::Height(3), Event::Draw(Size::new(3, 3))]
+        );
+    }
+
+    #[test]
+    fn selected_width_height_floors_propagate_through_ancestor_claims() {
+        let first_events = Arc::new(Mutex::new(Vec::new()));
+        let second_events = Arc::new(Mutex::new(Vec::new()));
+        let intrinsic = |height, floor, events: &Arc<Mutex<Vec<Event>>>| {
+            View::canvas(
+                Canvas::new()
+                    .sizing(CanvasSizing::intrinsic(StagedMeasure {
+                        width: CanvasRequirements::new(1, 0),
+                        height: CanvasRequirements::new(height, floor),
+                        events: Arc::clone(events),
+                    }))
+                    .item(DrawPastHeight(Arc::clone(events))),
+            )
+        };
+        let view = View::column(
+            Align::Left,
+            [
+                View::block(BlockStyle::new(), intrinsic(10, 8, &first_events)),
+                intrinsic(10, 0, &second_events),
+            ],
+        );
+
+        let resolved = resolve(&view, Available::size(3, 10));
+
+        assert_eq!(resolved.size(), Size::new(3, 10));
+        assert_eq!(
+            first_events.lock().unwrap().last(),
+            Some(&Event::Draw(Size::new(1, 8)))
+        );
+        assert_eq!(
+            second_events.lock().unwrap().last(),
+            Some(&Event::Draw(Size::new(3, 2)))
+        );
     }
 }

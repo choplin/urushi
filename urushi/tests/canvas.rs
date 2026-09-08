@@ -1,7 +1,7 @@
 use urushi::{
-    Available, Axis, BlockStyle, Canvas, CanvasCell, CanvasContext, CanvasItem, CellContribution,
-    Composition, Grapheme, LayoutErrorKind, Length, Path, Position, PositionedCell, Size,
-    TextStyle, View, resolve, try_resolve,
+    Available, Axis, BlockStyle, Canvas, CanvasCell, CanvasContext, CanvasItem, CanvasSizing,
+    CellContribution, Composition, Grapheme, LayoutErrorKind, Length, Path, Position,
+    PositionedCell, Size, TextStyle, View, resolve, try_resolve,
 };
 
 #[derive(Debug, Clone, PartialEq)]
@@ -46,6 +46,17 @@ fn items_are_owned_comparable_values_and_draw_after_size_is_final() {
         lines(&first, Available::size(8, 4)),
         ["        ", "─node── ", "        ", "       x"]
     );
+}
+
+#[test]
+fn viewport_sizing_is_an_explicit_comparable_canvas_value() {
+    let implicit = Canvas::new().extent(Size::new(4, 2));
+    let explicit = Canvas::new()
+        .sizing(CanvasSizing::viewport())
+        .extent(Size::new(4, 2));
+
+    assert_eq!(implicit, explicit);
+    assert_ne!(explicit, Canvas::new().extent(Size::new(5, 2)));
 }
 
 #[derive(Debug, Clone, PartialEq)]
