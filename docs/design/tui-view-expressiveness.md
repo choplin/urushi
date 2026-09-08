@@ -15,11 +15,11 @@ code must be able to construct the intended frame as a `View` without either:
 - computing final rectangles that only `resolve(Available)` can know; or
 - writing backend cells directly for ordinary Urushi-native content.
 
-That `View` may contain a Region plan whose renderer-neutral layout logic runs
-inside `resolve`. A Region is not a foreign backend escape: it emits the same
-`ResolvedView` cells and placements as built-in primitives and remains subject
-to the same local-area and terminal-independence rules. Its contract is
-[`presentation-region.md`](presentation-region.md).
+That `View` may contain an intrinsically sized Canvas whose renderer-neutral
+measurement runs inside `resolve` before its items draw. Canvas is not a
+foreign backend escape: it emits the same `ResolvedView` cells and placements
+as built-in primitives and remains subject to the same local-area and
+terminal-independence rules. Its contract is [`canvas.md`](canvas.md).
 
 The view need not describe how the snapshot was reached. Key presses, focus
 movement, selection changes, scrolling commands, drag gestures, animation
@@ -89,29 +89,29 @@ Core owns only renderer-neutral, one-frame presentation mechanics:
 - inline runs participating in one wrapping and clipping flow;
 - a viewport projection whose offset is supplied by its caller;
 - a Canvas for positioned placement, overlap, connected geometry, sparse
-  cells, clipping, and ordered cell composition;
-- type-erased Region plans that measure and resolve renderer-neutral content
-  within the local area assigned by their parent;
+  cells, clipping, ordered cell composition, and optional Canvas-wide intrinsic
+  sizing supplied explicitly by a built-in presentation;
 - keys and reported regions that follow the same transforms and clipping as
   the content around them; and
 - reservation of a foreign region without naming Ratatui or another backend.
 
-The `Text`, `Block`, `Row`, `Column`, `Grid`, `Region`, `Canvas`, and
+The `Text`, `Block`, `Row`, `Column`, `Grid`, `Canvas`, and
 `AnchorBlock` nodes are members of this vocabulary. Canvas is a finite drawing
-surface whose items record `View`, `Text`, `Path`, and `Cells` commands after
-its size is known; its exact contract is recorded in
+surface whose default size is independent of its items. An intrinsic sizing
+value may measure the Canvas as a whole, and its items record `View`, `Text`,
+`Path`, and `Cells` commands only after the size is known. Its exact contract is recorded in
 [`canvas.md`](canvas.md). Viewport projection remains a separate design topic.
 
 Core does not gain semantic nodes such as `View::Graph`, `View::Modal`, or
 `View::SelectedRow`. It also does not gain event callbacks, focus movement, or
 backend `Rect` and `Buffer` values. `resolve` remains the only operation that
-receives the final available area and may invoke a Region plan only with its
-derived local area.
+receives the final available area; it performs any Canvas intrinsic measurement
+with the derived local constraints before invoking Canvas items.
 
 ### Reusable components and presentations
 
 Components own semantic data and concrete ways to lower it to primitive views
-or owned Region plans.
+or bound Canvas items.
 List, Tree, Table, Summary, and Warning remain the canonical common components.
 Graphs, charts, sparklines, gauges, tabs, scrollbars, modal frames, and text-field
 visuals are component or presentation candidates when they add reusable
@@ -139,9 +139,9 @@ method signature follow the needs of that component, as
 
 The runtime lends the current model to the application's `view` function. The
 application selects or derives the immutable presentation inputs for that
-frame, components construct built-in nodes or bind Region plans, and the
-runtime resolves and draws the result. No interaction transition runs during
-composition or resolution.
+frame, components construct built-in nodes or bind Canvas items and sizing, and
+the runtime resolves and draws the result. No interaction transition runs
+during composition or resolution.
 
 ```text
 event -> update(Model) -> current Model snapshot

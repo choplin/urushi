@@ -30,17 +30,16 @@ SemanticTokens --> Theme --> ComponentTheme --> concrete Presentation
 Semantic component data -------------------------------+-- compose
 Optional component-specific frame input ---------------+     |
                                                              v
- View (built-ins, Region plan, or Canvas items) --> resolve --> ResolvedView + TerminalProfile --> AnsiRenderer --> ANSI text
+ View (built-ins and Canvas items) --> resolve --> ResolvedView + TerminalProfile --> AnsiRenderer --> ANSI text
          |
          +--> StderrTerminal (owns renderer/profile) --> stable stderr output
 ```
 
 The core [`View`](../urushi/src/view/model.rs) is a component-agnostic layout
 tree. Its built-in vocabulary is `Text`, `Block`, `Row`, `Column`, `Grid`,
-`Canvas`, and the keyed `AnchorBlock` form; Region additionally carries an
-opaque bound presentation plan. Canvas carries ordered, comparable items that
-record renderer-neutral drawing commands after its finite size is known. The
-tree carries logical
+`Canvas`, and the keyed `AnchorBlock` form. Canvas carries one sizing mode and
+ordered, comparable items that record renderer-neutral drawing commands after
+its finite size is known. The tree carries logical
 [`TextStyle`](../urushi/src/style/text.rs) and
 [`BlockStyle`](../urushi/src/style/block.rs) values rather than
 terminal-resolved ANSI strings. Component presentations stop at this boundary.
@@ -49,9 +48,9 @@ rectangle of styled graphemes, and
 [`AnsiRenderer`](../urushi/src/render/ansi.rs) applies a
 [`TerminalProfile`](../urushi/src/terminal/profile.rs) to it and serializes the
 result. A presentation either lowers component meaning into built-in nodes or
-binds its component snapshot and policy into an opaque Region plan. Neither
-`View` nor `resolve` can inspect whether a tree or plan came from a List, Table,
-Tree, or future Graph.
+binds its component snapshot and policy into an intrinsically sized Canvas.
+Neither `View` nor `resolve` can inspect whether a tree or item came from a
+List, Table, Tree, or future Graph.
 
 Primitive styling splits in two, and geometry belongs to only one half: a
 `TextStyle` is everything a terminal can express about a run of text, and a
@@ -108,7 +107,7 @@ The contracts shared across surfaces are:
   reusable semantic vocabulary;
 - concrete component presentations, whose `compose` operations turn semantic
   data and any borrowed component-specific frame input into built-in `View`
-  nodes or an opaque bound Region plan without receiving an available area;
+  nodes or bound Canvas items without receiving an available area;
 - the [`text`](../urushi/src/text/) implementation, which supplies one
   cell-aware definition of plain-text display width and wrapping; and
 - [`TerminalProfile`](../urushi/src/terminal/profile.rs), which resolves the
@@ -259,12 +258,12 @@ A reusable component owns semantic data and normalization. A concrete
 presentation owns one structural interpretation and composes a `View` without
 receiving `Available`; it may also borrow component-specific immutable input
 describing the current frame. It either constructs built-in nodes or binds an
-owned, renderer-neutral plan into a Region. The application owns the frame
-input's transitions, and `resolve` alone decides area-dependent geometry,
-passing a Region plan only the local area assigned by its parent. Neither layer
-may write to stderr, choose live mode, construct an Indicatif object, or depend
-on Ratatui. The boundary and plan invariants are defined in
-[`design/presentation-region.md`](design/presentation-region.md).
+owned frame into a Canvas item and supplies one Canvas-wide intrinsic sizing
+value. The application owns the frame input's transitions, and `resolve` alone
+decides area-dependent geometry before asking Canvas items to draw. Neither
+layer may write to stderr, choose live mode, construct an Indicatif object, or
+depend on Ratatui. The boundary and sizing invariants are defined in
+[`design/canvas.md`](design/canvas.md).
 
 Application-specific workflow chrome remains in the application: an application
 composes its own command start and finish lines rather than Urushi growing

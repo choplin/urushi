@@ -8,8 +8,8 @@ resolved scene. The reasoning behind the boundary lives in
 ## Components become views through presentations
 
 A semantic component describes what exists. A concrete presentation describes
-one way to turn that meaning into layout primitives or an area-dependent region
-plan:
+one way to turn that meaning into layout primitives, including an
+area-dependent Canvas:
 
 ```text
 semantic data + presentation [+ optional frame input]
@@ -43,8 +43,9 @@ let view = numbered.compose(&list);
 This ordinary `compose` call borrows presentation and data, performs no
 terminal I/O, and receives no `Available` area. It returns a `View`; it does not
 render output. The presentation may build a tree from closed built-in
-primitives or bind an owned layout plan into a `Region`. `compose` names the
-lowering responsibility, not one shared signature: a component that needs
+primitives or bind an owned frame into a Canvas item with one Canvas-wide
+intrinsic sizing value. `compose` names the lowering responsibility, not one
+shared signature: a component that needs
 selection, a visible origin, or another fact about the current frame may borrow
 an additional component-specific presentation input. `urushi-tui` owns and
 updates that state; composition only reads its current value.
@@ -55,16 +56,16 @@ updates that state; composition only reads its current value.
 | --- | --- | --- |
 | Semantic data | Content, relationships, hierarchy, domain visibility, and semantic inspection | Presentation styles, layout primitives, available area, interaction state, terminal capabilities, or output lifecycle |
 | Concrete presentation | One structural presentation, its logical styles, markers and other presentation policy, and lowering semantic data plus any borrowed frame input into a `View` | Component content, available area, state transitions, writers, or event loops |
-| `View` | Renderer-neutral built-in layout primitives, opaque bound region plans, and their logical styles | Component-specific variants or inspectable semantic roles, terminal capabilities, or application workflow |
+| `View` | Renderer-neutral built-in layout and drawing primitives, including Canvas, and their logical styles | Component-specific variants or inspectable semantic roles, terminal capabilities, or application workflow |
 | `ResolvedView` | The resolved rectangle of styled graphemes and reported placements | Semantic data, primitive nodes, terminal capability decisions, or output ownership |
 
 The presentation is the only layer that understands component meaning. It may
 finish that interpretation while constructing built-in primitives, or bind its
-data, styles, and policy into an owned region plan whose later decisions depend
-on the local area. The plan is opaque to `View`: the resolver dispatches every
-region through one generic layout contract and never inspects a header, branch,
-selection, or component kind. The exact contract is
-[`design/presentation-region.md`](design/presentation-region.md).
+data, styles, and policy into an owned Canvas item whose later drawing depends
+on the final local size. The corresponding Canvas sizing value participates in
+layout before any item draws. Both remain opaque to `View`: the resolver uses
+generic Canvas contracts and never inspects a header, branch, selection, or
+component kind. The exact contract is [`design/canvas.md`](design/canvas.md).
 
 An immutable, component-specific snapshot such as selection, expansion,
 visible origin, cursor, or camera is an input to that lowering operation, not a
@@ -79,11 +80,11 @@ share, align columns by inserting measured spaces, or repeat glyphs to bake a
 line of a chosen width into a text leaf.
 
 The area reaches the tree only through `resolve`. Built-in primitive rules and
-region plans then decide widths, wrapping, clipping, alignment, and placement.
-A region plan receives only the local area assigned after its siblings share
-their parent; the presentation's `compose` operation never receives the root
-area. This keeps the same composed component valid at the root, inside a `Row`,
-and under different backends and available areas.
+Canvas intrinsic sizing then decide widths, wrapping, clipping, alignment, and
+placement. The sizing value receives only the selected local width after its
+siblings share their parent; the presentation's `compose` operation never
+receives the root area. This keeps the same composed component valid at the
+root, inside a `Row`, and under different backends and available areas.
 
 Intrinsic, area-independent work remains valid during composition. A
 presentation may normalize a marker to one line or choose a primitive from a
@@ -105,9 +106,9 @@ their theme-derived defaults alongside shared component role styles.
 Each presentation is an independent concrete type. `compose` is a naming and
 responsibility convention, not a shared trait or universal signature. Internal
 reuse does not create a public `Presentation`, `PresentationInput`, or
-`Component` abstraction. `RegionLayout` is different: it is the common
-contract of an already-bound presentation plan, not a common contract over the
-presentations' distinct input signatures.
+`Component` abstraction. Canvas's private intrinsic measurement capability is
+different: it is invoked only after a presentation has bound its distinct
+inputs into an owned value.
 
 ## Canonical and alternate presentations
 
@@ -129,8 +130,8 @@ style split or trait today.
 The same rule scales to a future graph component. Graph topology and content
 remain semantic data, while concrete choices such as layered or explicitly
 positioned presentation use named types such as `LayeredGraphPresentation` or
-`PositionedGraphPresentation`. They may use the built-in Canvas or an owned
-Region plan, but `View` gains neither a `Graph` node nor graph
+`PositionedGraphPresentation`. They may use the built-in Canvas, but `View`
+gains neither a `Graph` node nor graph
 interaction semantics. No
 `theme.graph(&graph)` shortcut exists until Urushi has chosen and shipped one
 canonical graph presentation.
@@ -161,12 +162,13 @@ canonical visual structure. A table header is Table meaning until
 policy until their presentation expresses them as generic primitives.
 
 The canonical Table presentation binds an owned Table snapshot, its styles,
-and its drawing policy into a region plan. That plan receives its local area
-during `resolve`, decides shared column widths, applies its Table presentation,
-and draws directly into one renderer-neutral rectangle. It is not a Grid and
-the core resolver cannot inspect the bound Table or presentation. Presentations
-that need no specialized area-dependent algorithm continue to compose ordinary
-primitive trees.
+and its drawing policy into a Canvas item. The item derives the Canvas's one
+intrinsic sizing value from that same bound frame. During `resolve`, sizing
+reports column requirements and height at the selected width; after the final
+viewport is known, the item records cell and rule commands. It is not a Grid
+and the core resolver cannot inspect the bound Table or presentation.
+Presentations that need no specialized area-dependent algorithm continue to
+compose ordinary primitive trees.
 
 Shared recursive traversal, marker normalization, or CJK handling may remain
 private implementation. Promote a shared public contract only when external

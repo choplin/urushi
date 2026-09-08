@@ -82,8 +82,8 @@ enum BlockStylePropertyKey {
 The grid vocabulary is the width its columns claim and the default padding of
 its cells. A grid carries no box geometry, fill style, or line network — a grid
 that needs a border, a margin, or a stated size is placed inside a block, while
-a presentation that draws internal rules uses a Region plan — so Grid has
-neither box nor text properties:
+a presentation that draws internal rules uses Canvas — so Grid has neither box
+nor text properties:
 
 ```rust
 enum GridStyleProperty {

@@ -2,8 +2,8 @@
 
 The view model splits primitive styling into `TextStyle` and `BlockStyle` and
 composes a component-agnostic layout tree resolved to per-grapheme rows and
-placements. Built-in nodes carry no component meaning; an opaque Region may
-bind a presentation and its inputs behind the common layout contract. This
+placements. Built-in nodes carry no component meaning; Canvas may bind a
+presentation's frame behind generic measurement and drawing contracts. This
 document records why the model has those boundaries and which alternatives
 were rejected. The contracts are defined in
 [`component-model.md`](../component-model.md),
@@ -47,20 +47,19 @@ may contain either kind, but are not themselves style values.
 component kinds. A concrete component presentation is the last layer that
 knows whether a row is a Table header, a marker belongs to a List item, or two
 nodes are joined by a Graph edge. Its `compose` operation translates that
-meaning into built-in primitives or binds its inputs and behavior into an owned,
-opaque Region plan before `resolve` sees the tree.
+meaning into built-in primitives or binds its inputs and behavior into an owned
+Canvas item before `resolve` sees the tree.
 
 Keeping semantic component variants out of `View` lets a component change
 independently of the resolver and lets Urushi and Noctui share one layout
 contract without duplicating every component in it. Built-in nodes remain a
-small common vocabulary. Region admits specialized algorithms through one
-type-erased measurement and resolution contract, while Canvas admits
-size-responsive positioned drawing through ordered renderer-neutral commands.
-Neither exposes the component meaning it serves. This also prevents one
+small common vocabulary. Canvas admits specialized intrinsic measurement as
+one optional Canvas-wide policy and size-responsive drawing through ordered
+renderer-neutral items and commands. Neither contract exposes the component
+meaning it serves. This also prevents one
 convenient primitive, such as Grid, from becoming a semantic intermediate
 representation every component is forced through. Their boundaries are
-defined in [`presentation-region.md`](presentation-region.md) and
-[`canvas.md`](canvas.md).
+defined in [`canvas.md`](canvas.md).
 
 ## Why neither type is named `Style`
 
@@ -113,8 +112,13 @@ consume the one `ResolvedView`, and the Ratatui adapter turns its target
   make every backend-facing implementation learn component semantics.
 - **Presentation composition that receives `Available`.** A nested component's
   share does not exist until its siblings are resolved. Giving composition the
-  root area lets it pre-wrap and pre-pad against the wrong rectangle. A Region
-  plan instead receives the local area during ordinary resolution.
+  root area lets it pre-wrap and pre-pad against the wrong rectangle. Canvas
+  intrinsic sizing instead participates in ordinary local resolution before
+  its items draw.
+- **A separate Region node for specialized presentation.** Region would
+  duplicate Canvas's erased presentation execution and renderer-neutral output
+  path. Optional intrinsic Canvas sizing supplies the missing measurement
+  capability while preserving one drawing primitive.
 
 - **One style type, with inline text reading only the properties it can honor.**
   The illegal combination stays constructible and the constraint stays a promise.

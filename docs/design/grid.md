@@ -29,7 +29,8 @@ supplies an empty View when that is the intended cell.
 
 Grid has no border, separator, header, or component preset. A surrounding
 `Block` supplies outer box geometry. A presentation that needs an internal
-line network owns that drawing in a [Region plan](presentation-region.md).
+line network owns that drawing in an intrinsically sized
+[Canvas](canvas.md).
 
 ### Column widths
 
@@ -85,15 +86,15 @@ The former proposal used Tree indentation as the reason for column span. Tree
 is semantic data with its own presentation, not evidence for widening Grid.
 A future direct Grid use may reopen span only together with the precise
 interval-sizing behavior it needs. A future Table colspan belongs first to the
-Table data and its Region presentation; it does not imply a Grid span.
+Table data and presentation; it does not imply a Grid span.
 
 ## Grid and Table are independent
 
 Grid is a layout container: it recursively resolves arbitrary child Views under
 shared column widths. Table is semantic data interpreted by
 `TablePresentation`. The canonical Table presentation binds its data, styles,
-and area-dependent drawing behavior into a Region plan and draws its cells and
-rules directly in that region.
+and area-dependent drawing behavior into a Canvas item, supplies that Canvas's
+intrinsic sizing, and draws its cells and rules directly in the final viewport.
 
 Similar width arithmetic does not create a lowering relation. The two may use
 the same private sizing functions where their mechanics coincide, but neither
@@ -108,16 +109,17 @@ aligning children in shared tracks. Keeping them on Grid would require a public
 vocabulary for edge occupancy, selective gaps, glyph repertoires, and junctions
 even when the direct caller wants only alignment.
 
-Table supplies the concrete use that needs those decisions, and Region lets the
-Table presentation make them after receiving the correct local area. The owner
-of the Table line network is therefore the bound Table plan. It sees all
-incident rules, reserves their rows and columns during its own measurement, and
-derives each corner, tee, cross, or straight glyph when it resolves. Cells do
-not own junctions.
+Table supplies the concrete use that needs those decisions, and Canvas lets the
+Table presentation measure before allocation and draw after receiving the
+final local size. The owner of the Table line network is therefore the bound
+Table item. It sees all incident rules, reserves their rows and columns during
+its own measurement, and derives each corner, tee, cross, or straight glyph
+when it draws. Cells do not own junctions.
 
 The exact absence, blank-occupancy, and junction rules belong to the Table
-Region contract rather than Grid because that is the algorithm drawing them;
-see [Presentation Regions](presentation-region.md).
+presentation rather than Grid because that is the algorithm drawing them; see
+[Canvas](canvas.md) and
+[Component Presentation Boundary](component-presentation.md).
 
 ## Effect on the superseded proposal
 
@@ -129,9 +131,10 @@ The canceled earlier proposal correctly identified several constraints:
 - Table and Block keep their public border policy; and
 - a presentation must not receive the root area during composition.
 
-This design retains those constraints but changes their owner. The Table Region
-plan, not Grid, owns Table rules, occupancy, and junction derivation. The plan
-receives its local area only during ordinary resolution.
+This design retains those constraints but changes their owner. The bound Table
+item and its sizing value, not Grid, own Table rules, occupancy, and junction
+derivation. Composition receives no area; ordinary resolution selects the
+Canvas size before the item draws.
 
 The rest of that proposal is not adopted:
 
@@ -162,5 +165,5 @@ which of its conclusions survived and which did not.
 - **Column or row span now.** It introduces interval constraints and partial
   tracks without a current Grid requirement.
 - **Presentation composition receiving `Available`.** A nested component does
-  not know its share until its siblings are resolved. A bound Region plan
-  instead receives the correct local area during the ordinary pass.
+  not know its share until its siblings are resolved. Canvas intrinsic sizing
+  instead participates in the ordinary local layout pass.

@@ -5,8 +5,8 @@ relate, and what each enabled edge contributes to the box. [`style-model.md`](..
 states the rule; the sizing rules that consume the frame's contribution are
 [`box-sizing.md`](box-sizing.md). A presentation-owned line network is not a
 collection of adjacent block borders; its occupancy and junctions belong to
-the Region plan drawing that network, as
-[`presentation-region.md`](presentation-region.md) defines.
+the bound Canvas item drawing that network, as [`canvas.md`](canvas.md)
+defines.
 
 ## The rule
 

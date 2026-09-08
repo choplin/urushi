@@ -10,11 +10,15 @@ Canvas is a primitive drawing mechanism, not an application scene model. Pan,
 zoom, selection, hit testing, routing policy, and animation remain application
 or presentation state. A `CanvasItem` may capture the resulting immutable
 frame data and turn it into drawing commands after the Canvas size is known.
+The Canvas normally sizes as an independent viewport. A presentation such as
+Table may instead supply one explicit intrinsic sizing policy for the whole
+Canvas; Canvas never infers that policy from its items.
 
 ## The surface owns its size
 
-A Canvas is a finite rectangle before any item draws. Its size never comes
-from item bounds:
+A Canvas is a finite rectangle before any item draws. It carries exactly one
+sizing mode, and its size never comes from item bounds. The default
+**viewport sizing** follows these rules:
 
 - on an axis for which its parent supplies a finite allocation, Canvas consumes
   that allocation;
@@ -22,9 +26,24 @@ from item bounds:
 - an item may draw beyond any edge without enlarging or moving the Canvas.
 
 This makes a Canvas inside a `Block` with `Fill` width and height consume the
-Block's entire inner area. It also makes an independently measured Canvas
-possible when both extents are stated. Missing an extent on an unbounded axis
-is an invalid layout request rather than a request to inspect the items.
+Block's entire inner area. It also makes an independently sized Canvas possible
+when both extents are stated. Missing an extent on an unbounded axis is an
+invalid layout request rather than a request to inspect the items.
+
+A Canvas may instead carry explicit **intrinsic sizing** supplied by the
+presentation that constructs it. The sizing value reports horizontal demand
+and floor, then reports vertical demand and floor after the parent has selected
+the Canvas width. The parent remains the allocator: intrinsic sizing supplies
+claims, not a final rectangle. Once both axes are selected, the Canvas is the
+same finite viewport as one using the default mode, and drawing beyond any
+edge is still clipped.
+
+Intrinsic sizing is one policy for the Canvas as a whole. It is separate from
+the ordered item collection, does not enumerate or measure those items, and
+does not require the Canvas to contain only one item. The constructing
+presentation owns the meaning of the policy. It may deliberately choose a
+viewport smaller than its drawing or combine several items under one aggregate
+rule; Canvas does not impose a fit relationship between the two values.
 
 Canvas coordinates are signed cell coordinates local to the surface. The
 origin is its top-left cell, positive `x` moves right, and positive `y` moves
@@ -35,7 +54,89 @@ The size is independent of the drawing for two reasons. A responsive item must
 know the final surface before deciding what to draw, and drawings such as a
 grid, a camera projection, or a line leaving the viewport have no useful
 content-derived bounding box. Inferring the surface from the items would make
-those items and the surface determine one another.
+those items and the surface determine one another. Explicit intrinsic sizing
+does not reintroduce that cycle: it is a separate bound presentation value
+whose staged measurement runs before any item draws.
+
+## Intrinsic sizing binds presentation measurement
+
+The public Canvas holds an opaque sizing value alongside its independent item
+collection. Its representation has two semantic variants even though callers
+cannot construct the intrinsic one directly:
+
+```rust
+pub struct Canvas {
+    sizing: CanvasSizing,
+    items: Vec<CanvasItem>,
+}
+
+pub struct CanvasSizing(CanvasSizingRepr);
+
+enum CanvasSizingRepr {
+    Viewport(ViewportSizing),
+    Intrinsic(ErasedCanvasMeasure),
+}
+```
+
+`Canvas::new` installs viewport sizing. An ordinary caller may state the
+explicit extents that mode needs. A built-in presentation may replace it with
+the opaque value returned by its bound item's private `sizing()` operation.
+Supplying another sizing value replaces the previous one; a Canvas never
+accumulates policies.
+
+The private measurement capability is:
+
+```rust
+struct CanvasRequirements {
+    demand: usize,
+    floor: usize,
+}
+
+trait CanvasMeasure {
+    fn width_requirements(&self) -> CanvasRequirements;
+    fn height_requirements(&self, width: usize) -> CanvasRequirements;
+}
+```
+
+`CanvasRequirements` is checked at construction: `floor <= demand`, and zero
+demand with zero floor is valid. Width is measured first because wrapping and
+track selection need the width the parent chose; height measurement receives
+that selected width and may therefore report a taller demand for a narrower
+Canvas. Repeated measurement with equal inputs is pure and deterministic.
+
+The arbitrary `CanvasMeasure` implementation boundary and the constructor that
+erases one are private initially. Built-in presentations expose ordinary
+component APIs and construct intrinsic Canvas sizing internally. Opening the
+measurement trait later is additive once an external custom-sizing use case
+justifies committing to its invariants.
+
+An intrinsic Canvas has auto claims. A surrounding `Block`, including one with
+no visible frame, remains the only way to state `Cells`, `Fill`, minimum and
+maximum dimensions, padding, alignment, and overflow. This keeps one box model
+and lets the parent override or bound the Canvas's intrinsic claims before the
+Canvas asks its items to draw.
+
+Table is the representative binding:
+
+```text
+Table + TablePresentation
+          |
+        compose
+          v
+   bound TableItem ----------------------+
+          |                              |
+          +-- sizing() -> intrinsic -----+--> Canvas -> View::Canvas
+          +-- draw(context) -------------+
+```
+
+The item owns or shares one immutable frame containing the selected Table data,
+presentation policy, styles, and frame input. Its `sizing()` value measures
+from that same frame, while its item implementation records cell and rule
+commands after the final Canvas size is known. The two values enter Canvas
+through separate APIs: one Canvas-wide sizing value and one member of an
+arbitrary-length item collection. Canonical `TablePresentation::compose`
+constructs the pair, so ordinary callers neither coordinate them nor interact
+with Canvas directly.
 
 ## Items describe a frame; commands draw it
 
@@ -58,6 +159,14 @@ concrete item type and equal captured values, not when they share an allocation
 or happen to render the same cells. Given equal item data and the same context,
 drawing must be deterministic. This preserves `View`'s value equality and
 makes equality-based redraw avoidance sound.
+
+Canvas sizing is comparable by the same value rule. Two viewport modes are
+equal when their explicit extents are equal. Two intrinsic modes are equal when
+their erased concrete measurement types and values are equal. A viewport mode
+and an intrinsic mode are unequal. Measurement equality never compares an
+allocation, a function address, generated commands, or resolved output, and it
+includes every captured value capable of changing a requirement. Canvas
+equality combines this sizing equality with ordered item equality.
 
 The exact private mechanism used to own, erase, clone, and compare different
 item types is an implementation decision. Rust and MoonBit may use different
@@ -180,8 +289,9 @@ The parent assigns the Block 64 by 22 cells; after its frame, Canvas receives a
 finite 62-by-20 allocation. Its items capture a camera, graph data, node Views,
 and a minimap policy.
 
-1. Measurement and parent area sharing settle the Block and Canvas at 62 by 20.
-   No graph node or edge is inspected to determine that size.
+1. Default viewport measurement and parent area sharing settle the Block and
+   Canvas at 62 by 20. No graph node or edge is inspected to determine that
+   size.
 2. Canvas creates a context whose local bounds are `(0, 0, 62, 20)`.
 3. The graph item reads those bounds, projects visible world coordinates, and
    records edge `Path` commands using a box-junction composition rule.
@@ -208,11 +318,33 @@ rasterize its points directly to `Cells`. The graph-specific camera, routing,
 and sampling policies stay in items or their owning presentation rather than
 becoming Canvas state.
 
+An intrinsically sized Table takes the other measurement path without changing
+the drawing path. Its sizing value reports the unbounded column demand and
+floor, the parent selects a width, and it reports the row demand at that width.
+After the parent selects the height, the Canvas creates the same final context
+and invokes the Table item. Cell placement and the rule network may extend
+beyond the selected rectangle; Canvas applies the ordinary crop rather than
+revising either axis or reflowing the Table.
+
 ## Alternatives rejected
 
 **Derive Canvas bounds from its items.** This creates a cycle for responsive
 items and gives viewport-like drawings no stable surface. Canvas instead owns
-a finite size before drawing.
+a finite size before drawing. Explicit intrinsic sizing is supplied separately
+by the constructing presentation and never discovers item bounds.
+
+**Add a separate Region node for measured presentation output.** Region and
+Canvas would both retain erased presentation behavior, receive a local area,
+and produce renderer-neutral cells, while Region would need another public
+output-construction API for operations Canvas already expresses as commands.
+Optional intrinsic sizing gives Canvas the missing layout participation without
+changing its viewport, item, composition, or clipping contracts.
+
+**Make the sizing provider the only Canvas item.** A Canvas commonly combines
+several independently ordered items. Sizing is one Canvas-wide value and items
+remain a separate arbitrary-length collection. A component item may offer a
+convenience `sizing()` derived from the same bound frame without coupling the
+generic Canvas APIs.
 
 **Provide only positioned child Views.** This handles opaque boxes but forces
 edges, marks, subcell plots, and sparse decorations back through artificial
@@ -244,8 +376,9 @@ only the renderer-neutral drawing of the current frame.
 
 ## Cross-language contract
 
-Urushi and Noctui use the same Canvas and command types, coordinate and sizing
-rules, defaults, ordering, clipping, composition semantics, anchor results, and
-item equality. Language and runtime constraints may change the spelling and
-private type-erasure machinery only. A representation is acceptable when both
-implementations produce the same `ResolvedView` for equivalent input.
+Urushi and Noctui use the same Canvas sizing modes, staged intrinsic
+measurement, command types, coordinate rules, defaults, ordering, clipping,
+composition semantics, anchor results, and value equality. Language and
+runtime constraints may change the spelling and private type-erasure machinery
+only. A representation is acceptable when both implementations produce the
+same `ResolvedView` for equivalent input.

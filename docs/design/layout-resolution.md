@@ -55,14 +55,17 @@ swapped.
 settle, which is what makes an intrinsic size the same computation as a bounded
 one rather than a second rule.
 
-**`Canvas`** settles each axis from a finite parent allocation or, when that
-axis is unbounded, its explicit extent. It does not inspect items to determine
-that size. After both axes are final, it creates a local context, asks items to
-record commands in order, rasterizes and composes their cell contributions,
-clips them at all four edges, and returns the resulting cells and translated
-anchors. A placed View resolves once in its complete local geometry before
-projection; Canvas clipping never revises its size or reflows it. The detailed
-contract and walkthrough are in [`canvas.md`](canvas.md).
+**`Canvas`** carries exactly one sizing mode. Its default viewport mode settles
+each axis from a finite parent allocation or, when that axis is unbounded, its
+explicit extent. An intrinsic mode supplied explicitly by a built-in
+presentation reports width demand and floor; after the parent selects that
+width, it reports height demand and floor. Neither mode inspects Canvas items
+to determine size. After both axes are final, Canvas creates a local context,
+asks items to record commands in order, rasterizes and composes their cell
+contributions, clips them at all four edges, and returns the resulting cells
+and translated anchors. A placed View resolves once in its complete local
+geometry before projection; Canvas clipping never revises its size or reflows
+it. The detailed contract and walkthrough are in [`canvas.md`](canvas.md).
 
 The order settles two questions that would otherwise be ambiguous. A
 `max_height` bounds the box *before* `vertical_align` places content inside

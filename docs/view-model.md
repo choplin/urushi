@@ -2,9 +2,9 @@
 
 Urushi represents composed terminal output as primitive style values and a
 component-agnostic view tree that resolves to the single scene every renderer
-consumes. Its built-in nodes form a closed common vocabulary, while Region and
-Canvas admit presentation-owned, renderer-neutral work through bounded
-contracts.
+consumes. Its built-in nodes form a closed common vocabulary, while Canvas
+admits presentation-owned, renderer-neutral measurement and drawing through a
+bounded contract.
 
 This document gives the shape of that model: the primitive styles and nodes,
 what the layout pass produces, and the principles sizing rests on. Semantic
@@ -45,7 +45,7 @@ rectangle. `TextStyleProperty` converts into `BlockStyleProperty`; there is no
 conversion in the other direction, so no geometry property can be applied to a
 `TextStyle`.
 
-A view is a tree of seven primitive nodes, and a keyed form of one of them:
+A view is a tree of six primitive nodes, and a keyed form of one of them:
 
 ```rust
 pub enum View {
@@ -54,7 +54,6 @@ pub enum View {
     Row(VerticalAlign, Vec<View>),
     Column(Align, Vec<View>),
     Grid(GridStyle, Vec<Vec<View>>),
-    Region(RegionPlan),
     Canvas(Canvas),
     AnchorBlock(Key, BlockStyle, Box<View>),
 }
@@ -65,8 +64,8 @@ pub enum View {
 - `Row` places children side by side.
 - `Column` stacks children.
 - `Grid` lines child Views up in shared columns.
-- `Region` lets an owned layout plan measure and resolve within its local area.
-- `Canvas` draws ordered, freely positioned commands on a finite local surface.
+- `Canvas` owns one sizing mode and draws ordered, freely positioned commands
+  on the finite local surface that mode produces.
 - `AnchorBlock` is a `Block` that also reports where its content landed.
 
 These primitives cover the current common mechanics: carry text, put a box
@@ -74,49 +73,35 @@ around something, place things beside each other, stack them, and line them up
 in columns. They are not claimed to exhaust every renderer-neutral operation a
 full-screen frame needs. Applications and concrete presentations construct
 views through `View::text`, `View::block`, `View::row`, `View::column`,
-`View::grid`, `View::region`, and `View::canvas`; there is one way to express
-each node.
+`View::grid` and `View::canvas`; there is one way to express each node.
 
 Those nodes state layout and drawing intent only. There is no `View::List`,
 `View::Table`, `View::Tree`, or `View::Graph`: a concrete presentation either
 lowers that meaning into built-in nodes or binds its component snapshot,
-styles, and behavior into an opaque Region plan. The plan may retain and
-interpret presentation-specific data, but its type is erased; `View` and the
-resolver expose no component-specific variant or branch.
+styles, and behavior into a Canvas item. The item may retain and interpret
+presentation-specific data, but `View` and the resolver expose no
+component-specific variant or branch.
 
 `GridStyle` is the grid node's own geometry: an optional `Length` per column
 and the default padding its cells take. It holds no box geometry or line
 network — a grid that needs a border, a margin, or a stated size is placed
 inside a `Block`, while a presentation that draws internal rules owns them in
-a Region plan. What Grid computes and why it is independent of Table are
-defined in
+an intrinsically sized Canvas. What Grid computes and why it is independent of
+Table are defined in
 [`design/grid.md`](design/grid.md).
-
-`RegionPlan` is an opaque cloneable and comparable value holding one concrete
-`RegionLayout`. The plan reports horizontal requirements, reports height after
-a width is selected, and resolves to a `ResolvedView` under the local
-`Available` passed by its parent. Its constructor requires the concrete plan to
-provide value equality before erasing its type, so `View` retains structural
-`Clone` and `PartialEq` without closing the plan implementations into an enum or
-a layout DSL. Region has no box properties: border, padding, stated size,
-alignment, and overflow remain the responsibility of a surrounding `Block`.
-The exact contract and its purity and equality rules are defined in
-[`design/presentation-region.md`](design/presentation-region.md).
-
-Region implementations construct their result through checked row-oriented
-output values. Those values derive grapheme widths and preserve the rectangular
-and anchor invariants of `ResolvedView`; they do not expose backend cells or the
-positioned Canvas contract.
 
 Canvas is a finite, local drawing surface whose owned items see its final size
 and record `View`, `Text`, `Path`, or sparse `Cells` commands for that resolve.
-Commands compose in recording order at cell granularity. Canvas size is
-independent of item bounds, and commands may use signed positions beyond any
-edge; clipping occurs during Canvas assembly. The sizing, command,
-composition, anchor, and equality contracts are defined in
+It carries exactly one sizing mode. The default viewport mode consumes finite
+allocation and requires explicit extents on unbounded axes; an intrinsic mode
+may instead be supplied by a built-in presentation to report width
+requirements and height at the selected width. Neither mode derives size from
+item bounds. Commands compose in recording order at cell granularity and may
+use signed positions beyond any edge; clipping occurs during Canvas assembly.
+The sizing, command, composition, anchor, and equality contracts are defined in
 [`design/canvas.md`](design/canvas.md).
 
-`AnchorBlock` adds no eighth thing. It is a box in every respect sizing reasons
+`AnchorBlock` adds no seventh thing. It is a box in every respect sizing reasons
 about — one child, one `BlockStyle`, the same rules — and the key adds only a
 report, for a caller that draws in that rectangle content this crate does not
 produce. `View::anchor_block` builds one; `View::anchor` is the boxless case,
@@ -180,8 +165,8 @@ renderer never sees text below grapheme granularity and receives every width
 from the layout pass instead of re-deriving it.
 
 `ResolvedView` carries no semantic data and no primitive nodes. It is the
-resolved scene: styled graphemes plus placements such as anchors. A Region,
-Canvas, or Graph presentation does not create another renderer input; after
+resolved scene: styled graphemes plus placements such as anchors. A Canvas or
+Graph presentation does not create another renderer input; after
 lowering and resolution it produces the same `ResolvedView` as every other
 tree.
 
@@ -249,20 +234,17 @@ The column claim, the meaning of a `Length` on a column, cell padding, and the
 absence of spans and line drawing are defined in
 [`design/grid.md`](design/grid.md).
 
-**How a specialized presentation participates.** A `Region` asks its bound
-plan for a width demand and floor, then for its height at the width selected by
-the parent. The plan resolves only after sibling sharing has derived its local
-area. A `Block` around the Region supplies any stated size, fill claim, frame,
-padding, alignment, or overflow; Region itself adds none. The phase agreement
-and output invariants are defined in
-[`design/presentation-region.md`](design/presentation-region.md).
-
 **How a drawing surface participates.** A `Canvas` consumes a finite parent
-allocation, or requires an explicit extent on an unbounded axis. Once both axes
-are final, its items record commands using local signed coordinates; those
-commands rasterize, compose in order, clip at the Canvas edges, and return the
-same cells and anchors as every other node. Item contents never determine the
-Canvas size. The full contract is [`design/canvas.md`](design/canvas.md).
+allocation under its default viewport sizing, or requires an explicit extent
+on an unbounded axis. A built-in presentation may explicitly replace that mode
+with intrinsic sizing, which reports a width demand and floor and then height
+requirements at the width selected by the parent. A surrounding `Block`
+supplies stated size, fill, frame, padding, alignment, and overflow. Once both
+Canvas axes are final, its items record commands using local signed
+coordinates; those commands rasterize, compose in order, clip at the Canvas
+edges, and return the same cells and anchors as every other node. Items never
+determine the Canvas size. The full contract is
+[`design/canvas.md`](design/canvas.md).
 
 **What happens to content that does not fit.** The frame always closes at the
 used size; excess is absorbed by the content under a policy the application

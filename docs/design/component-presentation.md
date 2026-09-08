@@ -16,8 +16,9 @@ by multiple borrowed policies without copying or mutating either one.
 The operation returns `View` rather than rendered text. Logical styles and
 layout intent therefore survive until the one resolver and the selected output
 adapter, instead of becoming ANSI that another backend cannot interpret. A
-presentation whose algorithm depends on its eventual local area binds an owned
-plan into a Region rather than precomputing that algorithm during composition.
+presentation whose algorithm depends on its eventual local area may bind its
+owned frame into a Canvas item and supply one intrinsic sizing value for that
+Canvas rather than precomputing the algorithm during composition.
 
 ## Why the composing type is a presentation
 
@@ -78,31 +79,31 @@ already expressed by inherent methods.
 Internal traversal reuse stays private. A public trait becomes justified only
 by an external generic use, not by the number of similarly named methods.
 
-`RegionLayout` does not contradict this decision. A Region plan has already
-bound its component snapshot, presentation, styles, and frame input into one
-owned value, so layout supplies no semantic argument when it invokes the plan.
-Presentations remain unrelated concrete interpreters; region plans share only
-the measurement and resolution operations every parent layout needs.
+Canvas intrinsic sizing does not contradict this decision. A presentation has
+already bound its component snapshot, policy, styles, and frame input into one
+owned item before Canvas asks the corresponding sizing value to measure it.
+Presentations remain unrelated concrete interpreters; the private measurement
+capability shares only the staged width and height questions every parent
+layout needs.
 
 ## Why View has no semantic component variants
 
 `View` never exposes component meaning in its own vocabulary. It may describe
-text, boxes, sequential layout, shared tracks, keyed placements, an erased
-Region plan, and a generic Canvas, but it cannot name Table headers, Tree
-branches, Graph edges, selection, or another component role.
+text, boxes, sequential layout, shared tracks, keyed placements, and a generic
+Canvas, but it cannot name Table headers, Tree branches, Graph edges, selection,
+or another component role.
 
 A semantic node such as `View::Tree` would defer the presentation decision into
 the resolver. That would make every component part of the built-in layout enum,
 couple resolver evolution to component evolution, and require the Noctui
-resolver to know the same growing component set. A Region instead erases a
-bound concrete presentation plan behind one layout contract; the plan may
-interpret its own captured inputs, while the resolver invokes it without
-matching on the originating component.
+resolver to know the same growing component set. A bound presentation item may
+instead interpret its own captured inputs and record generic Canvas commands;
+the resolver invokes it without matching on the originating component.
 
 This is also why Grid is not a common component intermediate representation.
-The canonical Table presentation uses a Region plan and leaves Grid as a
-directly useful shared-track container. A tree or graph independently chooses
-built-in primitives or a Region from its own layout needs.
+The canonical Table presentation uses an intrinsically sized Canvas and leaves
+Grid as a directly useful shared-track container. A tree or graph independently
+chooses built-in primitives or Canvas from its own layout and drawing needs.
 
 ## Graph as the boundary test
 
@@ -142,12 +143,43 @@ area. Pre-wrapping or padding against that number makes the result correct only
 at the root.
 
 Presentations therefore compose structural intent or bind it into an owned
-Region plan. `resolve` alone receives the area and decides final widths,
-wrapping, clipping, and placement. During that operation a Region plan receives
-the local area assigned by its parent, after sibling sharing; it never receives
-the root area during composition. An application that chooses a different
-overall structure at a breakpoint does so in its own view function before
-composition, where it owns the same area that will be passed to `resolve`.
+Canvas item with one Canvas-wide intrinsic sizing value. `resolve` alone
+receives the area: it asks that sizing value for width requirements, selects the
+local width after sibling sharing, asks for height requirements at that width,
+and finalizes the Canvas viewport before any item draws. The presentation never
+receives the root area during composition. An application that chooses a
+different overall structure at a breakpoint does so in its own view function
+before composition, where it owns the same area that will be passed to
+`resolve`.
+
+## Table binds one Canvas frame
+
+The canonical `TablePresentation` owns the reusable presentation policy. Its
+`compose` operation binds the selected Table data, presentation, logical
+styles, visible-row offset, and any immutable frame input into one owned Table
+item. The item exposes a private `sizing()` derived from that same bound frame;
+composition installs the returned value as the Canvas's one sizing policy and
+adds the item to the Canvas's independent ordered item collection.
+
+The sizing value and item may share immutable storage, but allocation identity
+has no semantic meaning. The sizing value reports column-based width
+requirements and height at the selected width. After the final Canvas size is
+known, the item records cell and rule commands. The Canvas contract owns the
+measurement order, command recording, composition, and clipping; the Table
+presentation owns the column algorithm, role styling, rule selection, and the
+meaning of its presets. The exact Canvas flow is in
+[`canvas.md`](canvas.md), while Table/Grid separation and line-network
+ownership are in [`grid.md`](grid.md).
+
+A per-cell style strategy is executable presentation policy, so
+`TablePresentation` stores it as an owned, type-erased, comparable value rather
+than a function address. Equality first requires the same concrete strategy
+type and then delegates to that concrete value's `PartialEq`. A user-defined
+strategy may implement that equality manually, but it must compare every value
+that can change measurement, text, style, or placement. Allocation identity,
+function addresses, generated Canvas commands, and resolved output are not
+valid equality mechanisms. Canonical presets hide this machinery from ordinary
+callers.
 
 ## Rejected designs
 
@@ -168,8 +200,12 @@ composition, where it owns the same area that will be passed to `resolve`.
   the resolver and turns the primitive tree into a closed registry of product
   concepts.
 - **Give presentation composition `Available`.** It supplies the wrong area for
-  nested composition and bakes geometry before sibling sharing. A bound Region
-  plan receiving its local area during `resolve` is the chosen alternative.
+  nested composition and bakes geometry before sibling sharing. A Canvas-wide
+  intrinsic sizing value participates in ordinary local layout instead.
+- **Add a separate Region primitive.** Region would duplicate Canvas's erased
+  presentation execution and renderer-neutral output boundary, then require a
+  second drawing API. Optional intrinsic Canvas sizing supplies the missing
+  measurement without adding another `View` node.
 - **Adopt a single all-in-one Graph widget model.** Combining graph topology,
   layout, interaction, and backend rendering prevents the same semantic graph
   and presentation from participating in Urushi's ordinary `View` pipeline.
@@ -197,8 +233,7 @@ remain. The source-level migration is mechanical:
 | `ComponentStyles` | `ComponentTheme`, including terminal helper parameters that consume theme-derived component values |
 
 Component migrations replace width-dependent wrapping, measured padding, and
-repeated-glyph construction during composition with primitive or Region layout
-intent. Canvas and Graph work preserve the same lowering boundary. Urushi and
-Noctui use the same four layers, names, invariants, and operation; only
-type-erasure, dynamic equality, borrowing, and language-specific method
-spelling may differ.
+repeated-glyph construction during composition with primitive layout intent or
+an intrinsically sized Canvas. Urushi and Noctui use the same four layers,
+names, invariants, and operation; only type-erasure, dynamic equality,
+borrowing, and language-specific method spelling may differ.
