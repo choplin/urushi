@@ -95,7 +95,7 @@ mod tests {
     };
 
     use super::*;
-    use crate::runtime::{FieldRegion, PromptLine};
+    use crate::runtime::{PromptLine, view::FieldRegion};
 
     #[derive(Debug, Clone, PartialEq)]
     struct PartlyVisibleAnchor;
