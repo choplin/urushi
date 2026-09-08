@@ -1,17 +1,14 @@
 //! Renderer-neutral terminal output.
 
-use crate::{Align, BlockStyle, GridStyle, Key, TextStyle, VerticalAlign};
+use crate::{Align, BlockStyle, Canvas, GridStyle, Key, TextStyle, VerticalAlign};
 
 /// A fully composed, renderer-neutral terminal view.
 ///
-/// A view is a tree of the five things terminal output does: carry text, put a
-/// box around something, place things beside each other, stack them, and line
-/// them up in columns. Every node resolves to a rectangle, so a bordered block
-/// composes inside a row the same way a word does.
-///
-/// A sixth node adds nothing to that list: an anchor is a box that also
-/// reports where its content landed, for a caller that draws there something
-/// this crate does not produce.
+/// A view tree combines text, boxes, linear and grid layout, and finite Canvas
+/// drawing surfaces. Every node resolves to a rectangle, so a bordered block
+/// or Canvas composes inside a row the same way a word does. An anchor is a box
+/// that also reports where its content landed, for a caller that draws there
+/// something this crate does not produce.
 ///
 /// Components return a `View`; output adapters resolve it once
 /// ([`resolve`](crate::resolve)) and serialize the resulting
@@ -48,6 +45,8 @@ pub enum View {
     /// Debug builds panic on a ragged grid; release builds resolve a missing
     /// cell as an empty view.
     Grid(GridStyle, Vec<Vec<View>>),
+    /// A finite free-positioned drawing surface.
+    Canvas(Canvas),
     /// A block that also reports where it landed, named by a key.
     ///
     /// It is a [`Block`](Self::Block) in every respect layout cares about —
@@ -157,6 +156,11 @@ impl View {
                 .map(|row| row.into_iter().collect())
                 .collect(),
         )
+    }
+
+    /// Creates a finite drawing surface from ordered, owned items.
+    pub const fn canvas(canvas: Canvas) -> Self {
+        Self::Canvas(canvas)
     }
 
     /// Creates a view that resolves to an empty rectangle.

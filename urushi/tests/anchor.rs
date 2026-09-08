@@ -23,7 +23,7 @@ fn rows(view: &View, available: Available) -> Vec<String> {
 }
 
 /// The one region `view` reports, as `(x, y, width, height)`.
-fn region(view: &View, available: Available) -> (usize, usize, usize, usize) {
+fn region(view: &View, available: Available) -> (i64, i64, usize, usize) {
     let resolved = resolve(view, available);
     assert_eq!(resolved.anchors().len(), 1, "exactly one anchor");
     let region = &resolved.anchors()[0];
@@ -176,7 +176,7 @@ fn a_box_is_reported_before_what_it_encloses() {
     );
 
     let resolved = resolve(&view, Available::NONE);
-    let reported: Vec<(Key, usize)> = resolved
+    let reported: Vec<(Key, i64)> = resolved
         .anchors()
         .iter()
         .map(|region| (region.key(), region.x()))

@@ -24,6 +24,67 @@ use super::height::{fit, heights};
 use super::rendered::RenderedBlock;
 use super::width::widths;
 
+/// An axis for which a finite Canvas extent was required.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Axis {
+    Width,
+    Height,
+}
+
+/// The input whose finite extent is missing.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LayoutErrorKind {
+    CanvasExtent,
+    ViewAllocation,
+}
+
+/// A layout request that cannot produce finite geometry.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct LayoutError {
+    kind: LayoutErrorKind,
+    axis: Axis,
+}
+
+impl LayoutError {
+    pub const fn axis(&self) -> Axis {
+        self.axis
+    }
+    pub const fn kind(&self) -> LayoutErrorKind {
+        self.kind
+    }
+    pub(crate) const fn missing_extent(axis: Axis) -> Self {
+        Self {
+            kind: LayoutErrorKind::CanvasExtent,
+            axis,
+        }
+    }
+    pub(crate) const fn missing_allocation(axis: Axis) -> Self {
+        Self {
+            kind: LayoutErrorKind::ViewAllocation,
+            axis,
+        }
+    }
+}
+
+impl std::fmt::Display for LayoutError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self.kind {
+            LayoutErrorKind::CanvasExtent => write!(
+                f,
+                "Canvas requires an explicit {:?} on an unbounded axis",
+                self.axis
+            ),
+            LayoutErrorKind::ViewAllocation => write!(
+                f,
+                "a Canvas View command with Fill requires a finite {:?} allocation",
+                self.axis
+            ),
+        }
+    }
+}
+
+impl std::error::Error for LayoutError {}
+
 /// One grapheme, the width it occupies, and its logical style.
 ///
 /// A renderer cannot split a grapheme cluster or a wide character, because it
@@ -99,8 +160,8 @@ impl StyledGrapheme {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct AnchoredRect {
     key: Key,
-    x: usize,
-    y: usize,
+    x: i64,
+    y: i64,
     width: usize,
     height: usize,
     within_resolved_view: bool,
@@ -110,8 +171,8 @@ impl AnchoredRect {
     pub(super) const fn new(key: Key, x: usize, y: usize, width: usize, height: usize) -> Self {
         Self {
             key,
-            x,
-            y,
+            x: x as i64,
+            y: y as i64,
             width,
             height,
             // Nothing to compare against until the rectangle this is reported
@@ -126,12 +187,12 @@ impl AnchoredRect {
     }
 
     /// Cells from the resolved view's left edge.
-    pub const fn x(&self) -> usize {
+    pub const fn x(&self) -> i64 {
         self.x
     }
 
     /// Rows from the resolved view's top edge.
-    pub const fn y(&self) -> usize {
+    pub const fn y(&self) -> i64 {
         self.y
     }
 
@@ -168,9 +229,17 @@ impl AnchoredRect {
     /// Settles
     /// [`is_within_resolved_view`](Self::is_within_resolved_view) against the
     /// rectangle this is reported with.
-    pub(super) const fn locate(mut self, resolved: Size) -> Self {
-        self.within_resolved_view =
-            self.x + self.width <= resolved.width() && self.y + self.height <= resolved.height();
+    pub(super) fn locate(mut self, resolved: Size) -> Self {
+        self.within_resolved_view = self.x >= 0
+            && self.y >= 0
+            && self
+                .x
+                .checked_add(self.width as i64)
+                .is_some_and(|right| right <= resolved.width() as i64)
+            && self
+                .y
+                .checked_add(self.height as i64)
+                .is_some_and(|bottom| bottom <= resolved.height() as i64);
         self
     }
 
@@ -179,9 +248,9 @@ impl AnchoredRect {
     /// This is what assembly applies as it nests a rectangle inside a larger
     /// one: every offset a parent introduces — padding, a border, a margin, a
     /// sibling to the left, an alignment gap — moves the anchors within it.
-    pub(super) const fn offset(mut self, x: usize, y: usize) -> Self {
-        self.x += x;
-        self.y += y;
+    pub(super) const fn offset(mut self, x: i64, y: i64) -> Self {
+        self.x = self.x.saturating_add(x);
+        self.y = self.y.saturating_add(y);
         self
     }
 }
@@ -301,9 +370,15 @@ fn serialize_row(row: &[StyledGrapheme]) -> String {
 /// the same two sizing phases, stopping before the rectangle they describe is
 /// built. No rectangle is allocated.
 pub fn measure(view: &View) -> Size {
+    try_measure(view).expect("an intrinsically measured Canvas must state both extents")
+}
+
+/// Tries to measure a view, reporting a Canvas with a missing finite extent.
+pub fn try_measure(view: &View) -> Result<Size, LayoutError> {
     let fitted = fit(widths(view, None));
-    let sized = heights(&fitted, None);
-    Size::new(sized.width, sized.height)
+    let sized = heights(&fitted, None, false);
+    validate_canvas_extents(&sized)?;
+    Ok(Size::new(sized.width, sized.height))
 }
 
 /// Resolves `view` into one rectangle sized under `available`.
@@ -313,9 +388,15 @@ pub fn measure(view: &View) -> Size {
 /// it fires only when a rectangle could not be made to fit — an area that
 /// cannot hold a frame at all — and it cuts grapheme-atomically.
 pub fn resolve(view: &View, available: Available) -> ResolvedView {
+    try_resolve(view, available).expect("Canvas layout must have a finite extent on both axes")
+}
+
+/// Resolves a view or reports an unbounded Canvas axis without an explicit extent.
+pub fn try_resolve(view: &View, available: Available) -> Result<ResolvedView, LayoutError> {
     let fitted = fit(widths(view, available.width()));
-    let sized = heights(&fitted, available.height());
-    let mut rect = assemble(&sized);
+    let sized = heights(&fitted, available.height(), available.height().is_some());
+    validate_canvas_extents(&sized)?;
+    let mut rect = assemble(&sized)?;
     if let Some(width) = available.width() {
         rect.crop_width(width, &TextStyle::new());
     }
@@ -329,7 +410,35 @@ pub fn resolve(view: &View, available: Available) -> ResolvedView {
         .into_iter()
         .map(|anchor| anchor.locate(size))
         .collect();
-    ResolvedView::new(size, rect.rows, anchors)
+    Ok(ResolvedView::new(size, rect.rows, anchors))
+}
+
+fn validate_canvas_extents(sized: &super::height::Sized<'_>) -> Result<(), LayoutError> {
+    use super::height::SizedNode;
+    match &sized.node {
+        SizedNode::Canvas {
+            canvas,
+            width_bounded,
+            height_bounded,
+        } => {
+            if !width_bounded && canvas.explicit_width().is_none() {
+                return Err(LayoutError::missing_extent(Axis::Width));
+            }
+            if !height_bounded && canvas.explicit_height().is_none() {
+                return Err(LayoutError::missing_extent(Axis::Height));
+            }
+            Ok(())
+        }
+        SizedNode::Block { child, .. } => validate_canvas_extents(child),
+        SizedNode::Row(_, children) | SizedNode::Column(_, children) => {
+            children.iter().try_for_each(validate_canvas_extents)
+        }
+        SizedNode::Grid { rows, .. } => rows
+            .iter()
+            .flatten()
+            .try_for_each(|cell| validate_canvas_extents(&cell.child)),
+        SizedNode::Text { .. } => Ok(()),
+    }
 }
 
 /// Asserts that no key names two regions.

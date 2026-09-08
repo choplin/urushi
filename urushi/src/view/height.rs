@@ -18,7 +18,7 @@
 //!   the fitted lines and never fits them again.
 
 use crate::text::{PrintableLines, PrintableText, wrap_text};
-use crate::{Align, BlockStyle, GridStyle, Key, Overflow, Sides, TextStyle, VerticalAlign};
+use crate::{Align, BlockStyle, Canvas, GridStyle, Key, Overflow, Sides, TextStyle, VerticalAlign};
 
 use super::grid;
 use super::sizing::{
@@ -58,6 +58,7 @@ enum FittedNode<'a> {
         columns: Vec<usize>,
         rows: Vec<Vec<FittedCell<'a>>>,
     },
+    Canvas(&'a Canvas, bool),
 }
 
 /// One cell of a grid, with its text already fitted to its column's width.
@@ -133,6 +134,7 @@ pub(super) fn fit(widths: Widths<'_>) -> Fitted<'_> {
                 })
                 .collect(),
         },
+        WidthNode::Canvas(canvas, width_bounded) => FittedNode::Canvas(canvas, width_bounded),
     };
     Fitted {
         width,
@@ -203,6 +205,11 @@ pub(super) enum SizedNode<'f> {
         heights: Vec<usize>,
         rows: Vec<Vec<SizedCell<'f>>>,
     },
+    Canvas {
+        canvas: &'f Canvas,
+        width_bounded: bool,
+        height_bounded: bool,
+    },
 }
 
 /// One cell of a grid, with both of its sizes settled.
@@ -218,7 +225,7 @@ pub(super) struct SizedCell<'f> {
 }
 
 /// Counts the rows every node occupies under `area`.
-pub(super) fn heights<'f>(fitted: &'f Fitted<'_>, area: Option<usize>) -> Sized<'f> {
+pub(super) fn heights<'f>(fitted: &'f Fitted<'_>, area: Option<usize>, bounded: bool) -> Sized<'f> {
     match &fitted.node {
         FittedNode::Text {
             lines,
@@ -275,7 +282,13 @@ pub(super) fn heights<'f>(fitted: &'f Fitted<'_>, area: Option<usize>) -> Sized<
             // 2. The content, under what the box leaves it, and then the used
             //    height by the same clamp the width took — now that the rows
             //    are known, because the content is what decided how many.
-            let child = heights(child, axis.content_bound(box_height));
+            let child = heights(
+                child,
+                axis.content_bound(box_height),
+                bounded
+                    || matches!(axis.length, Some(crate::Length::Cells(_)))
+                    || axis.max.is_some(),
+            );
             let used = axis.used(box_height, child.height, 0);
 
             Sized {
@@ -295,8 +308,10 @@ pub(super) fn heights<'f>(fitted: &'f Fitted<'_>, area: Option<usize>) -> Sized<
         FittedNode::Row(align, children) => {
             // The cross axis has nothing to divide: every child receives the
             // row's own height, and a `Fill` there stretches to it.
-            let children: Vec<Sized<'f>> =
-                children.iter().map(|child| heights(child, area)).collect();
+            let children: Vec<Sized<'f>> = children
+                .iter()
+                .map(|child| heights(child, area, bounded))
+                .collect();
             Sized {
                 width: fitted.width,
                 height: children.iter().map(|child| child.height).max().unwrap_or(0),
@@ -307,9 +322,9 @@ pub(super) fn heights<'f>(fitted: &'f Fitted<'_>, area: Option<usize>) -> Sized<
             let children = match area {
                 None => children
                     .iter()
-                    .map(|child| heights(child, None))
+                    .map(|child| heights(child, None, false))
                     .collect::<Vec<_>>(),
-                Some(area) => divide(children, area),
+                Some(area) => divide(children, area, bounded),
             };
             Sized {
                 width: fitted.width,
@@ -323,8 +338,11 @@ pub(super) fn heights<'f>(fitted: &'f Fitted<'_>, area: Option<usize>) -> Sized<
             rows,
         } => {
             let lines = grid::line_extent(style, columns.len(), rows.len());
-            let (heights, rows) =
-                rows_of(rows, area.map(|area| area.saturating_sub(lines.height())));
+            let (heights, rows) = rows_of(
+                rows,
+                area.map(|area| area.saturating_sub(lines.height())),
+                bounded,
+            );
             Sized {
                 width: fitted.width,
                 height: heights.iter().sum::<usize>() + lines.height(),
@@ -336,6 +354,15 @@ pub(super) fn heights<'f>(fitted: &'f Fitted<'_>, area: Option<usize>) -> Sized<
                 },
             }
         }
+        FittedNode::Canvas(canvas, width_bounded) => Sized {
+            width: fitted.width,
+            height: area.or(canvas.explicit_height()).unwrap_or(0),
+            node: SizedNode::Canvas {
+                canvas,
+                width_bounded: *width_bounded,
+                height_bounded: bounded,
+            },
+        },
     }
 }
 
@@ -350,10 +377,15 @@ pub(super) fn heights<'f>(fitted: &'f Fitted<'_>, area: Option<usize>) -> Sized<
 fn rows_of<'f>(
     rows: &'f [Vec<FittedCell<'_>>],
     area: Option<usize>,
+    bounded: bool,
 ) -> (Vec<usize>, Vec<Vec<SizedCell<'f>>>) {
     let asked: Vec<Vec<Sized<'f>>> = rows
         .iter()
-        .map(|row| row.iter().map(|cell| heights(&cell.child, None)).collect())
+        .map(|row| {
+            row.iter()
+                .map(|cell| heights(&cell.child, None, false))
+                .collect()
+        })
         .collect();
     let claims: Vec<Claim> = rows
         .iter()
@@ -397,10 +429,10 @@ fn rows_of<'f>(
                 padding.bottom = 0;
             }
             let inner = share.saturating_sub(vertical(padding));
-            let child = if asked.height <= inner {
+            let child = if !bounded && asked.height <= inner {
                 asked
             } else {
-                heights(&cell.child, Some(inner))
+                heights(&cell.child, Some(inner), bounded)
             };
             settled_heights[index] = settled_heights[index].max(child.height + vertical(padding));
             cells.push(SizedCell {
@@ -428,12 +460,12 @@ fn rows_of<'f>(
 /// assignment, which closes its frame at the smaller size instead of cutting
 /// it. That second visit is arithmetic over lines that were fitted before this
 /// function ran; nothing is fitted twice.
-fn divide<'f>(children: &'f [Fitted<'_>], area: usize) -> Vec<Sized<'f>> {
+fn divide<'f>(children: &'f [Fitted<'_>], area: usize, bounded: bool) -> Vec<Sized<'f>> {
     let asked: Vec<Option<Sized<'f>>> = children
         .iter()
         .map(|child| match child.height_kind {
             Kind::Fill(_) => None,
-            _ => Some(heights(child, None)),
+            _ => Some(heights(child, None, false)),
         })
         .collect();
     let claims: Vec<Claim> = children
@@ -451,8 +483,8 @@ fn divide<'f>(children: &'f [Fitted<'_>], area: usize) -> Vec<Sized<'f>> {
         .zip(asked)
         .zip(distribute(area, &claims))
         .map(|((child, asked), height)| match asked {
-            Some(sized) if sized.height <= height => sized,
-            _ => heights(child, Some(height)),
+            Some(sized) if !bounded && sized.height <= height => sized,
+            _ => heights(child, Some(height), bounded),
         })
         .collect()
 }

@@ -24,7 +24,8 @@
 
 use crate::text::Grapheme;
 use crate::{
-    Align, BlockStyle, GridStyle, Key, Length, Overflow, Sides, TextStyle, VerticalAlign, View,
+    Align, BlockStyle, Canvas, GridStyle, Key, Length, Overflow, Sides, TextStyle, VerticalAlign,
+    View,
 };
 
 use super::grid;
@@ -82,6 +83,15 @@ fn metrics(view: &View) -> Metrics {
                 children: Vec::new(),
             }
         }
+        View::Canvas(canvas) => Metrics {
+            natural: canvas.explicit_width().unwrap_or(0),
+            floor: 0,
+            height_floor: 0,
+            fills: true,
+            width_kind: Kind::Fill(1),
+            height_kind: Kind::Fill(1),
+            children: Vec::new(),
+        },
         // An anchor measures as the block it is: the key says where to report,
         // never how large to be.
         View::Block(style, child) | View::AnchorBlock(_, style, child) => {
@@ -251,6 +261,7 @@ pub(super) enum WidthNode<'a> {
     Row(VerticalAlign, Vec<Widths<'a>>),
     Column(Align, Vec<Widths<'a>>),
     Grid(GridBox<'a>),
+    Canvas(&'a Canvas, bool),
 }
 
 /// A grid whose column widths are settled.
@@ -323,7 +334,7 @@ struct TextFit<'a> {
 
 /// Settles every node's width under `area`.
 pub(super) fn widths(view: &View, area: Option<usize>) -> Widths<'_> {
-    place(view, &metrics(view), area, None)
+    place(view, &metrics(view), area, area.is_some(), None)
 }
 
 /// Pass B: hands `area` down and reads pass A's numbers to settle each width.
@@ -331,6 +342,7 @@ fn place<'a>(
     view: &'a View,
     metrics: &Metrics,
     area: Option<usize>,
+    bounded: bool,
     fit: Option<TextFit<'a>>,
 ) -> Widths<'a> {
     match view {
@@ -357,6 +369,12 @@ fn place<'a>(
                 }),
             }
         }
+        View::Canvas(canvas) => Widths {
+            width: area.or(canvas.explicit_width()).unwrap_or(0),
+            height_kind: Kind::Fill(1),
+            height_floor: 0,
+            node: WidthNode::Canvas(canvas, bounded),
+        },
         View::Block(style, child) | View::AnchorBlock(_, style, child) => {
             let inner = &metrics.children[0];
             let border = border_extent(style);
@@ -406,6 +424,7 @@ fn place<'a>(
                 child,
                 inner,
                 Some(content_width),
+                bounded || matches!(axis.length, Some(Length::Cells(_))) || axis.max.is_some(),
                 Some(TextFit {
                     align: style.horizontal_alignment(),
                     fill: style.text(),
@@ -461,6 +480,7 @@ fn place<'a>(
                         child,
                         inner,
                         shares.as_ref().map(|share| share[index]),
+                        bounded,
                         None,
                     )
                 })
@@ -480,7 +500,7 @@ fn place<'a>(
             let children: Vec<Widths<'a>> = children
                 .iter()
                 .zip(&metrics.children)
-                .map(|(child, inner)| place(child, inner, area, None))
+                .map(|(child, inner)| place(child, inner, area, bounded, None))
                 .collect();
             Widths {
                 width: children.iter().map(|child| child.width).max().unwrap_or(0),
@@ -522,6 +542,7 @@ fn place<'a>(
                         view,
                         inner,
                         Some(share.saturating_sub(horizontal(padding))),
+                        bounded || matches!(claims[column].kind, Kind::Cells),
                         None,
                     );
                     // A cell wider than its share is a grapheme that could not

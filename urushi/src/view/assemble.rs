@@ -10,10 +10,11 @@
 use crate::text::PrintableText;
 use crate::{Align, Border, GridStyle, Sides, TextStyle, VerticalAlign};
 
+use super::canvas::canvas_rect;
 use super::geometry::Size;
 use super::grid;
 use super::height::{Sized, SizedCell, SizedNode};
-use super::resolve::{AnchoredRect, StyledGrapheme};
+use super::resolve::{AnchoredRect, LayoutError, StyledGrapheme};
 
 /// A rectangle under construction: every row is exactly `width` cells wide.
 ///
@@ -62,7 +63,7 @@ impl Rect {
 fn shift(anchors: Vec<AnchoredRect>, x: usize, y: usize) -> Vec<AnchoredRect> {
     anchors
         .into_iter()
-        .map(|anchor| anchor.offset(x, y))
+        .map(|anchor| anchor.offset(x as i64, y as i64))
         .collect()
 }
 
@@ -77,32 +78,36 @@ const fn align_offset(gap: usize, align: Align) -> usize {
 }
 
 /// Builds the rectangle `sized` describes.
-pub(super) fn assemble(sized: &Sized<'_>) -> Rect {
+pub(super) fn assemble(sized: &Sized<'_>) -> Result<Rect, LayoutError> {
     let rect = match &sized.node {
         SizedNode::Text {
             lines,
             style,
             align,
             fill,
-        } => Rect {
+        } => Ok(Rect {
             width: sized.width,
             rows: lines
                 .iter()
                 .map(|line| align_row(graphemes(line, style), sized.width, *align, fill))
                 .collect(),
             anchors: Vec::new(),
-        },
+        }),
         SizedNode::Block { .. } => block(sized),
         SizedNode::Row(align, children) => row(*align, children, sized.width),
         SizedNode::Column(align, children) => column(*align, children, sized.width),
         SizedNode::Grid { .. } => grid_rect(sized),
+        SizedNode::Canvas { canvas, .. } => {
+            canvas_rect(canvas, Size::new(sized.width, sized.height))
+        }
     };
+    let rect = rect?;
     debug_assert_eq!(
         rect.size(),
         Size::new(sized.width, sized.height),
         "assembly builds exactly the rectangle the sizing phases decided"
     );
-    rect
+    Ok(rect)
 }
 
 /// The style filling padding a parent introduces around a node.
@@ -114,7 +119,7 @@ fn fill_style(sized: &Sized<'_>) -> TextStyle {
 }
 
 /// Builds a block: place the content, then close the frame around it.
-fn block(sized: &Sized<'_>) -> Rect {
+fn block(sized: &Sized<'_>) -> Result<Rect, LayoutError> {
     let SizedNode::Block {
         style,
         anchor,
@@ -136,7 +141,7 @@ fn block(sized: &Sized<'_>) -> Rect {
         usize::from(padding.bottom),
     );
 
-    let content = assemble(child);
+    let content = assemble(child)?;
     debug_assert!(
         content.width <= content_width,
         "a box is never widened by what it contains: {} > {content_width}",
@@ -262,7 +267,7 @@ fn block(sized: &Sized<'_>) -> Rect {
     if *margin != Sides::default() {
         rect = spaced(rect, *margin);
     }
-    rect
+    Ok(rect)
 }
 
 /// Surrounds a rectangle with plain, unstyled margin.
@@ -291,11 +296,11 @@ fn spaced(rect: Rect, margin: Sides) -> Rect {
 }
 
 /// Places children side by side, padding the shorter ones by `align`.
-fn row(align: VerticalAlign, children: &[Sized<'_>], width: usize) -> Rect {
+fn row(align: VerticalAlign, children: &[Sized<'_>], width: usize) -> Result<Rect, LayoutError> {
     let rects: Vec<(Rect, TextStyle)> = children
         .iter()
-        .map(|child| (assemble(child), fill_style(child)))
-        .collect();
+        .map(|child| Ok((assemble(child)?, fill_style(child))))
+        .collect::<Result<_, LayoutError>>()?;
     let height = rects
         .iter()
         .map(|(rect, _)| rect.rows.len())
@@ -330,20 +335,20 @@ fn row(align: VerticalAlign, children: &[Sized<'_>], width: usize) -> Rect {
         left += rect.width;
     }
 
-    Rect {
+    Ok(Rect {
         width,
         rows,
         anchors,
-    }
+    })
 }
 
 /// Stacks children, padding the narrower ones to `width` by `align`.
-fn column(align: Align, children: &[Sized<'_>], width: usize) -> Rect {
+fn column(align: Align, children: &[Sized<'_>], width: usize) -> Result<Rect, LayoutError> {
     let mut rows = Vec::new();
     let mut anchors = Vec::new();
     for child in children {
         let fill = fill_style(child);
-        let rect = assemble(child);
+        let rect = assemble(child)?;
         // Every row of a child is padded to the column's width by the same
         // alignment, so its anchors shift by that same offset, and by the
         // rows already stacked above it.
@@ -356,11 +361,11 @@ fn column(align: Align, children: &[Sized<'_>], width: usize) -> Rect {
             rows.push(align_row(row, width, align, &fill));
         }
     }
-    Rect {
+    Ok(Rect {
         width,
         rows,
         anchors,
-    }
+    })
 }
 
 /// One horizontal stretch of a grid row: either a line the grid draws, or the
@@ -377,7 +382,7 @@ enum Segment {
 /// Every width and every height already exists, which is what lets the lines
 /// be drawn at all: a line and the cells beside it cannot disagree, because
 /// neither was decided here.
-fn grid_rect(sized: &Sized<'_>) -> Rect {
+fn grid_rect(sized: &Sized<'_>) -> Result<Rect, LayoutError> {
     let SizedNode::Grid {
         style,
         columns,
@@ -388,19 +393,19 @@ fn grid_rect(sized: &Sized<'_>) -> Rect {
         unreachable!("a grid")
     };
     let Some(border) = style.border_kind() else {
-        let (body, anchors) = bands(rows, columns, heights, None, &TextStyle::new());
-        return Rect {
+        let (body, anchors) = bands(rows, columns, heights, None, &TextStyle::new())?;
+        return Ok(Rect {
             width: sized.width,
             rows: body,
             anchors,
-        };
+        });
     };
 
     let line = style.border_style();
     let segments = segments(&border, style, columns);
     let banded = !rows.is_empty();
     let top = usize::from(style.is_border_top_enabled());
-    let (body, anchors) = bands(rows, columns, heights, Some((&border, style)), &line);
+    let (body, anchors) = bands(rows, columns, heights, Some((&border, style)), &line)?;
 
     let mut rect = Rect {
         width: sized.width,
@@ -441,7 +446,7 @@ fn grid_rect(sized: &Sized<'_>) -> Rect {
             &line,
         ));
     }
-    rect
+    Ok(rect)
 }
 
 /// The horizontal stretches one grid row is made of, left to right.
@@ -506,7 +511,7 @@ fn bands(
     heights: &[usize],
     lines: Option<(&Border, &GridStyle)>,
     style: &TextStyle,
-) -> (Vec<Vec<StyledGrapheme>>, Vec<AnchoredRect>) {
+) -> Result<(Vec<Vec<StyledGrapheme>>, Vec<AnchoredRect>), LayoutError> {
     let drawn = |enabled: fn(&GridStyle) -> bool| lines.is_some_and(|(_, style)| enabled(style));
     let left = usize::from(drawn(GridStyle::is_border_left_enabled));
     let rule = usize::from(drawn(GridStyle::is_border_column_enabled));
@@ -523,7 +528,7 @@ fn bands(
             .iter()
             .zip(columns)
             .map(|(cell, width)| cell_rect(cell, *width, *height))
-            .collect();
+            .collect::<Result<_, LayoutError>>()?;
 
         let mut x = left;
         for (column, rect) in rects.iter().enumerate() {
@@ -559,11 +564,11 @@ fn bands(
         }
         top += *height;
     }
-    (out, anchors)
+    Ok((out, anchors))
 }
 
 /// One cell, padded and placed inside the column and row it was assigned.
-fn cell_rect(cell: &SizedCell<'_>, width: usize, height: usize) -> Rect {
+fn cell_rect(cell: &SizedCell<'_>, width: usize, height: usize) -> Result<Rect, LayoutError> {
     let (pl, pr, pt, pb) = (
         usize::from(cell.padding.left),
         usize::from(cell.padding.right),
@@ -574,7 +579,7 @@ fn cell_rect(cell: &SizedCell<'_>, width: usize, height: usize) -> Rect {
     let content_height = height.saturating_sub(pt + pb);
     let fill = fill_style(&cell.child);
 
-    let content = assemble(&cell.child);
+    let content = assemble(&cell.child)?;
     let kept = content.rows.len().min(content_height);
     let gap = content_height - kept;
     let (above, below) = match cell.vertical_align {
@@ -615,7 +620,7 @@ fn cell_rect(cell: &SizedCell<'_>, width: usize, height: usize) -> Rect {
     for _ in 0..pb + below {
         rect.rows.push(blank_row.clone());
     }
-    rect
+    Ok(rect)
 }
 
 /// Truncates one row to `max_width` cells.
