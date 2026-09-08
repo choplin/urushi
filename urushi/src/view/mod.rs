@@ -14,11 +14,14 @@ mod resolve;
 mod sizing;
 mod width;
 
+pub(crate) use canvas::sizing::{CanvasMeasure, CanvasRequirements};
 pub use canvas::{
     Canvas, CanvasCell, CanvasContext, CanvasItem, CanvasSizing, CellContribution, Composition,
     Path, Position, PositionedCell,
 };
 pub use geometry::{Available, Size};
+pub(crate) use grid::junction;
+pub(crate) use height::fit_text_lines;
 pub use join::{join_horizontal, join_vertical};
 pub use model::View;
 pub use rendered::RenderedBlock;
@@ -26,3 +29,4 @@ pub use resolve::{
     AnchoredRect, Axis, LayoutError, LayoutErrorKind, ResolvedView, StyledGrapheme, measure,
     resolve, try_measure, try_resolve,
 };
+pub(crate) use sizing::{Claim, Kind, distribute};

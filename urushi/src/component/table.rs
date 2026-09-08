@@ -1,7 +1,15 @@
 //! Renderer-neutral tables with an independent public model.
 
+use std::{any::Any, fmt, sync::Arc};
+
+use crate::text::wrapped_line_count;
+use crate::view::{
+    CanvasMeasure, CanvasRequirements, Claim, Kind, distribute, fit_text_lines, junction,
+};
 use crate::{
-    BlockStyle, BlockStylePropertyKey, Border, GridStyle, Length, TableRole, TextStyle, View,
+    Align, BlockStyle, BlockStylePropertyKey, Border, Canvas, CanvasContext, CanvasItem,
+    CanvasSizing, CellContribution, Composition, Grapheme, Length, Overflow, Position,
+    PositionedCell, PrintableLines, PrintableText, TableRole, TextStyle, VerticalAlign, View,
 };
 
 /// Which row of a table a cell belongs to.
@@ -16,13 +24,13 @@ enum TableRow {
     Body(usize),
 }
 
-/// Identifies one cell while a [`TableStyleFunc`] resolves its style.
+/// Identifies one cell while a [`TableCellStyler`] resolves its style.
 ///
 /// Lip Gloss passes a bare `(row, column)` pair and encodes the header row as
 /// the sentinel index `-1`. urushi passes this opaque value instead, matching
 /// the [`ListPosition`](crate::ListPosition) and
 /// [`SiblingPosition`](crate::SiblingPosition) precedent: further context can
-/// be exposed as new accessors without changing the hook signature.
+/// be exposed as new accessors without changing the styler signature.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct TableCell<'a> {
     text: &'a str,
@@ -61,40 +69,112 @@ impl<'a> TableCell<'a> {
 
 /// Chooses the style of one table cell.
 ///
-/// `None` keeps the [`TableStyle`] role default for that cell, so a hook only
-/// has to name the cells it overrides. `Some(style)` **replaces** the role
-/// default outright rather than layering over it, so a hook that means to keep
-/// the theme's colors must set them itself:
+/// `None` keeps the [`TablePresentation`] role default for that cell, so a
+/// styler only has to name the cells it overrides. `Some(style)` **replaces**
+/// the role default outright rather than layering over it, so a styler that
+/// means to keep the theme's colors must set them itself:
 ///
 /// ```
-/// use urushi::{Align, BlockStyle, Color, TextStyle, TableCell, TableStyle};
+/// use urushi::{
+///     Align, BlockStyle, Color, TableCell, TableCellStyler, TablePresentation,
+///     TextStyle,
+/// };
 ///
-/// fn numbers_right(cell: TableCell<'_>) -> Option<BlockStyle> {
-///     if cell.is_header() || cell.column() == 0 {
-///         return None;
+/// #[derive(Debug, Clone, PartialEq)]
+/// struct NumbersRight;
+///
+/// impl TableCellStyler for NumbersRight {
+///     fn style(&self, cell: TableCell<'_>) -> Option<BlockStyle> {
+///         if cell.is_header() || cell.column() == 0 {
+///             return None;
+///         }
+///         // Restates the foreground, because Some replaces the role default.
+///         Some(BlockStyle::new().foreground(Color::CYAN).align(Align::Right))
 ///     }
-///     // Restates the foreground, because Some replaces the role default.
-///     Some(BlockStyle::new().foreground(Color::CYAN).align(Align::Right))
 /// }
 ///
 /// let cells = BlockStyle::new().foreground(Color::CYAN);
-/// let table_style = TableStyle::new(BlockStyle::new(), cells, TextStyle::new())
-///     .style_func(numbers_right);
+/// let presentation = TablePresentation::new(BlockStyle::new(), cells, TextStyle::new())
+///     .cell_styler(NumbersRight);
 /// ```
 ///
-/// A cell is a block, so the hook returns a [`BlockStyle`]. Its colors, text
+/// A cell is a block, so the styler returns a [`BlockStyle`]. Its colors, text
 /// modifiers, alignment, and padding are used; a cell that states its own
 /// padding replaces the table's for that cell, and its column is as wide as it
 /// needs. The rest of the geometry — border, margin, and stated sizes — is
-/// dropped, because the grid the table composes owns layout.
+/// dropped, because the table's bound Canvas frame owns layout.
 ///
-/// The hook is a function pointer rather than a boxed closure, which keeps
-/// [`TableStyle`] `Clone` and comparable.
-pub type TableStyleFunc = fn(cell: TableCell<'_>) -> Option<BlockStyle>;
+/// A styler is retained as an owned value. Its concrete type and complete
+/// value participate in presentation equality, so implementations must include
+/// every field that can affect the returned style in their `PartialEq`.
+pub trait TableCellStyler: fmt::Debug + Send + Sync + 'static {
+    /// Returns this cell's complete replacement style, or its role default.
+    fn style(&self, cell: TableCell<'_>) -> Option<BlockStyle>;
+}
 
-/// Keeps every cell on its role default.
-pub fn default_table_style_func(_: TableCell<'_>) -> Option<BlockStyle> {
-    None
+trait ErasedTableCellStyler: fmt::Debug + Send + Sync {
+    fn style(&self, cell: TableCell<'_>) -> Option<BlockStyle>;
+    fn clone_box(&self) -> Box<dyn ErasedTableCellStyler>;
+    fn equals(&self, other: &dyn ErasedTableCellStyler) -> bool;
+    fn as_any(&self) -> &dyn Any;
+}
+
+impl<T> ErasedTableCellStyler for T
+where
+    T: TableCellStyler + Clone + PartialEq,
+{
+    fn style(&self, cell: TableCell<'_>) -> Option<BlockStyle> {
+        TableCellStyler::style(self, cell)
+    }
+
+    fn clone_box(&self) -> Box<dyn ErasedTableCellStyler> {
+        Box::new(self.clone())
+    }
+
+    fn equals(&self, other: &dyn ErasedTableCellStyler) -> bool {
+        other.as_any().downcast_ref::<T>() == Some(self)
+    }
+
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+}
+
+#[derive(Debug)]
+struct CellStyler(Box<dyn ErasedTableCellStyler>);
+
+impl CellStyler {
+    fn new<T>(styler: T) -> Self
+    where
+        T: TableCellStyler + Clone + PartialEq,
+    {
+        Self(Box::new(styler))
+    }
+
+    fn style(&self, cell: TableCell<'_>) -> Option<BlockStyle> {
+        self.0.style(cell)
+    }
+}
+
+impl Clone for CellStyler {
+    fn clone(&self) -> Self {
+        Self(self.0.clone_box())
+    }
+}
+
+impl PartialEq for CellStyler {
+    fn eq(&self, other: &Self) -> bool {
+        self.0.equals(&*other.0)
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct DefaultCellStyler;
+
+impl TableCellStyler for DefaultCellStyler {
+    fn style(&self, _: TableCell<'_>) -> Option<BlockStyle> {
+        None
+    }
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -107,21 +187,22 @@ struct RowOffset {
 ///
 /// `Table` owns semantic content, structural visibility, and offsets only. Every
 /// presentation concern — borders, padding, width, and cell styles — belongs to
-/// [`TableStyle`].
+/// [`TablePresentation`].
 ///
 /// Rows may be ragged: a row shorter than the widest row is padded with empty
 /// cells when it is composed.
 ///
 /// ```
-/// use urushi::{BlockStyle, TextStyle, Table, TableStyle, measure};
+/// use urushi::{BlockStyle, Table, TablePresentation, TextStyle, measure};
 ///
 /// let table = Table::new()
 ///     .headers(["Name", "Location"])
 ///     .row(["Kini", "New York"])
 ///     .row(["Iris", "Paris"]);
 ///
-/// let table_style = TableStyle::new(BlockStyle::new(), BlockStyle::new(), TextStyle::new());
-/// assert_eq!(measure(&table_style.view(&table)).height(), 6);
+/// let presentation =
+///     TablePresentation::new(BlockStyle::new(), BlockStyle::new(), TextStyle::new());
+/// assert_eq!(measure(&presentation.compose(&table)).height(), 6);
 /// ```
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Table {
@@ -228,10 +309,10 @@ impl Table {
 /// Presentation policy used to compose a [`Table`] into a [`View`].
 ///
 /// The policy owns the border, the edge toggles, cell padding, the total width
-/// constraint, and the per-cell style hook. It borrows the data and performs no
-/// terminal output.
+/// constraint, and the per-cell styling strategy. It borrows the data and
+/// performs no terminal output.
 #[derive(Debug, Clone)]
-pub struct TableStyle {
+pub struct TablePresentation {
     header: BlockStyle,
     cell: BlockStyle,
     border_style: TextStyle,
@@ -245,10 +326,10 @@ pub struct TableStyle {
     border_row: bool,
     padding: u16,
     width: Option<u16>,
-    style_func: TableStyleFunc,
+    cell_styler: CellStyler,
 }
 
-impl PartialEq for TableStyle {
+impl PartialEq for TablePresentation {
     fn eq(&self, other: &Self) -> bool {
         self.header == other.header
             && self.cell == other.cell
@@ -263,12 +344,12 @@ impl PartialEq for TableStyle {
             && self.border_row == other.border_row
             && self.padding == other.padding
             && self.width == other.width
-            && std::ptr::fn_addr_eq(self.style_func, other.style_func)
+            && self.cell_styler == other.cell_styler
     }
 }
 
-impl TableStyle {
-    /// Creates a table style with a single-line border and one cell of padding.
+impl TablePresentation {
+    /// Creates a table presentation with a single-line border and one cell of padding.
     pub fn new(header: BlockStyle, cell: BlockStyle, border: TextStyle) -> Self {
         Self {
             header,
@@ -284,7 +365,7 @@ impl TableStyle {
             border_row: false,
             padding: 1,
             width: None,
-            style_func: default_table_style_func,
+            cell_styler: CellStyler::new(DefaultCellStyler),
         }
     }
 
@@ -399,16 +480,15 @@ impl TableStyle {
     /// States the total width the table takes, in terminal cells.
     ///
     /// A total width is a statement about the box the table sits in, so
-    /// [`view`](Self::view) puts the grid in one: a block of exactly this
-    /// width. What the grid then does with it is a statement about columns,
-    /// and the vocabulary for "take a share of what is there" is
-    /// [`Length::Fill`]. Every column takes an equal share, which is why a
+    /// [`compose`](Self::compose) puts its Canvas in a borderless block of
+    /// exactly this width. The bound table frame then gives every column an
+    /// equal share, which is why a
     /// width much wider than the content can leave a short column wider than a
     /// long one, and a width narrower than the content narrows every column
     /// rather than only the widest.
     ///
-    /// Nothing is measured while composing. The columns and the lines between
-    /// them are decided together when the view resolves, so they cannot
+    /// Nothing is measured while composing. The bound frame decides columns
+    /// and the lines between them together when the view resolves, so they cannot
     /// disagree, and a column floors at the narrowest grapheme it must show:
     /// a table given less than its floor is as wide as that floor, wrapping
     /// its content rather than dropping it.
@@ -425,26 +505,23 @@ impl TableStyle {
         self
     }
 
-    /// Replaces the per-cell style hook.
+    /// Replaces the owned per-cell styling strategy.
     #[must_use]
-    pub const fn style_func(mut self, style_func: TableStyleFunc) -> Self {
-        self.style_func = style_func;
+    pub fn cell_styler<T>(mut self, styler: T) -> Self
+    where
+        T: TableCellStyler + Clone + PartialEq,
+    {
+        self.cell_styler = CellStyler::new(styler);
         self
     }
 
-    /// Composes table data into a renderer-neutral view.
+    /// Composes table data into an intrinsically sized, renderer-neutral Canvas.
     ///
-    /// The result is one [`View::Grid`]: the table states which cells share a
-    /// column and which lines are drawn, and
-    /// [`resolve`](crate::resolve) decides every width, every wrap, and the
-    /// glyph at every intersection. Nothing here is measured, so a table
-    /// re-fitted to a narrower area shrinks its columns and its lines
-    /// together.
-    ///
-    /// A cell style contributes its colors, text modifiers, alignment, and
-    /// padding. The rest of its geometry — border, margin, and stated sizes —
-    /// is dropped, because the grid owns layout.
-    pub fn view(&self, table: &Table) -> View {
+    /// Composition binds an owned snapshot without receiving an available
+    /// area. During resolution, the bound item first supplies width and
+    /// width-dependent height requirements, then records cell and rule
+    /// commands after the final Canvas size is known.
+    pub fn compose(&self, table: &Table) -> View {
         if table.is_hidden() {
             return View::empty();
         }
@@ -457,93 +534,516 @@ impl TableStyle {
             return View::empty();
         }
 
-        let has_headers = !table.headers.is_empty();
-        let mut cells = Vec::with_capacity(rows.len() + usize::from(has_headers));
-        if has_headers {
-            cells.push(self.cell_row(&table.headers, columns, TableRow::Header));
-        }
-        for (index, row) in rows.iter().enumerate() {
-            cells.push(self.cell_row(row, columns, TableRow::Body(index)));
-        }
+        let item = TableItem(Arc::new(TableFrame::new(table, self, rows, columns)));
+        let canvas = Canvas::new().sizing(item.sizing()).item(item);
+        let frame = self.width.map_or_else(BlockStyle::new, |width| {
+            BlockStyle::new().width(Length::Cells(width))
+        });
+        View::block(frame, View::canvas(canvas))
+    }
 
-        let grid = View::grid(self.grid_style(columns, has_headers), cells);
-        match self.width {
-            // A total width is a statement about the box the table is in, not
-            // about any one column; see `width`.
-            Some(width) => View::block(BlockStyle::new().width(Length::Cells(width)), grid),
-            None => grid,
+    /// Resolves one cell's style from the strategy, falling back to its role.
+    fn cell_style_at(&self, cell: TableCell<'_>) -> BlockStyle {
+        self.cell_styler
+            .style(cell)
+            .unwrap_or_else(|| match cell.row {
+                TableRow::Header => self.header.clone(),
+                _ => self.cell.clone(),
+            })
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+struct TableFrame {
+    presentation: TablePresentation,
+    rows: Vec<TableFrameRow>,
+    columns: usize,
+}
+
+impl TableFrame {
+    fn new(
+        table: &Table,
+        presentation: &TablePresentation,
+        visible_rows: &[Vec<String>],
+        columns: usize,
+    ) -> Self {
+        let mut rows =
+            Vec::with_capacity(visible_rows.len() + usize::from(!table.headers.is_empty()));
+        if !table.headers.is_empty() {
+            rows.push(TableFrameRow::new(
+                &table.headers,
+                columns,
+                TableRow::Header,
+                presentation,
+            ));
+        }
+        for (index, row) in visible_rows.iter().enumerate() {
+            rows.push(TableFrameRow::new(
+                row,
+                columns,
+                TableRow::Body(index),
+                presentation,
+            ));
+        }
+        Self {
+            presentation: presentation.clone(),
+            rows,
+            columns,
         }
     }
 
-    /// The grid style this table's policy describes.
-    ///
-    /// `border_header` is stated only where there is a header row to state it
-    /// about: without one, the first gap is an ordinary gap between two body
-    /// rows and follows `border_row` like every other.
-    fn grid_style(&self, columns: usize, has_headers: bool) -> GridStyle {
-        let mut style = GridStyle::new()
-            .border(self.border)
-            .border_top(self.border_top)
-            .border_bottom(self.border_bottom)
-            .border_left(self.border_left)
-            .border_right(self.border_right)
-            .border_column(self.border_column)
-            .border_row(self.border_row)
-            .cell_padding((0, self.padding));
-        if has_headers {
-            style = style.border_header(self.border_header);
-        }
-        if let Some(color) = self.border_style.foreground_color() {
-            style = style.border_foreground(color);
-        }
-        if let Some(color) = self.border_style.background_color() {
-            style = style.border_background(color);
-        }
-        // A stated total width is spent on the columns, which is the only
-        // place a grid has to put it; see `width`.
-        if self.width.is_some() {
-            style = style.columns(std::iter::repeat_n(Some(Length::Fill(1)), columns));
-        }
-        style
+    fn line_width(&self) -> usize {
+        usize::from(self.presentation.border_left)
+            + usize::from(self.presentation.border_right)
+            + usize::from(self.presentation.border_column) * self.columns.saturating_sub(1)
     }
 
-    /// Builds one row of cells, padding a short row out to the column count.
-    ///
-    /// A grid is a rectangle and supplies no cell of its own, so the empty
-    /// cell of a ragged row is composed here, where the table's own cell style
-    /// is known.
-    fn cell_row(&self, cells: &[String], columns: usize, row: TableRow) -> Vec<View> {
-        (0..columns)
+    fn line_height(&self) -> usize {
+        usize::from(self.presentation.border_top)
+            + usize::from(self.presentation.border_bottom)
+            + (0..self.rows.len().saturating_sub(1))
+                .filter(|gap| self.draws_row_rule(*gap))
+                .count()
+    }
+
+    fn draws_row_rule(&self, gap: usize) -> bool {
+        match self.rows.get(gap).map(|row| row.kind) {
+            Some(TableRow::Header) => self.presentation.border_header,
+            _ => self.presentation.border_row,
+        }
+    }
+
+    fn column_requirements(&self) -> Vec<(usize, usize)> {
+        (0..self.columns)
             .map(|column| {
-                let text = cells.get(column).map_or("", String::as_str);
-                self.cell(TableCell { text, row, column })
+                self.rows
+                    .iter()
+                    .map(|row| row.cells[column].width_requirements())
+                    .fold((0, 0), |(demand, floor), next| {
+                        (demand.max(next.0), floor.max(next.1))
+                    })
             })
             .collect()
     }
 
-    /// Wraps one cell's text in the block that carries its style.
-    fn cell(&self, cell: TableCell<'_>) -> View {
-        let style = self
-            .cell_style_at(cell)
-            .remove(BlockStylePropertyKey::Border)
-            .remove(BlockStylePropertyKey::Margin)
-            .remove(BlockStylePropertyKey::Width)
-            .remove(BlockStylePropertyKey::Height)
-            .remove(BlockStylePropertyKey::MinWidth)
-            .remove(BlockStylePropertyKey::MinHeight)
-            .remove(BlockStylePropertyKey::MaxWidth)
-            .remove(BlockStylePropertyKey::MaxHeight);
-        let text = View::text(cell.text.to_owned(), style.text().clone());
-        View::block(style, text)
+    fn column_widths(&self, width: usize) -> Vec<usize> {
+        let requirements = self.column_requirements();
+        let kind = if self.presentation.width.is_some() {
+            Kind::Fill(1)
+        } else {
+            Kind::Auto
+        };
+        let claims: Vec<Claim> = requirements
+            .iter()
+            .map(|(demand, floor)| Claim {
+                kind,
+                demand: *demand,
+                floor: *floor,
+            })
+            .collect();
+        distribute(width.saturating_sub(self.line_width()), &claims)
     }
 
-    /// Resolves one cell's style from the hook, falling back to its role.
-    fn cell_style_at(&self, cell: TableCell<'_>) -> BlockStyle {
-        (self.style_func)(cell).unwrap_or_else(|| match cell.row {
-            TableRow::Header => self.header.clone(),
-            _ => self.cell.clone(),
-        })
+    fn row_heights(&self, columns: &[usize]) -> Vec<usize> {
+        self.rows
+            .iter()
+            .map(|row| {
+                row.cells
+                    .iter()
+                    .zip(columns)
+                    .map(|(cell, width)| cell.height_at(*width))
+                    .max()
+                    .unwrap_or(0)
+            })
+            .collect()
     }
+
+    fn height_at(&self, width: usize) -> usize {
+        self.row_heights(&self.column_widths(width))
+            .iter()
+            .sum::<usize>()
+            .saturating_add(self.line_height())
+    }
+
+    fn draw(&self, context: &mut CanvasContext) {
+        let columns = self.column_widths(context.size().width());
+        let heights = self.row_heights(&columns);
+        let segments = self.line_segments(&columns);
+        let mut line_cells = Vec::new();
+        let mut y = 0;
+
+        self.record_cell_rows(context, &columns, &heights);
+
+        if self.presentation.border_top {
+            self.push_rule(
+                &mut line_cells,
+                &segments,
+                y,
+                false,
+                true,
+                self.presentation.border.top,
+            );
+            y += 1;
+        }
+
+        for (row_index, (_row, height)) in self.rows.iter().zip(&heights).enumerate() {
+            for offset in 0..*height {
+                self.push_verticals(&mut line_cells, &segments, y + offset);
+            }
+            y = y.saturating_add(*height);
+
+            if row_index + 1 < self.rows.len() && self.draws_row_rule(row_index) {
+                self.push_rule(
+                    &mut line_cells,
+                    &segments,
+                    y,
+                    true,
+                    true,
+                    self.presentation.border.middle_horizontal,
+                );
+                y += 1;
+            }
+        }
+
+        if self.presentation.border_bottom {
+            self.push_rule(
+                &mut line_cells,
+                &segments,
+                y,
+                true,
+                false,
+                self.presentation.border.bottom,
+            );
+        }
+        context.cells(line_cells);
+    }
+
+    fn record_cell_rows(&self, context: &mut CanvasContext, columns: &[usize], heights: &[usize]) {
+        let mut y = usize::from(self.presentation.border_top);
+        for (row_index, (row, height)) in self.rows.iter().zip(heights).enumerate() {
+            let rendered = row
+                .cells
+                .iter()
+                .zip(columns)
+                .map(|(cell, width)| cell.rendered_rows(*width, *height))
+                .collect::<Vec<_>>();
+            for line in 0..*height {
+                let mut runs = Vec::<TextRun>::new();
+                let mut x = 0;
+                if self.presentation.border_left {
+                    push_run(&mut runs, x, " ", TextStyle::new());
+                    x += 1;
+                }
+                for (column, ((cell, rows), width)) in
+                    row.cells.iter().zip(&rendered).zip(columns).enumerate()
+                {
+                    push_run(&mut runs, x, &rows[line], cell.style.text().clone());
+                    x = x.saturating_add(*width);
+                    if column + 1 < columns.len() && self.presentation.border_column {
+                        push_run(&mut runs, x, " ", TextStyle::new());
+                        x += 1;
+                    }
+                }
+                if self.presentation.border_right {
+                    push_run(&mut runs, x, " ", TextStyle::new());
+                }
+                for run in runs {
+                    context.text_with(
+                        Position::new(position(run.x), position(y + line)),
+                        run.text,
+                        run.style,
+                        Composition::Replace,
+                    );
+                }
+            }
+            y = y.saturating_add(*height);
+            if row_index + 1 < self.rows.len() && self.draws_row_rule(row_index) {
+                y += 1;
+            }
+        }
+    }
+
+    fn line_segments(&self, columns: &[usize]) -> Vec<LineSegment> {
+        let mut segments = Vec::with_capacity(columns.len() * 2 + 2);
+        if self.presentation.border_left {
+            segments.push(LineSegment::Rule(self.presentation.border.left));
+        }
+        for (index, width) in columns.iter().enumerate() {
+            if index > 0 && self.presentation.border_column {
+                segments.push(LineSegment::Rule(self.presentation.border.left));
+            }
+            segments.push(LineSegment::Span(*width));
+        }
+        if self.presentation.border_right {
+            segments.push(LineSegment::Rule(self.presentation.border.right));
+        }
+        segments
+    }
+
+    fn push_verticals(&self, output: &mut Vec<PositionedCell>, segments: &[LineSegment], y: usize) {
+        let mut x = 0;
+        for segment in segments {
+            match segment {
+                LineSegment::Rule(glyph) => {
+                    output.push(self.line_cell(x, y, *glyph));
+                    x += 1;
+                }
+                LineSegment::Span(width) => x = x.saturating_add(*width),
+            }
+        }
+    }
+
+    fn push_rule(
+        &self,
+        output: &mut Vec<PositionedCell>,
+        segments: &[LineSegment],
+        y: usize,
+        up: bool,
+        down: bool,
+        horizontal: char,
+    ) {
+        let mut x = 0;
+        for (index, segment) in segments.iter().enumerate() {
+            match segment {
+                LineSegment::Rule(vertical) => {
+                    let glyph = junction(
+                        &self.presentation.border,
+                        up,
+                        down,
+                        index > 0,
+                        index + 1 < segments.len(),
+                        horizontal,
+                        *vertical,
+                    );
+                    output.push(self.line_cell(x, y, glyph));
+                    x += 1;
+                }
+                LineSegment::Span(width) => {
+                    for offset in 0..*width {
+                        output.push(self.line_cell(x + offset, y, horizontal));
+                    }
+                    x = x.saturating_add(*width);
+                }
+            }
+        }
+    }
+
+    fn line_cell(&self, x: usize, y: usize, glyph: char) -> PositionedCell {
+        let glyph = glyph.to_string();
+        let mut style = TextStyle::new();
+        if let Some(color) = self.presentation.border_style.foreground_color() {
+            style = style.foreground(color);
+        }
+        if let Some(color) = self.presentation.border_style.background_color() {
+            style = style.background(color);
+        }
+        PositionedCell::new(
+            Position::new(position(x), position(y)),
+            CellContribution::new()
+                .symbol(Grapheme::new(&glyph))
+                .style(style),
+        )
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+struct TableFrameRow {
+    kind: TableRow,
+    cells: Vec<TableFrameCell>,
+}
+
+impl TableFrameRow {
+    fn new(
+        values: &[String],
+        columns: usize,
+        kind: TableRow,
+        presentation: &TablePresentation,
+    ) -> Self {
+        let cells = (0..columns)
+            .map(|column| {
+                let text = values.get(column).map_or("", String::as_str);
+                let cell = TableCell {
+                    text,
+                    row: kind,
+                    column,
+                };
+                let mut style = presentation
+                    .cell_style_at(cell)
+                    .remove(BlockStylePropertyKey::Border)
+                    .remove(BlockStylePropertyKey::Margin)
+                    .remove(BlockStylePropertyKey::Width)
+                    .remove(BlockStylePropertyKey::Height)
+                    .remove(BlockStylePropertyKey::MinWidth)
+                    .remove(BlockStylePropertyKey::MinHeight)
+                    .remove(BlockStylePropertyKey::MaxWidth)
+                    .remove(BlockStylePropertyKey::MaxHeight);
+                if style.padding_sides() == Default::default() {
+                    style = style.padding((0, presentation.padding));
+                }
+                TableFrameCell {
+                    text: text.to_owned(),
+                    style,
+                }
+            })
+            .collect();
+        Self { kind, cells }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+struct TableFrameCell {
+    text: String,
+    style: BlockStyle,
+}
+
+impl TableFrameCell {
+    fn width_requirements(&self) -> (usize, usize) {
+        let padding = self.style.padding_sides();
+        let frame = usize::from(padding.left) + usize::from(padding.right);
+        let lines = PrintableLines::new(&self.text).lines();
+        let demand = lines.iter().map(|line| line.width()).max().unwrap_or(0);
+        let floor = lines
+            .iter()
+            .flat_map(|line| line.graphemes().map(Grapheme::width))
+            .max()
+            .unwrap_or(0);
+        (demand.saturating_add(frame), floor.saturating_add(frame))
+    }
+
+    fn height_at(&self, width: usize) -> usize {
+        let padding = self.style.padding_sides();
+        let content_width = width
+            .saturating_sub(usize::from(padding.left).saturating_add(usize::from(padding.right)));
+        let content_height = match self.style.overflow_policy() {
+            Overflow::Wrap => wrapped_line_count(PrintableLines::new(&self.text), content_width),
+            Overflow::Clip(_) => PrintableLines::new(&self.text).lines().len(),
+        };
+        content_height
+            .saturating_add(usize::from(padding.top))
+            .saturating_add(usize::from(padding.bottom))
+    }
+
+    fn rendered_rows(&self, width: usize, height: usize) -> Vec<String> {
+        let padding = self.style.padding_sides();
+        let content_width = width
+            .saturating_sub(usize::from(padding.left).saturating_add(usize::from(padding.right)));
+        let content_height = height
+            .saturating_sub(usize::from(padding.top).saturating_add(usize::from(padding.bottom)));
+        let mut lines = fit_text_lines(
+            &self.text,
+            Some(content_width),
+            self.style.overflow_policy(),
+        );
+        lines.truncate(content_height);
+        let vertical_gap = content_height.saturating_sub(lines.len());
+        let above = match self.style.vertical_alignment() {
+            VerticalAlign::Top => 0,
+            VerticalAlign::Center => vertical_gap / 2,
+            VerticalAlign::Bottom => vertical_gap,
+        };
+        let blank = " ".repeat(width);
+        let mut rows = Vec::with_capacity(height);
+        rows.resize(
+            usize::from(padding.top).saturating_add(above),
+            blank.clone(),
+        );
+        for line in lines {
+            let line_width = PrintableText::new(&line).width();
+            let gap = content_width.saturating_sub(line_width);
+            let before = match self.style.horizontal_alignment() {
+                Align::Left => 0,
+                Align::Center => gap / 2,
+                Align::Right => gap,
+            };
+            let after = gap.saturating_sub(before);
+            rows.push(format!(
+                "{}{}{}",
+                " ".repeat(usize::from(padding.left).saturating_add(before)),
+                line,
+                " ".repeat(after.saturating_add(usize::from(padding.right)))
+            ));
+        }
+        rows.resize(height, blank);
+        rows
+    }
+
+    #[cfg(test)]
+    fn view(&self) -> View {
+        let style = self
+            .style
+            .clone()
+            .width(Length::Fill(1))
+            .height(Length::Fill(1));
+        View::block(
+            style,
+            View::text(self.text.clone(), self.style.text().clone()),
+        )
+    }
+}
+
+struct TextRun {
+    x: usize,
+    text: String,
+    style: TextStyle,
+}
+
+fn push_run(runs: &mut Vec<TextRun>, x: usize, text: &str, style: TextStyle) {
+    if let Some(run) = runs.last_mut().filter(|run| run.style == style) {
+        run.text.push_str(text);
+    } else {
+        runs.push(TextRun {
+            x,
+            text: text.to_owned(),
+            style,
+        });
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+enum LineSegment {
+    Rule(char),
+    Span(usize),
+}
+
+#[derive(Debug, Clone, PartialEq)]
+struct TableItem(Arc<TableFrame>);
+
+impl TableItem {
+    fn sizing(&self) -> CanvasSizing {
+        CanvasSizing::intrinsic(self.clone())
+    }
+}
+
+impl CanvasMeasure for TableItem {
+    fn width_requirements(&self) -> CanvasRequirements {
+        let requirements = self.0.column_requirements();
+        CanvasRequirements::new(
+            requirements
+                .iter()
+                .map(|requirement| requirement.0)
+                .sum::<usize>()
+                .saturating_add(self.0.line_width()),
+            requirements
+                .iter()
+                .map(|requirement| requirement.1)
+                .sum::<usize>()
+                .saturating_add(self.0.line_width()),
+        )
+    }
+
+    fn height_requirements(&self, width: usize) -> CanvasRequirements {
+        CanvasRequirements::new(self.0.height_at(width), 0)
+    }
+}
+
+impl CanvasItem for TableItem {
+    fn draw(&self, context: &mut CanvasContext) {
+        self.0.draw(context);
+    }
+}
+
+fn position(value: usize) -> i64 {
+    i64::try_from(value).unwrap_or(i64::MAX)
 }
 
 /// Returns the column count spanned by `rows` and a header of `headers` cells.
@@ -560,8 +1060,8 @@ mod tests {
     use super::*;
     use crate::test_support::{plain_exact as plain, plain_rows, style_at};
     use crate::{
-        Align, Available, Color, ComponentStyles, PrintableText, SemanticTokens, StyledGrapheme,
-        VerticalAlign, measure, resolve,
+        Align, Available, Color, ComponentStyles, Overflow, PrintableText, SemanticTokens,
+        StyledGrapheme, VerticalAlign, measure, resolve,
     };
 
     fn styles() -> ComponentStyles {
@@ -589,7 +1089,7 @@ mod tests {
     #[test]
     fn composes_headers_rows_and_borders() {
         assert_eq!(
-            plain(&styles().table().view(&sample())),
+            plain(&styles().table().compose(&sample())),
             "\
 ┌──────┬──────────┐
 │ Name │ Location │
@@ -603,12 +1103,12 @@ mod tests {
     #[test]
     fn empty_tables_compose_nothing() {
         let table_style = styles().table().clone();
-        assert!(measure(&table_style.view(&Table::new())).is_empty());
-        assert!(measure(&table_style.view(&sample().hidden(true))).is_empty());
+        assert!(measure(&table_style.compose(&Table::new())).is_empty());
+        assert!(measure(&table_style.compose(&sample().hidden(true))).is_empty());
 
         let headers_only = Table::new().headers(["Name", "Location"]);
         assert_eq!(
-            plain(&table_style.view(&headers_only)),
+            plain(&table_style.compose(&headers_only)),
             "\
 ┌──────┬──────────┐
 │ Name │ Location │
@@ -617,7 +1117,7 @@ mod tests {
 
         let rows_only = Table::new().row(["Kini", "New York"]);
         assert_eq!(
-            plain(&table_style.view(&rows_only)),
+            plain(&table_style.compose(&rows_only)),
             "\
 ┌──────┬──────────┐
 │ Kini │ New York │
@@ -633,7 +1133,7 @@ mod tests {
             .row(["1", "2", "3"]);
 
         assert_eq!(
-            plain(&styles().table().view(&table)),
+            plain(&styles().table().compose(&table)),
             "\
 ┌───┬───┬───┐
 │ A │ B │ C │
@@ -649,7 +1149,7 @@ mod tests {
         let table = sample().row(["Eli", "London"]).offset(1, 1);
 
         assert_eq!(
-            plain(&styles().table().view(&table)),
+            plain(&styles().table().compose(&table)),
             "\
 ┌──────┬──────────┐
 │ Name │ Location │
@@ -666,7 +1166,7 @@ mod tests {
             .headers(["名前", "所在地"])
             .row(["日本語", "東京"])
             .row(["ab", "Paris"]);
-        let view = styles().table().view(&table);
+        let view = styles().table().compose(&table);
 
         assert_eq!(
             plain(&view),
@@ -692,7 +1192,7 @@ mod tests {
             .row(["a", "one\ntwo"]);
 
         assert_eq!(
-            plain(&styles().table().view(&table)),
+            plain(&styles().table().compose(&table)),
             "\
 ┌─────┬───────┐
 │ Key │ Value │
@@ -707,14 +1207,14 @@ mod tests {
     fn width_expands_and_shrinks_columns() {
         let table_style = styles().table().clone();
         let wide = table_style.clone().width(28);
-        let view = wide.view(&sample());
+        let view = wide.compose(&sample());
         for row in plain_rows(&view) {
             assert_eq!(PrintableText::new(&row).width(), 28);
         }
 
         let narrow = table_style.width(16);
         assert_eq!(
-            plain(&narrow.view(&sample())),
+            plain(&narrow.compose(&sample())),
             "\
 ┌──────┬───────┐
 │ Name │ Locat │
@@ -731,11 +1231,11 @@ mod tests {
     fn a_width_constraint_narrower_than_a_grapheme_keeps_rows_rectangular() {
         // A column narrower than one wide grapheme is where a constraint runs
         // out: the grapheme cannot be split, so the column stops at it. The
-        // grid widens past the constraint rather than dropping the content,
-        // and every row still matches the frame — the table composes no width
-        // of its own, so its lines and its cells cannot disagree.
+        // bound frame widens past the constraint rather than dropping the
+        // content, and every row still matches it because column and line
+        // geometry are selected together.
         let table = Table::new().headers(["A", "B"]).row(["日本語", "x"]);
-        let view = styles().table().clone().width(9).view(&table);
+        let view = styles().table().clone().width(9).compose(&table);
 
         assert_eq!(
             plain(&view),
@@ -755,7 +1255,7 @@ mod tests {
             .clone()
             .padding(0)
             .width(5)
-            .view(&Table::new().row(["日本", "ab"]));
+            .compose(&Table::new().row(["日本", "ab"]));
         let widths: Vec<usize> = plain_rows(&padded)
             .iter()
             .map(|row| PrintableText::new(row).width())
@@ -769,7 +1269,7 @@ mod tests {
     #[test]
     fn width_below_the_column_minimum_overflows() {
         let narrow = styles().table().clone().width(4);
-        let view = narrow.view(&sample());
+        let view = narrow.compose(&sample());
         let width = PrintableText::new(&plain_rows(&view)[0]).width();
 
         assert!(
@@ -826,7 +1326,7 @@ mod tests {
 
         for (border, expected) in cases {
             assert_eq!(
-                plain(&table_style.clone().border(border).view(&sample())),
+                plain(&table_style.clone().border(border).compose(&sample())),
                 expected
             );
         }
@@ -844,7 +1344,7 @@ mod tests {
             .border_column(false);
 
         assert_eq!(
-            plain(&table_style.view(&sample())),
+            plain(&table_style.compose(&sample())),
             [
                 " Name  Location ",
                 "────────────────",
@@ -860,7 +1360,7 @@ mod tests {
         let table_style = styles().table().clone().border_row(true);
 
         assert_eq!(
-            plain(&table_style.view(&sample())),
+            plain(&table_style.compose(&sample())),
             "\
 ┌──────┬──────────┐
 │ Name │ Location │
@@ -872,22 +1372,27 @@ mod tests {
         );
     }
 
-    fn accent_header(cell: TableCell<'_>) -> Option<BlockStyle> {
-        if cell.is_header() {
-            return Some(BlockStyle::new().foreground(Color::CYAN).bold());
-        }
-        match (cell.row(), cell.column()) {
-            (Some(1), _) => Some(BlockStyle::new().foreground(Color::GREEN)),
-            (_, 1) => Some(BlockStyle::new().align(Align::Right)),
-            _ => None,
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    struct AccentHeader;
+
+    impl TableCellStyler for AccentHeader {
+        fn style(&self, cell: TableCell<'_>) -> Option<BlockStyle> {
+            if cell.is_header() {
+                return Some(BlockStyle::new().foreground(Color::CYAN).bold());
+            }
+            match (cell.row(), cell.column()) {
+                (Some(1), _) => Some(BlockStyle::new().foreground(Color::GREEN)),
+                (_, 1) => Some(BlockStyle::new().align(Align::Right)),
+                _ => None,
+            }
         }
     }
 
     #[test]
-    fn the_style_hook_overrides_cells_rows_and_columns() {
+    fn the_cell_styler_overrides_cells_rows_and_columns() {
         let component_styles = styles();
-        let table_style = component_styles.table().clone().style_func(accent_header);
-        let view = table_style.view(&sample());
+        let table_style = component_styles.table().clone().cell_styler(AccentHeader);
+        let view = table_style.compose(&sample());
 
         // Header row: matched by the (Header, _) arm.
         assert_eq!(
@@ -922,12 +1427,12 @@ mod tests {
     }
 
     #[test]
-    fn a_hook_style_realigns_a_column_that_has_slack() {
+    fn a_styler_realigns_a_column_that_has_slack() {
         // Body row 2 escapes the (Body(1), _) arm, so the (_, 1) column arm
         // applies where the cell is narrower than its column.
         let table = sample().row(["Eli", "London"]);
-        let table_style = styles().table().clone().style_func(accent_header);
-        let view = table_style.view(&table);
+        let table_style = styles().table().clone().cell_styler(AccentHeader);
+        let view = table_style.compose(&table);
 
         assert_eq!(
             plain_rows(&view)[5],
@@ -937,26 +1442,29 @@ mod tests {
     }
 
     #[test]
-    fn a_hook_style_keeps_its_padding_and_loses_the_rest_of_the_box() {
-        fn boxed(_: TableCell<'_>) -> Option<BlockStyle> {
-            Some(
-                BlockStyle::new()
-                    .padding((0, 3))
-                    .width(30)
-                    .height(4)
-                    .border(Border::DOUBLE),
-            )
+    fn a_styler_keeps_its_padding_and_loses_the_rest_of_the_box() {
+        #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+        struct Boxed;
+        impl TableCellStyler for Boxed {
+            fn style(&self, _: TableCell<'_>) -> Option<BlockStyle> {
+                Some(
+                    BlockStyle::new()
+                        .padding((0, 3))
+                        .width(30)
+                        .height(4)
+                        .border(Border::DOUBLE),
+                )
+            }
         }
 
-        let table_style = styles().table().clone().style_func(boxed);
+        let table_style = styles().table().clone().cell_styler(Boxed);
 
-        // A cell that states its own padding replaces the grid's rather than
-        // adding to it, and its column is as wide as it needs — the rule
-        // `docs/design/grid.md` states, reached here through the hook. The
-        // frame, the stated sizes, and the margin are still the grid's to
-        // decide, so none of them survive.
+        // A cell that states its own padding replaces the presentation's
+        // rather than adding to it, and its column is as wide as it needs.
+        // The bound frame owns column geometry, so the cell's stated sizes,
+        // border, and margin do not survive.
         assert_eq!(
-            plain(&table_style.view(&sample())),
+            plain(&table_style.compose(&sample())),
             "\
 ┌──────────┬──────────────┐
 │   Name   │   Location   │
@@ -981,7 +1489,7 @@ mod tests {
             "the data-level count still spans every owned row"
         );
         assert_eq!(
-            plain(&styles().table().view(&table)),
+            plain(&styles().table().compose(&table)),
             "\
 ┌───┬───┐
 │ A │ B │
@@ -994,14 +1502,18 @@ mod tests {
 
     #[test]
     fn cell_alignment_comes_from_the_cell_style() {
-        fn right(_: TableCell<'_>) -> Option<BlockStyle> {
-            Some(BlockStyle::new().align(Align::Right))
+        #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+        struct Right;
+        impl TableCellStyler for Right {
+            fn style(&self, _: TableCell<'_>) -> Option<BlockStyle> {
+                Some(BlockStyle::new().align(Align::Right))
+            }
         }
 
-        let table_style = styles().table().clone().style_func(right);
+        let table_style = styles().table().clone().cell_styler(Right);
 
         assert_eq!(
-            plain(&table_style.view(&sample())),
+            plain(&table_style.compose(&sample())),
             "\
 ┌──────┬──────────┐
 │ Name │ Location │
@@ -1014,15 +1526,19 @@ mod tests {
 
     #[test]
     fn vertical_alignment_places_short_cells_within_a_tall_row() {
-        fn bottom(_: TableCell<'_>) -> Option<BlockStyle> {
-            Some(BlockStyle::new().align_vertical(VerticalAlign::Bottom))
+        #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+        struct Bottom;
+        impl TableCellStyler for Bottom {
+            fn style(&self, _: TableCell<'_>) -> Option<BlockStyle> {
+                Some(BlockStyle::new().align_vertical(VerticalAlign::Bottom))
+            }
         }
 
         let table = Table::new().row(["a", "one\ntwo"]);
-        let table_style = styles().table().clone().style_func(bottom);
+        let table_style = styles().table().clone().cell_styler(Bottom);
 
         assert_eq!(
-            plain(&table_style.view(&table)),
+            plain(&table_style.compose(&table)),
             "\
 ┌───┬─────┐
 │   │ one │
@@ -1036,7 +1552,7 @@ mod tests {
         let table_style = styles().table().clone().padding(0);
 
         assert_eq!(
-            plain(&table_style.view(&sample())),
+            plain(&table_style.compose(&sample())),
             "\
 ┌────┬────────┐
 │Name│Location│
@@ -1059,27 +1575,31 @@ mod tests {
     }
 
     #[test]
-    fn the_hook_sees_each_cell_its_row_and_its_text() {
-        fn shout(cell: TableCell<'_>) -> Option<BlockStyle> {
-            let expected = match (cell.is_header(), cell.column()) {
-                (true, 0) => "Name",
-                (true, 1) => "Location",
-                (false, 0) => "Kini",
-                _ => "New York",
-            };
-            assert_eq!(cell.text(), expected, "column {}", cell.column());
-            assert_eq!(
-                cell.is_header(),
-                cell.row().is_none(),
-                "a header cell has no body-row number"
-            );
-            None
+    fn the_styler_sees_each_cell_its_row_and_its_text() {
+        #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+        struct Shout;
+        impl TableCellStyler for Shout {
+            fn style(&self, cell: TableCell<'_>) -> Option<BlockStyle> {
+                let expected = match (cell.is_header(), cell.column()) {
+                    (true, 0) => "Name",
+                    (true, 1) => "Location",
+                    (false, 0) => "Kini",
+                    _ => "New York",
+                };
+                assert_eq!(cell.text(), expected, "column {}", cell.column());
+                assert_eq!(
+                    cell.is_header(),
+                    cell.row().is_none(),
+                    "a header cell has no body-row number"
+                );
+                None
+            }
         }
 
         let table = Table::new()
             .headers(["Name", "Location"])
             .row(["Kini", "New York"]);
-        let _ = styles().table().clone().style_func(shout).view(&table);
+        let _ = styles().table().clone().cell_styler(Shout).compose(&table);
     }
 
     #[test]
@@ -1101,6 +1621,25 @@ mod tests {
         );
     }
 
+    #[test]
+    fn border_drawing_preserves_only_the_legacy_color_properties() {
+        let presentation = styles().table().clone().border_style(
+            TextStyle::new()
+                .foreground(Color::RED)
+                .background(Color::BLUE)
+                .bold()
+                .underline(),
+        );
+        let view = presentation.compose(&Table::new().row(["cell"]));
+
+        assert_eq!(
+            style_at(&view, 0, 0),
+            TextStyle::new()
+                .foreground(Color::RED)
+                .background(Color::BLUE)
+        );
+    }
+
     /// A table whose natural width is 41 cells: the case #22 reproduced.
     fn wide() -> Table {
         Table::new()
@@ -1111,7 +1650,7 @@ mod tests {
 
     #[test]
     fn an_area_narrower_than_the_table_shrinks_its_columns_and_its_lines() {
-        let view = styles().table().view(&wide());
+        let view = styles().table().compose(&wide());
         assert_eq!(measure(&view).width(), 41, "the natural width");
 
         let rows: Vec<String> = resolve(&view, Available::columns(18))
@@ -1146,7 +1685,7 @@ mod tests {
 
     #[test]
     fn an_area_wider_than_the_table_does_not_widen_it() {
-        let view = styles().table().view(&wide());
+        let view = styles().table().compose(&wide());
 
         let rows: Vec<String> = resolve(&view, Available::columns(200))
             .rows()
@@ -1164,13 +1703,201 @@ mod tests {
     }
 
     #[test]
-    fn table_styles_compare_by_policy_and_hook() {
+    fn table_presentations_compare_by_policy_and_styler() {
         let table_style = styles().table().clone();
         assert_eq!(table_style, styles().table().clone());
         assert_ne!(
             table_style.clone(),
-            table_style.clone().style_func(accent_header)
+            table_style.clone().cell_styler(AccentHeader)
         );
         assert_ne!(table_style.clone(), table_style.border(Border::ASCII));
+    }
+
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    struct ColumnStyler(usize);
+
+    impl TableCellStyler for ColumnStyler {
+        fn style(&self, cell: TableCell<'_>) -> Option<BlockStyle> {
+            (cell.column() == self.0).then(|| BlockStyle::new().bold())
+        }
+    }
+
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    struct OtherColumnStyler(usize);
+
+    impl TableCellStyler for OtherColumnStyler {
+        fn style(&self, cell: TableCell<'_>) -> Option<BlockStyle> {
+            (cell.column() == self.0).then(|| BlockStyle::new().bold())
+        }
+    }
+
+    #[test]
+    fn cell_stylers_compare_by_concrete_type_and_value() {
+        let base = styles().table().clone();
+        assert_eq!(
+            base.clone().cell_styler(ColumnStyler(1)),
+            base.clone().cell_styler(ColumnStyler(1))
+        );
+        assert_ne!(
+            base.clone().cell_styler(ColumnStyler(1)),
+            base.clone().cell_styler(ColumnStyler(0))
+        );
+        assert_ne!(
+            base.clone().cell_styler(ColumnStyler(1)),
+            base.cell_styler(OtherColumnStyler(1)),
+            "equal output from another concrete strategy is not value equality"
+        );
+    }
+
+    #[test]
+    fn canonical_composition_binds_an_intrinsic_canvas_item() {
+        let view = styles().table().compose(&sample());
+        let View::Block(style, child) = view else {
+            panic!("a Table is boxed only to state its outer sizing")
+        };
+        assert_eq!(style.border_kind(), None);
+        assert!(matches!(*child, View::Canvas(_)));
+    }
+
+    #[test]
+    fn narrow_height_measurement_matches_drawing_and_shorter_height_crops() {
+        let view = styles().table().compose(&wide());
+        let complete = resolve(&view, Available::columns(18));
+        let exact = resolve(&view, Available::size(18, complete.size().height()));
+        assert_eq!(
+            exact, complete,
+            "measurement and drawing use one bound frame"
+        );
+
+        let cropped = resolve(&view, Available::size(18, 3));
+        assert_eq!(cropped.size().height(), 3);
+        assert_eq!(cropped.rows(), &complete.rows()[..3]);
+    }
+
+    #[test]
+    fn table_cell_height_matches_the_shared_block_text_model() {
+        let cases = [
+            TableFrameCell {
+                text: "words that wrap\n日本語".to_owned(),
+                style: BlockStyle::new().padding((2, 1)),
+            },
+            TableFrameCell {
+                text: "words that clip\n日本語".to_owned(),
+                style: BlockStyle::new()
+                    .padding((1, 2))
+                    .overflow(Overflow::ellipsis()),
+            },
+        ];
+
+        for cell in cases {
+            let floor = cell.width_requirements().1;
+            for width in [floor, floor.saturating_add(3), floor.saturating_add(12)] {
+                assert_eq!(
+                    cell.height_at(width),
+                    resolve(&cell.view(), Available::columns(width))
+                        .size()
+                        .height(),
+                    "{cell:?} at width {width}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn an_outer_borderless_block_can_state_fixed_or_fill_table_size() {
+        let table = styles().table().compose(&sample());
+        let fixed = View::block(BlockStyle::new().width(30), table.clone());
+        assert_eq!(resolve(&fixed, Available::NONE).size().width(), 30);
+
+        let fill = View::block(BlockStyle::new().width(Length::Fill(1)), table);
+        assert_eq!(resolve(&fill, Available::columns(32)).size().width(), 32);
+    }
+
+    #[test]
+    fn every_border_preset_keeps_its_observable_glyphs() {
+        let table = Table::new().headers(["A", "B"]).row(["1", "2"]);
+        let cases = [
+            (Border::NORMAL, '┌', '┬', '┼', '└'),
+            (Border::ROUNDED, '╭', '┬', '┼', '╰'),
+            (Border::THICK, '┏', '┳', '╋', '┗'),
+            (Border::DOUBLE, '╔', '╦', '╬', '╚'),
+            (Border::ASCII, '+', '+', '+', '+'),
+            (Border::MARKDOWN, '|', '|', '|', '|'),
+            (Border::BOOKTABS, '━', '━', '─', '━'),
+            (Border::HIDDEN, ' ', ' ', ' ', ' '),
+        ];
+
+        for (border, top_left, top_middle, middle, bottom_left) in cases {
+            let rows = plain_rows(&styles().table().clone().border(border).compose(&table));
+            assert_eq!(rows[0].chars().next(), Some(top_left));
+            assert!(rows[0].contains(top_middle));
+            assert!(rows[2].contains(middle));
+            assert_eq!(rows[4].chars().next(), Some(bottom_left));
+        }
+    }
+
+    #[test]
+    fn a_custom_border_derives_corners_tees_and_crosses_from_incident_rules() {
+        let border = Border {
+            top: 't',
+            bottom: 'b',
+            left: 'l',
+            right: 'r',
+            top_left: 'A',
+            top_right: 'B',
+            bottom_left: 'C',
+            bottom_right: 'D',
+            middle_left: 'E',
+            middle_right: 'F',
+            middle: 'G',
+            middle_horizontal: 'm',
+            middle_top: 'H',
+            middle_bottom: 'I',
+        };
+        let table = Table::new()
+            .headers(["a", "b"])
+            .row(["1", "2"])
+            .row(["3", "4"]);
+        let view = styles()
+            .table()
+            .clone()
+            .border(border)
+            .border_row(true)
+            .compose(&table);
+
+        assert_eq!(
+            plain(&view),
+            [
+                "AtttHtttB",
+                "l a l b r",
+                "EmmmGmmmF",
+                "l 1 l 2 r",
+                "EmmmGmmmF",
+                "l 3 l 4 r",
+                "CbbbIbbbD",
+            ]
+            .join("\n")
+        );
+    }
+
+    #[test]
+    fn theme_table_is_the_canonical_presentation_shortcut() {
+        let tokens = SemanticTokens {
+            text: Color::WHITE,
+            text_muted: Color::BRIGHT_BLACK,
+            background: Color::BLACK,
+            surface: Color::BLACK,
+            accent: Color::CYAN,
+            accent_text: Color::BLACK,
+            success: Color::GREEN,
+            warning: Color::YELLOW,
+            error: Color::RED,
+            border: Color::BRIGHT_BLACK,
+        };
+        let theme = crate::Theme::from_tokens(tokens);
+        assert_eq!(
+            theme.table(&sample()),
+            theme.components().table().compose(&sample())
+        );
     }
 }

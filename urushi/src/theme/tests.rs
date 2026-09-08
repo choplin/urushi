@@ -1,4 +1,4 @@
-use crate::{BlockStyle, Color, TableStyle, TextStyle};
+use crate::{BlockStyle, Color, TablePresentation, TextStyle};
 
 use super::*;
 
@@ -194,7 +194,7 @@ fn panel_roles_resolve_through_the_theme_contract() {
 
 #[test]
 fn replacing_the_table_policy_keeps_the_other_component_defaults() {
-    let replaced = ComponentStyles::from_tokens(&TOKENS).with_table(TableStyle::new(
+    let replaced = ComponentStyles::from_tokens(&TOKENS).with_table(TablePresentation::new(
         BlockStyle::new().underline(),
         BlockStyle::new(),
         TextStyle::new(),

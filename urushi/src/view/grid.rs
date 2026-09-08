@@ -120,7 +120,7 @@ pub(super) fn line_extent(style: &GridStyle, columns: usize, rows: usize) -> Siz
 /// which is why no cell states one. `horizontal` and `vertical` are the glyphs
 /// of the lines that pass through — the outer edges and the separators use
 /// different ones — and answer the cases where a line does not turn.
-pub(super) const fn junction(
+pub(crate) const fn junction(
     border: &Border,
     up: bool,
     down: bool,

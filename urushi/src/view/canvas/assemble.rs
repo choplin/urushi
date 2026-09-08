@@ -1,5 +1,5 @@
 use crate::text::Grapheme;
-use crate::{Available, Axis, Length, TextStyle, View};
+use crate::{Available, Axis, Length, PrintableText, TextStyle, View};
 
 use super::{Canvas, CanvasCell, CanvasCommand, CellContribution, Composition, Position};
 use crate::view::assemble::Rect;
@@ -43,8 +43,19 @@ pub(in crate::view) fn canvas_rect(canvas: &Canvas, size: Size) -> Result<Rect, 
                 style,
                 composition,
             } => {
-                let resolved = try_resolve(&View::text(text, style), Available::NONE)?;
-                paint_resolved(&mut slots, origin, &resolved, composition);
+                if text.contains('\n') {
+                    let resolved = try_resolve(&View::text(text, style), Available::NONE)?;
+                    paint_resolved(&mut slots, origin, &resolved, composition);
+                } else if matches!(composition, Composition::Replace)
+                    && origin.x == 0
+                    && PrintableText::new(&text).width() == size.width()
+                    && usize::try_from(origin.y).is_ok_and(|y| y < size.height())
+                {
+                    slots[usize::try_from(origin.y).expect("the checked row is nonnegative")] =
+                        text_line_slots(&text, &style);
+                } else {
+                    paint_text_line(&mut slots, origin, &text, &style, composition);
+                }
             }
             CanvasCommand::Path { path, composition } => {
                 for cell in path.cells(size) {
@@ -74,6 +85,52 @@ pub(in crate::view) fn canvas_rect(canvas: &Canvas, size: Size) -> Result<Rect, 
         rows,
         anchors,
     })
+}
+
+fn text_line_slots(text: &str, style: &TextStyle) -> Vec<Slot> {
+    let text = PrintableText::new(text);
+    let mut slots = Vec::with_capacity(text.width());
+    let mut x = 0;
+    for grapheme in text.graphemes() {
+        let width = grapheme.width();
+        slots.push(Slot::Start(StyledGrapheme::new(grapheme, style.clone())));
+        slots.extend((1..width).map(|_| Slot::Continuation(x)));
+        x += width;
+    }
+    slots
+}
+
+fn paint_text_line(
+    slots: &mut [Vec<Slot>],
+    origin: Position,
+    text: &str,
+    style: &TextStyle,
+    composition: Composition,
+) {
+    let mut x = 0;
+    for grapheme in PrintableText::new(text).graphemes() {
+        let position = Position::new(origin.x.saturating_add(x as i64), origin.y);
+        match composition {
+            Composition::Replace => {
+                paint_resolved_replace(
+                    slots,
+                    position,
+                    &StyledGrapheme::new(grapheme, style.clone()),
+                );
+            }
+            Composition::Overlay | Composition::Custom(_) => {
+                paint(
+                    slots,
+                    position,
+                    &CellContribution::new()
+                        .symbol(grapheme)
+                        .style(style.clone()),
+                    composition,
+                );
+            }
+        }
+        x += grapheme.width();
+    }
 }
 
 fn requires_allocation(view: &View, axis: Axis) -> bool {
@@ -125,19 +182,56 @@ fn paint_resolved(
     for (y, row) in resolved.rows().iter().enumerate() {
         let mut x = 0usize;
         for grapheme in row {
-            paint(
-                slots,
-                Position::new(
-                    origin.x.saturating_add(x as i64),
-                    origin.y.saturating_add(y as i64),
-                ),
-                &CellContribution::new()
-                    .symbol(Grapheme::new(grapheme.symbol()))
-                    .style(grapheme.style().clone()),
-                composition,
+            let position = Position::new(
+                origin.x.saturating_add(x as i64),
+                origin.y.saturating_add(y as i64),
             );
+            match composition {
+                Composition::Replace => paint_resolved_replace(slots, position, grapheme),
+                Composition::Overlay | Composition::Custom(_) => {
+                    paint(
+                        slots,
+                        position,
+                        &CellContribution::new()
+                            .symbol(Grapheme::new(grapheme.symbol()))
+                            .style(grapheme.style().clone()),
+                        composition,
+                    );
+                }
+            }
             x += grapheme.width();
         }
+    }
+}
+
+fn paint_resolved_replace(slots: &mut [Vec<Slot>], position: Position, grapheme: &StyledGrapheme) {
+    let (Ok(y), Ok(x)) = (usize::try_from(position.y), usize::try_from(position.x)) else {
+        return;
+    };
+    let width = grapheme.width();
+    if width == 0
+        || y >= slots.len()
+        || x.checked_add(width)
+            .is_none_or(|right| right > slots[y].len())
+    {
+        return;
+    }
+
+    let owner = match slots[y][x] {
+        Slot::Start(_) => x,
+        Slot::Continuation(owner) => owner,
+    };
+    clear_owner(&mut slots[y], owner);
+    for target in x..x + width {
+        let target_owner = match slots[y][target] {
+            Slot::Start(_) => target,
+            Slot::Continuation(owner) => owner,
+        };
+        clear_owner(&mut slots[y], target_owner);
+    }
+    slots[y][x] = Slot::Start(grapheme.clone());
+    for slot in slots[y].iter_mut().skip(x + 1).take(width - 1) {
+        *slot = Slot::Continuation(x);
     }
 }
 

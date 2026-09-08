@@ -20,14 +20,16 @@
 //! - `siblings` widens a single row rather than deepening it, which is the
 //!   distribution rule's own cost.
 //! - `dashboard` is a view of the shape an application actually builds.
+//! - `table` exercises intrinsic Canvas sizing and a dense presentation item,
+//!   both as a retained View and when composed anew.
 //!
 //! `measure` is the sizing phases alone; `resolve` adds assembly, whose cost is
 //! the area of the rectangle it produces rather than the size of the tree.
 
 use divan::{Bencher, black_box};
 use urushi::{
-    Align, Available, BlockStyle, Border, Length, Overflow, TextStyle, VerticalAlign, View,
-    measure, resolve,
+    Align, Available, BlockStyle, Border, Length, Overflow, Table, TablePresentation, TextStyle,
+    VerticalAlign, View, measure, resolve,
 };
 
 fn main() {
@@ -130,6 +132,20 @@ fn dashboard(rows_of_body: usize) -> View {
     )
 }
 
+/// A wide-enough table to exercise per-cell wrapping and Canvas assembly.
+fn table(rows: usize) -> View {
+    let table = (0..rows).fold(Table::new(), |table, row| {
+        table.row(
+            (0..10)
+                .map(|column| format!("cell {row}:{column} with content that wraps"))
+                .collect::<Vec<_>>(),
+        )
+    });
+    TablePresentation::new(BlockStyle::new(), BlockStyle::new(), TextStyle::new())
+        .border(Border::NORMAL)
+        .compose(&table)
+}
+
 /// The sizing phases alone: no rectangle is allocated.
 #[divan::bench_group]
 mod measuring {
@@ -201,5 +217,18 @@ mod resolving {
     #[divan::bench(args = SIZES)]
     fn dashboard(bencher: Bencher, size: usize) {
         run(bencher, size, super::dashboard);
+    }
+
+    #[divan::bench(args = SIZES)]
+    fn table_warm(bencher: Bencher, size: usize) {
+        run(bencher, size, super::table);
+    }
+
+    #[divan::bench(args = SIZES)]
+    fn table_cold(bencher: Bencher, size: usize) {
+        bencher.bench(|| {
+            let view = super::table(black_box(size));
+            black_box(resolve(&view, AREA).size())
+        });
     }
 }

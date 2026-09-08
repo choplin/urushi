@@ -84,17 +84,7 @@ pub(super) fn fit(widths: Widths<'_>) -> Fitted<'_> {
     } = widths;
     let node = match node {
         WidthNode::Text(text) => {
-            let mut lines: Vec<String> = match (text.area, text.overflow) {
-                (Some(width), Overflow::Wrap) => wrap_text(PrintableLines::new(text.text), width),
-                (Some(width), Overflow::Clip(marker)) => text_lines(text.text)
-                    .iter()
-                    .map(|line| clip_line(line, width, marker))
-                    .collect(),
-                (None, _) => text.text.lines().map(str::to_owned).collect(),
-            };
-            if lines.is_empty() {
-                lines.push(String::new());
-            }
+            let lines = fit_text_lines(text.text, text.area, text.overflow);
             FittedNode::Text {
                 lines,
                 style: text.style,
@@ -144,6 +134,22 @@ pub(super) fn fit(widths: Widths<'_>) -> Fitted<'_> {
         height_floor,
         node,
     }
+}
+
+/// Fits plain text to a settled width under one overflow policy.
+pub(crate) fn fit_text_lines(text: &str, width: Option<usize>, overflow: &Overflow) -> Vec<String> {
+    let mut lines = match (width, overflow) {
+        (Some(width), Overflow::Wrap) => wrap_text(PrintableLines::new(text), width),
+        (Some(width), Overflow::Clip(marker)) => text_lines(text)
+            .iter()
+            .map(|line| clip_line(line, width, marker))
+            .collect(),
+        (None, _) => text.lines().map(str::to_owned).collect(),
+    };
+    if lines.is_empty() {
+        lines.push(String::new());
+    }
+    lines
 }
 
 /// Cuts one line to `width` cells between graphemes, ending it with `marker`.

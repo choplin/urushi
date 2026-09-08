@@ -94,13 +94,6 @@ impl CanvasSizing {
         }
     }
 
-    #[cfg_attr(
-        not(test),
-        expect(
-            dead_code,
-            reason = "the next built-in Canvas presentation consumes this private constructor"
-        )
-    )]
     pub(crate) fn intrinsic<T>(measure: T) -> Self
     where
         T: CanvasMeasure + Clone + PartialEq,
@@ -160,13 +153,6 @@ struct ViewportSizing {
 #[derive(Debug, Clone, PartialEq)]
 enum CanvasSizingRepr {
     Viewport(ViewportSizing),
-    #[cfg_attr(
-        not(test),
-        expect(
-            dead_code,
-            reason = "the next built-in Canvas presentation constructs this private variant"
-        )
-    )]
     Intrinsic(Measure),
 }
 

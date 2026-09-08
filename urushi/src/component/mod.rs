@@ -13,7 +13,7 @@ pub use list::{
     default_list_indenter, roman_enumerator,
 };
 pub use summary::{Summary, SummaryField};
-pub use table::{Table, TableCell, TableStyle, TableStyleFunc, default_table_style_func};
+pub use table::{Table, TableCell, TableCellStyler, TablePresentation};
 pub use tree::{
     SiblingPosition, Tree, TreeEnumerator, TreeIndenter, TreeNode, TreeStyle,
     default_tree_enumerator, default_tree_indenter,

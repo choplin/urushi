@@ -101,6 +101,46 @@ fn custom_composition_is_ordered_and_wide_graphemes_are_never_split() {
     assert_eq!(lines(&view, Available::NONE), ["c  z "]);
 }
 
+#[derive(Debug, Clone, PartialEq)]
+struct FullRowReplace;
+
+impl CanvasItem for FullRowReplace {
+    fn draw(&self, context: &mut CanvasContext) {
+        context.view(
+            Position::new(0, 0),
+            View::text("界x", TextStyle::new().bold()),
+            None,
+            None,
+        );
+        context.text_with(
+            Position::new(0, 0),
+            "abcd",
+            TextStyle::new().foreground(urushi::Color::RED),
+            Composition::Replace,
+        );
+    }
+}
+
+#[test]
+fn a_full_row_text_replace_clears_prior_wide_content() {
+    let resolved = resolve(
+        &View::canvas(Canvas::new().extent(Size::new(4, 1)).item(FullRowReplace)),
+        Available::NONE,
+    );
+
+    assert_eq!(
+        resolved.rows()[0]
+            .iter()
+            .map(|cell| cell.symbol())
+            .collect::<String>(),
+        "abcd"
+    );
+    assert!(resolved.rows()[0].iter().all(|cell| {
+        cell.style().foreground_color() == Some(urushi::Color::RED)
+            && cell.style().modifiers().is_empty()
+    }));
+}
+
 #[test]
 #[should_panic]
 fn canvas_symbol_boundaries_reject_terminal_control_sequences() {

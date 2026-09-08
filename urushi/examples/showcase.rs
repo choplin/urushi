@@ -1,7 +1,7 @@
 use urushi::{
     Align, AnsiPolicy, AnsiRenderer, BlockStyle, Border, Color, ColorProfile, List, ListItem,
-    SemanticTokens, Table, TableCell, TerminalProfile, TextStyle, Theme, Tree, TreeNode,
-    VerticalAlign, View, arabic_enumerator, measure,
+    SemanticTokens, Table, TableCell, TableCellStyler, TerminalProfile, TextStyle, Theme, Tree,
+    TreeNode, VerticalAlign, View, arabic_enumerator, measure,
 };
 
 /// Blank space of a fixed width, used to separate samples.
@@ -354,47 +354,52 @@ fn table_sample() -> View {
         .row(["mode", "plain"])
         .row(["theme", "dark"]);
 
-    sample_theme().components().table().view(&table)
+    sample_theme().table(&table)
 }
 
 /// Styles every cell from its own coordinates: one checkerboard covering the
 /// header and the body, with right-aligned numeric columns.
 ///
-/// A style the hook returns replaces the role default rather than layering over
-/// it, so it restates the foreground it wants.
-fn checkerboard(cell: TableCell<'_>) -> Option<BlockStyle> {
-    // The header sits one row above the first body row, so it continues the
-    // same board instead of starting a new one.
-    let parity = match cell.row() {
-        Some(row) => row + cell.column(),
-        None => cell.column() + 1,
-    };
-    // Both shades must differ from the surrounding backdrop, or the board reads
-    // as detached blocks instead of alternating squares.
-    let shade = if parity % 2 == 0 {
-        Color::BRIGHT_BLACK
-    } else {
-        Color::BLUE
-    };
-    let align = if cell.column() == 0 {
-        Align::Left
-    } else {
-        Align::Right
-    };
+/// A style the strategy returns replaces the role default rather than layering
+/// over it, so it restates the foreground it wants.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct Checkerboard;
 
-    let square = BlockStyle::new()
-        .foreground(Color::WHITE)
-        .background(shade)
-        .align(align);
-    Some(if cell.is_header() {
-        square.bold()
-    } else {
-        square
-    })
+impl TableCellStyler for Checkerboard {
+    fn style(&self, cell: TableCell<'_>) -> Option<BlockStyle> {
+        // The header sits one row above the first body row, so it continues the
+        // same board instead of starting a new one.
+        let parity = match cell.row() {
+            Some(row) => row + cell.column(),
+            None => cell.column() + 1,
+        };
+        // Both shades must differ from the surrounding backdrop, or the board reads
+        // as detached blocks instead of alternating squares.
+        let shade = if parity % 2 == 0 {
+            Color::BRIGHT_BLACK
+        } else {
+            Color::BLUE
+        };
+        let align = if cell.column() == 0 {
+            Align::Left
+        } else {
+            Align::Right
+        };
+
+        let square = BlockStyle::new()
+            .foreground(Color::WHITE)
+            .background(shade)
+            .align(align);
+        Some(if cell.is_header() {
+            square.bold()
+        } else {
+            square
+        })
+    }
 }
 
 /// Shows the presentation policy a caller can vary: every border edge off, a
-/// total width, and a per-cell style hook driven by row and column.
+/// total width, and a per-cell strategy driven by row and column.
 fn table_style_sample() -> View {
     let table = Table::new()
         .headers(["Cmd", "Ok", "Err"])
@@ -413,9 +418,9 @@ fn table_style_sample() -> View {
         .border_header(false)
         .border_column(false)
         .width(20)
-        .style_func(checkerboard);
+        .cell_styler(Checkerboard);
 
-    table_style.view(&table)
+    table_style.compose(&table)
 }
 
 fn section(title: &str, rows: Vec<View>) -> View {

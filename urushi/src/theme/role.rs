@@ -101,7 +101,8 @@ impl TextThemeRole for TreeRole {
 ///
 /// A table cell is a block: it aligns its content inside a column width, which
 /// is geometry. The glyph style of the table's rules is a plain [`TextStyle`],
-/// reachable through [`TableStyle::border_glyph_style`](crate::TableStyle::border_glyph_style).
+/// reachable through
+/// [`TablePresentation::border_glyph_style`](crate::TablePresentation::border_glyph_style).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TableRole {
     Header,

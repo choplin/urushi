@@ -86,7 +86,7 @@ impl Axis {
 /// The three kinds are the distribution rule's three cases, and their order in
 /// this enum is also the order a deficit shrinks them.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) enum Kind {
+pub(crate) enum Kind {
     /// A weighted share of whatever the other children leave.
     Fill(u16),
     /// No stated length: the intrinsic size.
@@ -97,7 +97,7 @@ pub(super) enum Kind {
 
 /// One child's claim on its container's main axis.
 #[derive(Debug, Clone, Copy)]
-pub(super) struct Claim {
+pub(crate) struct Claim {
     pub kind: Kind,
     /// The size the child asks for. A `Fill` child's is decided by
     /// [`distribute`], so its value here is unused.
@@ -119,7 +119,7 @@ pub(super) struct Claim {
 /// The returned sizes sum to `area` unless a floor prevented it, in which case
 /// the container resolves larger than its area and the degenerate safety net
 /// is what finally bounds it.
-pub(super) fn distribute(area: usize, claims: &[Claim]) -> Vec<usize> {
+pub(crate) fn distribute(area: usize, claims: &[Claim]) -> Vec<usize> {
     let stated: usize = claims
         .iter()
         .filter(|claim| !matches!(claim.kind, Kind::Fill(_)))

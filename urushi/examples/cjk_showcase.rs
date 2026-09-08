@@ -296,7 +296,7 @@ fn table_sample() -> View {
         .row(["表示", "有効"])
         .row(["色数", "16"]);
 
-    component_theme().components().table().view(&table)
+    component_theme().table(&table)
 }
 
 fn panel(title: &str, rows: Vec<View>) -> View {

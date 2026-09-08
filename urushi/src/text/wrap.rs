@@ -45,6 +45,46 @@ pub(crate) fn wrap_text(text: &PrintableLines, width: usize) -> Vec<String> {
     out
 }
 
+/// Counts the rows [`wrap_text`] would produce without allocating them.
+pub(crate) fn wrapped_line_count(text: &PrintableLines, width: usize) -> usize {
+    let width = width.max(1);
+    text.lines()
+        .into_iter()
+        .map(|line| {
+            if line.width() <= width {
+                return 1;
+            }
+            let mut rows = 0usize;
+            let mut current_width = 0usize;
+            for word in line.as_str().split(' ') {
+                let word = PrintableText::new(word);
+                let word_width = word.width();
+                if current_width > 0 {
+                    if current_width + 1 + word_width <= width {
+                        current_width += 1 + word_width;
+                        continue;
+                    }
+                    rows += 1;
+                    current_width = 0;
+                }
+                if word_width <= width {
+                    current_width = word_width;
+                } else {
+                    for grapheme in word.graphemes() {
+                        let grapheme_width = grapheme.width();
+                        if current_width + grapheme_width > width && current_width > 0 {
+                            rows += 1;
+                            current_width = 0;
+                        }
+                        current_width += grapheme_width;
+                    }
+                }
+            }
+            rows + 1
+        })
+        .sum()
+}
+
 fn hard_break(
     word: &PrintableText,
     width: usize,
@@ -91,5 +131,18 @@ mod tests {
     fn hard_wrap_keeps_grapheme_clusters_whole() {
         assert_eq!(wrap("abcdef", 4), ["abcd", "ef"]);
         assert_eq!(wrap("👩‍💻x", 2), ["👩‍💻", "x"]);
+    }
+
+    #[test]
+    fn counting_matches_materialized_wrapping() {
+        for text in ["", "short", "the quick brown fox", "a  b", "日本語", "a\nb"] {
+            for width in 0..8 {
+                assert_eq!(
+                    wrapped_line_count(PrintableLines::new(text), width),
+                    wrap_text(PrintableLines::new(text), width).len(),
+                    "{text:?} at width {width}"
+                );
+            }
+        }
     }
 }
