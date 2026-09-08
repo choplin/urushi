@@ -15,6 +15,12 @@ code must be able to construct the intended frame as a `View` without either:
 - computing final rectangles that only `resolve(Available)` can know; or
 - writing backend cells directly for ordinary Urushi-native content.
 
+That `View` may contain a Region plan whose renderer-neutral layout logic runs
+inside `resolve`. A Region is not a foreign backend escape: it emits the same
+`ResolvedView` cells and placements as built-in primitives and remains subject
+to the same local-area and terminal-independence rules. Its contract is
+[`presentation-region.md`](presentation-region.md).
+
 The view need not describe how the snapshot was reached. Key presses, focus
 movement, selection changes, scrolling commands, drag gestures, animation
 ticks, asynchronous work, and redraw scheduling remain outside it. It must
@@ -83,26 +89,30 @@ Core owns only renderer-neutral, one-frame presentation mechanics:
 - inline runs participating in one wrapping and clipping flow;
 - a viewport projection whose offset is supplied by its caller;
 - generic positioned placement, overlap, clipping, and draw order;
+- type-erased Region plans that measure and resolve renderer-neutral content
+  within the local area assigned by their parent;
 - keys and reported regions that follow the same transforms and clipping as
   the content around them; and
 - reservation of a foreign region without naming Ratatui or another backend.
 
-The current `Text`, `Block`, `Row`, `Column`, `Grid`, and `AnchorBlock` remain
-valid members of this vocabulary. The list above is a capability requirement,
-not a commitment to node names or to one all-purpose `Canvas`. The evidence
+The `Text`, `Block`, `Row`, `Column`, `Grid`, `Region`, and `AnchorBlock` nodes
+are members of this vocabulary. The list above is a capability requirement,
+not a commitment to one all-purpose `Canvas`. The evidence
 that an ordered positioned layer can fit the existing box model and one-pass
 resolver, and the constraints the binding contract must settle, are recorded
 in [`positioned-layout-feasibility.md`](positioned-layout-feasibility.md).
 Viewport projection remains a separate design topic.
 
 Core does not gain semantic nodes such as `View::Graph`, `View::Modal`, or
-`View::SelectedRow`. It also does not gain callbacks, events, focus movement,
-or backend `Rect` and `Buffer` values. `resolve` remains the only operation that
-receives the final available area.
+`View::SelectedRow`. It also does not gain event callbacks, focus movement, or
+backend `Rect` and `Buffer` values. `resolve` remains the only operation that
+receives the final available area and may invoke a Region plan only with its
+derived local area.
 
 ### Reusable components and presentations
 
-Components own semantic data and concrete ways to lower it to primitive views.
+Components own semantic data and concrete ways to lower it to primitive views
+or owned Region plans.
 List, Tree, Table, Summary, and Warning remain the canonical common components.
 Graphs, charts, sparklines, gauges, tabs, scrollbars, modal frames, and text-field
 visuals are component or presentation candidates when they add reusable
@@ -130,9 +140,9 @@ method signature follow the needs of that component, as
 
 The runtime lends the current model to the application's `view` function. The
 application selects or derives the immutable presentation inputs for that
-frame, components lower them to core primitives, and the runtime resolves and
-draws the result. No interaction transition runs during composition or
-resolution.
+frame, components construct built-in nodes or bind Region plans, and the
+runtime resolves and draws the result. No interaction transition runs during
+composition or resolution.
 
 ```text
 event -> update(Model) -> current Model snapshot

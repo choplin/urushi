@@ -1,9 +1,10 @@
 # View and Block Split
 
 The view model splits primitive styling into `TextStyle` and `BlockStyle` and
-composes semantic-free layout primitives into a tree resolved to per-grapheme
-rows and placements. This document records why it does each of those, why
-semantic components are lowered before this boundary, and which alternatives
+composes a component-agnostic layout tree resolved to per-grapheme rows and
+placements. Built-in nodes carry no component meaning; an opaque Region may
+bind a presentation and its inputs behind the common layout contract. This
+document records why the model has those boundaries and which alternatives
 were rejected. The contracts are defined in
 [`component-model.md`](../component-model.md),
 [`view-model.md`](../view-model.md), and
@@ -40,19 +41,23 @@ The split also makes geometry themeable on its own terms: a `panel` role is a
 `BlockStyle`, while text roles are `TextStyle` values. Component presentations
 may contain either kind, but are not themselves style values.
 
-## Why semantic components are lowered before View
+## Why View has no semantic component variants
 
 `View` is the shared language of layout and rendering, not a registry of
 component kinds. A concrete component presentation is the last layer that
 knows whether a row is a Table header, a marker belongs to a List item, or two
 nodes are joined by a Graph edge. Its `compose` operation translates that
-meaning into generic primitives before `resolve` sees the tree.
+meaning into built-in primitives or binds its inputs and behavior into an owned,
+opaque Region plan before `resolve` sees the tree.
 
-Keeping `View` primitive-only lets a component change independently of the
-resolver and lets Urushi and Noctui share one closed layout model without
-duplicating every component in it. It also prevents one convenient primitive,
-such as Grid, from becoming a semantic intermediate representation every
-component is forced through.
+Keeping semantic component variants out of `View` lets a component change
+independently of the resolver and lets Urushi and Noctui share one layout
+contract without duplicating every component in it. Built-in nodes remain a
+small common vocabulary; the Region node admits specialized algorithms through
+one type-erased measurement and resolution contract. It also prevents one
+convenient primitive, such as Grid, from becoming a semantic intermediate
+representation every component is forced through. The Region boundary is
+defined in [`presentation-region.md`](presentation-region.md).
 
 ## Why neither type is named `Style`
 
@@ -100,12 +105,13 @@ consume the one `ResolvedView`, and the Ratatui adapter turns its target
 ## Rejected designs
 
 - **Semantic component nodes such as `View::Table` or `View::Graph`.** They
-  move the presentation algorithm into the resolver, couple the closed layout
-  enum to an open set of component concepts, and make every backend-facing
-  implementation learn component semantics.
-- **Component presentations that receive `Available`.** A nested component's
+  move the presentation algorithm into component-specific resolver branches,
+  couple the built-in layout enum to an open set of component concepts, and
+  make every backend-facing implementation learn component semantics.
+- **Presentation composition that receives `Available`.** A nested component's
   share does not exist until its siblings are resolved. Giving composition the
-  root area lets it pre-wrap and pre-pad against the wrong rectangle.
+  root area lets it pre-wrap and pre-pad against the wrong rectangle. A Region
+  plan instead receives the local area during ordinary resolution.
 
 - **One style type, with inline text reading only the properties it can honor.**
   The illegal combination stays constructible and the constraint stays a promise.

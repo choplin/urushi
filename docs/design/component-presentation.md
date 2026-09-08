@@ -15,7 +15,9 @@ by multiple borrowed policies without copying or mutating either one.
 
 The operation returns `View` rather than rendered text. Logical styles and
 layout intent therefore survive until the one resolver and the selected output
-adapter, instead of becoming ANSI that another backend cannot interpret.
+adapter, instead of becoming ANSI that another backend cannot interpret. A
+presentation whose algorithm depends on its eventual local area binds an owned
+plan into a Region rather than precomputing that algorithm during composition.
 
 ## Why the composing type is a presentation
 
@@ -76,23 +78,31 @@ already expressed by inherent methods.
 Internal traversal reuse stays private. A public trait becomes justified only
 by an external generic use, not by the number of similarly named methods.
 
-## Why View is primitive-only
+`RegionLayout` does not contradict this decision. A Region plan has already
+bound its component snapshot, presentation, styles, and frame input into one
+owned value, so layout supplies no semantic argument when it invokes the plan.
+Presentations remain unrelated concrete interpreters; region plans share only
+the measurement and resolution operations every parent layout needs.
 
-Lowering ends semantic ownership. `View` may describe text, boxes, sequential
-layout, shared tracks, keyed placements, and a future generic positioned
-layout, but it cannot name Table headers, Tree branches, Graph edges, selection,
-or another component role.
+## Why View has no semantic component variants
+
+`View` never exposes component meaning in its own vocabulary. It may describe
+text, boxes, sequential layout, shared tracks, keyed placements, an erased
+Region plan, and a future generic positioned layout, but it cannot name Table
+headers, Tree branches, Graph edges, selection, or another component role.
 
 A semantic node such as `View::Tree` would defer the presentation decision into
-the resolver. That would make every component part of the closed layout enum,
+the resolver. That would make every component part of the built-in layout enum,
 couple resolver evolution to component evolution, and require the Noctui
-resolver to know the same growing component set. A generic primitive instead
-states only the geometry a presentation chose.
+resolver to know the same growing component set. A Region instead erases a
+bound concrete presentation plan behind one layout contract; the plan may
+interpret its own captured inputs, while the resolver invokes it without
+matching on the originating component.
 
 This is also why Grid is not a common component intermediate representation.
-A table may lower to Grid, but a tree or graph chooses primitives from its own
-layout needs. If Grid supports selective separators, their public vocabulary is
-positional and generic; it never names a header or another Table role.
+The canonical Table presentation uses a Region plan and leaves Grid as a
+directly useful shared-track container. A tree or graph independently chooses
+built-in primitives or a Region from its own layout needs.
 
 ## Graph as the boundary test
 
@@ -126,16 +136,19 @@ backend-specific compositor.
 
 ## Area independence
 
-A presentation cannot receive `Available`. A component inside a `Row` does not
-know its share until sibling claims are resolved; a presentation given the
-terminal width would know the root area, not its own area. Pre-wrapping or
-padding against that number makes the result correct only at the root.
+A presentation's `compose` operation cannot receive `Available`. A component
+inside a `Row` does not know its share until sibling claims are resolved; a
+presentation given the terminal width would know the root area, not its own
+area. Pre-wrapping or padding against that number makes the result correct only
+at the root.
 
-Presentations therefore compose structural intent. `resolve` alone receives
-the area and decides final widths, wrapping, clipping, and placement. An
-application that chooses a different overall structure at a breakpoint does so
-in its own view function before composition, where it owns the same area that
-will be passed to `resolve`.
+Presentations therefore compose structural intent or bind it into an owned
+Region plan. `resolve` alone receives the area and decides final widths,
+wrapping, clipping, and placement. During that operation a Region plan receives
+the local area assigned by its parent, after sibling sharing; it never receives
+the root area during composition. An application that chooses a different
+overall structure at a breakpoint does so in its own view function before
+composition, where it owns the same area that will be passed to `resolve`.
 
 ## Rejected designs
 
@@ -155,8 +168,9 @@ will be passed to `resolve`.
 - **Put semantic component nodes in `View`.** It moves component evolution into
   the resolver and turns the primitive tree into a closed registry of product
   concepts.
-- **Give a presentation `Available`.** It supplies the wrong area for nested
-  composition and bakes geometry before sibling sharing.
+- **Give presentation composition `Available`.** It supplies the wrong area for
+  nested composition and bakes geometry before sibling sharing. A bound Region
+  plan receiving its local area during `resolve` is the chosen alternative.
 - **Adopt a single all-in-one Graph widget model.** Combining graph topology,
   layout, interaction, and backend rendering prevents the same semantic graph
   and presentation from participating in Urushi's ordinary `View` pipeline.
@@ -183,11 +197,13 @@ remain. The source-level migration is mechanical:
 | `warning.view(theme.components(), width)` | `theme.warning(&warning)` or `theme.components().warning().compose(&warning)`; `resolve` receives the width |
 | `ComponentStyles` | `ComponentTheme`, including terminal helper parameters that consume theme-derived component values |
 
-The downstream ownership is explicit: Issue #61 decides Grid/Table lowering
-and generic separator vocabulary; Issue #62 decides area-independent List/Tree
-layout intent; Issue #66 migrates Summary; and Issue #48 migrates Warning.
-Those component migrations replace width-dependent wrapping, measured padding,
-and repeated-glyph construction with primitive layout intent. Future Canvas
-and Graph work must preserve the same lowering boundary. Urushi and Noctui use
-the same four layers, names, invariants, and operation; only borrowing and
+The downstream ownership is explicit: Issue #61 introduces the Region contract
+and moves Table's area-dependent layout behind it while leaving Grid
+independent; Issue #62 decides whether area-independent List/Tree layout intent
+needs Region or only built-in nodes; Issue #66 migrates Summary; and Issue #48
+migrates Warning. Those component migrations replace width-dependent wrapping,
+measured padding, and repeated-glyph construction during composition with
+primitive or Region layout intent. Future Canvas and Graph work must preserve
+the same lowering boundary. Urushi and Noctui use the same four layers, names,
+invariants, and operation; only type-erasure, dynamic equality, borrowing, and
 language-specific method spelling may differ.

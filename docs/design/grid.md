@@ -1,17 +1,15 @@
 # Grid
 
-How a grid aligns column widths across rows and draws the lines between its
-cells: the claim a column makes, the `Length` a column may carry, the padding
-every cell takes, and why the separators belong to the container rather than to
-the cells. [`view-model.md`](../view-model.md) summarizes this under "Sizing at
-a glance"; how a `Row` or `Column` divides an area is
-[`area-sharing.md`](area-sharing.md), the clamp each cell applies to the width
-it is handed is [`box-sizing.md`](box-sizing.md), and which edges a border
-draws is [`border-edges.md`](border-edges.md).
+How a Grid aligns child Views in shared columns: the claim a column makes, the
+`Length` a column may carry, the padding every cell takes, and why Table
+presentation and line drawing are outside this primitive.
+[View Model](../view-model.md) summarizes the node; sibling distribution is
+[Area Sharing](area-sharing.md), and the clamp each cell applies is
+[Box Sizing](box-sizing.md).
 
 ## The rule
 
-A grid is a rectangle of cells and one style:
+A Grid is a rectangle of child Views and one geometry style:
 
 ```rust
 pub enum View {
@@ -20,189 +18,149 @@ pub enum View {
 }
 
 pub struct GridStyle {
-    border, border_top, border_right, border_bottom, border_left,
-    border_column, border_row,
-    border_foreground, border_background,
     columns: Vec<Option<Length>>,
     cell_padding: Sides,
 }
 ```
 
-Every row holds the same number of cells. A grid does not pad a short row: an
-absent cell has no style to fill it with, so an empty cell is supplied by
-whatever composes the grid.
+Every row holds the same number of cells. Grid does not invent a missing cell:
+an absent child has no style, padding, alignment, or background, so the caller
+supplies an empty View when that is the intended cell.
+
+Grid has no border, separator, header, or component preset. A surrounding
+`Block` supplies outer box geometry. A presentation that needs an internal
+line network owns that drawing in a [Region plan](presentation-region.md).
 
 ### Column widths
 
 Every cell in a column resolves under one width, and that width is decided
-once. For each column the grid forms a claim:
+once. For each column Grid forms a claim:
 
-- its **kind** from the column's `Length`, auto where none is stated;
-- its **demand** from the greatest intrinsic width among the cells in that
-  column;
-- its **floor** from the greatest floor among them.
+- its **kind** comes from the column's `Length`, and is auto when none is
+  stated;
+- its **demand** is the greatest intrinsic width among the cells in that
+  column; and
+- its **floor** is the greatest width floor among them.
 
-Those claims divide the grid's width by the rule
-[`area-sharing.md`](area-sharing.md) already defines: stated sizes take their
-size, auto columns their intrinsic size, `Fill` columns divide the remainder by
-weight, and when the claims exceed the area they shrink in that same order,
-each floored at its own floor.
+Those claims divide the available width by the rule in
+[Area Sharing](area-sharing.md): stated sizes take their requested size, auto
+columns their intrinsic size, and `Fill` columns divide the remainder by
+weight. When claims exceed the area, they shrink in that order, each down to its
+floor.
 
-A `Length` on a column is the vocabulary a `BlockStyle` states about a box, and
-it carries the same meaning: `Cells` is an absolute request, `Fill` a share of
-the remainder, auto the intrinsic size. It marks intent rather than fixing a
-formula — a grid derives the demand and the floor from the cells beneath the
-column, where a `Row` reads them from the child itself.
+A `Length` on a column has the same meaning as one on a `BlockStyle`:
+`Cells` is an absolute request, `Fill` is a share of the remainder, and an
+absent value is intrinsic. The cells supply demand and floor because they are
+the content that must fit.
 
 Nothing is renegotiated. A cell that resolves narrower than its column leaves
-the remainder unused, and the alignment fill of its own box places it, exactly
-as a `Row` child below its share is placed.
+the remainder to its own alignment fill, just as a child below a `Row` share
+does.
 
 ### Row heights
 
-A row's height is the greatest height among its cells, as in a `Row`. A shorter
-cell is padded with blank rows and placed by its own vertical alignment.
+A row's height is the greatest resolved height among its cells, as in a `Row`.
+A shorter cell is filled to that height and placed by its own vertical
+alignment.
 
 ### Cell padding
 
-`cell_padding` applies to every cell that states no padding of its own. A cell
-that states one replaces it rather than adding to it, which is the rule the
-style model applies wherever a specific value meets a general one.
+`cell_padding` applies to every cell that states no padding of its own. A
+cell's stated padding replaces it rather than adding to it, following the
+style-value model's effective-value rule.
 
-A grid does not need uniform padding to keep its columns aligned: a column is
-as wide as its widest cell, whatever padding that cell carries. `cell_padding`
-therefore states the ordinary case — one spacing for the whole grid — rather
-than an invariant the alignment rests on.
+Uniform padding is not required for alignment. A column's demand includes the
+padding each cell actually takes, and one shared width is still selected for the
+column.
 
-### Separators
+## No spans
 
-The grid draws every line: its four outer edges, the line between two columns,
-and the line between two rows, from one glyph set and one border color. The
-outer edges follow [`border-edges.md`](border-edges.md) — an enabled edge
-contributes one row or one column, a disabled one contributes nothing.
-`border_column` and `border_row` each contribute one column or row between
-neighbours and never at the ends.
+Grid has neither column span nor row span. Its public use is a rectangular
+alignment of child Views, and no established direct Grid case requires one
+child to cover several tracks. Adding span would introduce interval demand and
+floor constraints and a different cell-addressing model without serving that
+contract.
 
-Which gaps carry separators is generic layout information. A Grid never knows
-that a row is a Table header or carries another component role. If a container
-supports a selective separator, its vocabulary identifies a position or track;
-the Table presentation owns the fact that its header lowers to that generic
-position. The exact generic separator vocabulary is part of the Grid/Table
-design, not the component boundary.
+The former proposal used Tree indentation as the reason for column span. Tree
+is semantic data with its own presentation, not evidence for widening Grid.
+A future direct Grid use may reopen span only together with the precise
+interval-sizing behavior it needs. A future Table colspan belongs first to the
+Table data and its Region presentation; it does not imply a Grid span.
 
-The glyph at an intersection is derived, not stated. Each intersection has four
-incident directions; which of them carry a line follows from the edge
-switches and from where the intersection sits, and the glyph — corner, tee,
-or cross — follows from those four facts. `Border` already names each one.
+## Grid and Table are independent
 
-Lines are drawn after every width is decided, so a grid narrowed by its area
-shrinks its columns and its lines together. They cannot disagree, because
-neither exists until the widths do.
+Grid is a layout container: it recursively resolves arbitrary child Views under
+shared column widths. Table is semantic data interpreted by
+`TablePresentation`. The canonical Table presentation binds its data, styles,
+and area-dependent drawing behavior into a Region plan and draws its cells and
+rules directly in that region.
 
-## Why the container draws the separators
+Similar width arithmetic does not create a lowering relation. The two may use
+the same private sizing functions where their mechanics coincide, but neither
+public model is the other's intermediate representation. In particular, Grid
+never receives Table headers, `BOOKTABS`, `MARKDOWN`, row-rule switches, or
+junction glyphs.
 
-A cell knows its own four edges. The glyph at an interior intersection is a
-statement about a neighbourhood — which lines arrive from which directions —
-and the container is the only node that has one.
+## Why Grid does not draw lines
 
-Letting the cells carry the edges is arithmetically possible: disable one of
-every adjacent pair so each line is drawn once, and every intersection still
-lands in exactly one cell's corner, with no doubling and no gap. What it cannot
-do is choose the glyph. A corner is where two of a box's *own* edges meet, so a
-box that draws one has no vocabulary for a third or fourth line arriving from
-outside it. Every interior intersection would come out as a corner where a tee
-or a cross belongs.
+Lines are part of a particular presentation, not a necessary consequence of
+aligning children in shared tracks. Keeping them on Grid would require a public
+vocabulary for edge occupancy, selective gaps, glyph repertoires, and junctions
+even when the direct caller wants only alignment.
 
-Supplying the glyph per cell closes that, and is rejected below. Deriving it in
-the container closes it without adding a property, and removes the possibility
-of a disagreement: there is no second party stating a glyph for the same cell.
+Table supplies the concrete use that needs those decisions, and Region lets the
+Table presentation make them after receiving the correct local area. The owner
+of the Table line network is therefore the bound Table plan. It sees all
+incident rules, reserves their rows and columns during its own measurement, and
+derives each corner, tee, cross, or straight glyph when it resolves. Cells do
+not own junctions.
 
-## Why component row roles stay above Grid
+The exact absence, blank-occupancy, and junction rules belong to the Table
+Region contract rather than Grid because that is the algorithm drawing them;
+see [Presentation Regions](presentation-region.md).
 
-A table's ordinary shape may draw a rule below its header and nowhere else,
-but `header` is Table meaning. Giving Grid a header switch makes one component
-role part of a primitive used directly and by unrelated presentations. The
-Table presentation instead lowers that meaning into whatever generic gap or
-separator mechanism the layout design provides.
+## Effect on the superseded proposal
 
-This distinction applies even when the geometry is identical. A generic
-primitive may know that a separator occupies a particular gap; it cannot know
-why the caller selected that gap, style its semantic contents, repeat it, or
-exclude it from column claims because it is a header.
+The canceled earlier proposal correctly identified several constraints:
 
-## Why a column carries a `Length`
+- Table roles must not enter Grid vocabulary;
+- line absence and an occupied blank line are distinct;
+- one owner with neighbourhood information must derive junctions;
+- Table and Block keep their public border policy; and
+- a presentation must not receive the root area during composition.
 
-Without one, every column is auto, and a grid can only ever be as wide as its
-content. "This column is exactly this wide" and "this column takes what is
-left" — the two ordinary intentions a layout has about a column — become
-inexpressible.
+This design retains those constraints but changes their owner. The Table Region
+plan, not Grid, owns Table rules, occupancy, and junction derivation. The plan
+receives its local area only during ordinary resolution.
 
-The shrink order is the sharper case. A column of fixed markers and a column of
-prose are both auto, so a narrow area takes cells from both in proportion, when
-the entire point of the fixed column is that it gives none up. Stating `Cells`
-on it puts it last in the shrink order, which is the behaviour
-[`area-sharing.md`](area-sharing.md) already defines for a box that states its
-size. The vocabulary that expresses this exists; the grid only has to accept it.
+The rest of that proposal is not adopted:
 
-That a stated column still shrinks when the area leaves no alternative is
-deliberate, and is the same rule every other stated size follows. A grid that
-refused would resolve past its area and meet the degenerate crop, which is the
-post-hoc cut the sizing model exists to avoid.
+- Grid span is omitted because its Tree motivation disappeared and no direct
+  Grid use requires it.
+- `LineSet`, `GridLineStyle`, per-line weights, and gap overrides are omitted
+  because a geometry-only Grid has no line vocabulary.
+- Table does not translate its presets or header rule into Grid.
+- Block borders remain ordinary four-edge box geometry and do not acquire a
+  grid-junction model.
 
-## Why a grid is a rectangle
-
-A ragged grid would need the grid to invent the missing cells, and an invented
-cell has no style: the background it fills, the padding it takes, and the
-alignment it applies would all be the grid guessing on behalf of a caller who
-never stated them. Requiring the rectangle moves that decision to the only
-place that can answer it, at the cost of one loop in whatever composes the
-grid.
-
-## What belongs above a grid
-
-A grid aligns and draws. What a cell contains, which rows are present, how a
-value becomes a cell, and which style a cell takes belong to whatever composes
-it — see [`component-model.md`](../component-model.md).
-
-Keeping them apart is what lets a composed view carry no size at all. A
-component that measures its own content and writes the result into the tree —
-as an absolute length, as pre-wrapped text, or as a string of repeated
-glyphs — has decided a layout before the area is known, and the pass has no
-way to refuse it, because the contents of a text leaf are opaque to it. The
-grid gives that intent a form the pass can read, so a component states which
-cells share a column and the pass decides how wide it is.
+The current decision is complete without that draft; the list above records
+which of its conclusions survived and which did not.
 
 ## Rejected designs
 
-- **A component that receives the `Available` area and sizes itself.** A
-  component composed inside a `Row` cannot know its share while composing: that
-  share depends on what its siblings resolve to, which the pass settles later.
-  The rule would hold only for a component used at the root, and one that is
-  correct only at the root does not compose.
-
-- **A subtree exempt from re-fitting.** Its baked sizes would survive the area
-  and be cut afterwards — the post-hoc crop [`box-sizing.md`](box-sizing.md)
-  rejects, reintroduced as an opt-in. A bound that arrives after a box is
-  assembled can only cut its frame open, which is the artifact making the area
-  an input removed.
-
-- **Per-cell border edges, with corner glyphs stated on `BlockStyle`.** It puts
-  a property on every box whose correct use no signature states, and it lets
-  two adjacent boxes state different glyphs for the line between them with
-  nothing to resolve the disagreement. Derivation in the container answers what
-  this would have asked an author to supply.
-
-- **Grid properties on `BlockStyle`.** `border_column` and `border_row` mean
-  nothing to a box with one child.
-  [`style-value-model.md`](style-value-model.md) keeps the property vocabulary
-  closed and every property meaningful in it.
-
-- **A `cell_padding` that adds to a cell's own padding.** Reading a cell's
-  style would no longer tell you the padding that cell has, and layering one
-  value over another is the patch semantics the style model excludes.
-
-- **Ragged rows padded by the grid.** Argued under "Why a grid is a rectangle".
-
-- **A header switch on Grid.** It names Table meaning in a layout primitive and
-  makes an unrelated Grid distinguish semantic row roles. Selective separators,
-  when the Grid/Table design requires them, use generic positional vocabulary.
+- **Table lowering to Grid.** It forces Table's area-dependent cells and rule
+  network into another public primitive's vocabulary and makes Grid the de
+  facto Table presentation representation.
+- **Lines retained on Grid for possible direct use.** No established direct
+  Grid case requires them, while their presence adds geometry, glyph, topology,
+  and junction contracts.
+- **A header or selective Table-rule switch on Grid.** It exposes Table meaning
+  on an unrelated primitive.
+- **Cell-owned rules and junction glyphs.** Adjacent cells can disagree about a
+  shared edge, and no one cell sees every direction arriving at an
+  intersection.
+- **Column or row span now.** It introduces interval constraints and partial
+  tracks without a current Grid requirement.
+- **Presentation composition receiving `Available`.** A nested component does
+  not know its share until its siblings are resolved. A bound Region plan
+  instead receives the correct local area during the ordinary pass.

@@ -1,14 +1,16 @@
 # View Model
 
 Urushi represents composed terminal output as primitive style values and a
-semantic-free view tree that resolves to the single scene every renderer
-consumes.
+component-agnostic view tree that resolves to the single scene every renderer
+consumes. Its built-in nodes form a closed common vocabulary, while one Region
+node admits an erased, renderer-neutral layout plan produced by a presentation.
 
 This document gives the shape of that model: the primitive styles and nodes,
 what the layout pass produces, and the principles sizing rests on. Semantic
-components are lowered into this tree through the presentations defined by
-[`component-model.md`](component-model.md); they are not nodes in it. The precise
-rules — how a box's size is clamped, how siblings divide an area, how overflow
+components reach this tree through the presentations defined by
+[`component-model.md`](component-model.md); they are never exposed as View
+variants. The precise rules — how a box's size is clamped, how siblings divide
+an area, how overflow
 is absorbed, the order a node resolves in, how rendered output is measured —
 each have a file under [`design/`](design/), linked from the section that
 summarizes them. Why the model has this shape at all is recorded in
@@ -42,7 +44,7 @@ rectangle. `TextStyleProperty` converts into `BlockStyleProperty`; there is no
 conversion in the other direction, so no geometry property can be applied to a
 `TextStyle`.
 
-A view is a tree of five primitive nodes, and a keyed form of one of them:
+A view is a tree of six primitive nodes, and a keyed form of one of them:
 
 ```rust
 pub enum View {
@@ -51,6 +53,7 @@ pub enum View {
     Row(VerticalAlign, Vec<View>),
     Column(Align, Vec<View>),
     Grid(GridStyle, Vec<Vec<View>>),
+    Region(RegionPlan),
     AnchorBlock(Key, BlockStyle, Box<View>),
 }
 ```
@@ -59,31 +62,49 @@ pub enum View {
 - `Block` applies one `BlockStyle` around exactly one child.
 - `Row` places children side by side.
 - `Column` stacks children.
-- `Grid` lines cells up in columns and draws the lines between them.
+- `Grid` lines child Views up in shared columns.
+- `Region` lets an owned layout plan measure and resolve within its local area.
 - `AnchorBlock` is a `Block` that also reports where its content landed.
 
 These primitives cover the current common mechanics: carry text, put a box
 around something, place things beside each other, stack them, and line them up
 in columns. They are not claimed to exhaust every renderer-neutral operation a
 full-screen frame needs. Applications and concrete presentations construct
-views through `View::text`, `View::block`, `View::row`, `View::column`, and
-`View::grid`; there is one way to express each node.
+views through `View::text`, `View::block`, `View::row`, `View::column`,
+`View::grid`, and `View::region`; there is one way to express each node.
 
 Those nodes state layout and drawing intent only. There is no `View::List`,
-`View::Table`, `View::Tree`, or `View::Graph`: a concrete presentation reads
-that meaning and lowers it before constructing the tree. A Grid produced by a
-Table presentation is indistinguishable from a Grid written directly by an
-application, and no Grid property may name a Table header or another semantic
-row role.
+`View::Table`, `View::Tree`, or `View::Graph`: a concrete presentation either
+lowers that meaning into built-in nodes or binds its component snapshot,
+styles, and behavior into an opaque Region plan. The plan may retain and
+interpret presentation-specific data, but its type is erased; `View` and the
+resolver expose no component-specific variant or branch.
 
-`GridStyle` is the grid node's own style: its generic edges and separators, an
-optional `Length` per column, and the padding its cells take. It
-holds no box geometry — a grid that needs a border of its own, a margin, or a
-stated size is placed inside a `Block`. What a grid computes, and why the lines
-between cells belong to it rather than to the cells, are defined in
+`GridStyle` is the grid node's own geometry: an optional `Length` per column
+and the default padding its cells take. It holds no box geometry or line
+network — a grid that needs a border, a margin, or a stated size is placed
+inside a `Block`, while a presentation that draws internal rules owns them in
+a Region plan. What Grid computes and why it is independent of Table are
+defined in
 [`design/grid.md`](design/grid.md).
 
-`AnchorBlock` adds no sixth thing. It is a box in every respect sizing reasons
+`RegionPlan` is an opaque cloneable and comparable value holding one concrete
+`RegionLayout`. The plan reports horizontal requirements, reports height after
+a width is selected, and resolves to a `ResolvedView` under the local
+`Available` passed by its parent. Its constructor requires the concrete plan to
+provide value equality before erasing its type, so `View` retains structural
+`Clone` and `PartialEq` without closing the plan implementations into an enum or
+a layout DSL. Region has no box properties: border, padding, stated size,
+alignment, and overflow remain the responsibility of a surrounding `Block`.
+The exact contract and its purity and equality rules are defined in
+[`design/presentation-region.md`](design/presentation-region.md).
+
+Region implementations construct their result through checked row-oriented
+output values. Those values derive grapheme widths and preserve the rectangular
+and anchor invariants of `ResolvedView`; they do not expose backend cells or the
+positioned Canvas contract.
+
+`AnchorBlock` adds no seventh thing. It is a box in every respect sizing reasons
 about — one child, one `BlockStyle`, the same rules — and the key adds only a
 report, for a caller that draws in that rectangle content this crate does not
 produce. `View::anchor_block` builds one; `View::anchor` is the boxless case,
@@ -146,10 +167,10 @@ renderer never sees text below grapheme granularity and receives every width
 from the layout pass instead of re-deriving it.
 
 `ResolvedView` carries no semantic data and no primitive nodes. It is the
-resolved scene: styled graphemes plus placements such as anchors. A future
-Canvas or Graph presentation does not create another renderer input; after
-lowering and resolution it produces the same `ResolvedView` as every other
-tree.
+resolved scene: styled graphemes plus placements such as anchors. A Region,
+future Canvas, or Graph presentation does not create another renderer input;
+after lowering and resolution it produces the same `ResolvedView` as every
+other tree.
 
 Full-screen validation requires the same tree to express inline style changes
 within one text flow, viewport projection, and positioned overlap without
@@ -211,11 +232,17 @@ floors. Distribution, the remainder rule, the cross axis, shrinking, and how a
 resolves every cell of that column under it, forming each column's claim from
 the cells beneath it — the kind from an optional `Length` on the column, the
 demand and the floor from the cells — and dividing its width by the same rule.
-It also draws its own outer edges and the lines between its cells, deriving
-each intersection's glyph from the lines that meet there, after every width is
-decided. The column claim, the meaning of a `Length` on a column, cell padding,
-and why the separators belong to the container are defined in
+The column claim, the meaning of a `Length` on a column, cell padding, and the
+absence of spans and line drawing are defined in
 [`design/grid.md`](design/grid.md).
+
+**How a specialized presentation participates.** A `Region` asks its bound
+plan for a width demand and floor, then for its height at the width selected by
+the parent. The plan resolves only after sibling sharing has derived its local
+area. A `Block` around the Region supplies any stated size, fill claim, frame,
+padding, alignment, or overflow; Region itself adds none. The phase agreement
+and output invariants are defined in
+[`design/presentation-region.md`](design/presentation-region.md).
 
 **What happens to content that does not fit.** The frame always closes at the
 used size; excess is absorbed by the content under a policy the application

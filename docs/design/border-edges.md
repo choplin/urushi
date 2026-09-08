@@ -3,9 +3,10 @@
 Which edges of a border are drawn, how the glyph set and the four edge switches
 relate, and what each enabled edge contributes to the box. [`style-model.md`](../style-model.md)
 states the rule; the sizing rules that consume the frame's contribution are
-[`box-sizing.md`](box-sizing.md). The lines a `Grid` draws between its cells
-follow these same edge rules but belong to the grid, not to the cells —
-[`grid.md`](grid.md).
+[`box-sizing.md`](box-sizing.md). A presentation-owned line network is not a
+collection of adjacent block borders; its occupancy and junctions belong to
+the Region plan drawing that network, as
+[`presentation-region.md`](presentation-region.md) defines.
 
 ## The rule
 
@@ -39,8 +40,8 @@ Each enabled edge contributes to the box as follows:
 - A corner glyph represents the intersection of two enabled incident edges, so
   it is drawn only when both those edges are enabled. A box states no glyph for
   a line arriving from outside it: a corner is where two of its *own* edges
-  meet. Where lines from several boxes meet, the container that owns them
-  chooses the glyph, which is what a `Grid` does at each of its intersections.
+  meet. A presentation drawing a line network derives its junctions from that
+  network instead of joining the borders of several cells.
 - The horizontal glyph repeats across the padded content width, and every
   emitted row has the same outer width: the padded content width plus the
   enabled vertical-edge columns.

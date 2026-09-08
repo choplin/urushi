@@ -1,11 +1,11 @@
 # Decision Log
 
-One row per decision made or changed, newest first. The linked document holds
-the current rule and rationale; because those documents are rewritten in place,
-this table is the record of when each decision was made and what it replaced.
+One concise summary per decision made or changed, newest first. This table is
+an at-a-glance history; linked documents own the current rule and rationale.
 
 | Date | Decision | Recorded in |
 | --- | --- | --- |
+| 2026-09-07 | Added Region for presentation-owned, area-dependent layout. Table now renders through Region; Grid remains a line-free, span-free shared-column primitive. | [`design/presentation-region.md`](design/presentation-region.md), [`design/component-presentation.md`](design/component-presentation.md), [`design/grid.md`](design/grid.md) |
 | 2026-09-04 | Let a caller choose whether an inline prompt starts on a new line, at column zero of the current line, or at a declared current position, and optionally cap its drawing width. Replaces the rule that every prompt first reached column zero and spanned the terminal width; the prompt now preserves content left of its chosen edge while owning and clearing each drawn row from that edge to the terminal's right edge. | [`design/prompt-region.md`](design/prompt-region.md) |
 | 2026-09-04 | Defined TUI expressiveness by one frame rather than by interaction ownership: for any current TEA model snapshot, presentations must be able to construct the intended renderer-neutral `View` without precomputing final rectangles or directly writing ordinary Urushi-native cells. Kept transitions, focus, selection, scrolling commands, camera changes, gestures, time, and effects in `urushi-tui`; allowed independent presentations to borrow component-specific immutable frame inputs with no shared signature; and identified inline styled flow, viewport projection, positioned overlap and ordering, and foreign-region reservation as the generic capability families the follow-up primitive designs must cover. | [`design/tui-view-expressiveness.md`](design/tui-view-expressiveness.md), [`design/component-presentation.md`](design/component-presentation.md) |
 | 2026-09-01 | Replaced the component-style composition contract with four explicit layers: semantic data, a concrete `...Presentation` whose `compose` operation lowers it without an available area, a semantic-free primitive `View`, and the resolved `ResolvedView` scene. Reserved `...Style` for declarative primitive or appearance values; kept presentation types independent with no common trait; added short `Theme` delegates for canonical List, Tree, Table, Summary, and Warning presentations; and required future alternatives such as layered or positioned Graph presentations to use named concrete types rather than semantic `View` nodes. | [`design/component-presentation.md`](design/component-presentation.md) |
