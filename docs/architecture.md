@@ -30,15 +30,17 @@ SemanticTokens --> Theme --> ComponentTheme --> concrete Presentation
 Semantic component data -------------------------------+-- compose
 Optional component-specific frame input ---------------+     |
                                                              v
- View (built-ins or Region plan) --> resolve --> ResolvedView + TerminalProfile --> AnsiRenderer --> ANSI text
+ View (built-ins, Region plan, or Canvas items) --> resolve --> ResolvedView + TerminalProfile --> AnsiRenderer --> ANSI text
          |
          +--> StderrTerminal (owns renderer/profile) --> stable stderr output
 ```
 
 The core [`View`](../urushi/src/view/model.rs) is a component-agnostic layout
-tree. Its built-in vocabulary is `Text`, `Block`, `Row`, `Column`, `Grid`, and
-the keyed `AnchorBlock` form; Region additionally carries an opaque bound
-presentation plan. The tree carries logical
+tree. Its built-in vocabulary is `Text`, `Block`, `Row`, `Column`, `Grid`,
+`Canvas`, and the keyed `AnchorBlock` form; Region additionally carries an
+opaque bound presentation plan. Canvas carries ordered, comparable items that
+record renderer-neutral drawing commands after its finite size is known. The
+tree carries logical
 [`TextStyle`](../urushi/src/style/text.rs) and
 [`BlockStyle`](../urushi/src/style/block.rs) values rather than
 terminal-resolved ANSI strings. Component presentations stop at this boundary.

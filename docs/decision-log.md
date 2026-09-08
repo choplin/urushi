@@ -6,6 +6,7 @@ describe the current snapshot.
 
 | Date | Decision | Recorded in |
 | --- | --- | --- |
+| 2026-09-08 | Added Canvas as a finite, content-independent drawing surface whose comparable items record `View`, `Text`, `Path`, and sparse `Cells` commands after sizing; commands compose in order through separate per-command rules. | [`design/canvas.md`](design/canvas.md) |
 | 2026-09-07 | Added Region so presentation-owned, area-dependent rendering need not become semantic `View` nodes or misuse Grid; Table uses Region, while Grid remains a line-free, span-free shared-column primitive. | [`design/presentation-region.md`](design/presentation-region.md), [`design/component-presentation.md`](design/component-presentation.md), [`design/grid.md`](design/grid.md) |
 | 2026-09-04 | Made an inline prompt's origin and width caller-configurable so it can coexist with content to its left instead of always claiming a full-width line. | [`design/prompt-region.md`](design/prompt-region.md) |
 | 2026-09-04 | Defined TUI expressiveness by whether any model snapshot can produce a renderer-neutral `View`, not by interaction ownership, so layout capability can grow without moving transitions and effects out of `urushi-tui`. | [`design/tui-view-expressiveness.md`](design/tui-view-expressiveness.md), [`design/component-presentation.md`](design/component-presentation.md) |

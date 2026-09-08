@@ -88,8 +88,8 @@ the measurement and resolution operations every parent layout needs.
 
 `View` never exposes component meaning in its own vocabulary. It may describe
 text, boxes, sequential layout, shared tracks, keyed placements, an erased
-Region plan, and a future generic positioned layout, but it cannot name Table
-headers, Tree branches, Graph edges, selection, or another component role.
+Region plan, and a generic Canvas, but it cannot name Table headers, Tree
+branches, Graph edges, selection, or another component role.
 
 A semantic node such as `View::Tree` would defer the presentation decision into
 the resolver. That would make every component part of the built-in layout enum,
@@ -127,11 +127,10 @@ cannot mutate them, interpret input events, or prescribe their transitions.
 The general one-frame expressiveness rule is recorded in
 [`tui-view-expressiveness.md`](tui-view-expressiveness.md).
 
-The exact Canvas coordinate and clipping contract, and the exact inputs of a
-future Graph presentation, remain separate design questions. Issue #59 owns
-the Canvas feasibility evidence; Issue #60 owns the binding primitive,
-coordinate, sizing, clipping, and ordering contract. This boundary only
-requires that those choices do not create `View::Graph` or a second
+Canvas owns the generic coordinate, sizing, clipping, command, and composition
+contract recorded in [`canvas.md`](canvas.md). A future Graph presentation
+owns its graph-specific projection, routing, and immutable frame inputs. This
+boundary prevents either side from creating `View::Graph` or a second
 backend-specific compositor.
 
 ## Area independence
@@ -197,13 +196,9 @@ remain. The source-level migration is mechanical:
 | `warning.view(theme.components(), width)` | `theme.warning(&warning)` or `theme.components().warning().compose(&warning)`; `resolve` receives the width |
 | `ComponentStyles` | `ComponentTheme`, including terminal helper parameters that consume theme-derived component values |
 
-The downstream ownership is explicit: Issue #61 introduces the Region contract
-and moves Table's area-dependent layout behind it while leaving Grid
-independent; Issue #62 decides whether area-independent List/Tree layout intent
-needs Region or only built-in nodes; Issue #66 migrates Summary; and Issue #48
-migrates Warning. Those component migrations replace width-dependent wrapping,
-measured padding, and repeated-glyph construction during composition with
-primitive or Region layout intent. Future Canvas and Graph work must preserve
-the same lowering boundary. Urushi and Noctui use the same four layers, names,
-invariants, and operation; only type-erasure, dynamic equality, borrowing, and
-language-specific method spelling may differ.
+Component migrations replace width-dependent wrapping, measured padding, and
+repeated-glyph construction during composition with primitive or Region layout
+intent. Canvas and Graph work preserve the same lowering boundary. Urushi and
+Noctui use the same four layers, names, invariants, and operation; only
+type-erasure, dynamic equality, borrowing, and language-specific method
+spelling may differ.

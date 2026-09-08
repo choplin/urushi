@@ -55,6 +55,15 @@ swapped.
 settle, which is what makes an intrinsic size the same computation as a bounded
 one rather than a second rule.
 
+**`Canvas`** settles each axis from a finite parent allocation or, when that
+axis is unbounded, its explicit extent. It does not inspect items to determine
+that size. After both axes are final, it creates a local context, asks items to
+record commands in order, rasterizes and composes their cell contributions,
+clips them at all four edges, and returns the resulting cells and translated
+anchors. A placed View resolves once in its complete local geometry before
+projection; Canvas clipping never revises its size or reflows it. The detailed
+contract and walkthrough are in [`canvas.md`](canvas.md).
+
 The order settles two questions that would otherwise be ambiguous. A
 `max_height` bounds the box *before* `vertical_align` places content inside
 it, not after. And no bound ever reaches the frame, because steps 2 and 4

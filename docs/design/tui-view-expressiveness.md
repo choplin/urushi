@@ -88,20 +88,19 @@ Core owns only renderer-neutral, one-frame presentation mechanics:
 - sequential and shared-track layout;
 - inline runs participating in one wrapping and clipping flow;
 - a viewport projection whose offset is supplied by its caller;
-- generic positioned placement, overlap, clipping, and draw order;
+- a Canvas for positioned placement, overlap, connected geometry, sparse
+  cells, clipping, and ordered cell composition;
 - type-erased Region plans that measure and resolve renderer-neutral content
   within the local area assigned by their parent;
 - keys and reported regions that follow the same transforms and clipping as
   the content around them; and
 - reservation of a foreign region without naming Ratatui or another backend.
 
-The `Text`, `Block`, `Row`, `Column`, `Grid`, `Region`, and `AnchorBlock` nodes
-are members of this vocabulary. The list above is a capability requirement,
-not a commitment to one all-purpose `Canvas`. The evidence
-that an ordered positioned layer can fit the existing box model and one-pass
-resolver, and the constraints the binding contract must settle, are recorded
-in [`positioned-layout-feasibility.md`](positioned-layout-feasibility.md).
-Viewport projection remains a separate design topic.
+The `Text`, `Block`, `Row`, `Column`, `Grid`, `Region`, `Canvas`, and
+`AnchorBlock` nodes are members of this vocabulary. Canvas is a finite drawing
+surface whose items record `View`, `Text`, `Path`, and `Cells` commands after
+its size is known; its exact contract is recorded in
+[`canvas.md`](canvas.md). Viewport projection remains a separate design topic.
 
 Core does not gain semantic nodes such as `View::Graph`, `View::Modal`, or
 `View::SelectedRow`. It also does not gain event callbacks, focus movement, or
@@ -160,10 +159,9 @@ event -> update(Model) -> current Model snapshot
                   urushi-tui backend adapter
 ```
 
-## Invariants for the follow-up designs
+## Invariants
 
-The exact primitive APIs remain open, but the follow-up designs must preserve
-these constraints:
+The primitive APIs must preserve these constraints:
 
 - inline runs wrap and clip as one flow rather than as independently allocated
   siblings;

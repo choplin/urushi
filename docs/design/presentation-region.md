@@ -124,10 +124,10 @@ region-local coordinates. It produces `ResolvedView` only after those
 invariants hold. A plan never supplies a claimed grapheme width or constructs
 backend cells.
 
-This is not the positioned Canvas API. Region output describes completed rows
-inside one local rectangle; it does not establish public overlap, z-order,
-absolute-coordinate, or backend-buffer operations. Those remain owned by the
-separate positioned-layout design.
+This is not the Canvas API. Region output describes completed rows inside one
+local rectangle; it does not establish public overlap, ordered cell
+composition, signed-coordinate placement, or backend-buffer operations. The
+renderer-neutral drawing operations belong to [`canvas.md`](canvas.md).
 
 ## What a plan may contain
 

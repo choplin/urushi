@@ -53,11 +53,14 @@ opaque Region plan before `resolve` sees the tree.
 Keeping semantic component variants out of `View` lets a component change
 independently of the resolver and lets Urushi and Noctui share one layout
 contract without duplicating every component in it. Built-in nodes remain a
-small common vocabulary; the Region node admits specialized algorithms through
-one type-erased measurement and resolution contract. It also prevents one
+small common vocabulary. Region admits specialized algorithms through one
+type-erased measurement and resolution contract, while Canvas admits
+size-responsive positioned drawing through ordered renderer-neutral commands.
+Neither exposes the component meaning it serves. This also prevents one
 convenient primitive, such as Grid, from becoming a semantic intermediate
-representation every component is forced through. The Region boundary is
-defined in [`presentation-region.md`](presentation-region.md).
+representation every component is forced through. Their boundaries are
+defined in [`presentation-region.md`](presentation-region.md) and
+[`canvas.md`](canvas.md).
 
 ## Why neither type is named `Style`
 

@@ -129,8 +129,8 @@ style split or trait today.
 The same rule scales to a future graph component. Graph topology and content
 remain semantic data, while concrete choices such as layered or explicitly
 positioned presentation use named types such as `LayeredGraphPresentation` or
-`PositionedGraphPresentation`. They may use a future built-in canvas primitive
-or an owned region plan, but `View` gains neither a `Graph` node nor graph
+`PositionedGraphPresentation`. They may use the built-in Canvas or an owned
+Region plan, but `View` gains neither a `Graph` node nor graph
 interaction semantics. No
 `theme.graph(&graph)` shortcut exists until Urushi has chosen and shipped one
 canonical graph presentation.
