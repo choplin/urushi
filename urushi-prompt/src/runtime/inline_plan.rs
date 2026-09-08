@@ -402,3 +402,499 @@ fn plan_clear_owned_rows(previous: &InlinePresentation) -> Vec<InlineCommand> {
     commands.push(InlineCommand::RestorePosition);
     commands
 }
+
+#[cfg(test)]
+mod tests {
+    use super as inline_plan;
+    use super::*;
+    use crate::runtime::{
+        LineKind, PromptStyles, PromptView, ViewCursor, crossterm::CrosstermRenderer,
+        terminal::Renderer, test_styles, view::tests::*,
+    };
+    use urushi::{AnsiPolicy, ColorProfile, TerminalProfile};
+    /// The plan the renderer would execute for `view`, without writing it.
+    fn draw_plan<W>(renderer: &CrosstermRenderer<W>, view: &PromptView) -> InlineRenderPlan {
+        draw_plan_at(
+            renderer,
+            PromptStart::CurrentPosition { column: 0 },
+            renderer.columns,
+            view,
+        )
+    }
+
+    fn draw_plan_at<W>(
+        renderer: &CrosstermRenderer<W>,
+        start: PromptStart,
+        drawing_columns: u16,
+        view: &PromptView,
+    ) -> InlineRenderPlan {
+        let framed = lay_out(drawing_columns, renderer.rows, view);
+        inline_plan::plan_draw(
+            framed,
+            &renderer.presentation,
+            start,
+            drawing_columns,
+            renderer.rows,
+        )
+    }
+
+    /// The state a partially written plan leaves behind: the fold of the
+    /// commands that succeeded. Testing recovery this way needs no failure
+    /// injection.
+    fn fold(previous: &InlinePresentation, commands: &[InlineCommand]) -> InlinePresentation {
+        commands
+            .iter()
+            .fold(RenderState::resuming(previous.clone()), step)
+            .presentation
+    }
+
+    /// The rows a `columns` x `rows` terminal box shows of `view`.
+    #[test]
+    fn every_prompt_start_has_an_explicit_first_frame_plan() {
+        let styles = test_styles();
+        let renderer = CrosstermRenderer::new(Vec::new(), (20, 4));
+        let view = renderer_view(vec![view_line("question", &styles.question)], None);
+
+        let cases = [
+            (
+                PromptStart::NewLine,
+                Some(InlineCommand::CarriageReturnLineFeed),
+            ),
+            (
+                PromptStart::CurrentLine,
+                Some(InlineCommand::MoveToColumn(0)),
+            ),
+            (PromptStart::CurrentPosition { column: 4 }, None),
+        ];
+        for (start, initial) in cases {
+            let columns = 20_u16.saturating_sub(start.column()).max(1);
+            let plan = draw_plan_at(&renderer, start, columns, &view);
+            let mut expected = vec![InlineCommand::HideCursor];
+            expected.extend(initial);
+            expected.extend([
+                InlineCommand::SavePosition,
+                InlineCommand::RestorePosition,
+                InlineCommand::ClearLine,
+                InlineCommand::Write(plan.next.rows[0].clone()),
+                InlineCommand::RestorePosition,
+            ]);
+            assert_eq!(plan.commands, expected, "{start:?}");
+        }
+    }
+
+    fn every_plan_shape() -> Vec<(&'static str, Vec<InlineCommand>)> {
+        let theme = test_theme();
+        let profile = TerminalProfile::new(ColorProfile::Monochrome, AnsiPolicy::Disabled);
+        let styles = PromptStyles::resolve(&theme, &profile);
+        let one_row = |cursor| renderer_view(vec![view_line("only", &styles.question)], cursor);
+        let three_rows = |cursor| {
+            renderer_view(
+                vec![
+                    view_line("first", &styles.question),
+                    view_line("second", &styles.answer),
+                    view_line("third", &styles.help).with_kind(LineKind::Help),
+                ],
+                cursor,
+            )
+        };
+
+        let mut plans = Vec::new();
+
+        let mut renderer = CrosstermRenderer::new(Vec::new(), (20, 4));
+        plans.push((
+            "first frame, cursor at the origin",
+            draw_plan(&renderer, &one_row(Some(ViewCursor { row: 0, column: 0 }))).commands,
+        ));
+        plans.push((
+            "first frame, three rows",
+            draw_plan(
+                &renderer,
+                &three_rows(Some(ViewCursor { row: 2, column: 4 })),
+            )
+            .commands,
+        ));
+
+        plans.push((
+            "first frame, new line",
+            draw_plan_at(
+                &renderer,
+                PromptStart::NewLine,
+                renderer.columns,
+                &one_row(Some(ViewCursor { row: 0, column: 3 })),
+            )
+            .commands,
+        ));
+        plans.push((
+            "first frame, current line",
+            draw_plan_at(
+                &renderer,
+                PromptStart::CurrentLine,
+                renderer.columns,
+                &one_row(Some(ViewCursor { row: 0, column: 3 })),
+            )
+            .commands,
+        ));
+        plans.push((
+            "first frame, current position",
+            draw_plan_at(
+                &renderer,
+                PromptStart::CurrentPosition { column: 4 },
+                renderer.columns - 4,
+                &one_row(Some(ViewCursor { row: 0, column: 3 })),
+            )
+            .commands,
+        ));
+
+        renderer
+            .draw(&one_row(Some(ViewCursor { row: 0, column: 1 })))
+            .expect("first frame renders");
+        plans.push((
+            "growth from one row to three",
+            draw_plan(
+                &renderer,
+                &three_rows(Some(ViewCursor { row: 1, column: 2 })),
+            )
+            .commands,
+        ));
+
+        renderer
+            .draw(&three_rows(Some(ViewCursor { row: 1, column: 2 })))
+            .expect("grown frame renders");
+        plans.push((
+            "redraw of a changed middle row",
+            draw_plan(
+                &renderer,
+                &renderer_view(
+                    vec![
+                        view_line("first", &styles.question),
+                        view_line("changed", &styles.answer),
+                        view_line("third", &styles.help).with_kind(LineKind::Help),
+                    ],
+                    Some(ViewCursor { row: 2, column: 0 }),
+                ),
+            )
+            .commands,
+        ));
+        for outcome in [
+            RenderFinish::Submitted,
+            RenderFinish::Cancelled,
+            RenderFinish::Error,
+        ] {
+            plans.push((
+                match outcome {
+                    RenderFinish::Submitted => "finish: submitted",
+                    RenderFinish::Cancelled => "finish: cancelled",
+                    _ => "finish: error",
+                },
+                inline_plan::plan_finish(outcome, &renderer.presentation).commands,
+            ));
+        }
+
+        renderer.resize(20, 4);
+        plans.push((
+            "re-establishing after a lost region",
+            draw_plan(
+                &renderer,
+                &three_rows(Some(ViewCursor { row: 0, column: 0 })),
+            )
+            .commands,
+        ));
+
+        plans
+    }
+
+    #[test]
+    fn no_plan_emits_a_movement_of_zero_distance() {
+        for (name, commands) in every_plan_shape() {
+            for command in &commands {
+                let zero = matches!(
+                    command,
+                    InlineCommand::MoveUp(0)
+                        | InlineCommand::MoveDown(0)
+                        | InlineCommand::MoveRight(0)
+                );
+                assert!(!zero, "{name}: {commands:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn every_write_is_positioned_and_cleared_the_same_way() {
+        let mut writes = 0;
+        for (name, commands) in every_plan_shape() {
+            for (index, command) in commands.iter().enumerate() {
+                if !matches!(command, InlineCommand::Write(_)) {
+                    continue;
+                }
+                writes += 1;
+                // Position, clear, write — the same three steps for every row,
+                // with no column command and no first-row special case. The
+                // clear immediately before the write is what the recovery
+                // contract rests on.
+                let positioning = matches!(
+                    commands[..index],
+                    [.., InlineCommand::RestorePosition, InlineCommand::ClearLine]
+                        | [
+                            ..,
+                            InlineCommand::RestorePosition,
+                            InlineCommand::MoveDown(_),
+                            InlineCommand::ClearLine,
+                        ]
+                );
+                assert!(positioning, "{name}: row form at {index} in {commands:?}");
+            }
+        }
+        assert!(writes >= 8, "the shapes must actually write rows: {writes}");
+    }
+
+    #[test]
+    fn a_write_is_always_followed_by_an_absolute_reposition() {
+        for (name, commands) in every_plan_shape() {
+            let mut written = false;
+            for command in &commands {
+                match command {
+                    InlineCommand::Write(_) => written = true,
+                    // The cursor's position after a write that reaches the
+                    // right margin is terminal-dependent, so nothing relative
+                    // may follow one until an absolute command has removed the
+                    // ambiguity.
+                    InlineCommand::MoveUp(_)
+                    | InlineCommand::MoveDown(_)
+                    | InlineCommand::MoveRight(_) => {
+                        assert!(
+                            !written,
+                            "{name}: relative move after a write in {commands:?}"
+                        )
+                    }
+                    InlineCommand::RestorePosition
+                    | InlineCommand::MoveToColumn(_)
+                    | InlineCommand::CarriageReturnLineFeed => written = false,
+                    _ => {}
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn first_draw_reserves_rows_before_saving_the_render_origin() {
+        let theme = test_theme();
+        let profile = TerminalProfile::new(ColorProfile::Monochrome, AnsiPolicy::Disabled);
+        let styles = PromptStyles::resolve(&theme, &profile);
+        let mut renderer = CrosstermRenderer::new(Vec::new(), (20, 4));
+        let view = renderer_view(
+            vec![
+                view_line("first", &styles.question),
+                view_line("second", &styles.answer),
+                view_line("third", &styles.help).with_kind(LineKind::Help),
+            ],
+            None,
+        );
+
+        // Two bare line feeds scroll the extra rows into existence, the cursor
+        // returns to the top of them, and only then is the origin anchored. No
+        // origin is saved before the line feeds: a first frame has nothing to
+        // return to, and a position saved ahead of them would be the very one
+        // a line feed at the bottom of the screen invalidates.
+        let plan = draw_plan(&renderer, &view);
+        assert_eq!(
+            plan.commands[..4],
+            [
+                InlineCommand::HideCursor,
+                InlineCommand::LineFeed,
+                InlineCommand::LineFeed,
+                InlineCommand::MoveUp(2),
+            ]
+        );
+        assert_eq!(plan.commands[4], InlineCommand::SavePosition);
+        assert_eq!(
+            plan.commands
+                .iter()
+                .position(|command| *command == InlineCommand::SavePosition),
+            Some(4),
+            "the frame saves the origin once, after the rows are reserved"
+        );
+        // Mid-growth the region is unanchored: the line feeds may have
+        // scrolled the display, and no saved position survives that.
+        let growing = fold(&renderer.presentation, &plan.commands[..2]);
+        assert!(!growing.anchored);
+        // No command carries the anchor or the row count: folding the prefix
+        // that ends at the closing SavePosition derives both. Nothing has been
+        // written yet, so the region is reserved but not yet owned.
+        let reserved = fold(&renderer.presentation, &plan.commands[..5]);
+        assert!(reserved.anchored);
+        assert_eq!(reserved.reserved_rows, 3);
+        assert_eq!(reserved.owned_rows, 0);
+        assert!(!reserved.drawn);
+
+        renderer
+            .draw(&view)
+            .expect("renderer reserves and draws three rows");
+        assert_eq!(renderer.presentation.reserved_rows, 3);
+    }
+
+    #[test]
+    fn unchanged_frames_only_reposition_the_cursor() {
+        let theme = test_theme();
+        let profile = TerminalProfile::new(ColorProfile::Monochrome, AnsiPolicy::Disabled);
+        let styles = PromptStyles::resolve(&theme, &profile);
+        let mut renderer = CrosstermRenderer::new(Vec::new(), (20, 4));
+        let view = renderer_view(
+            vec![view_line("stable", &styles.answer)],
+            Some(ViewCursor { row: 0, column: 2 }),
+        );
+        renderer.draw(&view).expect("first frame renders");
+
+        // Nothing is cleared and nothing is rewritten; the frame only puts the
+        // cursor back.
+        let plan = draw_plan(&renderer, &view);
+        assert_eq!(
+            plan.commands,
+            [
+                InlineCommand::HideCursor,
+                InlineCommand::RestorePosition,
+                InlineCommand::MoveRight(2),
+                InlineCommand::ShowCursor,
+            ]
+        );
+        // A frame that only repositions leaves the region exactly as it was,
+        // whichever command it failed on.
+        for k in 0..=plan.commands.len() {
+            assert_eq!(
+                fold(&renderer.presentation, &plan.commands[..k]),
+                renderer.presentation
+            );
+        }
+
+        let first_frame_bytes = renderer.writer.len();
+        renderer.draw(&view).expect("unchanged frame renders");
+        let update = String::from_utf8(renderer.writer[first_frame_bytes..].to_vec())
+            .expect("renderer writes UTF-8 commands");
+        assert!(!update.contains("stable"), "{update:?}");
+    }
+
+    #[test]
+    fn submitted_prompt_finishes_with_a_scrolling_line_feed() {
+        let theme = test_theme();
+        let profile = TerminalProfile::new(ColorProfile::Monochrome, AnsiPolicy::Disabled);
+        let styles = PromptStyles::resolve(&theme, &profile);
+        let mut renderer = CrosstermRenderer::new(Vec::new(), (20, 2));
+        renderer
+            .draw(&renderer_view(
+                vec![
+                    view_line("answer", &styles.answer),
+                    view_line("help", &styles.help).with_kind(LineKind::Help),
+                ],
+                None,
+            ))
+            .expect("prompt renders");
+
+        // Step down to the last owned row, then release the region with a real
+        // line feed. Relative movement would stop at the terminal boundary
+        // instead of scrolling, so the final row must not be re-entered with a
+        // MoveDown-style command.
+        let plan = inline_plan::plan_finish(RenderFinish::Submitted, &renderer.presentation);
+        assert_eq!(
+            plan.commands,
+            [
+                InlineCommand::RestorePosition,
+                InlineCommand::MoveDown(1),
+                InlineCommand::CarriageReturnLineFeed,
+                InlineCommand::ShowCursor,
+            ]
+        );
+
+        renderer
+            .finish(RenderFinish::Submitted)
+            .expect("submitted prompt finishes");
+    }
+
+    #[test]
+    fn recovery_state_is_the_fold_of_the_commands_that_succeeded() {
+        let theme = test_theme();
+        let profile = TerminalProfile::new(ColorProfile::Monochrome, AnsiPolicy::Disabled);
+        let styles = PromptStyles::resolve(&theme, &profile);
+        let renderer = CrosstermRenderer::new(Vec::new(), (20, 4));
+        let plan = draw_plan(
+            &renderer,
+            &renderer_view(
+                vec![
+                    view_line("first", &styles.question),
+                    view_line("second", &styles.option),
+                    view_line("third", &styles.help).with_kind(LineKind::Help),
+                ],
+                None,
+            ),
+        );
+
+        // The state at any failure point is the fold of the prefix that
+        // succeeded, so it can be asserted without injecting a failure. Rows
+        // are reserved before anything is owned, and each row becomes owned by
+        // the clear that precedes its write.
+        let expected = [
+            (0, false, 0, 0, false),
+            (2, false, 2, 0, false),
+            (5, true, 3, 0, false),
+            (8, true, 3, 1, true),
+            (12, true, 3, 2, true),
+            (16, true, 3, 3, true),
+            (plan.commands.len(), true, 3, 3, true),
+        ];
+        for (prefix, anchored, reserved_rows, owned_rows, drawn) in expected {
+            let state = fold(&renderer.presentation, &plan.commands[..prefix]);
+            assert_eq!(
+                (
+                    state.anchored,
+                    state.reserved_rows,
+                    state.owned_rows,
+                    state.drawn
+                ),
+                (anchored, reserved_rows, owned_rows, drawn),
+                "fold of the first {prefix} commands"
+            );
+        }
+
+        // A completed frame collapses the owned extent to its own height, which
+        // the commands do not carry; only the planner knows it.
+        assert_eq!(plan.next.owned_rows, 3);
+        assert!(plan.next.drawn);
+    }
+
+    #[test]
+    fn every_row_is_cleared_before_it_is_written_in_the_same_frame() {
+        let theme = test_theme();
+        let profile = TerminalProfile::new(ColorProfile::Monochrome, AnsiPolicy::Disabled);
+        let styles = PromptStyles::resolve(&theme, &profile);
+        let mut renderer = CrosstermRenderer::new(Vec::new(), (20, 4));
+        let tall = renderer_view(
+            vec![
+                view_line("first", &styles.question),
+                view_line("second", &styles.option),
+                view_line("third", &styles.help).with_kind(LineKind::Help),
+            ],
+            Some(ViewCursor { row: 1, column: 3 }),
+        );
+        let short = renderer_view(vec![view_line("only", &styles.question)], None);
+
+        // A write that fails partway never reaches the fold, so it cannot raise
+        // owned_rows itself. It is covered because the clear on its own row
+        // already did — the invariant the recovery contract rests on. Dropping
+        // a clear for a row believed to be empty or merely appended to would
+        // fail here rather than silently leaving residue behind a failed write.
+        for view in [&tall, &short, &tall] {
+            let plan = draw_plan(&renderer, view);
+            let mut state = RenderState::resuming(renderer.presentation.clone());
+            for command in &plan.commands {
+                if matches!(command, InlineCommand::Write(_)) {
+                    assert!(
+                        state.presentation.owned_rows > state.cursor_row,
+                        "row {} is written while cleanup owns only {} rows",
+                        state.cursor_row,
+                        state.presentation.owned_rows
+                    );
+                }
+                state = step(state, command);
+            }
+            renderer.draw(view).expect("renderer writes to a buffer");
+        }
+    }
+}

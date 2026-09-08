@@ -551,3 +551,227 @@ mod tests {
         );
     }
 }
+
+#[cfg(test)]
+mod integration_tests {
+    use crate::runtime::{
+        FormState, LineKind, PromptLine, PromptStyles, ReducerResult, ViewCursor, ViewSpan,
+        crossterm::CrosstermRenderer, frame, terminal::tests::enter, test_styles, view::tests::*,
+    };
+    use crate::{FieldKey, Form, Group, Input};
+    use urushi::{AnsiPolicy, ColorProfile, TerminalProfile};
+    #[test]
+    fn a_wrapped_question_is_omitted_whole_before_focus_error_and_help() {
+        let mut form = Form::builder()
+            .group(
+                Group::builder()
+                    .field(Input::new(FieldKey::new("first"), "First", "one").expect("input"))
+                    .field(
+                        Input::new(
+                            FieldKey::new("second"),
+                            "A question long enough that it wraps across several terminal rows",
+                            "value",
+                        )
+                        .expect("input")
+                        .help("enter continue")
+                        .validate(Box::new(|_| {
+                            Err(crate::ValidationError::new("Not acceptable."))
+                        })),
+                    )
+                    .build()
+                    .expect("group"),
+            )
+            .build()
+            .expect("form");
+        let mut state = FormState::Running { group: 0, field: 0 };
+        assert_eq!(form.reduce(&mut state, enter()), ReducerResult::Running);
+        // Enter on the focused field is refused and raises its error row.
+        assert_eq!(form.reduce(&mut state, enter()), ReducerResult::Running);
+
+        let styles = test_styles();
+        let laid_out = lay_out(20, 3, &form.view(&state, &styles, 20));
+        let drawn = laid_out
+            .rows
+            .iter()
+            .map(frame::FramedRow::text)
+            .collect::<Vec<_>>();
+        assert!(drawn.iter().any(|line| line.contains("Not acceptable")));
+        assert!(drawn.iter().any(|line| line.contains("› value")));
+        assert!(!drawn.iter().any(|line| line.contains("A question")));
+        assert!(drawn.iter().any(|line| line.contains("enter continue")));
+    }
+
+    #[test]
+    fn a_validation_error_wider_than_the_terminal_is_wrapped_not_cut() {
+        // The regression guard for resolving against the terminal's real
+        // width. Resolving unbounded would make the error row as wide as its
+        // message and silently lose everything past the last column.
+        const MESSAGE: &str = "That value is not one this field will accept.";
+        let mut form = Form::builder()
+            .group(
+                Group::builder()
+                    .field(
+                        Input::new(FieldKey::new("name"), "Name", "value")
+                            .expect("input")
+                            .validate(Box::new(|_| Err(crate::ValidationError::new(MESSAGE)))),
+                    )
+                    .build()
+                    .expect("group"),
+            )
+            .build()
+            .expect("form");
+        let mut state = FormState::Running { group: 0, field: 0 };
+        // Enter is refused, which is what raises the validation error row.
+        assert_eq!(form.reduce(&mut state, enter()), ReducerResult::Running);
+
+        let styles = test_styles();
+        let view = form.view(&state, &styles, 20);
+        let framed = lay_out(20, 20, &view);
+        let drawn = framed
+            .rows
+            .iter()
+            .map(frame::FramedRow::text)
+            .collect::<Vec<_>>();
+
+        assert!(
+            drawn.iter().all(|row| row.chars().count() < MESSAGE.len()),
+            "the error row was never wrapped: {drawn:?}"
+        );
+        let joined = drawn
+            .iter()
+            .map(|row| row.trim().to_owned())
+            .collect::<Vec<_>>()
+            .join(" ");
+        assert!(
+            joined.contains(MESSAGE),
+            "wrapping lost part of the message: {joined:?}"
+        );
+    }
+
+    #[test]
+    fn narrow_viewports_omit_wide_scalars_without_losing_cursor_bounds() {
+        let theme = test_theme();
+        let profile = TerminalProfile::new(ColorProfile::TrueColor, AnsiPolicy::Enabled);
+        let styles = PromptStyles::resolve(&theme, &profile);
+        let cjk_line = view_line("あ", &styles.cursor);
+        for columns in [0, 1] {
+            let mut renderer = CrosstermRenderer::new(Vec::new(), (columns, 1));
+            let view = renderer_view(
+                vec![cjk_line.clone()],
+                Some(ViewCursor { row: 0, column: 0 }),
+            );
+            let layout = lay_out(renderer.columns, renderer.rows, &view);
+            assert_eq!(layout.rows.len(), 1);
+            // A wide grapheme that cannot be shown whole leaves blank cells:
+            // half of one is not something a terminal can draw.
+            assert!(!layout.rows[0].text().contains('あ'));
+            assert_eq!(layout.cursor, Some(ViewCursor { row: 0, column: 0 }));
+
+            renderer.draw(&view).expect("narrow draw succeeds");
+            let output =
+                String::from_utf8(renderer.writer).expect("renderer writes UTF-8 commands");
+            assert!(!output.contains('あ'));
+        }
+    }
+
+    #[test]
+    fn short_viewports_never_replace_the_active_field_with_help() {
+        let theme = test_theme();
+        let profile = TerminalProfile::new(ColorProfile::Monochrome, AnsiPolicy::Disabled);
+        let styles = PromptStyles::resolve(&theme, &profile);
+        for rows in 1..=4 {
+            let renderer = CrosstermRenderer::new(Vec::new(), (40, rows));
+            let view = renderer_view(
+                vec![
+                    view_line("previous question", &styles.muted),
+                    view_line("previous answer", &styles.answer),
+                    view_line("", &styles.body),
+                    active_line(view_line("┃ current question", &styles.accent)),
+                    active_line(PromptLine::spans(vec![
+                        ViewSpan::new("┃ ", &styles.accent),
+                        ViewSpan::new("› current answer", &styles.cursor),
+                    ])),
+                    view_line("", &styles.body),
+                    view_line("enter continue", &styles.help).with_kind(LineKind::Help),
+                ],
+                Some(ViewCursor { row: 4, column: 18 }),
+            );
+
+            let layout = lay_out(renderer.columns, renderer.rows, &view);
+
+            assert_eq!(layout.rows.len(), usize::from(rows));
+            assert!(layout.cursor.is_some_and(|cursor| cursor.row < rows));
+            // Monochrome collapses every role onto one style, so the row a
+            // frame decision selected is identifiable only by its content.
+            assert!(
+                layout
+                    .rows
+                    .iter()
+                    .any(|line| line.text().contains("current answer")),
+                "active input missing at {rows} rows"
+            );
+            assert_eq!(
+                layout
+                    .rows
+                    .iter()
+                    .any(|line| line.text().contains("enter continue")),
+                rows >= 3,
+                "unexpected help visibility at {rows} rows"
+            );
+        }
+    }
+
+    #[test]
+    fn one_row_viewports_show_the_actionable_choice() {
+        let theme = test_theme();
+        let profile = TerminalProfile::new(ColorProfile::Monochrome, AnsiPolicy::Disabled);
+        let styles = PromptStyles::resolve(&theme, &profile);
+        let renderer = CrosstermRenderer::new(Vec::new(), (40, 1));
+        let view = renderer_view(
+            vec![
+                active_line(view_line("┃ choose a language", &styles.accent)),
+                active_line(
+                    view_line("┃   Japanese", &styles.option)
+                        .with_kind(LineKind::Choice { focused: false }),
+                ),
+                active_line(
+                    PromptLine::spans(vec![
+                        ViewSpan::new("┃ ", &styles.accent),
+                        ViewSpan::new("› English", &styles.option_selected),
+                    ])
+                    .with_kind(LineKind::Choice { focused: true }),
+                ),
+                view_line("", &styles.body),
+                view_line("↑/↓ select", &styles.help).with_kind(LineKind::Help),
+            ],
+            None,
+        );
+
+        let layout = lay_out(renderer.columns, renderer.rows, &view);
+
+        assert_eq!(layout.rows.len(), 1);
+        assert_eq!(layout.rows[0].text(), "┃ › English");
+
+        let confirm_view = renderer_view(
+            vec![
+                active_line(view_line("┃ continue?", &styles.accent)),
+                active_line(view_line("┃", &styles.accent)),
+                active_line(
+                    PromptLine::spans(vec![
+                        ViewSpan::new("┃ ", &styles.accent),
+                        ViewSpan::new("  Yes  ", &styles.button_focused),
+                        ViewSpan::new("   No  ", &styles.button),
+                    ])
+                    .with_kind(LineKind::Choice { focused: true }),
+                ),
+                view_line("y/n answer", &styles.help).with_kind(LineKind::Help),
+            ],
+            None,
+        );
+
+        let confirm_layout = lay_out(renderer.columns, renderer.rows, &confirm_view);
+
+        assert_eq!(confirm_layout.rows.len(), 1);
+        assert_eq!(confirm_layout.rows[0].text(), "┃   Yes     No  ");
+    }
+}
