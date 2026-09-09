@@ -31,7 +31,8 @@ application's knowledge, so the library fixes no marker.
 The marker occupies cells of its own, so the content keeps the content width
 less the marker's display width — a three-cell `...` costs three. A marker the
 box cannot hold beside any content is dropped, leaving a silent cut rather than
-a box filled with the marker.
+a box filled with the marker. In styled text, the marker represents the omitted
+suffix and takes the complete style of its first omitted grapheme.
 
 `overflow` governs the width axis. Height always clips inside the frame;
 clipping inside a closed frame is a viewport's behavior, so scrolling composes

@@ -17,8 +17,12 @@
 //!   short child at its assignment — the second visit recomputes numbers over
 //!   the fitted lines and never fits them again.
 
-use crate::text::{PrintableLines, PrintableText, wrap_text};
-use crate::{Align, BlockStyle, Canvas, Key, Overflow, Sides, TextStyle, VerticalAlign};
+use crate::text::{
+    PrintableLines, PrintableText, StyledTextGrapheme, wrap_styled_lines, wrap_text,
+};
+use crate::{
+    Align, BlockStyle, Canvas, Key, Overflow, Sides, StyledText, TextStyle, VerticalAlign,
+};
 
 use super::sizing::{
     Claim, Kind, border_extent, degrade, distribute, height_axis, text_lines, vertical,
@@ -37,10 +41,9 @@ pub(super) struct Fitted<'a> {
 #[derive(Debug)]
 enum FittedNode<'a> {
     Text {
-        lines: Vec<String>,
-        style: &'a TextStyle,
+        lines: Vec<Vec<StyledTextGrapheme<'a>>>,
         align: Align,
-        fill: &'a TextStyle,
+        fill: TextStyle,
     },
     Block {
         style: &'a BlockStyle,
@@ -82,10 +85,9 @@ pub(super) fn fit(widths: Widths<'_>) -> Fitted<'_> {
     } = widths;
     let node = match node {
         WidthNode::Text(text) => {
-            let lines = fit_text_lines(text.text, text.area, text.overflow);
+            let lines = fit_styled_text_lines(text.text, text.area, text.overflow);
             FittedNode::Text {
                 lines,
-                style: text.style,
                 align: text.align,
                 fill: text.fill,
             }
@@ -149,6 +151,59 @@ pub(crate) fn fit_text_lines(text: &str, width: Option<usize>, overflow: &Overfl
     lines
 }
 
+fn fit_styled_text_lines<'a>(
+    text: &'a StyledText,
+    width: Option<usize>,
+    overflow: &'a Overflow,
+) -> Vec<Vec<StyledTextGrapheme<'a>>> {
+    let lines = text.lines();
+    match (width, overflow) {
+        (Some(width), Overflow::Wrap) => wrap_styled_lines(lines, width),
+        (Some(width), Overflow::Clip(marker)) => lines
+            .into_iter()
+            .map(|line| clip_styled_line(line, width, marker))
+            .collect(),
+        (None, _) => lines,
+    }
+}
+
+fn clip_styled_line<'a>(
+    line: Vec<StyledTextGrapheme<'a>>,
+    width: usize,
+    marker: &'a str,
+) -> Vec<StyledTextGrapheme<'a>> {
+    if line.iter().map(|grapheme| grapheme.width()).sum::<usize>() <= width {
+        return line;
+    }
+    if width == 0 {
+        return Vec::new();
+    }
+    let marker = PrintableText::new(marker);
+    let marker_width = marker.width();
+    let marker = (marker_width < width).then_some(marker);
+    let budget = width - marker.map_or(0, PrintableText::width);
+
+    let mut output = Vec::new();
+    let mut consumed = 0;
+    let mut omitted_style = None;
+    for grapheme in line {
+        if consumed + grapheme.width() > budget {
+            omitted_style = Some(grapheme.style);
+            break;
+        }
+        consumed += grapheme.width();
+        output.push(grapheme);
+    }
+    if let (Some(marker), Some(style)) = (marker, omitted_style) {
+        output.extend(
+            marker
+                .graphemes()
+                .map(|grapheme| StyledTextGrapheme { grapheme, style }),
+        );
+    }
+    output
+}
+
 /// Cuts one line to `width` cells between graphemes, ending it with `marker`.
 ///
 /// The marker occupies cells of its own, so the text keeps the width less the
@@ -185,8 +240,7 @@ pub(super) struct Sized<'f> {
 #[derive(Debug)]
 pub(super) enum SizedNode<'f> {
     Text {
-        lines: &'f [String],
-        style: &'f TextStyle,
+        lines: &'f [Vec<StyledTextGrapheme<'f>>],
         align: Align,
         fill: &'f TextStyle,
     },
@@ -231,19 +285,13 @@ pub(super) struct SizedCell<'f> {
 /// Counts the rows every node occupies under `area`.
 pub(super) fn heights<'f>(fitted: &'f Fitted<'_>, area: Option<usize>, bounded: bool) -> Sized<'f> {
     match &fitted.node {
-        FittedNode::Text {
-            lines,
-            style,
-            align,
-            fill,
-        } => Sized {
+        FittedNode::Text { lines, align, fill } => Sized {
             width: fitted.width,
             // A text leaf has no height of its own to bound: it produced its
             // rows when it was fitted, and clipping them is a box's rule.
             height: lines.len(),
             node: SizedNode::Text {
                 lines,
-                style,
                 align: *align,
                 fill,
             },

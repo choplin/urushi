@@ -194,7 +194,7 @@ pub(crate) mod tests {
     use super::*;
     use crate::runtime::{
         FieldAction, FieldEntry, FieldPresentation, Form, FormOutcome, IoOperation, PromptLine,
-        PromptStyles, RunError, RuntimeField, ViewSpan, field::FieldState, private, test_styles,
+        PromptStyles, RunError, RuntimeField, TextSpan, field::FieldState, private, test_styles,
     };
     use crate::{FieldKey, Group};
     use std::{
@@ -254,9 +254,9 @@ pub(crate) mod tests {
 
         fn view(&self, styles: &PromptStyles, _focused: bool, _width: usize) -> FieldPresentation {
             FieldPresentation::new(
-                PromptLine::spans(vec![ViewSpan::new(
+                PromptLine::spans(vec![TextSpan::new(
                     self.key.name().to_owned(),
-                    &styles.body,
+                    styles.body.clone(),
                 )])
                 .view,
             )

@@ -211,7 +211,7 @@ mod tests {
     use super::*;
     use crate::runtime::{
         Form, FormState, Group, LineKind, PromptLine, PromptStyles, PromptView, ReducerResult,
-        ViewCursor, ViewSpan,
+        TextSpan, ViewCursor,
         inline_plan::{InlineCommand, RenderState, step},
         terminal::tests::*,
         test_styles,
@@ -338,8 +338,8 @@ mod tests {
         let mut renderer = CrosstermRenderer::new(Vec::new(), (20, 4));
         let view = renderer_view(
             vec![PromptLine::spans(vec![
-                ViewSpan::new("質問", &styles.question),
-                ViewSpan::new("＊", &styles.cursor),
+                TextSpan::new("質問", styles.question.clone()),
+                TextSpan::new("＊", styles.cursor.clone()),
             ])],
             Some(ViewCursor { row: 0, column: 2 }),
         );
@@ -801,8 +801,8 @@ mod tests {
             .draw(&renderer_view(
                 vec![
                     PromptLine::spans(vec![
-                        ViewSpan::new("名前 ", &styles.question),
-                        ViewSpan::new("あいうえ", &styles.answer),
+                        TextSpan::new("名前 ", styles.question.clone()),
+                        TextSpan::new("あいうえ", styles.answer.clone()),
                     ]),
                     view_line("validation message", &styles.error).with_kind(LineKind::Error),
                 ],

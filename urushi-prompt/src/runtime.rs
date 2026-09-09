@@ -23,8 +23,9 @@ pub(crate) use form::{FormState, ReducerResult};
 pub(crate) use terminal::{Event, KeyCode, RenderFinish};
 #[cfg(test)]
 pub(crate) use terminal::{EventSource, KeyEvent, KeyModifiers, Renderer, TerminalControl};
+pub(crate) use urushi::TextSpan;
 pub(crate) use view::{
-    FieldPresentation, FieldRegionKind, LineKind, PromptStyles, PromptView, ViewCursor, ViewSpan,
+    FieldPresentation, FieldRegionKind, LineKind, PromptStyles, PromptView, ViewCursor,
     clipped_line_view, field_line_view, fixed_view, line_view, line_view_with_cursor, region,
     window_spans,
 };

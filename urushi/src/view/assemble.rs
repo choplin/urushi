@@ -7,7 +7,7 @@
 //! what makes the two backends agree: the geometry existed before either of
 //! them saw it.
 
-use crate::text::PrintableText;
+use crate::text::{PrintableText, StyledTextGrapheme};
 use crate::{Align, Sides, TextStyle, VerticalAlign};
 
 use super::canvas::canvas_rect;
@@ -79,16 +79,11 @@ const fn align_offset(gap: usize, align: Align) -> usize {
 /// Builds the rectangle `sized` describes.
 pub(super) fn assemble(sized: &Sized<'_>) -> Result<Rect, LayoutError> {
     let rect = match &sized.node {
-        SizedNode::Text {
-            lines,
-            style,
-            align,
-            fill,
-        } => Ok(Rect {
+        SizedNode::Text { lines, align, fill } => Ok(Rect {
             width: sized.width,
             rows: lines
                 .iter()
-                .map(|line| align_row(graphemes(line, style), sized.width, *align, fill))
+                .map(|line| align_row(styled_graphemes(line), sized.width, *align, fill))
                 .collect(),
             anchors: Vec::new(),
         }),
@@ -508,6 +503,13 @@ fn graphemes(text: &str, style: &TextStyle) -> Vec<StyledGrapheme> {
     PrintableText::new(text)
         .graphemes()
         .map(|grapheme| StyledGrapheme::new(grapheme, style.clone()))
+        .collect()
+}
+
+fn styled_graphemes(graphemes: &[StyledTextGrapheme<'_>]) -> Vec<StyledGrapheme> {
+    graphemes
+        .iter()
+        .map(|grapheme| StyledGrapheme::new(grapheme.grapheme, grapheme.style.clone()))
         .collect()
 }
 

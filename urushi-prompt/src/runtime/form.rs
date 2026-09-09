@@ -5,6 +5,7 @@ use std::{any::Any, collections::HashMap, fmt, marker::PhantomData};
 use urushi::{TerminalProfile, Theme};
 
 use super::{
+    TextSpan,
     crossterm::{CrosstermEventSource, CrosstermRenderer, CrosstermTerminalControl, terminal_size},
     error::{FormBuildError, GroupBuildError, IoOperation, RunError},
     field::{self, Field, FieldAction, FieldEntry},
@@ -12,7 +13,7 @@ use super::{
         Event, EventSource, KeyCode, KeyEvent, KeyModifiers, RenderFinish, Renderer,
         TerminalControl, TerminalSession,
     },
-    view::{GUTTER, LineKind, PromptLine, PromptStyles, PromptView, ViewSpan, gutter_view},
+    view::{GUTTER, LineKind, PromptLine, PromptStyles, PromptView, gutter_view},
 };
 
 pub struct FieldKey<T> {
@@ -429,15 +430,15 @@ impl Form {
         let mut lines = Vec::new();
         let mut footer = None;
         if let Some(title) = &self.groups[group].title {
-            lines.push(PromptLine::spans(vec![ViewSpan::new(
+            lines.push(PromptLine::spans(vec![TextSpan::new(
                 title.clone(),
-                &styles.question,
+                styles.question.clone(),
             )]));
         }
         if let Some(description) = &self.groups[group].description {
-            lines.push(PromptLine::spans(vec![ViewSpan::new(
+            lines.push(PromptLine::spans(vec![TextSpan::new(
                 description.clone(),
-                &styles.muted,
+                styles.muted.clone(),
             )]));
         }
         if !lines.is_empty() {

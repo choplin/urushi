@@ -7,7 +7,7 @@ use crate::{
     FieldConfigError, FieldKey,
     runtime::{
         self, Event, FieldAction, FieldEntry, FieldPresentation, FieldRegionKind, KeyCode,
-        PromptStyles, RuntimeField, ViewSpan, clipped_line_view, field_line_view, fixed_view,
+        PromptStyles, RuntimeField, TextSpan, clipped_line_view, field_line_view, fixed_view,
         line_view, line_view_with_cursor, region, window_spans,
     },
 };
@@ -190,17 +190,20 @@ impl Input {
         FieldAction::Accept
     }
 
-    fn answer_spans(&self, styles: &PromptStyles, focused: bool) -> Vec<ViewSpan> {
+    fn answer_spans(&self, styles: &PromptStyles, focused: bool) -> Vec<TextSpan> {
         if self.value.is_empty() {
             // The blank the cursor sits on exists only to be highlighted; an
             // unfocused field has no cursor and would draw a stray space.
             let mut spans = if focused {
-                vec![ViewSpan::new(" ", &styles.cursor)]
+                vec![TextSpan::new(" ", styles.cursor.clone())]
             } else {
                 Vec::new()
             };
             if let Some(placeholder) = &self.placeholder {
-                spans.push(ViewSpan::new(placeholder.clone(), &styles.placeholder));
+                spans.push(TextSpan::new(
+                    placeholder.clone(),
+                    styles.placeholder.clone(),
+                ));
             }
             return spans;
         }
@@ -208,9 +211,9 @@ impl Input {
         let cursor_byte = self.byte_index(self.cursor);
         let mut spans = Vec::new();
         if cursor_byte > 0 {
-            spans.push(ViewSpan::new(
+            spans.push(TextSpan::new(
                 self.value[..cursor_byte].to_owned(),
-                &styles.answer,
+                styles.answer.clone(),
             ));
         }
         if let Some(grapheme) = self.value[cursor_byte..].graphemes(true).next() {
@@ -221,16 +224,16 @@ impl Input {
             } else {
                 &styles.answer
             };
-            spans.push(ViewSpan::new(grapheme, style));
+            spans.push(TextSpan::new(grapheme, style.clone()));
             let after_cursor = cursor_byte + grapheme.len();
             if after_cursor < self.value.len() {
-                spans.push(ViewSpan::new(
+                spans.push(TextSpan::new(
                     self.value[after_cursor..].to_owned(),
-                    &styles.answer,
+                    styles.answer.clone(),
                 ));
             }
         } else if focused {
-            spans.push(ViewSpan::new(" ", &styles.cursor));
+            spans.push(TextSpan::new(" ", styles.cursor.clone()));
         }
         spans
     }
@@ -342,7 +345,10 @@ impl RuntimeField for Input {
                     View::row(
                         VerticalAlign::Top,
                         [
-                            fixed_view(answer_start, vec![ViewSpan::new("› ", &styles.answer)]),
+                            fixed_view(
+                                answer_start,
+                                vec![TextSpan::new("› ", styles.answer.clone())],
+                            ),
                             answer_value,
                         ],
                     ),
@@ -354,9 +360,9 @@ impl RuntimeField for Input {
             field_line_view(
                 styles,
                 focused,
-                line_view(vec![ViewSpan::new(
+                line_view(vec![TextSpan::new(
                     self.question.clone(),
-                    styles.question(focused),
+                    styles.question(focused).clone(),
                 )]),
             ),
         )];
@@ -371,7 +377,10 @@ impl RuntimeField for Input {
                 field_line_view(
                     styles,
                     focused,
-                    line_view(vec![ViewSpan::new(description.clone(), &styles.muted)]),
+                    line_view(vec![TextSpan::new(
+                        description.clone(),
+                        styles.muted.clone(),
+                    )]),
                 ),
             ));
             regions.push(FieldRegionKind::Description);
@@ -386,7 +395,7 @@ impl RuntimeField for Input {
                     View::row(
                         VerticalAlign::Top,
                         [
-                            fixed_view(2, vec![ViewSpan::new("! ", &styles.error)]),
+                            fixed_view(2, vec![TextSpan::new("! ", styles.error.clone())]),
                             View::text(message.clone(), styles.error.clone()),
                         ],
                     ),
@@ -395,9 +404,9 @@ impl RuntimeField for Input {
             regions.push(FieldRegionKind::Error);
         }
         let presentation = FieldPresentation::new(View::column(Align::Left, body))
-            .with_help(clipped_line_view(vec![ViewSpan::new(
+            .with_help(clipped_line_view(vec![TextSpan::new(
                 self.help.clone(),
-                &styles.help,
+                styles.help.clone(),
             )]))
             .with_regions(regions);
         if focused {

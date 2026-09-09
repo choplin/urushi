@@ -12,7 +12,9 @@ were rejected. The contracts are defined in
 have their own files — [`box-sizing.md`](box-sizing.md),
 [`area-sharing.md`](area-sharing.md), [`overflow.md`](overflow.md),
 [`layout-resolution.md`](layout-resolution.md), and
-[`rendered-output-measurement.md`](rendered-output-measurement.md).
+[`rendered-output-measurement.md`](rendered-output-measurement.md). How several
+text styles remain one text flow is defined separately in
+[`styled-text.md`](styled-text.md).
 
 ## Why text cannot carry geometry
 
@@ -64,7 +66,7 @@ defined in [`canvas.md`](canvas.md).
 ## Why neither type is named `Style`
 
 The two are peers — the model privileges neither — and the node names say which
-is which at every call site: `Text(String, TextStyle)` beside
+is which at every call site: `Text(StyledText)` beside
 `Block(BlockStyle, View)`. An unqualified `Style` would also read as one thing
 to a Lip Gloss reader and the other to a Ratatui reader, so it is the one name
 here that cannot mean the same thing to both audiences.
@@ -134,8 +136,8 @@ consume the one `ResolvedView`, and the Ratatui adapter turns its target
 - **A line-oriented model — a line holding inline segments, one of which may be
   a block.** A block's child is itself a multi-row view, so the recursion
   appears regardless; the line spine then adds a second, weaker way to write a
-  `Row`, and it keeps alive the intuition that a line contains spans, which is
-  what makes a bordered inline element look constructible.
+  `Row`. Text segments remain source annotations inside one `Text` leaf; they
+  never admit a geometry-bearing block or become sibling layout nodes.
 - **Naming one of the two `Style`.** Whichever one takes it becomes the default
   in the reader's mind, and the model has no default. It also forces a choice
   between Lip Gloss, where `Style` is the box, and Ratatui, where `Style` is the

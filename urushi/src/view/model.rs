@@ -1,6 +1,6 @@
 //! Renderer-neutral terminal output.
 
-use crate::{Align, BlockStyle, Canvas, GridStyle, Key, TextStyle, VerticalAlign};
+use crate::{Align, BlockStyle, Canvas, GridStyle, Key, StyledText, TextStyle, VerticalAlign};
 
 /// A fully composed, renderer-neutral terminal view.
 ///
@@ -27,10 +27,10 @@ use crate::{Align, BlockStyle, Canvas, GridStyle, Key, TextStyle, VerticalAlign}
 /// ```
 #[derive(Debug, Clone, PartialEq)]
 pub enum View {
-    /// Plain text and the style applied to it. Never holds escape sequences or
-    /// cursor movement: the layout pass measures its graphemes without
-    /// scanning for them.
-    Text(String, TextStyle),
+    /// One plain-text flow whose grapheme-aligned segments carry complete
+    /// styles. Never holds escape sequences or cursor movement: the layout
+    /// pass measures its graphemes without scanning for them.
+    Text(StyledText),
     /// One [`BlockStyle`] around exactly one child.
     Block(BlockStyle, Box<View>),
     /// Children placed side by side, aligned vertically.
@@ -70,7 +70,12 @@ impl View {
     /// already-rendered output with
     /// [`RenderedBlock::from_ansi`](crate::RenderedBlock::from_ansi) instead.
     pub fn text(text: impl Into<String>, style: TextStyle) -> Self {
-        Self::Text(text.into(), style)
+        Self::Text(StyledText::new(text, style))
+    }
+
+    /// Creates a text leaf carrying multiple styled segments in one flow.
+    pub const fn styled_text(text: StyledText) -> Self {
+        Self::Text(text)
     }
 
     /// Wraps one child in a block.

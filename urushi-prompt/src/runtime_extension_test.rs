@@ -4,7 +4,7 @@ use crate::{
     FieldKey, Form, Group,
     runtime::{
         self, FieldAction, FieldEntry, FieldPresentation, PromptLine, PromptStyles, RuntimeField,
-        ViewSpan,
+        TextSpan,
     },
 };
 
@@ -37,9 +37,9 @@ impl RuntimeField for SiblingField {
 
     fn view(&self, styles: &PromptStyles, _focused: bool, _width: usize) -> FieldPresentation {
         FieldPresentation::new(
-            PromptLine::spans(vec![ViewSpan::new(
+            PromptLine::spans(vec![TextSpan::new(
                 self.key.name().to_owned(),
-                &styles.body,
+                styles.body.clone(),
             )])
             .view,
         )

@@ -7,7 +7,7 @@ use crate::{
     FieldConfigError, FieldKey,
     runtime::{
         self, Event, FieldAction, FieldEntry, FieldPresentation, FieldRegionKind, KeyCode,
-        PromptStyles, RuntimeField, ViewSpan, clipped_line_view, field_line_view, fixed_view,
+        PromptStyles, RuntimeField, TextSpan, clipped_line_view, field_line_view, fixed_view,
         line_view, line_view_with_cursor, region, window_spans,
     },
 };
@@ -296,21 +296,21 @@ impl<T: 'static> RuntimeField for Select<T> {
     }
 
     fn view(&self, styles: &PromptStyles, focused: bool, width: usize) -> FieldPresentation {
-        let mut title_spans = vec![ViewSpan::new(
+        let mut title_spans = vec![TextSpan::new(
             self.question.clone(),
-            styles.question(focused),
+            styles.question(focused).clone(),
         )];
         let mut cursor = None;
         if self.filtering || !self.filter.is_empty() {
-            title_spans.push(ViewSpan::new("  / ", &styles.answer));
+            title_spans.push(TextSpan::new("  / ", styles.answer.clone()));
             if !self.filter.is_empty() {
-                title_spans.push(ViewSpan::new(self.filter.clone(), &styles.answer));
+                title_spans.push(TextSpan::new(self.filter.clone(), styles.answer.clone()));
             }
             if self.filtering {
                 // The blank marks where typing continues, so it belongs to the
                 // cursor and disappears with it when the field loses focus.
                 if focused {
-                    title_spans.push(ViewSpan::new(" ", &styles.cursor));
+                    title_spans.push(TextSpan::new(" ", styles.cursor.clone()));
                     cursor = Some(
                         PrintableText::new(
                             format!("{}  / {}", self.question, self.filter).as_str(),
@@ -347,7 +347,10 @@ impl<T: 'static> RuntimeField for Select<T> {
                 field_line_view(
                     styles,
                     focused,
-                    line_view(vec![ViewSpan::new(description.clone(), &styles.muted)]),
+                    line_view(vec![TextSpan::new(
+                        description.clone(),
+                        styles.muted.clone(),
+                    )]),
                 ),
             ));
             regions.push(FieldRegionKind::Description);
@@ -370,9 +373,9 @@ impl<T: 'static> RuntimeField for Select<T> {
                 field_line_view(
                     styles,
                     focused,
-                    line_view(vec![ViewSpan::new(
+                    line_view(vec![TextSpan::new(
                         self.no_matches_message.clone(),
-                        &styles.error,
+                        styles.error.clone(),
                     )]),
                 ),
             );
@@ -399,9 +402,12 @@ impl<T: 'static> RuntimeField for Select<T> {
                         [
                             fixed_view(
                                 2,
-                                vec![ViewSpan::new(if selected { "› " } else { "  " }, style)],
+                                vec![TextSpan::new(
+                                    if selected { "› " } else { "  " },
+                                    style.clone(),
+                                )],
                             ),
-                            line_view(vec![ViewSpan::new(option.label.clone(), style)]),
+                            line_view(vec![TextSpan::new(option.label.clone(), style.clone())]),
                         ],
                     ),
                 );
@@ -433,7 +439,7 @@ impl<T: 'static> RuntimeField for Select<T> {
             controls.push(field_line_view(
                 styles,
                 focused,
-                line_view(vec![ViewSpan::new(status, &styles.muted)]),
+                line_view(vec![TextSpan::new(status, styles.muted.clone())]),
             ));
         }
         body.push(region(
@@ -441,9 +447,9 @@ impl<T: 'static> RuntimeField for Select<T> {
             View::column(Align::Left, controls),
         ));
         let presentation = FieldPresentation::new(View::column(Align::Left, body))
-            .with_help(clipped_line_view(vec![ViewSpan::new(
+            .with_help(clipped_line_view(vec![TextSpan::new(
                 self.current_help().to_owned(),
-                &styles.help,
+                styles.help.clone(),
             )]))
             .with_regions(regions);
         if cursor.is_some() {

@@ -4,7 +4,7 @@ use crate::{
     FieldConfigError, FieldKey,
     runtime::{
         self, Event, FieldAction, FieldEntry, FieldPresentation, FieldRegionKind, KeyCode,
-        PromptStyles, RuntimeField, ViewSpan, clipped_line_view, field_line_view, fixed_view,
+        PromptStyles, RuntimeField, TextSpan, clipped_line_view, field_line_view, fixed_view,
         line_view, region,
     },
 };
@@ -197,9 +197,9 @@ impl RuntimeField for Confirm {
             field_line_view(
                 styles,
                 focused,
-                line_view(vec![ViewSpan::new(
+                line_view(vec![TextSpan::new(
                     self.question.clone(),
-                    styles.question(focused),
+                    styles.question(focused).clone(),
                 )]),
             ),
         );
@@ -215,7 +215,10 @@ impl RuntimeField for Confirm {
                 field_line_view(
                     styles,
                     focused,
-                    line_view(vec![ViewSpan::new(description.clone(), &styles.muted)]),
+                    line_view(vec![TextSpan::new(
+                        description.clone(),
+                        styles.muted.clone(),
+                    )]),
                 ),
             ));
             regions.push(FieldRegionKind::Description);
@@ -277,7 +280,7 @@ impl RuntimeField for Confirm {
                     View::row(
                         VerticalAlign::Top,
                         [
-                            fixed_view(2, vec![ViewSpan::new("! ", &styles.error)]),
+                            fixed_view(2, vec![TextSpan::new("! ", styles.error.clone())]),
                             View::text(self.unanswered_message.clone(), styles.error.clone()),
                         ],
                     ),
@@ -286,9 +289,9 @@ impl RuntimeField for Confirm {
             regions.push(FieldRegionKind::Error);
         }
         FieldPresentation::new(View::column(Align::Left, body))
-            .with_help(clipped_line_view(vec![ViewSpan::new(
+            .with_help(clipped_line_view(vec![TextSpan::new(
                 self.help.clone(),
-                &styles.help,
+                styles.help.clone(),
             )]))
             .with_regions(regions)
     }

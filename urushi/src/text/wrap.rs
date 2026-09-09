@@ -1,6 +1,6 @@
 //! Cell-aware word and hard wrapping.
 
-use super::{PrintableLines, PrintableText};
+use super::{Grapheme, PrintableLines, PrintableText, StyledTextGrapheme};
 
 /// Greedily wraps plain text to a terminal-cell width.
 ///
@@ -15,29 +15,11 @@ pub(crate) fn wrap_text(text: &PrintableLines, width: usize) -> Vec<String> {
             out.push(line.as_str().to_owned());
             continue;
         }
-        let mut current = String::new();
-        let mut current_width = 0;
-        for word in line.as_str().split(' ') {
-            let word = PrintableText::new(word);
-            let word_width = word.width();
-            if current_width > 0 {
-                if current_width + 1 + word_width <= width {
-                    current.push(' ');
-                    current.push_str(word.as_str());
-                    current_width += 1 + word_width;
-                    continue;
-                }
-                out.push(std::mem::take(&mut current));
-                current_width = 0;
-            }
-            if word_width <= width {
-                current.push_str(word.as_str());
-                current_width = word_width;
-            } else {
-                hard_break(word, width, &mut current, &mut current_width, &mut out);
-            }
-        }
-        out.push(current);
+        out.extend(
+            wrap_line(line.graphemes().collect(), width)
+                .into_iter()
+                .map(|row| row.into_iter().map(Grapheme::as_str).collect()),
+        );
     }
     if out.is_empty() {
         out.push(String::new());
@@ -85,22 +67,96 @@ pub(crate) fn wrapped_line_count(text: &PrintableLines, width: usize) -> usize {
         .sum()
 }
 
-fn hard_break(
-    word: &PrintableText,
+/// Wraps styled graphemes without treating style boundaries as text
+/// boundaries.
+pub(crate) fn wrap_styled_lines<'a>(
+    lines: Vec<Vec<StyledTextGrapheme<'a>>>,
     width: usize,
-    current: &mut String,
-    current_width: &mut usize,
-    out: &mut Vec<String>,
-) {
-    for grapheme in word.graphemes() {
-        let grapheme_width = grapheme.width();
-        if *current_width + grapheme_width > width && *current_width > 0 {
-            out.push(std::mem::take(current));
-            *current_width = 0;
-        }
-        current.push_str(grapheme.as_str());
-        *current_width += grapheme_width;
+) -> Vec<Vec<StyledTextGrapheme<'a>>> {
+    let width = width.max(1);
+    lines
+        .into_iter()
+        .flat_map(|line| wrap_line(line, width))
+        .collect()
+}
+
+trait WrapGrapheme {
+    fn symbol(&self) -> &str;
+    fn width(&self) -> usize;
+}
+
+impl WrapGrapheme for &Grapheme {
+    fn symbol(&self) -> &str {
+        self.as_str()
     }
+
+    fn width(&self) -> usize {
+        Grapheme::width(self)
+    }
+}
+
+impl WrapGrapheme for StyledTextGrapheme<'_> {
+    fn symbol(&self) -> &str {
+        self.grapheme.as_str()
+    }
+
+    fn width(&self) -> usize {
+        (*self).width()
+    }
+}
+
+fn wrap_line<T: WrapGrapheme>(line: Vec<T>, width: usize) -> Vec<Vec<T>> {
+    if line_width(&line) <= width {
+        return vec![line];
+    }
+
+    let mut words: Vec<(Option<T>, Vec<T>)> = vec![(None, Vec::new())];
+    for grapheme in line {
+        if grapheme.symbol() == " " {
+            words.push((Some(grapheme), Vec::new()));
+        } else {
+            words.last_mut().expect("one initial word").1.push(grapheme);
+        }
+    }
+
+    let mut out = Vec::new();
+    let mut current = Vec::new();
+    let mut current_width = 0;
+    for (separator, word) in words {
+        let word_width = line_width(&word);
+        if current_width > 0 {
+            if current_width + 1 + word_width <= width {
+                if let Some(separator) = separator {
+                    current.push(separator);
+                }
+                current.extend(word);
+                current_width += 1 + word_width;
+                continue;
+            }
+            out.push(std::mem::take(&mut current));
+            current_width = 0;
+        }
+        if word_width <= width {
+            current = word;
+            current_width = word_width;
+        } else {
+            for grapheme in word {
+                let grapheme_width = grapheme.width();
+                if current_width + grapheme_width > width && current_width > 0 {
+                    out.push(std::mem::take(&mut current));
+                    current_width = 0;
+                }
+                current.push(grapheme);
+                current_width += grapheme_width;
+            }
+        }
+    }
+    out.push(current);
+    out
+}
+
+fn line_width<T: WrapGrapheme>(line: &[T]) -> usize {
+    line.iter().map(|grapheme| grapheme.width()).sum()
 }
 
 #[cfg(test)]

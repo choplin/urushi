@@ -6,6 +6,7 @@ describe the current snapshot.
 
 | Date | Decision | Recorded in |
 | --- | --- | --- |
+| 2026-09-09 | Made `StyledText` the `View::Text` payload: caller segments are joined before grapheme segmentation and layout, invalid style boundaries are rejected, and wrap/clip operate on the resulting single text flow. | [`view-model.md`](view-model.md), [`design/styled-text.md`](design/styled-text.md) |
 | 2026-09-09 | Split prompt resize ownership by display mode: default inline prompts leave the displayed snapshot to primary-buffer terminal reflow without reconstructing or erasing it, while callers needing complete application-controlled re-layout explicitly select an alternate-screen presentation. | [`inline-prompt-rendering.md`](inline-prompt-rendering.md), [`design/prompt-resize.md`](design/prompt-resize.md) |
 | 2026-09-08 | Replaced Region with one optional Canvas-wide intrinsic sizing value because both abstractions retained presentation behavior and produced the same renderer-neutral scene; default Canvas sizing remains independent of its items. | [`design/canvas.md`](design/canvas.md), [`design/component-presentation.md`](design/component-presentation.md), [`design/grid.md`](design/grid.md) |
 | 2026-09-08 | Added an anchored field-presentation boundary so prompt viewport degradation preserves semantic fields and Confirm alignment uses Grid rather than width arithmetic. | [`design/prompt-field-presentation.md`](design/prompt-field-presentation.md) |

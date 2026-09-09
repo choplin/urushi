@@ -8,8 +8,8 @@ use ratatui::{
 };
 use urushi::{
     Align, AnsiPolicy, AnsiRenderer, Available, BlockStyle, Border, Color, ColorProfile, Length,
-    Modifier as UrushiModifier, Overflow, PanelRole, PrintableText, SemanticTokens,
-    TerminalProfile, TextStyle, Theme, VerticalAlign, View, measure,
+    Modifier as UrushiModifier, Overflow, PanelRole, PrintableText, SemanticTokens, StyledText,
+    TerminalProfile, TextSpan, TextStyle, Theme, VerticalAlign, View, measure,
 };
 use urushi_tui::ratatui::{RatatuiStyle, RatatuiStyleExt as _, ViewWidget};
 
@@ -158,7 +158,20 @@ fn bordered_block_in_a_row() -> View {
 /// dimensions, both alignment biases, and cropping.
 fn corpus() -> Vec<(&'static str, View, Rect)> {
     let plain = TextStyle::new();
+    let styled = StyledText::try_from_spans([
+        TextSpan::new("日本", TextStyle::new().foreground(Color::CYAN)),
+        TextSpan::new("👩‍💻 text", TextStyle::new().bold()),
+    ])
+    .expect("whole grapheme boundaries");
     vec![
+        (
+            "styled text wraps as one flow",
+            View::block(
+                BlockStyle::new().border(Border::NORMAL),
+                View::styled_text(styled),
+            ),
+            Rect::new(0, 0, 7, 4),
+        ),
         (
             "multiline text",
             View::text("alpha\nbeta gamma", plain.clone()),

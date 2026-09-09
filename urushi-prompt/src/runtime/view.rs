@@ -1,8 +1,8 @@
 //! Prompt views and the presentation values fields compose.
 
 use urushi::{
-    BlockStyle, ComponentRole, Key, Overflow, PrintableText, TerminalProfile, TextStyle, Theme,
-    VerticalAlign, View,
+    BlockStyle, ComponentRole, Key, Overflow, PrintableText, StyledText, TerminalProfile, TextSpan,
+    TextStyle, Theme, VerticalAlign, View,
 };
 
 #[cfg(test)]
@@ -90,7 +90,7 @@ impl PromptLine {
     }
 
     /// A line laid out as one horizontal flow of styled runs.
-    pub(crate) fn spans(spans: Vec<ViewSpan>) -> Self {
+    pub(crate) fn spans(spans: Vec<TextSpan>) -> Self {
         Self::new(line_view(spans))
     }
 
@@ -106,73 +106,43 @@ impl PromptLine {
     }
 }
 
-/// Composes styled runs into one line of a prompt.
-///
-/// A line is always a [`View::Row`], never a bare text leaf: a leaf resolves
-/// to the whole available width and pads what it does not use, which would
-/// make every row a full-width write. A row resolves to the width its children
-/// actually take.
-pub(crate) fn line_view(spans: Vec<ViewSpan>) -> View {
-    if spans.is_empty() {
-        // An empty row has no height at all, and a blank line is a row that
-        // draws nothing rather than a line that does not exist.
-        return View::row(VerticalAlign::Top, [View::text("", TextStyle::new())]);
-    }
-    View::row(
-        VerticalAlign::Top,
-        spans
-            .into_iter()
-            .map(|span| View::text(span.text, span.style)),
-    )
+/// Composes styled segments into one text flow.
+pub(crate) fn line_view(spans: Vec<TextSpan>) -> View {
+    View::styled_text(styled_text(spans))
 }
 
 /// Composes a line and places the prompt cursor anchor at one display column.
-pub(crate) fn line_view_with_cursor(spans: Vec<ViewSpan>, column: usize) -> View {
-    let mut before: Vec<ViewSpan> = Vec::new();
-    let mut after: Vec<ViewSpan> = Vec::new();
+pub(crate) fn line_view_with_cursor(spans: Vec<TextSpan>, column: usize) -> View {
+    let mut before: Vec<TextSpan> = Vec::new();
+    let mut after: Vec<TextSpan> = Vec::new();
     let mut width = 0;
     for span in spans {
-        for grapheme in PrintableText::new(span.text.as_str()).graphemes() {
+        for grapheme in PrintableText::new(span.text()).graphemes() {
             let target = if width < column {
                 &mut before
             } else {
                 &mut after
             };
-            match target.last_mut() {
-                Some(previous) if previous.style == span.style => {
-                    previous.text.push_str(grapheme.as_str());
-                }
-                _ => target.push(ViewSpan::new(grapheme.as_str(), &span.style)),
-            }
+            target.push(TextSpan::new(grapheme.as_str(), span.style().clone()));
             width = width.saturating_add(grapheme.width());
         }
     }
-    let children = before
-        .into_iter()
-        .map(|span| View::text(span.text, span.style))
-        .chain([View::anchor(cursor_key())])
-        .chain(
-            after
-                .into_iter()
-                .map(|span| View::text(span.text, span.style)),
-        );
-    View::row(VerticalAlign::Top, children)
+    View::row(
+        VerticalAlign::Top,
+        [
+            line_view(before),
+            View::anchor(cursor_key()),
+            line_view(after),
+        ],
+    )
 }
 
 /// Composes styled runs into a line that is cut, not reflowed, when it is
 /// wider than the terminal.
-pub(crate) fn clipped_line_view(spans: Vec<ViewSpan>) -> View {
-    if spans.is_empty() {
-        return line_view(spans);
-    }
-    View::row(
-        VerticalAlign::Top,
-        spans.into_iter().map(|span| {
-            View::block(
-                BlockStyle::new().overflow(Overflow::clip()),
-                View::text(span.text, span.style),
-            )
-        }),
+pub(crate) fn clipped_line_view(spans: Vec<TextSpan>) -> View {
+    View::block(
+        BlockStyle::new().overflow(Overflow::clip()),
+        line_view(spans),
     )
 }
 
@@ -181,7 +151,7 @@ pub(crate) fn clipped_line_view(spans: Vec<ViewSpan>) -> View {
 /// Sizing it in cells is what pins it: a row shrinks its `Fill` children
 /// first, then its auto children, and only then the ones that stated a size.
 /// An unpinned marker would be reflowed away with the text it marks.
-pub(crate) fn fixed_view(width: usize, spans: Vec<ViewSpan>) -> View {
+pub(crate) fn fixed_view(width: usize, spans: Vec<TextSpan>) -> View {
     View::block(
         BlockStyle::new().width(width.min(usize::from(u16::MAX)) as u16),
         line_view(spans),
@@ -203,7 +173,7 @@ pub(crate) fn gutter_view(styles: &PromptStyles, focused: bool, inner: View) -> 
     View::row(
         VerticalAlign::Top,
         [
-            fixed_view(GUTTER, vec![ViewSpan::new(marker, style)]),
+            fixed_view(GUTTER, vec![TextSpan::new(marker, style.clone())]),
             inner,
         ],
     )
@@ -217,20 +187,20 @@ pub(crate) fn gutter_view(styles: &PromptStyles, focused: bool, inner: View) -> 
 /// model. Doing it here is what lets Resolve be called with the terminal's
 /// real width and leaves the Frame stage with no horizontal concern at all.
 pub(crate) fn window_spans(
-    spans: Vec<ViewSpan>,
+    spans: Vec<TextSpan>,
     cursor: usize,
     width: usize,
-) -> (Vec<ViewSpan>, usize) {
+) -> (Vec<TextSpan>, usize) {
     if width == 0 {
         return (Vec::new(), 0);
     }
     let offset = cursor.saturating_sub(width - 1);
-    let mut windowed: Vec<ViewSpan> = Vec::new();
+    let mut windowed: Vec<TextSpan> = Vec::new();
     let mut seen = 0;
     let mut start = None;
     let mut used = 0;
     for span in &spans {
-        for grapheme in PrintableText::new(span.text.as_str()).graphemes() {
+        for grapheme in PrintableText::new(span.text()).graphemes() {
             let grapheme_width = grapheme.width();
             if seen + grapheme_width <= offset {
                 seen += grapheme_width;
@@ -246,15 +216,17 @@ pub(crate) fn window_spans(
             if used + grapheme_width > width {
                 return (windowed, cursor.saturating_sub(start));
             }
-            match windowed.last_mut() {
-                Some(last) if last.style == span.style => last.text.push_str(grapheme.as_str()),
-                _ => windowed.push(ViewSpan::new(grapheme.as_str(), &span.style)),
-            }
+            windowed.push(TextSpan::new(grapheme.as_str(), span.style().clone()));
             used += grapheme_width;
             seen += grapheme_width;
         }
     }
     (windowed, cursor.saturating_sub(start.unwrap_or(seen)))
+}
+
+fn styled_text(spans: Vec<TextSpan>) -> StyledText {
+    StyledText::try_from_spans(spans)
+        .expect("prompt text spans are always split at grapheme boundaries")
 }
 
 /// What the frame policy must know about a row beyond the text it draws.
@@ -374,24 +346,6 @@ pub(crate) fn field_line_view(styles: &PromptStyles, focused: bool, inner: View)
     gutter_view(styles, focused, inner)
 }
 
-/// A run of text before it becomes a [`View::Text`] leaf.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct ViewSpan {
-    pub text: String,
-    /// The style as it will be emitted: resolved against both the theme and
-    /// the terminal profile.
-    pub style: TextStyle,
-}
-
-impl ViewSpan {
-    pub(crate) fn new(text: impl Into<String>, style: &TextStyle) -> Self {
-        Self {
-            text: text.into(),
-            style: style.clone(),
-        }
-    }
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct ViewCursor {
     pub row: u16,
@@ -476,7 +430,7 @@ pub(crate) mod tests {
     use super::*;
     use crate::runtime::{
         Event, Form, FormState, KeyCode, KeyEvent, KeyModifiers, PromptLine, PromptView,
-        ReducerResult, ViewCursor, ViewSpan, frame, resolve, terminal::tests::*,
+        ReducerResult, TextSpan, ViewCursor, frame, resolve, terminal::tests::*,
     };
     use crate::{Confirm, FieldKey, Group, Input, Select, SelectOption};
     use urushi::{
@@ -511,7 +465,7 @@ pub(crate) mod tests {
     }
 
     pub(crate) fn view_line(text: &str, style: &TextStyle) -> PromptLine {
-        PromptLine::spans(vec![ViewSpan::new(text, style)])
+        PromptLine::spans(vec![TextSpan::new(text, style.clone())])
     }
 
     /// A row belonging to the focused field, as `Form::view` marks them.
@@ -583,8 +537,8 @@ pub(crate) mod tests {
         assert_eq!(monochrome.question, monochrome.answer);
 
         let line = PromptLine::spans(vec![
-            ViewSpan::new("ab", &monochrome.question),
-            ViewSpan::new("cd", &monochrome.answer),
+            TextSpan::new("ab", monochrome.question.clone()),
+            TextSpan::new("cd", monochrome.answer.clone()),
         ]);
         let framed = lay_out(10, 1, &renderer_view(vec![line], None));
         assert_eq!(framed.rows[0].runs.len(), 1);

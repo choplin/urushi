@@ -22,17 +22,15 @@
 //! a table is what makes the phase linear; nothing about what they answer
 //! changed.
 
-use crate::text::Grapheme;
 use crate::{
-    Align, BlockStyle, Canvas, GridStyle, Key, Length, Overflow, Sides, TextStyle, VerticalAlign,
-    View,
+    Align, BlockStyle, Canvas, GridStyle, Key, Length, Overflow, Sides, StyledText, TextStyle,
+    VerticalAlign, View,
 };
 
 use super::grid;
 
 use super::sizing::{
-    Claim, Kind, border_extent, degrade, distribute, horizontal, kind_of, text_lines, vertical,
-    width_axis,
+    Claim, Kind, border_extent, degrade, distribute, horizontal, kind_of, vertical, width_axis,
 };
 
 /// The overflow policy a text leaf outside a block is fitted under.
@@ -67,13 +65,17 @@ pub(super) struct Metrics {
 /// Pass A: the bottom-up walk that fills [`Metrics`] for every node.
 fn metrics(view: &View) -> Metrics {
     match view {
-        View::Text(text, _) => {
-            let lines = text_lines(text);
+        View::Text(text) => {
+            let lines = text.lines();
             Metrics {
-                natural: lines.iter().map(|line| line.width()).max().unwrap_or(0),
+                natural: lines
+                    .iter()
+                    .map(|line| line.iter().map(|grapheme| grapheme.width()).sum())
+                    .max()
+                    .unwrap_or(0),
                 floor: lines
                     .iter()
-                    .flat_map(|line| line.graphemes().map(Grapheme::width))
+                    .flat_map(|line| line.iter().map(|grapheme| grapheme.width()))
                     .max()
                     .unwrap_or(0),
                 height_floor: 0,
@@ -299,8 +301,7 @@ pub(super) struct GridCell<'a> {
 /// A text leaf and everything needed to fit its lines, once a width exists.
 #[derive(Debug)]
 pub(super) struct TextBox<'a> {
-    pub text: &'a str,
-    pub style: &'a TextStyle,
+    pub text: &'a StyledText,
     /// The area the leaf was given, which is what the policy fits against —
     /// not the width it resolved to, which a grapheme it cannot split may
     /// widen.
@@ -309,7 +310,7 @@ pub(super) struct TextBox<'a> {
     /// Per-line alignment and the style filling the gap, both supplied by an
     /// enclosing block.
     pub align: Align,
-    pub fill: &'a TextStyle,
+    pub fill: TextStyle,
 }
 
 /// A block whose horizontal frame and content width are settled.
@@ -351,26 +352,30 @@ fn place<'a>(
     fit: Option<TextFit<'a>>,
 ) -> Widths<'a> {
     match view {
-        View::Text(text, style) => {
-            let fit = fit.unwrap_or(TextFit {
-                // A bare text leaf wraps under a width bound: the same default
-                // a block's content gets. Another policy requires a block,
-                // because the policy is a box property.
-                align: Align::Left,
-                fill: style,
-                overflow: &WRAP,
-            });
+        View::Text(text) => {
+            let (align, fill, overflow) = fit.map_or_else(
+                || {
+                    // Preserve the uniform leaf's fill behavior. Mixed text
+                    // has no one style that can own geometry, so its bare
+                    // alignment gap is terminal-default.
+                    (
+                        Align::Left,
+                        text.uniform_style().cloned().unwrap_or_else(TextStyle::new),
+                        &WRAP,
+                    )
+                },
+                |fit| (fit.align, fit.fill.clone(), fit.overflow),
+            );
             Widths {
-                width: text_width(area, fit.overflow, metrics),
+                width: text_width(area, overflow, metrics),
                 height_kind: metrics.height_kind,
                 height_floor: metrics.height_floor,
                 node: WidthNode::Text(TextBox {
                     text,
-                    style,
                     area,
-                    overflow: fit.overflow,
-                    align: fit.align,
-                    fill: fit.fill,
+                    overflow,
+                    align,
+                    fill,
                 }),
             }
         }

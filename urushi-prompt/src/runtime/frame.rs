@@ -436,7 +436,7 @@ mod tests {
 
     use super::*;
     use crate::runtime::{
-        PromptLine, PromptView, ViewSpan, fixed_view, resolve::resolve_prompt, test_styles,
+        PromptLine, PromptView, TextSpan, fixed_view, resolve::resolve_prompt, test_styles,
     };
 
     /// Framing takes a resolved view and a row count. There is no terminal, no
@@ -461,15 +461,18 @@ mod tests {
         let whole = framed(
             10,
             1,
-            &view(vec![PromptLine::spans(vec![ViewSpan::new("abcd", &style)])]),
+            &view(vec![PromptLine::spans(vec![TextSpan::new(
+                "abcd",
+                style.clone(),
+            )])]),
         );
         let split = framed(
             10,
             1,
             &view(vec![PromptLine::spans(vec![
-                ViewSpan::new("", &style),
-                ViewSpan::new("ab", &style),
-                ViewSpan::new("cd", &style),
+                TextSpan::new("", style.clone()),
+                TextSpan::new("ab", style.clone()),
+                TextSpan::new("cd", style.clone()),
             ])]),
         );
 
@@ -485,7 +488,10 @@ mod tests {
         let framed = framed(
             10,
             1,
-            &view(vec![PromptLine::spans(vec![ViewSpan::new("名前", &style)])]),
+            &view(vec![PromptLine::spans(vec![TextSpan::new(
+                "名前",
+                style.clone(),
+            )])]),
         );
 
         assert_eq!(framed.rows[0].runs[0].text, "名前");
@@ -499,8 +505,8 @@ mod tests {
             10,
             1,
             &view(vec![PromptLine::spans(vec![
-                ViewSpan::new("ab", &style),
-                ViewSpan::new("cd", &style),
+                TextSpan::new("ab", style.clone()),
+                TextSpan::new("cd", style.clone()),
             ])]),
         );
 
@@ -514,25 +520,26 @@ mod tests {
         let mut choice = PromptLine::new(View::row(
             VerticalAlign::Top,
             [
-                fixed_view(2, vec![ViewSpan::new("› ", &styles.option_selected)]),
+                fixed_view(2, vec![TextSpan::new("› ", styles.option_selected.clone())]),
                 View::text("English", styles.option_selected.clone()),
             ],
         ))
         .with_kind(LineKind::Choice { focused: true });
         choice.active = true;
-        let mut question = PromptLine::spans(vec![ViewSpan::new("Language", &styles.accent)]);
+        let mut question =
+            PromptLine::spans(vec![TextSpan::new("Language", styles.accent.clone())]);
         question.active = true;
 
         let framed = framed(
             40,
             4,
             &view(vec![
-                PromptLine::spans(vec![ViewSpan::new("Earlier answer", &styles.muted)]),
+                PromptLine::spans(vec![TextSpan::new("Earlier answer", styles.muted.clone())]),
                 question,
-                PromptLine::spans(vec![ViewSpan::new("  Japanese", &styles.option)])
+                PromptLine::spans(vec![TextSpan::new("  Japanese", styles.option.clone())])
                     .with_kind(LineKind::Choice { focused: false }),
                 choice,
-                PromptLine::spans(vec![ViewSpan::new("↑/↓ select", &styles.help)])
+                PromptLine::spans(vec![TextSpan::new("↑/↓ select", styles.help.clone())])
                     .with_kind(LineKind::Help),
             ]),
         );
@@ -555,7 +562,7 @@ mod tests {
 #[cfg(test)]
 mod integration_tests {
     use crate::runtime::{
-        FormState, LineKind, PromptLine, PromptStyles, ReducerResult, ViewCursor, ViewSpan,
+        FormState, LineKind, PromptLine, PromptStyles, ReducerResult, TextSpan, ViewCursor,
         crossterm::CrosstermRenderer, frame, terminal::tests::enter, test_styles, view::tests::*,
     };
     use crate::{FieldKey, Form, Group, Input};
@@ -688,8 +695,8 @@ mod integration_tests {
                     view_line("", &styles.body),
                     active_line(view_line("┃ current question", &styles.accent)),
                     active_line(PromptLine::spans(vec![
-                        ViewSpan::new("┃ ", &styles.accent),
-                        ViewSpan::new("› current answer", &styles.cursor),
+                        TextSpan::new("┃ ", styles.accent.clone()),
+                        TextSpan::new("› current answer", styles.cursor.clone()),
                     ])),
                     view_line("", &styles.body),
                     view_line("enter continue", &styles.help).with_kind(LineKind::Help),
@@ -736,8 +743,8 @@ mod integration_tests {
                 ),
                 active_line(
                     PromptLine::spans(vec![
-                        ViewSpan::new("┃ ", &styles.accent),
-                        ViewSpan::new("› English", &styles.option_selected),
+                        TextSpan::new("┃ ", styles.accent.clone()),
+                        TextSpan::new("› English", styles.option_selected.clone()),
                     ])
                     .with_kind(LineKind::Choice { focused: true }),
                 ),
@@ -758,9 +765,9 @@ mod integration_tests {
                 active_line(view_line("┃", &styles.accent)),
                 active_line(
                     PromptLine::spans(vec![
-                        ViewSpan::new("┃ ", &styles.accent),
-                        ViewSpan::new("  Yes  ", &styles.button_focused),
-                        ViewSpan::new("   No  ", &styles.button),
+                        TextSpan::new("┃ ", styles.accent.clone()),
+                        TextSpan::new("  Yes  ", styles.button_focused.clone()),
+                        TextSpan::new("   No  ", styles.button.clone()),
                     ])
                     .with_kind(LineKind::Choice { focused: true }),
                 ),

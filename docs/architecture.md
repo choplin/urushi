@@ -68,7 +68,7 @@ same pass:
 plain text + BlockStyle --> BlockStyle::render --> RenderedBlock
 ```
 
-`BlockStyle::render` resolves `Block(style, Text(content, style.text))` with
+`BlockStyle::render` resolves a `Block` containing uniformly styled text with
 unbounded `Available`, so there is one implementation of the box model in the
 workspace. [`RenderedBlock`](../urushi/src/view/rendered.rs) carries the size it
 was measured at; `join_horizontal` and `join_vertical` compose such blocks
@@ -192,7 +192,7 @@ to share styling.
 | Module | Responsibility | Internal dependencies |
 | --- | --- | --- |
 | [`style`](../urushi/src/style/) | Colors, border glyphs, box spacing and alignment, the text `TextStyle` and the geometry-bearing `BlockStyle`, and the direct block render entry point. | `text`, `view` |
-| [`text`](../urushi/src/text/) | Plain-text display-width measurement and cell-aware word/CJK wrapping, over the `PrintableText` / `PrintableLines` types that carry the plain-text domain. | None |
+| [`text`](../urushi/src/text/) | Plain-text values, including grapheme-aligned `StyledText`, plus display-width measurement and cell-aware word/CJK wrapping. | `style` |
 | [`theme`](../urushi/src/theme/) | Semantic color tokens, reusable component roles, canonical component presentations, application role resolution, and explicit light/dark selection. | `style`, `component` |
 | [`view`](../urushi/src/view/) | The renderer-neutral `View` tree, the one layout pass in its three phases — width, height, assembly — behind `measure` / `resolve` (`Size`, `Available`, `StyledGrapheme`, `ResolvedView`), and composition of already-rendered `RenderedBlock` values. | `style`, `text` |
 | [`component`](../urushi/src/component/) | Reusable semantic data and the independent concrete presentations that compose it into primitive `View` trees. | `theme`, `view`, `text` |

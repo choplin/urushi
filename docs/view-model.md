@@ -17,6 +17,8 @@ each have a file under [`design/`](design/), linked from the section that
 summarizes them. Why the model has this shape at all is recorded in
 [`design/view-block-model.md`](design/view-block-model.md). The value model
 governing the two style types is defined in [`style-model.md`](style-model.md).
+The styled plain-text invariant is defined in
+[`design/styled-text.md`](design/styled-text.md).
 
 ## Primitive styles and the view tree
 
@@ -49,7 +51,7 @@ A view is a tree of six primitive nodes, and a keyed form of one of them:
 
 ```rust
 pub enum View {
-    Text(String, TextStyle),
+    Text(StyledText),
     Block(BlockStyle, Box<View>),
     Row(VerticalAlign, Vec<View>),
     Column(Align, Vec<View>),
@@ -59,7 +61,7 @@ pub enum View {
 }
 ```
 
-- `Text` is a leaf: plain text and the style applied to it.
+- `Text` is a leaf: one plain-text flow with zero or more styled segments.
 - `Block` applies one `BlockStyle` around exactly one child.
 - `Row` places children side by side.
 - `Column` stacks children.
@@ -72,8 +74,17 @@ These primitives cover the current common mechanics: carry text, put a box
 around something, place things beside each other, stack them, and line them up
 in columns. They are not claimed to exhaust every renderer-neutral operation a
 full-screen frame needs. Applications and concrete presentations construct
-views through `View::text`, `View::block`, `View::row`, `View::column`,
-`View::grid` and `View::canvas`; there is one way to express each node.
+views through `View::text`, `View::styled_text`, `View::block`, `View::row`,
+`View::column`, `View::grid` and `View::canvas`; there is one way to express
+each node.
+
+`TextSpan` is caller input: a string fragment and one complete `TextStyle`.
+`StyledText` joins those fragments into one source string and keeps private,
+canonical style ranges on grapheme boundaries. The style ranges do not create
+line, word, wrap, or clip boundaries. A `String` or string literal converts to
+a default-style `TextSpan`, so only styled fragments need an explicit
+constructor. The exact construction and normalization rules are defined in
+[`design/styled-text.md`](design/styled-text.md).
 
 Those nodes state layout and drawing intent only. There is no `View::List`,
 `View::Table`, `View::Tree`, or `View::Graph`: a concrete presentation either
@@ -195,8 +206,8 @@ as sitting on the last row. What being outside means is the caller's: a
 full-screen runtime hides a cursor it cannot show or scrolls to it, and a
 caller drawing into a region intersects it with the resolved size first.
 
-The same pass covers the single-block case: `BlockStyle::render` resolves
-`Block(style, Text(content, style.text))` with unbounded `Available`. There is
+The same pass covers the single-block case: `BlockStyle::render` resolves a
+`Block` containing uniformly styled text with unbounded `Available`. There is
 one implementation of the box model in the workspace.
 
 ## Sizing at a glance
@@ -299,7 +310,8 @@ impl RenderedBlock {
 }
 ```
 
-- A `Text` node holds plain text. Its width is grapheme display width.
+- A `Text` node holds one `StyledText`. Its width is the display width of the
+  joined source's graphemes; segment boundaries do not affect it.
 - `BlockStyle::render` and `AnsiRenderer::render` return a `RenderedBlock`,
   which implements `Display`.
 - `join_horizontal` and `join_vertical` take and return `RenderedBlock`. They

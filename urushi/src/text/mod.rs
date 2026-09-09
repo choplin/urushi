@@ -6,8 +6,11 @@
 //! is the crate's only ANSI-aware path.
 
 mod printable;
+mod styled;
 pub(crate) mod width;
 mod wrap;
 
 pub use printable::{Grapheme, PrintableLines, PrintableText};
-pub(crate) use wrap::{wrap_text, wrapped_line_count};
+pub(crate) use styled::StyledTextGrapheme;
+pub use styled::{StyledText, StyledTextError, TextSpan};
+pub(crate) use wrap::{wrap_styled_lines, wrap_text, wrapped_line_count};
