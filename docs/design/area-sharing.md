@@ -35,7 +35,7 @@ are 3, 3, 4.
 On the cross axis — height in a `Row`, width in a `Column` — there is nothing
 to divide: the container passes its available extent to every child
 unchanged, and a `Fill` length there stretches to it. A fixed-width sidebar
-spanning the terminal's height is `width(20).height(Fill(1))` inside a `Row`,
+spanning the terminal's height is `width(20).height(Length::fill(1))` inside a `Row`,
 and panels stacked inside it divide that height with their own `Length`s.
 
 Each child is resolved once at its assigned size. There is no renegotiation: a
@@ -51,7 +51,7 @@ Block: fill 1, align center                            -- spans the terminal, ce
 
 A box resolved below its available area is *placed* by its parent's existing
 alignment — `align`, `vertical_align`, and the `Row`/`Column` parameters — as
-the outer `Fill(1)` block above places the capped group.
+the outer `Length::fill(1)` block above places the capped group.
 
 When the children's assigned sizes — stated `Cells`, intrinsic auto, `Fill`
 shares — add up to more than the area, children shrink below those sizes:

@@ -13,22 +13,26 @@ the order these rules apply in per node is [`layout-resolution.md`](layout-resol
 Sizes are expressed in one vocabulary:
 
 ```rust
+use std::num::NonZeroU16;
+
 pub enum Length {
     Cells(u16),  // an absolute number of terminal cells
-    Fill(u16),   // a weighted share of the remaining area
+    Fill(NonZeroU16), // a positive weighted share of the remaining area
 }
 ```
 
 `width` and `height` take a `Length`; their absence means *auto* — the
 intrinsic size. `u16` converts into `Length::Cells`, so `width(20)` stays
-concise. `min_width`, `min_height`, `max_width`, and `max_height` are bounds
-in cells. Every one of these measures the same box: content plus padding plus
-enabled border edges. Margin lies outside. A bordered box "of width 6" is six
-visible cells wide — `┌────┐`. Margin still occupies cells: what a container
-hands a child, and what a `Fill` share or an `Available` bound is measured
-against, is the box plus its margin — the extent the child occupies in its
-parent — so a `width(20)` child with a margin of one on each side takes
-twenty-two cells of its parent's area.
+concise. `Length::fill(weight)` constructs a programmer-authored positive
+weight and panics on zero; `Length::try_fill(weight)` returns
+`InvalidFillWeight` when a dynamic weight is zero. `min_width`, `min_height`,
+`max_width`, and `max_height` are bounds in cells. Every one of these measures
+the same box: content plus padding plus enabled border edges. Margin lies
+outside. A bordered box "of width 6" is six visible cells wide — `┌────┐`.
+Margin still occupies cells: what a container hands a child, and what a `Fill`
+share or an `Available` bound is measured against, is the box plus its margin —
+the extent the child occupies in its parent — so a `width(20)` child with a
+margin of one on each side takes twenty-two cells of its parent's area.
 
 ### Intrinsic sizes
 
@@ -172,7 +176,7 @@ implementation:
 |---|---|---|
 | `width(Cells)` / `min_` / `max_` | `width`, `min-width`, `max-width` (border-box) | margin outside, as in CSS |
 | auto (absent `width`) | `max-content` sizing | |
-| `Fill(n)` | Grid's `fr` track | named after Ratatui's `Constraint::Fill` |
+| `fill(n)` | Grid's `fr` track | named after Ratatui's `Constraint::Fill` |
 | `Available` | the containing block | |
 | `Overflow::Wrap`/`Clip(marker)` | `white-space`, `overflow`, `text-overflow` | one enum: a terminal has no paint layer to make `overflow` its own axis |
 | min-content floor | `min-content` | grapheme atomicity, not word atomicity |

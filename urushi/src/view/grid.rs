@@ -142,9 +142,9 @@ mod tests {
 
     #[test]
     fn a_stated_column_length_is_read_by_index() {
-        let style = GridStyle::new().columns([Some(Length::Fill(2))]);
+        let style = GridStyle::new().columns([Some(Length::fill(2))]);
 
-        assert_eq!(style.column_length(0), Some(Length::Fill(2)));
+        assert_eq!(style.column_length(0), Some(Length::fill(2)));
         assert_eq!(style.column_length(1), None);
     }
 }

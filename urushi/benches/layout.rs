@@ -81,7 +81,7 @@ fn siblings(count: usize) -> View {
     View::row(
         VerticalAlign::Top,
         (0..count)
-            .map(|_| View::block(BlockStyle::new().width(Length::Fill(1)), leaf()))
+            .map(|_| View::block(BlockStyle::new().width(Length::fill(1)), leaf()))
             .collect::<Vec<_>>(),
     )
 }
@@ -90,7 +90,7 @@ fn siblings(count: usize) -> View {
 fn dashboard(rows_of_body: usize) -> View {
     View::block(
         BlockStyle::new()
-            .width(Length::Fill(1))
+            .width(Length::fill(1))
             .align(Align::Center),
         View::block(
             BlockStyle::new().max_width(80),
@@ -108,7 +108,7 @@ fn dashboard(rows_of_body: usize) -> View {
                     ),
                     View::block(
                         BlockStyle::new()
-                            .width(Length::Fill(1))
+                            .width(Length::fill(1))
                             .border(Border::NORMAL)
                             .padding((0, 1))
                             .overflow(Overflow::ellipsis()),

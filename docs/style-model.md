@@ -114,7 +114,7 @@ let style = BlockStyle::new()
     .padding((0, 1))
     .border(Border::ROUNDED)
     .width(20)                     // Length::Cells(20) through From<u16>
-    .height(Length::Fill(1))
+    .height(Length::fill(1))
     .min_width(12)
     .max_width(60)
     .overflow(Overflow::ellipsis())

@@ -10,6 +10,8 @@
 //!
 //! [`View`]: crate::View
 
+use std::num::NonZeroU16;
+
 use crate::text::{PrintableLines, PrintableText};
 use crate::{BlockStyle, Length, Sides};
 
@@ -88,11 +90,20 @@ impl Axis {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Kind {
     /// A weighted share of whatever the other children leave.
-    Fill(u16),
+    Fill(NonZeroU16),
     /// No stated length: the intrinsic size.
     Auto,
     /// A stated size in cells.
     Cells,
+}
+
+impl Kind {
+    pub(crate) const fn fill(weight: u16) -> Self {
+        match NonZeroU16::new(weight) {
+            Some(weight) => Self::Fill(weight),
+            None => panic!("internal fill weight must be greater than zero"),
+        }
+    }
 }
 
 /// One child's claim on its container's main axis.
@@ -135,7 +146,7 @@ pub(crate) fn distribute(area: usize, claims: &[Claim]) -> Vec<usize> {
     let (mut weighted, mut given) = (0, 0);
     for claim in claims {
         assigned.push(match claim.kind {
-            Kind::Fill(_) if weights > 0 => {
+            Kind::Fill(_) => {
                 weighted += claim.weight();
                 let upto = remaining * weighted / weights;
                 let share = upto - given;
@@ -149,7 +160,7 @@ pub(crate) fn distribute(area: usize, claims: &[Claim]) -> Vec<usize> {
     }
 
     let mut excess = assigned.iter().sum::<usize>().saturating_sub(area);
-    for group in [Kind::Fill(0), Kind::Auto, Kind::Cells] {
+    for group in [Kind::fill(1), Kind::Auto, Kind::Cells] {
         if excess == 0 {
             break;
         }
@@ -161,7 +172,7 @@ pub(crate) fn distribute(area: usize, claims: &[Claim]) -> Vec<usize> {
 impl Claim {
     const fn weight(&self) -> usize {
         match self.kind {
-            Kind::Fill(weight) => weight as usize,
+            Kind::Fill(weight) => weight.get() as usize,
             _ => 0,
         }
     }
@@ -370,7 +381,7 @@ mod tests {
     fn a_fill_length_takes_the_area_and_falls_back_to_the_content() {
         let axis = Axis {
             frame: 2,
-            length: Some(Length::Fill(1)),
+            length: Some(Length::fill(1)),
             min: None,
             max: None,
         };
@@ -420,7 +431,7 @@ mod tests {
             "the maximum is tighter than the stated size"
         );
         assert_eq!(
-            axis(Some(Length::Fill(1)), None).content_bound(Some(6)),
+            axis(Some(Length::fill(1)), None).content_bound(Some(6)),
             Some(4),
             "a Fill length is bounded by the area it fills"
         );
@@ -498,7 +509,7 @@ mod tests {
     fn fill_children_divide_what_the_others_leave() {
         let stated = claim(Kind::Cells, 6, 0);
         let auto = claim(Kind::Auto, 4, 0);
-        let fill = |weight| claim(Kind::Fill(weight), 0, 0);
+        let fill = |weight| claim(Kind::fill(weight), 0, 0);
 
         assert_eq!(distribute(20, &[stated, fill(1)]), vec![6, 14]);
         assert_eq!(distribute(20, &[stated, auto, fill(1)]), vec![6, 4, 10]);
@@ -508,7 +519,7 @@ mod tests {
 
     #[test]
     fn a_share_never_loses_a_cell_to_rounding() {
-        let fill = claim(Kind::Fill(1), 0, 0);
+        let fill = claim(Kind::fill(1), 0, 0);
 
         // Three equal weights over ten cells: the odd cell goes to the last,
         // and the shares still sum to the area.
@@ -524,7 +535,7 @@ mod tests {
         // A capped Fill child is capped by its own clamp, not by distribution:
         // the share is handed over whole and the remainder simply goes unused.
         assert_eq!(
-            distribute(20, &[claim(Kind::Fill(1), 0, 0), claim(Kind::Cells, 4, 0)]),
+            distribute(20, &[claim(Kind::fill(1), 0, 0), claim(Kind::Cells, 4, 0)]),
             vec![16, 4]
         );
     }
@@ -534,7 +545,7 @@ mod tests {
         let claims = [
             claim(Kind::Cells, 6, 3),
             claim(Kind::Auto, 6, 3),
-            claim(Kind::Fill(1), 0, 3),
+            claim(Kind::fill(1), 0, 3),
         ];
 
         assert_eq!(distribute(16, &claims), vec![6, 6, 4], "no deficit at all");

@@ -117,8 +117,8 @@ fn an_anchor_stretches_with_the_box_that_carries_it() {
     let filling = View::anchor_block(
         "chart",
         BlockStyle::new()
-            .width(Length::Fill(1))
-            .height(Length::Fill(1))
+            .width(Length::fill(1))
+            .height(Length::fill(1))
             .border(Border::NORMAL),
         View::empty(),
     );

@@ -88,7 +88,7 @@ fn metrics(view: &View) -> Metrics {
         View::Canvas(canvas) => {
             let width = canvas.width_requirements();
             let kind = if canvas.uses_viewport_sizing() {
-                Kind::Fill(1)
+                Kind::fill(1)
             } else {
                 Kind::Auto
             };
@@ -714,7 +714,7 @@ mod tests {
 
     #[test]
     fn a_view_fills_its_area_when_anything_inside_it_does() {
-        let filling = View::block(BlockStyle::new().width(Length::Fill(1)), text("a"));
+        let filling = View::block(BlockStyle::new().width(Length::fill(1)), text("a"));
 
         assert!(!fills(&text("a")));
         assert!(fills(&filling));

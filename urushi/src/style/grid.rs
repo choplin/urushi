@@ -16,7 +16,7 @@ use crate::{GridStyleProperty, GridStylePropertyKey, Length, Sides};
 ///
 /// let style = GridStyle::new()
 ///     .cell_padding((0, 1))
-///     .columns([None, Some(Length::Fill(1))]);
+///     .columns([None, Some(Length::fill(1))]);
 /// let grid = View::grid(
 ///     style,
 ///     [

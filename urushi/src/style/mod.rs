@@ -16,7 +16,7 @@ pub use border::Border;
 pub use color::Color;
 pub use grid::GridStyle;
 pub use hyperlink::Hyperlink;
-pub use layout::{Align, Length, Overflow, Sides, VerticalAlign};
+pub use layout::{Align, InvalidFillWeight, Length, Overflow, Sides, VerticalAlign};
 pub use modifier::Modifier;
 pub use property::{
     BlockStyleProperty, BlockStylePropertyKey, GridStyleProperty, GridStylePropertyKey,

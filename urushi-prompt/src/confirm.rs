@@ -252,7 +252,7 @@ impl RuntimeField for Confirm {
         }
         let aligned_buttons = View::block(
             BlockStyle::new()
-                .width(Length::Fill(1))
+                .width(Length::fill(1))
                 .align(self.button_alignment),
             View::row(VerticalAlign::Top, buttons),
         );

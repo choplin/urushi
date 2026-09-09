@@ -653,7 +653,7 @@ impl TableFrame {
     fn column_widths(&self, width: usize) -> Vec<usize> {
         let requirements = self.column_requirements();
         let kind = if self.presentation.width.is_some() {
-            Kind::Fill(1)
+            Kind::fill(1)
         } else {
             Kind::Auto
         };
@@ -996,8 +996,8 @@ impl TableFrameCell {
         let style = self
             .style
             .clone()
-            .width(Length::Fill(1))
-            .height(Length::Fill(1));
+            .width(Length::fill(1))
+            .height(Length::fill(1));
         View::block(
             style,
             View::text(self.text.clone(), self.style.text().clone()),
@@ -1912,7 +1912,7 @@ mod tests {
         let fixed = View::block(BlockStyle::new().width(30), table.clone());
         assert_eq!(resolve(&fixed, Available::NONE).size().width(), 30);
 
-        let fill = View::block(BlockStyle::new().width(Length::Fill(1)), table);
+        let fill = View::block(BlockStyle::new().width(Length::fill(1)), table);
         assert_eq!(resolve(&fill, Available::columns(32)).size().width(), 32);
     }
 

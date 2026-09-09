@@ -121,7 +121,7 @@ fn a_fill_column_divides_what_the_others_leave() {
     let view = View::grid(
         GridStyle::new()
             .cell_padding((0, 1))
-            .columns([None, Some(Length::Fill(1))]),
+            .columns([None, Some(Length::fill(1))]),
         [[text("key"), text("value")]],
     );
 

@@ -1,6 +1,8 @@
 //! Alignment, sizing, and box-side values used by logical styles.
 
 use std::borrow::Cow;
+use std::fmt;
+use std::num::NonZeroU16;
 
 /// A box dimension: an absolute size, or a share of the remaining area.
 ///
@@ -12,12 +14,71 @@ pub enum Length {
     /// An absolute number of terminal cells.
     Cells(u16),
     /// A weighted share of the area remaining to the box's siblings.
-    Fill(u16),
+    Fill(NonZeroU16),
 }
+
+impl Length {
+    /// Creates a weighted share of the area remaining to the box's siblings.
+    ///
+    /// Use [`Length::try_fill`] when `weight` comes from input that may be
+    /// zero.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `weight` is zero.
+    pub const fn fill(weight: u16) -> Self {
+        match Self::try_fill(weight) {
+            Ok(length) => length,
+            Err(_) => panic!("fill weight must be greater than zero"),
+        }
+    }
+
+    /// Tries to create a weighted share of the remaining area.
+    pub const fn try_fill(weight: u16) -> Result<Self, InvalidFillWeight> {
+        match NonZeroU16::new(weight) {
+            Some(weight) => Ok(Self::Fill(weight)),
+            None => Err(InvalidFillWeight),
+        }
+    }
+}
+
+/// A fill weight was zero.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct InvalidFillWeight;
+
+impl fmt::Display for InvalidFillWeight {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str("fill weight must be greater than zero")
+    }
+}
+
+impl std::error::Error for InvalidFillWeight {}
 
 impl From<u16> for Length {
     fn from(value: u16) -> Self {
         Self::Cells(value)
+    }
+}
+
+#[cfg(test)]
+mod length_tests {
+    use super::{InvalidFillWeight, Length};
+
+    #[test]
+    fn fill_and_try_fill_construct_the_same_positive_weight() {
+        assert_eq!(Length::fill(1), Length::try_fill(1).unwrap());
+        assert_eq!(Length::fill(2), Length::try_fill(2).unwrap());
+    }
+
+    #[test]
+    fn try_fill_rejects_zero() {
+        assert_eq!(Length::try_fill(0), Err(InvalidFillWeight));
+    }
+
+    #[test]
+    #[should_panic(expected = "fill weight must be greater than zero")]
+    fn fill_panics_on_zero() {
+        Length::fill(0);
     }
 }
 

@@ -294,7 +294,7 @@ fn a_fill_length_resolves_against_the_area_and_falls_back_to_the_intrinsic_size(
     let view = View::block(
         BlockStyle::new()
             .border(Border::NORMAL)
-            .width(Length::Fill(1)),
+            .width(Length::fill(1)),
         View::text("ab", TextStyle::new()),
     );
 
@@ -393,7 +393,7 @@ fn a_row_gives_stated_children_their_size_and_the_rest_to_fill() {
     // what is left.
     let view = View::row(
         VerticalAlign::Top,
-        [panel("nav", 6), panel("main", Length::Fill(1))],
+        [panel("nav", 6), panel("main", Length::fill(1))],
     );
 
     assert_eq!(
@@ -406,7 +406,7 @@ fn a_row_gives_stated_children_their_size_and_the_rest_to_fill() {
 fn fill_weights_divide_the_remainder_and_equal_weights_split_it() {
     let equal = View::row(
         VerticalAlign::Top,
-        [panel("a", Length::Fill(1)), panel("b", Length::Fill(1))],
+        [panel("a", Length::fill(1)), panel("b", Length::fill(1))],
     );
     assert_eq!(
         view_rows(&equal, Available::columns(10)).remove(1),
@@ -415,7 +415,7 @@ fn fill_weights_divide_the_remainder_and_equal_weights_split_it() {
 
     let weighted = View::row(
         VerticalAlign::Top,
-        [panel("a", Length::Fill(1)), panel("b", Length::Fill(2))],
+        [panel("a", Length::fill(1)), panel("b", Length::fill(2))],
     );
     assert_eq!(
         view_rows(&weighted, Available::columns(9)).remove(1),
@@ -434,7 +434,7 @@ fn a_fill_on_the_cross_axis_stretches_to_the_containers_extent() {
                 BlockStyle::new()
                     .border(Border::NORMAL)
                     .width(5)
-                    .height(Length::Fill(1)),
+                    .height(Length::fill(1)),
                 View::text("nav", TextStyle::new()),
             ),
             View::text("x", TextStyle::new()),
@@ -458,11 +458,11 @@ fn a_capped_fill_leaves_its_remainder_unused_and_the_group_is_placed_by_align() 
             View::block(
                 BlockStyle::new()
                     .border(Border::NORMAL)
-                    .width(Length::Fill(1))
+                    .width(Length::fill(1))
                     .max_width(4),
                 View::text("a", TextStyle::new()),
             ),
-            panel("b", Length::Fill(1)),
+            panel("b", Length::fill(1)),
         ],
     );
     assert_eq!(
@@ -477,12 +477,12 @@ fn a_capped_fill_leaves_its_remainder_unused_and_the_group_is_placed_by_align() 
         BlockStyle::new().max_width(8),
         View::row(
             VerticalAlign::Top,
-            [panel("a", 3), panel("b", Length::Fill(1))],
+            [panel("a", 3), panel("b", Length::fill(1))],
         ),
     );
     let view = View::block(
         BlockStyle::new()
-            .width(Length::Fill(1))
+            .width(Length::fill(1))
             .align(Align::Center),
         group,
     );
@@ -504,7 +504,7 @@ fn a_deficit_shrinks_fill_then_auto_then_stated_and_freezes_at_the_floors() {
                     BlockStyle::new().border(Border::NORMAL),
                     View::text("abcd", TextStyle::new()),
                 ),
-                panel("x", Length::Fill(1)),
+                panel("x", Length::fill(1)),
             ],
         )
     };
@@ -530,8 +530,8 @@ fn distribution_never_opens_a_frame() {
         VerticalAlign::Top,
         [
             panel("abc", 5),
-            panel("de", Length::Fill(1)),
-            panel("fghi", Length::Fill(2)),
+            panel("de", Length::fill(1)),
+            panel("fghi", Length::fill(2)),
         ],
     );
 
@@ -561,7 +561,7 @@ fn a_column_divides_its_height_the_same_way_a_row_divides_its_width() {
             ),
             View::block(
                 BlockStyle::new()
-                    .height(Length::Fill(1))
+                    .height(Length::fill(1))
                     .border(Border::NORMAL),
                 View::text("body", TextStyle::new()),
             ),

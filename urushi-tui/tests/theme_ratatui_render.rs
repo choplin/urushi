@@ -281,7 +281,7 @@ fn corpus() -> Vec<(&'static str, View, Rect)> {
             View::block(
                 BlockStyle::new()
                     .border(Border::NORMAL)
-                    .width(Length::Fill(1))
+                    .width(Length::fill(1))
                     .align(Align::Center),
                 View::text("ab", plain.clone()),
             ),
@@ -307,7 +307,7 @@ fn corpus() -> Vec<(&'static str, View, Rect)> {
                     View::block(
                         BlockStyle::new()
                             .border(Border::NORMAL)
-                            .width(Length::Fill(1)),
+                            .width(Length::fill(1)),
                         View::text("main", plain.clone()),
                     ),
                 ],
@@ -326,7 +326,7 @@ fn corpus() -> Vec<(&'static str, View, Rect)> {
                     View::block(
                         BlockStyle::new()
                             .border(Border::NORMAL)
-                            .width(Length::Fill(1)),
+                            .width(Length::fill(1)),
                         View::text("wxyz", plain.clone()),
                     ),
                 ],
@@ -342,7 +342,7 @@ fn corpus() -> Vec<(&'static str, View, Rect)> {
                         BlockStyle::new()
                             .border(Border::NORMAL)
                             .width(5)
-                            .height(Length::Fill(1)),
+                            .height(Length::fill(1)),
                         View::text("nav", plain.clone()),
                     ),
                     View::text("x", plain.clone()),
@@ -359,7 +359,7 @@ fn corpus() -> Vec<(&'static str, View, Rect)> {
                     View::block(
                         BlockStyle::new()
                             .border(Border::NORMAL)
-                            .height(Length::Fill(1)),
+                            .height(Length::fill(1)),
                         View::text("body", plain.clone()),
                     ),
                     View::text("foot", plain.clone()),

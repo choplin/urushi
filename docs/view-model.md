@@ -216,9 +216,10 @@ Three questions are kept separate: how large a box is, how siblings share an
 area, and what happens to content that does not fit.
 
 **How large a box is.** Sizes are expressed in one vocabulary — `Length::Cells`
-for an absolute size, `Length::Fill(weight)` for a share of the remaining
-area, and *auto* (an absent `width` or `height`) for the intrinsic size — with
-`min_*` and `max_*` bounds in cells. Every one of these measures the same box:
+for an absolute size, `Length::fill(weight)` for a positive weighted share of
+the remaining area, and *auto* (an absent `width` or `height`) for the intrinsic
+size. These sizes combine with `min_*` and `max_*` bounds in cells. Every one of
+them measures the same box:
 content plus padding plus enabled border edges, with margin outside. A box's
 used size is a clamp: the stated or intrinsic size, capped by its maximum and
 the available area, floored by its minimum and — on the width axis only — the

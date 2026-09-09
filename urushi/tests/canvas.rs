@@ -190,7 +190,7 @@ impl CanvasItem for MissingAllocation {
         context.view(
             Position::default(),
             View::block(
-                BlockStyle::new().width(Length::Fill(1)),
+                BlockStyle::new().width(Length::fill(1)),
                 View::text("fill", TextStyle::new()),
             ),
             None,
@@ -209,7 +209,7 @@ impl CanvasItem for NestedMissingAllocation {
             View::row(
                 urushi::VerticalAlign::Top,
                 [View::block(
-                    BlockStyle::new().width(Length::Fill(1)),
+                    BlockStyle::new().width(Length::fill(1)),
                     View::text("fill", TextStyle::new()),
                 )],
             ),
@@ -227,7 +227,7 @@ impl CanvasItem for CappedMissingAllocation {
         context.view(
             Position::default(),
             View::block(
-                BlockStyle::new().width(Length::Fill(1)).max_width(4),
+                BlockStyle::new().width(Length::fill(1)).max_width(4),
                 View::text("fill", TextStyle::new()),
             ),
             None,
@@ -313,8 +313,8 @@ impl CanvasItem for Dot {
 fn nested_layout_allocates_canvas_and_clips_all_four_edges() {
     let canvas = View::block(
         BlockStyle::new()
-            .width(Length::Fill(1))
-            .height(Length::Fill(1)),
+            .width(Length::fill(1))
+            .height(Length::fill(1)),
         View::canvas(Canvas::new().extent(Size::new(3, 2)).item(Dot)),
     );
     let nested = View::block(
@@ -475,7 +475,7 @@ impl CanvasItem for RepresentativeGraph {
             Position::new(4, 1),
             View::block(
                 BlockStyle::new()
-                    .width(Length::Fill(1))
+                    .width(Length::fill(1))
                     .height(Length::Cells(1)),
                 View::text("F", TextStyle::new()),
             ),
