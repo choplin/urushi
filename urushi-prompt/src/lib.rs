@@ -2,7 +2,7 @@
 //!
 //! [`Form::run`] owns a short-lived terminal session and blocks until the form
 //! is submitted, cancelled, or terminal I/O fails. The crate exposes the form
-//! runtime ([`Form`], [`FormBuilder`], [`PromptStart`], [`Group`],
+//! runtime ([`Form`], [`FormBuilder`], [`PromptStart`], [`InlineResizePolicy`], [`Group`],
 //! [`FormOutcome`], [`RunError`]) together with the [`Input`], [`Select`], and
 //! [`Confirm`] field controls, and re-exports [`urushi`] for styling.
 
@@ -20,6 +20,6 @@ pub use confirm::{Confirm, ConfirmAnswer, ConfirmSource};
 pub use input::{Input, ValidationError, Validator};
 pub use runtime::{
     Field, FieldConfigError, FieldKey, Form, FormBuildError, FormBuilder, FormOutcome, FormValues,
-    Group, GroupBuildError, GroupBuilder, IoOperation, PromptStart, RunError,
+    Group, GroupBuildError, GroupBuilder, InlineResizePolicy, IoOperation, PromptStart, RunError,
 };
 pub use select::{Select, SelectOption};

@@ -77,6 +77,10 @@ pub(crate) trait Renderer {
     }
 
     fn resize(&mut self, _columns: u16, _rows: u16) {}
+
+    /// Clear the visible primary-buffer viewport and establish a known cursor
+    /// origin for the next draw.
+    fn clear_viewport(&mut self) -> io::Result<()>;
 }
 
 pub(crate) trait TerminalControl {
@@ -314,8 +318,10 @@ pub(crate) mod tests {
         pub(crate) regions: Vec<(PromptStart, u16)>,
         pub(crate) finishes: Vec<RenderFinish>,
         pub(crate) resizes: Vec<(u16, u16)>,
+        pub(crate) viewport_clears: usize,
         pub(crate) columns: u16,
         pub(crate) fail_draw: Option<usize>,
+        pub(crate) fail_clear_viewport: bool,
         pub(crate) fail_finish: bool,
     }
 
@@ -326,8 +332,10 @@ pub(crate) mod tests {
                 regions: Vec::new(),
                 finishes: Vec::new(),
                 resizes: Vec::new(),
+                viewport_clears: 0,
                 columns: 80,
                 fail_draw: None,
+                fail_clear_viewport: false,
                 fail_finish: false,
             }
         }
@@ -359,6 +367,15 @@ pub(crate) mod tests {
         fn resize(&mut self, columns: u16, rows: u16) {
             self.resizes.push((columns, rows));
             self.columns = columns.max(1);
+        }
+
+        fn clear_viewport(&mut self) -> io::Result<()> {
+            self.viewport_clears += 1;
+            if self.fail_clear_viewport {
+                Err(io::Error::other("clear viewport failed"))
+            } else {
+                Ok(())
+            }
         }
 
         fn columns(&self) -> u16 {
@@ -428,12 +445,20 @@ pub(crate) mod tests {
     }
 
     pub(crate) fn form(fields: impl IntoIterator<Item = TestField>) -> Form {
+        form_with_resize_policy(fields, crate::InlineResizePolicy::default())
+    }
+
+    pub(crate) fn form_with_resize_policy(
+        fields: impl IntoIterator<Item = TestField>,
+        policy: crate::InlineResizePolicy,
+    ) -> Form {
         let group = fields
             .into_iter()
             .fold(Group::builder(), |builder, field| builder.field(field))
             .build()
             .expect("test group has fields");
         Form::builder()
+            .inline_resize_policy(policy)
             .group(group)
             .build()
             .expect("test form is valid")

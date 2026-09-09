@@ -40,10 +40,11 @@
 //!
 //! Between the first line feed of such a sequence and the [`InlineCommand::SavePosition`]
 //! that ends it the region is unanchored, and a failure there leaves its extent
-//! unknown. So does a terminal resize. In both the region is *lost*: it is
-//! abandoned rather than erased, because erasing from an origin that no longer
-//! locates the region would destroy output the prompt does not own. See
-//! [`InlinePresentation::lose_region`] and `docs/design/prompt-region.md`.
+//! unknown. A terminal resize also invalidates the region, but the event loop
+//! either exits or clears the viewport and resets presentation state before
+//! planning another frame. Neither path asks this plan to recover an
+//! unlocatable origin. See [`InlinePresentation::lose_region`] and
+//! `docs/design/prompt-region.md`.
 //!
 //! ## Clear before write
 //!
@@ -197,9 +198,8 @@ pub(crate) struct InlineRenderPlan {
 /// has no horizontal concern.
 ///
 /// `start` chooses how the first frame reaches its left edge. A region already
-/// anchored restores its saved origin. A region re-established after a loss
-/// returns to the selected column without adding another row, bounding residue
-/// to the rows above it.
+/// anchored restores its saved origin. An unlocatable region is never passed
+/// back for redraw: resize handling exits or resets it after a viewport clear.
 pub(crate) fn plan_draw(
     view: FramedView,
     previous: &InlinePresentation,
@@ -207,6 +207,10 @@ pub(crate) fn plan_draw(
     drawing_columns: u16,
     max_rows: u16,
 ) -> InlineRenderPlan {
+    debug_assert!(
+        previous.anchored || !previous.drawn,
+        "an unlocatable inline region must not be redrawn"
+    );
     let FramedView {
         rows: lines,
         cursor,
@@ -238,14 +242,6 @@ pub(crate) fn plan_draw(
             if existing_rows > 1 {
                 commands.push(InlineCommand::MoveDown(existing_rows - 1));
             }
-        } else if previous.drawn {
-            // Re-establishing after a loss. The cursor's own row becomes the
-            // new region top: starting there overwrites it, so the residue left
-            // behind is bounded to the rows above it, and a single-row prompt
-            // leaves none. A line feed first would push the region below the
-            // residue instead, which is what a finishing prompt does and not
-            // what a redrawing one does.
-            commands.push(InlineCommand::MoveToColumn(start.column()));
         } else {
             match start {
                 PromptStart::NewLine => {
@@ -591,8 +587,11 @@ mod tests {
         }
 
         renderer.resize(20, 4);
+        renderer
+            .clear_viewport()
+            .expect("viewport reset before replacement frame");
         plans.push((
-            "re-establishing after a lost region",
+            "first frame after a viewport clear",
             draw_plan(
                 &renderer,
                 &three_rows(Some(ViewCursor { row: 0, column: 0 })),

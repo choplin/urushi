@@ -107,8 +107,11 @@ the ordinary redraw path.
 
 A saved origin and an owned row count are physical terminal state. A
 primary-buffer resize invalidates their use as addresses for the prompt's
-reflowed content. Resize is not region loss and does not invoke either lost
-region continuation below. Its exact handling and rationale are defined in
+reflowed content. The renderer abandons that region without erasing it. The
+default policy then returns an error; the destructive policy clears the visible
+viewport, resets presentation state, and establishes a new region on its next
+draw. Neither policy invokes the lost-write continuation below. Their exact
+handling and rationale are defined in
 [`prompt-resize.md`](prompt-resize.md).
 
 ### Losing a region

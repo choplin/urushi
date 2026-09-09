@@ -16,7 +16,8 @@ pub use error::{FieldConfigError, FormBuildError, GroupBuildError, IoOperation, 
 pub use field::Field;
 pub(crate) use field::{FieldAction, FieldEntry, RuntimeField, private};
 pub use form::{
-    FieldKey, Form, FormBuilder, FormOutcome, FormValues, Group, GroupBuilder, PromptStart,
+    FieldKey, Form, FormBuilder, FormOutcome, FormValues, Group, GroupBuilder, InlineResizePolicy,
+    PromptStart,
 };
 #[cfg(test)]
 pub(crate) use form::{FormState, ReducerResult};

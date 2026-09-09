@@ -33,6 +33,12 @@ impl fmt::Display for IoOperation {
 pub enum RunError {
     /// Standard input and standard error are not both interactive terminals.
     NotInteractive,
+    /// The terminal was resized while an inline prompt configured with
+    /// [`crate::InlineResizePolicy::ReturnError`] was running.
+    Resized {
+        /// A terminal restoration failure, if cleanup was attempted and failed.
+        cleanup: Option<io::Error>,
+    },
     /// A runtime operation failed; cleanup is retained separately when it also failed.
     Io {
         /// The primary operation that failed.
@@ -49,6 +55,15 @@ impl fmt::Display for RunError {
         match self {
             Self::NotInteractive => formatter
                 .write_str("standard input and standard error must be interactive terminals"),
+            Self::Resized {
+                cleanup: Some(cleanup),
+            } => write!(
+                formatter,
+                "terminal resized during inline prompt; terminal cleanup also failed: {cleanup}"
+            ),
+            Self::Resized { cleanup: None } => {
+                formatter.write_str("terminal resized during inline prompt")
+            }
             Self::Io {
                 operation,
                 source,
@@ -70,6 +85,9 @@ impl std::error::Error for RunError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
             Self::NotInteractive => None,
+            Self::Resized { cleanup } => cleanup
+                .as_ref()
+                .map(|error| error as &(dyn std::error::Error + 'static)),
             Self::Io { source, .. } => Some(source),
         }
     }

@@ -31,10 +31,9 @@ impl InlinePresentation {
     ///
     /// A resize may reflow content and move the saved origin, and a write that
     /// fails while the origin is being re-anchored leaves the region mid-growth
-    /// with nothing to restore to. Both leave the extent unknown, and the
-    /// design abandons such a region rather than erasing rows whose position
-    /// was inferred: residue is ugly and bounded, erasure is invisible and
-    /// unbounded.
+    /// with nothing to restore to. Both leave the extent unknown. Resize
+    /// handling exits or clears the viewport before another draw; failed-write
+    /// cleanup erases nothing whose position would have to be inferred.
     ///
     /// `drawn` survives. It records that this prompt put something on screen at
     /// some point, which stays true however many regions have been abandoned

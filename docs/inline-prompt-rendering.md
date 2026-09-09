@@ -19,7 +19,7 @@ A prompt has two display modes:
 
 | Mode | Surface | Resize behavior | Selection |
 | --- | --- | --- | --- |
-| `Inline` | A region in the primary buffer | The terminal owns soft-wrap reflow | Default |
+| `Inline` | A region in the primary buffer | Terminal reflow, then error or explicit viewport clear | Default |
 | `AlternateScreen` | The whole temporary viewport | The prompt lays out and redraws the viewport | Explicit |
 
 The modes share form state, field behavior, validation, themes, and outcomes.
@@ -36,6 +36,13 @@ must leave content outside that region untouched. Terminal soft wrapping owns
 how the displayed snapshot reflows when the terminal is resized. The prompt
 does not reconstruct or erase that snapshot from its previous physical
 geometry, so this mode does not promise deterministic post-resize layout.
+
+`InlineResizePolicy::ReturnError` is the default: the prompt restores the
+terminal session and returns `RunError::Resized`, leaving the reflowed snapshot
+untouched. `InlineResizePolicy::ClearViewportAndRedraw` is an explicit
+destructive opt-in. It clears the visible primary-buffer viewport, places the
+cursor at a known origin, and redraws current form state at the new size. It
+does not clear scrollback or enter the alternate screen.
 
 Submission keeps the final answered prompt and moves subsequent output below
 it. Cancellation and failure erase only a region whose ownership can still be
@@ -65,19 +72,23 @@ the default `Inline` mode. Inline rendering must:
 - redraw on every keystroke without visible flicker;
 - keep the focused row visible when content exceeds the terminal height;
 - release the region cleanly on submission, cancellation, and failure;
-- leave terminal content outside the region untouched in every case, including
-  when a terminal write fails midway; and
+- leave terminal content outside the region untouched unless the caller
+  explicitly selects the viewport-clearing resize policy, including when a
+  terminal write fails midway; and
 - allow command ordering and state transitions to be tested without a terminal.
 
 ## The owned region
 
-A prompt draws inline. It never enters the alternate screen and never clears
-the terminal. It owns a *region*: a run of rows anchored at a saved cursor
-position. The caller chooses whether that origin is on a new line, at column
-zero of the current line, or at a supplied current position. It may also cap the
-drawing width. Only the owned suffix of rows inside that region may be erased
-or rewritten. Terminal content above the origin, to the left of a non-zero
-origin, and below the last materialized row belongs to whatever produced it.
+A prompt draws inline and never enters the alternate screen. Its ordinary plan
+never clears the terminal. It owns a *region*: a run of rows anchored at a
+saved cursor position. The caller chooses whether that origin is on a new line,
+at column zero of the current line, or at a supplied current position. It may
+also cap the drawing width. Only the owned suffix of rows inside that region
+may be erased or rewritten. Terminal content above the origin, to the left of
+a non-zero origin, and below the last materialized row belongs to whatever
+produced it. The sole exception is the explicit
+`ClearViewportAndRedraw` resize policy, which abandons the unlocatable region
+and takes the visible viewport before establishing a new one.
 
 Three rules govern the region.
 
@@ -97,8 +108,9 @@ nothing.
 
 A region can be *lost* when a write fails while its physical extent cannot be
 established. Such a region is abandoned, never erased. Resize is a separate
-boundary: it hands the displayed snapshot to the primary terminal buffer rather
-than inferring a new origin. The resize boundary is defined in
+boundary: it hands the displayed snapshot to the primary terminal buffer and
+follows the selected inline resize policy rather than inferring a new origin.
+The resize boundary is defined in
 [`design/prompt-resize.md`](design/prompt-resize.md); origin anchoring and
 unlocatable-write recovery are defined in
 [`design/prompt-region.md`](design/prompt-region.md).

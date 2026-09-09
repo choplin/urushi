@@ -169,9 +169,17 @@ impl<W: Write> Renderer for CrosstermRenderer<W> {
         self.rows = rows.max(1);
         // A resize may reflow existing content and push rows past the top of
         // the screen, which invalidates both the saved origin and the row
-        // count. Neither can be recovered by inspection, so the region is
-        // abandoned; the next frame re-establishes on the cursor's own row.
+        // count. The caller must return an error or clear the viewport before
+        // another draw; a frame never re-establishes from this lost state.
         self.presentation.lose_region();
+    }
+
+    fn clear_viewport(&mut self) -> io::Result<()> {
+        // The resize already made the old region unlocatable. Keep it
+        // abandoned if any clear command fails so cleanup never infers rows.
+        crossterm_executor::clear_viewport(&mut self.writer)?;
+        self.presentation = InlinePresentation::default();
+        Ok(())
     }
 }
 pub(super) struct CrosstermTerminalControl;
@@ -327,6 +335,27 @@ mod tests {
 
         fn flush(&mut self) -> io::Result<()> {
             Ok(())
+        }
+    }
+
+    #[derive(Default)]
+    struct ToggleFailFlushWriter {
+        bytes: Vec<u8>,
+        fail_flush: bool,
+    }
+
+    impl io::Write for ToggleFailFlushWriter {
+        fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+            self.bytes.extend_from_slice(bytes);
+            Ok(bytes.len())
+        }
+
+        fn flush(&mut self) -> io::Result<()> {
+            if self.fail_flush {
+                Err(io::Error::other("planned flush failure"))
+            } else {
+                Ok(())
+            }
         }
     }
 
@@ -636,7 +665,7 @@ mod tests {
     }
 
     #[test]
-    fn a_redraw_after_a_resize_re_establishes_on_the_cursor_row() {
+    fn clearing_after_a_resize_resets_the_viewport_before_redraw() {
         let theme = test_theme();
         let profile = TerminalProfile::new(ColorProfile::Monochrome, AnsiPolicy::Disabled);
         let styles = PromptStyles::resolve(&theme, &profile);
@@ -650,59 +679,62 @@ mod tests {
             None,
         );
         renderer.draw(&tall).expect("first draw succeeds");
+        let before_clear = renderer.writer.len();
         renderer.resize(20, 4);
+        renderer.clear_viewport().expect("viewport clear succeeds");
+        assert_eq!(
+            &renderer.writer[before_clear..],
+            b"\x1b[?25l\x1b[2J\x1b[1;1H"
+        );
+        assert_eq!(renderer.presentation, InlinePresentation::default());
 
-        // A prompt that is still running re-establishes on the cursor's own
-        // row, overwriting it. It does not push below the residue first: that
-        // is what a finishing prompt does, and doing it here would add a blank
-        // row on every resize.
         let plan = draw_plan(&renderer, &tall);
         assert_eq!(
-            plan.commands[..5],
+            plan.commands[..4],
             [
                 InlineCommand::HideCursor,
-                InlineCommand::MoveToColumn(0),
                 InlineCommand::LineFeed,
                 InlineCommand::LineFeed,
                 InlineCommand::MoveUp(2),
             ]
         );
-        assert_eq!(plan.commands[5], InlineCommand::SavePosition);
+        assert_eq!(plan.commands[4], InlineCommand::SavePosition);
         assert!(
-            !plan
-                .commands
-                .contains(&InlineCommand::CarriageReturnLineFeed),
-            "a redraw never releases the terminal below the region"
-        );
-        // The old origin is gone, so nothing restores to it before the frame
-        // has saved a new one.
-        assert!(
-            !plan.commands[..5].contains(&InlineCommand::RestorePosition),
-            "a lost region has no origin to return to"
+            !plan.commands[..4].contains(&InlineCommand::RestorePosition),
+            "the cleared viewport has no old origin to restore"
         );
 
-        // A single-row prompt overwrites the whole of what it had, so it leaves
-        // no residue at all: the re-established region is exactly the cursor's
-        // row.
-        renderer.resize(20, 4);
-        let short = draw_plan(
-            &renderer,
-            &renderer_view(vec![view_line("only", &styles.question)], None),
-        );
-        assert_eq!(
-            short.commands[..3],
-            [
-                InlineCommand::HideCursor,
-                InlineCommand::MoveToColumn(0),
-                InlineCommand::SavePosition,
-            ]
-        );
-
-        renderer
-            .draw(&tall)
-            .expect("redraw after a resize succeeds");
+        renderer.draw(&tall).expect("redraw after a clear succeeds");
         assert!(renderer.presentation.anchored);
         assert_eq!(renderer.presentation.owned_rows, 3);
+    }
+
+    #[test]
+    fn a_failed_viewport_clear_keeps_the_reflowed_region_abandoned() {
+        let theme = test_theme();
+        let profile = TerminalProfile::new(ColorProfile::Monochrome, AnsiPolicy::Disabled);
+        let styles = PromptStyles::resolve(&theme, &profile);
+        let mut renderer = CrosstermRenderer::new(ToggleFailFlushWriter::default(), (20, 4));
+        renderer
+            .draw(&renderer_view(
+                vec![view_line("prompt", &styles.question)],
+                None,
+            ))
+            .expect("first draw succeeds");
+        renderer.resize(10, 4);
+        renderer.writer.fail_flush = true;
+
+        assert!(renderer.clear_viewport().is_err());
+        assert!(!renderer.presentation.anchored);
+        assert_eq!(renderer.presentation.owned_rows, 0);
+        assert!(renderer.presentation.drawn);
+        assert_eq!(
+            inline_plan::plan_finish(RenderFinish::Error, &renderer.presentation).commands,
+            [
+                InlineCommand::ShowCursor,
+                InlineCommand::CarriageReturnLineFeed,
+            ]
+        );
     }
 
     #[test]
@@ -826,6 +858,7 @@ mod tests {
         )));
 
         renderer.resize(3, 1);
+        renderer.clear_viewport().expect("viewport clear succeeds");
         renderer
             .draw(&renderer_view(
                 vec![view_line("短い", &styles.question)],
@@ -833,8 +866,8 @@ mod tests {
             ))
             .expect("redraw succeeds");
         assert_eq!(renderer.presentation.owned_rows, 1);
-        // A shrunk viewport leaves the region one row tall, so cancelling
-        // erases exactly that row — never the screen.
+        // The replacement region is one row tall, so later cancellation
+        // erases exactly that newly established row.
         assert_eq!(
             inline_plan::plan_finish(RenderFinish::Cancelled, &renderer.presentation).commands,
             [

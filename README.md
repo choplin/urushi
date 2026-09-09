@@ -197,6 +197,23 @@ nix develop --command cargo run -p urushi-prompt --example current_position
 That example combines `PromptStart::CurrentPosition` with
 `FormBuilder::width`; the prefix to the left of the prompt remains untouched.
 
+Inline prompts cannot locate their old rows after the primary buffer reflows
+them on resize. The default therefore restores the terminal session and returns
+`RunError::Resized` without guessing which rows to erase. A caller that accepts
+losing every other visible cell may opt into a destructive primary-buffer
+redraw:
+
+```rust
+use urushi_prompt::{Form, InlineResizePolicy};
+
+let builder = Form::builder()
+    .inline_resize_policy(InlineResizePolicy::ClearViewportAndRedraw);
+// Add groups to `builder`, then build the form.
+```
+
+This policy clears only the visible viewport, not scrollback, and never enters
+the alternate screen.
+
 Use this sequence for a terminal smoke test:
 
 1. Press Enter with the name empty. The form shows a validation error and
@@ -211,9 +228,9 @@ Use this sequence for a terminal smoke test:
 5. Run the example again and press Escape or Ctrl-C. The form cancels, removes
    its inline prompt region, and restores raw mode and cursor visibility.
 
-Resize the terminal while editing the CJK name to check narrow layouts. The
-cursor remains inside the prompt viewport, and redraws do not clear text to
-the left of the prompt's starting position.
+Resize the terminal while editing to observe the default `RunError::Resized`
+path. Configure `ClearViewportAndRedraw` to smoke-test continued editing at the
+new size; expect all other visible primary-buffer content to be erased.
 
 ## Roadmap
 

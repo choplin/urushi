@@ -8,7 +8,7 @@ display modes and their visible lifecycle contracts.
 
 ## The rule
 
-### Inline emits no row-recovery plan
+### Inline chooses an explicit resize policy
 
 An inline region's saved origin and owned row count describe physical terminal
 state. Once the primary buffer has been resized, neither identifies the rows to
@@ -17,13 +17,26 @@ cursor movement, erasure, separator, or replacement prompt block derived from
 the previous region.
 
 The primary terminal buffer owns whatever soft-wrap reflow it applies to the
-displayed snapshot. Urushi retains the logical form state, but the inline mode
-does not promise a deterministic physical layout after resize or treat
-application width calculations as authority over the terminal's rows.
+displayed snapshot. The inline mode does not promise a deterministic physical
+layout after resize or treat application width calculations as authority over
+the terminal's rows. It applies one of two policies:
+
+- `ReturnError`, the default, restores the terminal modes acquired by the
+  session and returns `RunError::Resized`. It neither erases the old region nor
+  redraws the form.
+- `ClearViewportAndRedraw`, an explicit destructive opt-in, clears the visible
+  primary-buffer viewport, moves to its upper-left cell, and redraws current
+  form state against the latest dimensions. It clears neither scrollback nor
+  terminal content outside the visible viewport.
+
+Neither policy enters the alternate screen. The second makes the whole visible
+viewport disposable for this recovery step, so selecting it is permission to
+erase caller content that an ordinary inline region does not own.
 
 Resize events may be coalesced above the render plan to avoid redundant
-observations. Coalescing is only an optimization: correctness does not depend
-on a quiet period because no delivered resize invokes row recovery.
+observations. `ReturnError` stops once after a coalesced burst;
+`ClearViewportAndRedraw` clears and redraws once for that burst. Correctness
+does not depend on a quiet period because neither policy recovers old rows.
 
 ### Alternate screen redraws its viewport
 
@@ -74,6 +87,11 @@ restore guessed erasure.
 mismatch and an origin outside the addressable viewport can make a calculated
 row delta land outside the prompt. This is not a safe portable recovery
 mechanism without an additional capability contract.
+
+**Append a replacement prompt block.** This preserves unrelated content but
+accumulates stale prompt snapshots in scrollback and makes resize-heavy flows
+unusable. Inline either stops or takes the visible viewport with explicit
+permission instead.
 
 **Always use the alternate screen.** Full viewport ownership gives reliable
 reflow, but removes the active form from ordinary terminal context and

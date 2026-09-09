@@ -285,6 +285,10 @@ stdout remains separate from human-facing progress on stderr.
 
 An interactive prompt draws inline by default. Its logical region participates
 in the primary buffer and scrollback, and terminal soft wrapping owns reflow.
+Because that reflow makes the old region unlocatable, an inline prompt returns
+a resize error by default. A caller may instead authorize clearing the visible
+primary-buffer viewport and redrawing there; this destructive policy does not
+clear scrollback or enter the alternate screen.
 Callers that need complete application-controlled layout across resize may
 instead select an alternate-screen presentation, which owns and redraws the
 whole temporary viewport. The two presentations share form behavior, but their

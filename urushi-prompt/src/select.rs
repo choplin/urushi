@@ -696,6 +696,10 @@ mod tests {
         fn finish(&mut self, _outcome: RenderFinish) -> io::Result<()> {
             Ok(())
         }
+
+        fn clear_viewport(&mut self) -> io::Result<()> {
+            Ok(())
+        }
     }
 
     fn rendered(view: &PromptView) -> crate::runtime::frame::FramedView {

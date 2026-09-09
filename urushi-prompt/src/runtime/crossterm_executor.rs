@@ -53,6 +53,18 @@ pub(crate) fn execute<W: Write>(
     writer.flush()
 }
 
+/// Erase the visible primary-buffer viewport and place the cursor at its
+/// upper-left cell. Scrollback is intentionally left untouched.
+pub(crate) fn clear_viewport<W: Write>(writer: &mut W) -> io::Result<()> {
+    queue!(
+        writer,
+        cursor::Hide,
+        Clear(ClearType::All),
+        cursor::MoveTo(0, 0)
+    )?;
+    writer.flush()
+}
+
 fn write_command<W: Write>(writer: &mut W, command: &InlineCommand) -> io::Result<()> {
     match command {
         InlineCommand::HideCursor => queue!(writer, cursor::Hide),

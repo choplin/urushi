@@ -117,6 +117,20 @@ pub enum PromptStart {
     CurrentPosition { column: u16 },
 }
 
+/// What an inline prompt does when its terminal viewport is resized.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub enum InlineResizePolicy {
+    /// Stop the form and return [`RunError::Resized`] without erasing an
+    /// unlocatable prompt region.
+    #[default]
+    ReturnError,
+    /// Clear the visible primary-buffer viewport and redraw the current form.
+    ///
+    /// This does not enter the alternate screen or clear scrollback, but it
+    /// does erase every other visible cell in the viewport.
+    ClearViewportAndRedraw,
+}
+
 impl PromptStart {
     pub(crate) const fn column(self) -> u16 {
         match self {
@@ -140,6 +154,7 @@ pub struct FormBuilder {
     groups: Vec<Group>,
     start: PromptStart,
     width: Option<u16>,
+    inline_resize_policy: InlineResizePolicy,
 }
 
 impl FormBuilder {
@@ -161,6 +176,17 @@ impl FormBuilder {
     #[must_use]
     pub fn width(mut self, width: u16) -> Self {
         self.width = Some(width);
+        self
+    }
+
+    /// Chooses how this inline prompt responds to a terminal resize.
+    ///
+    /// The default is [`InlineResizePolicy::ReturnError`]. Clearing and
+    /// redrawing must be selected explicitly because it erases the complete
+    /// visible primary-buffer viewport, including content outside the prompt.
+    #[must_use]
+    pub fn inline_resize_policy(mut self, policy: InlineResizePolicy) -> Self {
+        self.inline_resize_policy = policy;
         self
     }
 
@@ -190,6 +216,7 @@ impl FormBuilder {
             groups: self.groups,
             start: self.start,
             width: self.width,
+            inline_resize_policy: self.inline_resize_policy,
         })
     }
 }
@@ -199,6 +226,7 @@ pub struct Form {
     groups: Vec<Group>,
     pub(super) start: PromptStart,
     width: Option<u16>,
+    inline_resize_policy: InlineResizePolicy,
 }
 
 impl Form {
@@ -208,6 +236,7 @@ impl Form {
             groups: Vec::new(),
             start: PromptStart::default(),
             width: None,
+            inline_resize_policy: InlineResizePolicy::default(),
         }
     }
 
@@ -269,10 +298,9 @@ impl Form {
             };
             if matches!(event, Event::Resize { .. }) {
                 // Dragging a window edge emits a resize per intermediate size.
-                // Each one loses the region, so acting on every one multiplies
-                // the residue left behind. Only the size the burst settled on
-                // is acted upon, which is the layer above's responsibility: the
-                // plan stage sees one geometry at a time and cannot enforce it.
+                // Act once on the latest size already waiting: ReturnError has
+                // one terminal exit, while ClearViewportAndRedraw has one
+                // destructive clear and one replacement frame.
                 loop {
                     match events.poll_event() {
                         Ok(Some(waiting @ Event::Resize { .. })) => event = waiting,
@@ -287,6 +315,18 @@ impl Form {
             }
             if let Event::Resize { columns, rows } = &event {
                 session.renderer.resize(*columns, *rows);
+                match self.inline_resize_policy {
+                    InlineResizePolicy::ReturnError => {
+                        let cleanup = session.cleanup(RenderFinish::Error);
+                        return Err(RunError::Resized { cleanup });
+                    }
+                    InlineResizePolicy::ClearViewportAndRedraw => {
+                        if let Err(source) = session.renderer.clear_viewport() {
+                            return Err(session.fail(IoOperation::Render, source));
+                        }
+                        continue;
+                    }
+                }
             }
 
             match self.reduce(&mut state, event) {
@@ -607,6 +647,10 @@ mod tests {
             .build()
             .expect("default form is valid");
         assert_eq!(default.start, PromptStart::NewLine);
+        assert_eq!(
+            default.inline_resize_policy,
+            InlineResizePolicy::ReturnError
+        );
         assert_eq!(default.drawing_width(20), 20);
 
         let positioned = Form::builder()
@@ -679,6 +723,7 @@ mod tests {
             .expect("test group has a field");
         let form = Form::builder()
             .start(PromptStart::CurrentPosition { column: 7 })
+            .inline_resize_policy(InlineResizePolicy::ClearViewportAndRedraw)
             .group(group)
             .build()
             .expect("configured form is valid");
@@ -703,6 +748,7 @@ mod tests {
                 (PromptStart::CurrentPosition { column: 2 }, 1),
             ]
         );
+        assert_eq!(renderer.viewport_clears, 1);
     }
 
     #[test]
@@ -730,6 +776,10 @@ mod tests {
             "failed to render prompt: draw failed; terminal cleanup also failed: restore failed"
         );
         assert!(std::error::Error::source(&error).is_some());
+
+        let resized = RunError::Resized { cleanup: None };
+        assert_eq!(resized.to_string(), "terminal resized during inline prompt");
+        assert!(std::error::Error::source(&resized).is_none());
     }
 
     #[test]
@@ -960,7 +1010,7 @@ mod tests {
         );
     }
     #[test]
-    fn a_burst_of_resize_events_re_establishes_the_region_once() {
+    fn the_default_resize_policy_returns_an_error_after_one_coalesced_resize() {
         let mut events = ScriptedEvents::new([
             Ok(Event::Resize {
                 columns: 10,
@@ -980,19 +1030,22 @@ mod tests {
         let mut renderer = RecordingRenderer::default();
         let mut terminal = RecordingTerminal::interactive();
 
-        let outcome = form([TestField::new("field", "value")])
-            .run_with(&mut events, &mut renderer, &mut terminal, &test_styles())
-            .expect("the form submits");
+        let outcome = form([TestField::new("field", "value")]).run_with(
+            &mut events,
+            &mut renderer,
+            &mut terminal,
+            &test_styles(),
+        );
 
-        // Dragging a window edge emits a resize per intermediate size, and each
-        // one loses the region. Acting on every one would re-establish the
-        // region — and leave residue — as many times as the drag reported.
-        assert!(matches!(outcome, FormOutcome::Submitted(_)));
+        assert!(matches!(outcome, Err(RunError::Resized { cleanup: None })));
         assert_eq!(renderer.resizes, [(30, 7)]);
+        assert_eq!(renderer.viewport_clears, 0);
+        assert_eq!(renderer.views.len(), 1);
+        assert_eq!(renderer.finishes, [RenderFinish::Error]);
     }
 
     #[test]
-    fn coalescing_a_resize_burst_keeps_the_event_that_ended_it() {
+    fn clear_viewport_policy_redraws_then_keeps_the_event_that_ended_the_burst() {
         let mut events = ScriptedEvents::new([
             Ok(Event::Resize {
                 columns: 10,
@@ -1006,10 +1059,74 @@ mod tests {
 
         // Draining the burst reads one event past its end. That event is what
         // the user typed, and it is held over rather than dropped.
-        let outcome = form([TestField::new("field", "value")])
-            .run_with(&mut events, &mut renderer, &mut terminal, &test_styles())
-            .expect("the form submits");
+        let outcome = form_with_resize_policy(
+            [TestField::new("field", "value")],
+            InlineResizePolicy::ClearViewportAndRedraw,
+        )
+        .run_with(&mut events, &mut renderer, &mut terminal, &test_styles())
+        .expect("the form submits");
         assert!(matches!(outcome, FormOutcome::Submitted(_)));
         assert_eq!(renderer.resizes, [(10, 5)]);
+        assert_eq!(renderer.viewport_clears, 1);
+        assert_eq!(renderer.views.len(), 2);
+    }
+
+    #[test]
+    fn resize_error_retains_a_cleanup_failure() {
+        let mut events = ScriptedEvents::new([Ok(Event::Resize {
+            columns: 10,
+            rows: 5,
+        })]);
+        let mut renderer = RecordingRenderer {
+            fail_finish: true,
+            ..RecordingRenderer::default()
+        };
+        let mut terminal = RecordingTerminal::interactive();
+
+        let result = form([TestField::new("field", "value")]).run_with(
+            &mut events,
+            &mut renderer,
+            &mut terminal,
+            &test_styles(),
+        );
+
+        assert!(matches!(
+            result,
+            Err(RunError::Resized {
+                cleanup: Some(ref error)
+            }) if error.to_string() == "finish failed"
+        ));
+        assert_eq!(
+            terminal.calls,
+            [
+                "enable_raw_mode",
+                "show_cursor",
+                "disable_raw_mode",
+                "flush"
+            ]
+        );
+    }
+
+    #[test]
+    fn a_failed_viewport_clear_is_a_render_error_and_runs_cleanup() {
+        let mut events = ScriptedEvents::new([Ok(Event::Resize {
+            columns: 10,
+            rows: 5,
+        })]);
+        let mut renderer = RecordingRenderer {
+            fail_clear_viewport: true,
+            ..RecordingRenderer::default()
+        };
+        let mut terminal = RecordingTerminal::interactive();
+
+        let result = form_with_resize_policy(
+            [TestField::new("field", "value")],
+            InlineResizePolicy::ClearViewportAndRedraw,
+        )
+        .run_with(&mut events, &mut renderer, &mut terminal, &test_styles());
+
+        assert_io_operation(result, IoOperation::Render);
+        assert_eq!(renderer.viewport_clears, 1);
+        assert_eq!(renderer.finishes, [RenderFinish::Error]);
     }
 }
