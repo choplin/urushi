@@ -20,7 +20,6 @@ pub use canvas::{
     Path, Position, PositionedCell,
 };
 pub use geometry::{Available, Size};
-pub(crate) use grid::junction;
 pub(crate) use height::fit_text_lines;
 pub use join::{join_horizontal, join_vertical};
 pub use model::View;

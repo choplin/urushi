@@ -37,8 +37,7 @@ pub enum View {
     Row(VerticalAlign, Vec<View>),
     /// Children stacked, aligned horizontally.
     Column(Align, Vec<View>),
-    /// A rectangle of cells sharing one width per column, and the lines drawn
-    /// between them.
+    /// A rectangle of cells sharing one width per column.
     ///
     /// Every row holds the same number of cells: a grid has no style to fill
     /// an invented one with, so whatever composes it supplies the empty cell.
@@ -143,7 +142,7 @@ impl View {
         Self::anchor_block(key, BlockStyle::new(), Self::empty())
     }
 
-    /// Lines cells up in columns and draws the lines between them.
+    /// Lines cells up in shared columns.
     ///
     /// Every row must hold the same number of cells; see [`View::Grid`].
     pub fn grid<R>(style: GridStyle, rows: impl IntoIterator<Item = R>) -> Self

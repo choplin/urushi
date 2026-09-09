@@ -3,14 +3,38 @@
 use std::{any::Any, fmt, sync::Arc};
 
 use crate::text::wrapped_line_count;
-use crate::view::{
-    CanvasMeasure, CanvasRequirements, Claim, Kind, distribute, fit_text_lines, junction,
-};
+use crate::view::{CanvasMeasure, CanvasRequirements, Claim, Kind, distribute, fit_text_lines};
 use crate::{
     Align, BlockStyle, BlockStylePropertyKey, Border, Canvas, CanvasContext, CanvasItem,
     CanvasSizing, CellContribution, Composition, Grapheme, Length, Overflow, Position,
     PositionedCell, PrintableLines, PrintableText, TableRole, TextStyle, VerticalAlign, View,
 };
+
+/// Selects the glyph implied by the four incident line directions.
+const fn junction(
+    border: &Border,
+    up: bool,
+    down: bool,
+    left: bool,
+    right: bool,
+    horizontal: char,
+    vertical: char,
+) -> char {
+    match (up, down, left, right) {
+        (true, true, true, true) => border.middle,
+        (false, true, true, true) => border.middle_top,
+        (true, false, true, true) => border.middle_bottom,
+        (true, true, false, true) => border.middle_left,
+        (true, true, true, false) => border.middle_right,
+        (false, true, false, true) => border.top_left,
+        (false, true, true, false) => border.top_right,
+        (true, false, false, true) => border.bottom_left,
+        (true, false, true, false) => border.bottom_right,
+        (true, _, false, false) | (false, true, false, false) => vertical,
+        (false, false, true, _) | (false, false, false, true) => horizontal,
+        (false, false, false, false) => ' ',
+    }
+}
 
 /// Which row of a table a cell belongs to.
 ///
@@ -1369,6 +1393,85 @@ mod tests {
 ├──────┼──────────┤
 │ Iris │ Paris    │
 └──────┴──────────┘"
+        );
+    }
+
+    #[test]
+    fn a_disabled_header_rule_leaves_the_first_gap_to_the_header_policy() {
+        let table_style = styles()
+            .table()
+            .clone()
+            .border_header(false)
+            .border_row(true);
+
+        assert_eq!(
+            plain(&table_style.compose(&sample())),
+            "\
+┌──────┬──────────┐
+│ Name │ Location │
+│ Kini │ New York │
+├──────┼──────────┤
+│ Iris │ Paris    │
+└──────┴──────────┘",
+            "the header owns its gap even when body rows carry rules"
+        );
+    }
+
+    #[test]
+    fn a_disabled_column_rule_occupies_no_cell() {
+        let table_style = styles().table().clone().border_column(false);
+
+        assert_eq!(
+            plain(&table_style.compose(&sample())),
+            "\
+┌────────────────┐
+│ Name  Location │
+├────────────────┤
+│ Kini  New York │
+│ Iris  Paris    │
+└────────────────┘",
+            "the columns touch while the outer edges and row rules remain"
+        );
+    }
+
+    #[test]
+    fn each_disabled_outer_edge_removes_its_own_cells() {
+        let table = Table::new().headers(["A", "B"]).row(["1", "2"]);
+        let table_style = styles().table().clone();
+        let cases = [
+            (
+                table_style.clone().border_top(false),
+                ["│ A │ B │", "├───┼───┤", "│ 1 │ 2 │", "└───┴───┘"].join("\n"),
+            ),
+            (
+                table_style.clone().border_bottom(false),
+                ["┌───┬───┐", "│ A │ B │", "├───┼───┤", "│ 1 │ 2 │"].join("\n"),
+            ),
+            (
+                table_style.clone().border_left(false),
+                ["───┬───┐", " A │ B │", "───┼───┤", " 1 │ 2 │", "───┴───┘"].join("\n"),
+            ),
+            (
+                table_style.border_right(false),
+                ["┌───┬───", "│ A │ B ", "├───┼───", "│ 1 │ 2 ", "└───┴───"].join("\n"),
+            ),
+        ];
+
+        for (presentation, expected) in cases {
+            assert_eq!(plain(&presentation.compose(&table)), expected);
+        }
+    }
+
+    #[test]
+    fn a_single_cell_has_no_internal_separator() {
+        let table = Table::new().row(["only"]);
+
+        assert_eq!(
+            plain(&styles().table().compose(&table)),
+            "\
+┌──────┐
+│ only │
+└──────┘"
         );
     }
 

@@ -140,26 +140,15 @@ impl From<Modifier> for BlockStylePropertyKey {
 
 /// A value that can be added to a [`GridStyle`](crate::GridStyle).
 ///
-/// The lines a grid draws and the width its columns claim. A grid carries no
-/// box geometry and no fill style, so this vocabulary has neither the box
-/// properties of [`BlockStyleProperty`] nor a `Text` variant: a grid that needs
-/// a border of its own or a stated size is placed inside a block, which has
-/// them.
+/// The width a grid's columns claim and the default padding its cells take.
+/// A grid carries no box geometry, fill style, or line presentation, so this
+/// vocabulary has neither the box properties of [`BlockStyleProperty`] nor a
+/// `Text` variant.
 ///
 /// This is not `Copy`: [`GridStyleProperty::Columns`] carries one entry per
 /// column.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum GridStyleProperty {
-    Border(Border),
-    BorderTop(bool),
-    BorderRight(bool),
-    BorderBottom(bool),
-    BorderLeft(bool),
-    BorderColumn(bool),
-    BorderRow(bool),
-    BorderHeader(bool),
-    BorderForeground(Color),
-    BorderBackground(Color),
     Columns(Vec<Option<Length>>),
     CellPadding(Sides),
 }
@@ -167,16 +156,6 @@ pub enum GridStyleProperty {
 /// A property that can be removed from a [`GridStyle`](crate::GridStyle).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum GridStylePropertyKey {
-    Border,
-    BorderTop,
-    BorderRight,
-    BorderBottom,
-    BorderLeft,
-    BorderColumn,
-    BorderRow,
-    BorderHeader,
-    BorderForeground,
-    BorderBackground,
     Columns,
     CellPadding,
 }

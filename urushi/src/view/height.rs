@@ -18,9 +18,8 @@
 //!   the fitted lines and never fits them again.
 
 use crate::text::{PrintableLines, PrintableText, wrap_text};
-use crate::{Align, BlockStyle, Canvas, GridStyle, Key, Overflow, Sides, TextStyle, VerticalAlign};
+use crate::{Align, BlockStyle, Canvas, Key, Overflow, Sides, TextStyle, VerticalAlign};
 
-use super::grid;
 use super::sizing::{
     Claim, Kind, border_extent, degrade, distribute, height_axis, text_lines, vertical,
 };
@@ -54,7 +53,6 @@ enum FittedNode<'a> {
     Row(VerticalAlign, Vec<Fitted<'a>>),
     Column(Align, Vec<Fitted<'a>>),
     Grid {
-        style: &'a GridStyle,
         columns: Vec<usize>,
         rows: Vec<Vec<FittedCell<'a>>>,
     },
@@ -107,7 +105,6 @@ pub(super) fn fit(widths: Widths<'_>) -> Fitted<'_> {
             FittedNode::Column(align, children.into_iter().map(fit).collect())
         }
         WidthNode::Grid(box_) => FittedNode::Grid {
-            style: box_.style,
             columns: box_.columns,
             rows: box_
                 .rows
@@ -206,7 +203,6 @@ pub(super) enum SizedNode<'f> {
     Row(VerticalAlign, Vec<Sized<'f>>),
     Column(Align, Vec<Sized<'f>>),
     Grid {
-        style: &'f GridStyle,
         /// One width per column, padding included.
         columns: &'f [usize],
         /// One height per row, the padding of its cells included.
@@ -340,22 +336,12 @@ pub(super) fn heights<'f>(fitted: &'f Fitted<'_>, area: Option<usize>, bounded: 
                 node: SizedNode::Column(*align, children),
             }
         }
-        FittedNode::Grid {
-            style,
-            columns,
-            rows,
-        } => {
-            let lines = grid::line_extent(style, columns.len(), rows.len());
-            let (heights, rows) = rows_of(
-                rows,
-                area.map(|area| area.saturating_sub(lines.height())),
-                bounded,
-            );
+        FittedNode::Grid { columns, rows } => {
+            let (heights, rows) = rows_of(rows, area, bounded);
             Sized {
                 width: fitted.width,
-                height: heights.iter().sum::<usize>() + lines.height(),
+                height: heights.iter().sum(),
                 node: SizedNode::Grid {
-                    style,
                     columns,
                     heights,
                     rows,

@@ -174,15 +174,13 @@ fn metrics(view: &View) -> Metrics {
                     cells.push(metrics(grid::cell(rows, row, column)));
                 }
             }
-            let lines = grid::line_extent(style, columns, rows.len());
             let claims = column_claims(style, rows, &cells, columns);
             Metrics {
-                natural: claims.iter().map(|claim| claim.demand).sum::<usize>() + lines.width(),
-                floor: claims.iter().map(|claim| claim.floor).sum::<usize>() + lines.width(),
+                natural: claims.iter().map(|claim| claim.demand).sum(),
+                floor: claims.iter().map(|claim| claim.floor).sum(),
                 height_floor: (0..rows.len())
                     .map(|row| row_floor(style, rows, &cells, columns, row))
-                    .sum::<usize>()
-                    + lines.height(),
+                    .sum(),
                 fills: cells.iter().any(|cell| cell.fills)
                     || (0..columns)
                         .any(|column| matches!(style.column_length(column), Some(Length::Fill(_)))),
@@ -279,7 +277,6 @@ pub(super) enum WidthNode<'a> {
 /// cannot disagree: the second is what the first was handed down as.
 #[derive(Debug)]
 pub(super) struct GridBox<'a> {
-    pub style: &'a GridStyle,
     pub columns: Vec<usize>,
     pub rows: Vec<Vec<GridCell<'a>>>,
 }
@@ -534,15 +531,12 @@ fn place<'a>(
         }
         View::Grid(style, rows) => {
             let columns = grid::columns(rows);
-            let lines = grid::line_extent(style, columns, rows.len());
             let claims = column_claims(style, rows, &metrics.children, columns);
 
-            // The lines are part of the grid, not of a column, so they come
-            // off the area before the columns divide what is left. One
-            // `distribute` settles every column, and column j's width is what
-            // every cell of column j resolves under.
+            // One `distribute` settles every column, and column j's width is
+            // what every cell of column j resolves under.
             let mut widths: Vec<usize> = match area {
-                Some(area) => distribute(area.saturating_sub(lines.width()), &claims),
+                Some(area) => distribute(area, &claims),
                 None => claims.iter().map(|claim| claim.demand).collect(),
             };
 
@@ -592,15 +586,13 @@ fn place<'a>(
                         .max()
                         .unwrap_or(0)
                 })
-                .sum::<usize>()
-                + lines.height();
+                .sum();
 
             Widths {
-                width: widths.iter().sum::<usize>() + lines.width(),
+                width: widths.iter().sum(),
                 height_kind: metrics.height_kind,
                 height_floor,
                 node: WidthNode::Grid(GridBox {
-                    style,
                     columns: widths,
                     rows: placed,
                 }),
