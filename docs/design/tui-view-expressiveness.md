@@ -99,7 +99,8 @@ The `Text`, `Block`, `Row`, `Column`, `Grid`, `Canvas`, and
 `AnchorBlock` nodes are members of this vocabulary. Canvas is a finite drawing
 surface whose default size is independent of its items. An intrinsic sizing
 value may measure the Canvas as a whole, and its items record `View`, `Text`,
-`Path`, and `Cells` commands only after the size is known. Its exact contract is recorded in
+cell-space primitives, `LineNetwork`, and `Cells` commands only after the size
+is known. Its exact contract is recorded in
 [`canvas.md`](canvas.md). Viewport projection remains a separate design topic.
 
 Core does not gain semantic nodes such as `View::Graph`, `View::Modal`, or

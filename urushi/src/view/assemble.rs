@@ -3,14 +3,14 @@
 //! Nothing here decides a size. Every number this module uses — a width, a row
 //! count, the rows a box keeps — was settled by the [`width`](super::width) and
 //! [`height`](super::height) phases; assembly turns text into graphemes, places
-//! it inside the frame, and draws the border and the margin around it. That is
-//! what makes the two backends agree: the geometry existed before either of
-//! them saw it.
+//! it inside the frame, draws the border and margin around it, and rasterizes
+//! and composes Canvas commands. That is what makes the two backends agree: the
+//! geometry existed before either of them saw it.
 
 use crate::text::{PrintableText, StyledTextGrapheme};
 use crate::{Align, Sides, TextStyle, VerticalAlign};
 
-use super::canvas::canvas_rect;
+use super::canvas::compose_canvas;
 use super::geometry::Size;
 use super::height::{Sized, SizedCell, SizedNode};
 use super::resolve::{AnchoredRect, LayoutError, StyledGrapheme};
@@ -92,7 +92,7 @@ pub(super) fn assemble(sized: &Sized<'_>) -> Result<Rect, LayoutError> {
         SizedNode::Column(align, children) => column(*align, children, sized.width),
         SizedNode::Grid { .. } => grid_rect(sized),
         SizedNode::Canvas { canvas, .. } => {
-            canvas_rect(canvas, Size::new(sized.width, sized.height))
+            compose_canvas(canvas, Size::new(sized.width, sized.height))
         }
     };
     let rect = rect?;

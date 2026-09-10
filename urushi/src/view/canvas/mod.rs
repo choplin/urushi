@@ -6,7 +6,10 @@
 //!
 //! A Canvas owns immutable [`CanvasItem`] values. Resolution first fixes the
 //! surface size, then calls each item once with a frame-scoped [`CanvasContext`].
-//! Items record `View`, text, [`Path`], or sparse-cell commands in paint order.
+//! Items record `View`, text, cell-space primitives, [`LineNetwork`], or
+//! sparse-cell commands in paint order. After sizing, Canvas assembly
+//! rasterizes one command at a time through a common internal contract and
+//! immediately applies its cells through that command's [`Composition`].
 //!
 //! ```
 //! use urushi::{
@@ -43,8 +46,10 @@
 
 mod assemble;
 mod cell;
+mod cell_primitives;
+mod command;
 mod context;
-mod path;
+mod line_network;
 pub(crate) mod sizing;
 
 use std::any::Any;
@@ -54,15 +59,14 @@ use super::geometry::Size;
 
 pub use cell::{CanvasCell, CellContribution, Composition, PositionedCell};
 pub use context::CanvasContext;
-pub use path::Path;
+pub use line_network::{LineGlyphs, LineNetwork};
 pub(crate) use sizing::CanvasRequirements;
 pub use sizing::CanvasSizing;
 
-pub(in crate::view) use assemble::canvas_rect;
-use context::CanvasCommand;
+pub(in crate::view) use assemble::compose_canvas;
 
 /// A signed cell position relative to a Canvas's top-left corner.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
 pub struct Position {
     pub x: i64,
     pub y: i64,
@@ -208,7 +212,7 @@ impl Canvas {
         self.sizing.height_requirements(width)
     }
 
-    fn draw(&self, size: Size) -> CanvasContext {
+    pub(super) fn draw(&self, size: Size) -> CanvasContext {
         let mut context = CanvasContext::new(size);
         for item in &self.items {
             item.0.draw(&mut context);

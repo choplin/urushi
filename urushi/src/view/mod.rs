@@ -17,7 +17,7 @@ mod width;
 pub(crate) use canvas::sizing::{CanvasMeasure, CanvasRequirements};
 pub use canvas::{
     Canvas, CanvasCell, CanvasContext, CanvasItem, CanvasSizing, CellContribution, Composition,
-    Path, Position, PositionedCell,
+    LineGlyphs, LineNetwork, Position, PositionedCell,
 };
 pub use geometry::{Available, Size};
 pub(crate) use height::fit_text_lines;

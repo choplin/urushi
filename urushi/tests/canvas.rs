@@ -1,7 +1,7 @@
 use urushi::{
     Available, Axis, BlockStyle, Canvas, CanvasCell, CanvasContext, CanvasItem, CanvasSizing,
-    CellContribution, Composition, Grapheme, LayoutErrorKind, Length, Path, Position,
-    PositionedCell, Size, TextStyle, View, resolve, try_resolve,
+    CellContribution, Composition, Grapheme, LayoutErrorKind, Length, LineGlyphs, LineNetwork,
+    Position, PositionedCell, Size, TextStyle, View, resolve, try_resolve,
 };
 
 #[derive(Debug, Clone, PartialEq)]
@@ -12,12 +12,12 @@ struct Scene {
 impl CanvasItem for Scene {
     fn draw(&self, context: &mut CanvasContext) {
         assert_eq!(context.bounds(), (Position::new(0, 0), Size::new(8, 4)));
-        context.path(Path::line(
+        context.line(
             Position::new(-2, 1),
             Position::new(6, 1),
             Grapheme::new("─"),
             TextStyle::new(),
-        ));
+        );
         context.text(Position::new(1, 1), self.label, TextStyle::new());
         context.cells([PositionedCell::new(
             Position::new(7, 3),
@@ -146,6 +146,95 @@ fn a_full_row_text_replace_clears_prior_wide_content() {
 fn canvas_symbol_boundaries_reject_terminal_control_sequences() {
     let symbol = Grapheme::new("\u{1b}]8;;https://example.invalid\u{7}");
     let _ = CellContribution::new().symbol(symbol);
+}
+
+#[derive(Debug, Clone, PartialEq)]
+struct InvalidMarker(&'static str);
+
+impl CanvasItem for InvalidMarker {
+    fn draw(&self, context: &mut CanvasContext) {
+        context.line(
+            Position::new(0, 0),
+            Position::new(1, 0),
+            Grapheme::new(self.0),
+            TextStyle::new(),
+        );
+    }
+}
+
+#[test]
+#[should_panic(expected = "exactly one terminal cell")]
+fn cell_lines_reject_zero_width_markers() {
+    let view = View::canvas(
+        Canvas::new()
+            .extent(Size::new(2, 1))
+            .item(InvalidMarker("\u{301}")),
+    );
+    let _ = resolve(&view, Available::NONE);
+}
+
+#[test]
+#[should_panic(expected = "exactly one terminal cell")]
+fn cell_lines_reject_wide_markers() {
+    let view = View::canvas(
+        Canvas::new()
+            .extent(Size::new(2, 1))
+            .item(InvalidMarker("界")),
+    );
+    let _ = resolve(&view, Available::NONE);
+}
+
+#[test]
+#[should_panic(expected = "exactly one terminal cell")]
+fn line_network_rejects_zero_width_glyphs() {
+    let _ = LineNetwork::new(
+        LineGlyphs {
+            isolated: '\u{301}',
+            ..LineGlyphs::NORMAL
+        },
+        TextStyle::new(),
+    );
+}
+
+#[test]
+#[should_panic(expected = "exactly one terminal cell")]
+fn line_network_rejects_wide_glyphs() {
+    let _ = LineNetwork::new(
+        LineGlyphs {
+            isolated: '界',
+            ..LineGlyphs::NORMAL
+        },
+        TextStyle::new(),
+    );
+}
+
+#[derive(Debug, Clone, PartialEq)]
+struct ZeroWidthFullRowAfterNetwork;
+
+impl CanvasItem for ZeroWidthFullRowAfterNetwork {
+    fn draw(&self, context: &mut CanvasContext) {
+        let mut network = LineNetwork::new(LineGlyphs::NORMAL, TextStyle::new());
+        network.horizontal(0, 0..=0);
+        context.line_network(network);
+        context.text_with(
+            Position::new(0, 0),
+            "\u{301}a",
+            TextStyle::new(),
+            Composition::Replace,
+        );
+        context.text(Position::new(1, 0), "x", TextStyle::new());
+    }
+}
+
+#[test]
+fn zero_width_full_row_text_stays_within_canvas_bounds() {
+    let view = View::canvas(
+        Canvas::new()
+            .extent(Size::new(1, 1))
+            .item(ZeroWidthFullRowAfterNetwork),
+    );
+
+    assert_eq!(lines(&view, Available::NONE), ["a"]);
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -409,17 +498,17 @@ struct ExtremePath;
 
 impl CanvasItem for ExtremePath {
     fn draw(&self, context: &mut CanvasContext) {
-        context.path(Path::line(
+        context.line(
             Position::new(i64::MIN, 0),
             Position::new(i64::MAX, 0),
             Grapheme::new("─"),
             TextStyle::new(),
-        ));
+        );
     }
 }
 
 #[test]
-fn path_rasterization_is_bounded_by_the_canvas_before_expansion() {
+fn cell_line_rasterization_is_bounded_by_the_canvas_before_expansion() {
     let view = View::canvas(Canvas::new().extent(Size::new(3, 1)).item(ExtremePath));
     assert_eq!(lines(&view, Available::NONE), ["───"]);
 }
@@ -429,19 +518,331 @@ struct ExtremeDiagonal;
 
 impl CanvasItem for ExtremeDiagonal {
     fn draw(&self, context: &mut CanvasContext) {
-        context.path(Path::line(
+        context.line(
             Position::new(i64::MIN, i64::MIN),
             Position::new(i64::MAX, i64::MAX),
             Grapheme::new("x"),
             TextStyle::new(),
-        ));
+        );
     }
 }
 
 #[test]
-fn path_clipping_avoids_intermediate_overflow_on_both_axes() {
+fn cell_line_clipping_avoids_intermediate_overflow_on_both_axes() {
     let view = View::canvas(Canvas::new().extent(Size::new(3, 3)).item(ExtremeDiagonal));
     assert_eq!(lines(&view, Available::NONE), ["x  ", " x ", "  x"]);
+}
+
+#[derive(Debug, Clone, PartialEq)]
+struct MarkerCrossing;
+
+impl CanvasItem for MarkerCrossing {
+    fn draw(&self, context: &mut CanvasContext) {
+        context.line(
+            Position::new(0, 1),
+            Position::new(2, 1),
+            Grapheme::new("-"),
+            TextStyle::new(),
+        );
+        context.line(
+            Position::new(1, 0),
+            Position::new(1, 2),
+            Grapheme::new("|"),
+            TextStyle::new(),
+        );
+    }
+}
+
+#[test]
+fn cell_lines_cross_as_ordinary_marker_cells() {
+    let view = View::canvas(Canvas::new().extent(Size::new(3, 3)).item(MarkerCrossing));
+
+    assert_eq!(lines(&view, Available::NONE), [" | ", "-|-", " | "]);
+}
+
+#[derive(Debug, Clone, PartialEq)]
+struct CellPrimitiveShapes;
+
+impl CanvasItem for CellPrimitiveShapes {
+    fn draw(&self, context: &mut CanvasContext) {
+        context.polyline(
+            [
+                Position::new(0, 0),
+                Position::new(2, 0),
+                Position::new(2, 2),
+            ],
+            Grapheme::new("p"),
+            TextStyle::new(),
+        );
+        context.rectangle(
+            Position::new(3, 0),
+            2,
+            3,
+            Grapheme::new("r"),
+            TextStyle::new(),
+        );
+    }
+}
+
+#[test]
+fn cell_polyline_and_rectangle_are_direct_canvas_primitives() {
+    let view = View::canvas(
+        Canvas::new()
+            .extent(Size::new(5, 3))
+            .item(CellPrimitiveShapes),
+    );
+
+    assert_eq!(lines(&view, Available::NONE), ["ppprr", "  prr", "  prr"]);
+}
+
+#[derive(Debug, Clone, PartialEq)]
+struct NetworkJunctions {
+    reverse: bool,
+}
+
+impl CanvasItem for NetworkJunctions {
+    fn draw(&self, context: &mut CanvasContext) {
+        let mut segments = vec![
+            (true, 2, 0..=4),
+            (false, 2, 0..=4),
+            (false, 0, 1..=3),
+            (false, 4, 1..=3),
+            (true, 0, 1..=3),
+            (true, 4, 1..=3),
+        ];
+        if self.reverse {
+            segments.reverse();
+        }
+        let mut network = LineNetwork::new(LineGlyphs::NORMAL, TextStyle::new());
+        for (horizontal, fixed, range) in segments {
+            if horizontal {
+                network.horizontal(fixed, range);
+            } else {
+                network.vertical(fixed, range);
+            }
+        }
+        context.line_network(network);
+    }
+}
+
+#[test]
+fn line_network_junctions_do_not_depend_on_network_recording_order() {
+    let render = |reverse| {
+        lines(
+            &View::canvas(
+                Canvas::new()
+                    .extent(Size::new(5, 5))
+                    .item(NetworkJunctions { reverse }),
+            ),
+            Available::NONE,
+        )
+    };
+    let expected = [" ─┬─ ", "│ │ │", "├─┼─┤", "│ │ │", " ─┴─ "];
+
+    assert_eq!(render(false), expected);
+    assert_eq!(render(true), expected);
+}
+
+#[derive(Debug, Clone, PartialEq)]
+struct NetworkShapes;
+
+impl CanvasItem for NetworkShapes {
+    fn draw(&self, context: &mut CanvasContext) {
+        let mut rectangle = LineNetwork::new(LineGlyphs::ROUNDED, TextStyle::new());
+        rectangle
+            .horizontal(0, 0..=3)
+            .horizontal(2, 0..=3)
+            .vertical(0, 0..=2)
+            .vertical(3, 0..=2);
+        context.line_network(rectangle);
+
+        let mut polyline = LineNetwork::new(LineGlyphs::ASCII, TextStyle::new());
+        polyline.horizontal(1, -4..=1).vertical(1, 1..=5);
+        context.line_network(polyline);
+    }
+}
+
+#[test]
+fn separate_network_commands_use_ordinary_canvas_overlay() {
+    let view = View::canvas(Canvas::new().extent(Size::new(4, 3)).item(NetworkShapes));
+
+    assert_eq!(lines(&view, Available::NONE), ["╭──╮", "-+ │", "╰|─╯"]);
+}
+
+#[derive(Debug, Clone, PartialEq)]
+struct NetworkCustomComposition;
+
+fn keep_existing(existing: &CanvasCell, _: &CellContribution) -> CanvasCell {
+    existing.clone()
+}
+
+impl CanvasItem for NetworkCustomComposition {
+    fn draw(&self, context: &mut CanvasContext) {
+        context.text(Position::new(0, 0), "x", TextStyle::new());
+        let mut network = LineNetwork::new(LineGlyphs::NORMAL, TextStyle::new());
+        network.horizontal(0, 0..=0);
+        context.line_network_with(network, Composition::Custom(keep_existing));
+    }
+}
+
+#[test]
+fn line_network_cells_use_the_recorded_composition() {
+    let view = View::canvas(
+        Canvas::new()
+            .extent(Size::new(1, 1))
+            .item(NetworkCustomComposition),
+    );
+
+    assert_eq!(lines(&view, Available::NONE), ["x"]);
+}
+
+#[derive(Debug, Clone, PartialEq)]
+struct CustomLineGlyphs;
+
+impl CanvasItem for CustomLineGlyphs {
+    fn draw(&self, context: &mut CanvasContext) {
+        let glyphs = LineGlyphs {
+            isolated: 'i',
+            end_up: 'u',
+            end_right: 'r',
+            end_down: 'd',
+            end_left: 'l',
+            vertical: 'v',
+            horizontal: 'h',
+            corner_down_right: '1',
+            corner_down_left: '2',
+            corner_up_right: '3',
+            corner_up_left: '4',
+            tee_right: '5',
+            tee_down: '6',
+            tee_left: '7',
+            tee_up: '8',
+            cross: 'x',
+        };
+        let mut network = LineNetwork::new(glyphs, TextStyle::new());
+        network
+            .horizontal(1, i64::MIN..=i64::MAX)
+            .vertical(1, i64::MIN..=i64::MAX);
+        context.line_network(network);
+    }
+}
+
+#[test]
+fn caller_owned_glyphs_and_extreme_cardinal_coordinates_are_supported() {
+    let view = View::canvas(Canvas::new().extent(Size::new(3, 3)).item(CustomLineGlyphs));
+
+    assert_eq!(lines(&view, Available::NONE), [" v ", "hxh", " v "]);
+}
+
+#[derive(Debug, Clone, PartialEq)]
+struct NetworkOverlap;
+
+impl CanvasItem for NetworkOverlap {
+    fn draw(&self, context: &mut CanvasContext) {
+        let glyphs = LineGlyphs {
+            isolated: 'i',
+            end_up: 'u',
+            end_right: 'r',
+            end_down: 'd',
+            end_left: 'l',
+            vertical: 'v',
+            horizontal: 'h',
+            corner_down_right: '1',
+            corner_down_left: '2',
+            corner_up_right: '3',
+            corner_up_left: '4',
+            tee_right: '5',
+            tee_down: '6',
+            tee_left: '7',
+            tee_up: '8',
+            cross: 'x',
+        };
+        let mut network = LineNetwork::new(glyphs, TextStyle::new());
+        network
+            .horizontal(0, 0..=3)
+            .horizontal(0, 2..=4)
+            .horizontal(0, 5..=5);
+        context.line_network(network);
+    }
+}
+
+#[test]
+fn network_endpoints_collinear_overlap_and_isolated_points_keep_connections() {
+    let view = View::canvas(Canvas::new().extent(Size::new(6, 1)).item(NetworkOverlap));
+
+    assert_eq!(lines(&view, Available::NONE), ["rhhhli"]);
+}
+
+#[derive(Debug, Clone, PartialEq)]
+struct OverwrittenNetwork;
+
+impl CanvasItem for OverwrittenNetwork {
+    fn draw(&self, context: &mut CanvasContext) {
+        let mut horizontal = LineNetwork::new(LineGlyphs::NORMAL, TextStyle::new());
+        horizontal.horizontal(1, 0..=2);
+        context.line_network(horizontal);
+        context.text(Position::new(1, 1), "x", TextStyle::new());
+        let mut vertical = LineNetwork::new(LineGlyphs::NORMAL, TextStyle::new());
+        vertical.vertical(1, 0..=2);
+        context.line_network(vertical);
+    }
+}
+
+#[test]
+fn separate_network_commands_do_not_resurrect_overwritten_connections() {
+    let view = View::canvas(
+        Canvas::new()
+            .extent(Size::new(3, 3))
+            .item(OverwrittenNetwork),
+    );
+
+    assert_eq!(lines(&view, Available::NONE), [" │ ", "─│─", " │ "]);
+}
+
+#[derive(Debug, Clone, PartialEq)]
+struct StyledNetwork;
+
+impl CanvasItem for StyledNetwork {
+    fn draw(&self, context: &mut CanvasContext) {
+        context.text(
+            Position::new(1, 1),
+            "x",
+            TextStyle::new().background(urushi::Color::BLUE),
+        );
+        let mut network = LineNetwork::new(
+            LineGlyphs::NORMAL,
+            TextStyle::new()
+                .hyperlink("https://example.com/path")
+                .bold(),
+        );
+        network.horizontal(1, 0..=2).vertical(1, 0..=2);
+        context.line_network(network);
+    }
+}
+
+#[test]
+fn line_network_overlays_every_text_style_property() {
+    let resolved = resolve(
+        &View::canvas(Canvas::new().extent(Size::new(3, 3)).item(StyledNetwork)),
+        Available::NONE,
+    );
+    let crossing = &resolved.rows()[1][1];
+
+    assert_eq!(crossing.symbol(), "┼");
+    assert_eq!(
+        crossing.style().background_color(),
+        Some(urushi::Color::BLUE)
+    );
+    assert_eq!(
+        crossing.style().hyperlink_value().unwrap().uri(),
+        "https://example.com/path"
+    );
+    assert!(
+        crossing
+            .style()
+            .modifiers()
+            .contains(urushi::Modifier::BOLD)
+    );
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -453,12 +854,12 @@ fn mark(existing: &CanvasCell, _: &CellContribution) -> CanvasCell {
 
 impl CanvasItem for RepresentativeGraph {
     fn draw(&self, context: &mut CanvasContext) {
-        context.path(Path::line(
+        context.line(
             Position::new(-2, 1),
             Position::new(7, 1),
             Grapheme::new("-"),
             TextStyle::new(),
-        ));
+        );
         context.view(
             Position::new(1, 1),
             View::anchor_block(

@@ -119,3 +119,12 @@ pub(super) fn validate_symbol(symbol: &str) {
         "a Canvas cell symbol must be exactly one printable grapheme: {symbol:?}"
     );
 }
+
+pub(super) fn validate_cell_glyph(symbol: &str) {
+    validate_symbol(symbol);
+    assert_eq!(
+        Grapheme::new(symbol).width(),
+        1,
+        "a rasterized cell glyph must occupy exactly one terminal cell: {symbol:?}"
+    );
+}

@@ -10,10 +10,12 @@
 //! fixes and in the only order the dependencies allow. [`width`](super::width)
 //! settles every width, because wrapping needs a width to wrap to.
 //! [`height`](super::height) then fits the text and counts the rows, because a
-//! height is what wrapping produced. [`assemble`](super::assemble) builds the
-//! rectangle those numbers describe, and decides nothing. This module is the
-//! entry point that runs them and the degenerate-case safety net that bounds
-//! the result.
+//! height is what wrapping produced. [`assemble`](super::assemble) then builds
+//! the rectangle those numbers describe. At a Canvas leaf, each command
+//! rasterizes against the settled dimensions without access to the destination
+//! surface and is immediately passed to the common compositor. This module is
+//! the entry point that runs the phases and the degenerate-case safety net that
+//! bounds the result.
 
 use crate::text::Grapheme;
 use crate::{Key, TextStyle, View};
@@ -420,6 +422,7 @@ fn validate_canvas_extents(sized: &super::height::Sized<'_>) -> Result<(), Layou
             canvas,
             width_bounded,
             height_bounded,
+            ..
         } => {
             if canvas.uses_viewport_sizing() && !width_bounded && canvas.explicit_width().is_none()
             {

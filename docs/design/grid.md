@@ -112,14 +112,17 @@ even when the direct caller wants only alignment.
 Table supplies the concrete use that needs those decisions, and Canvas lets the
 Table presentation measure before allocation and draw after receiving the
 final local size. The owner of the Table line network is therefore the bound
-Table item. It sees all incident rules, reserves their rows and columns during
-its own measurement, and derives each corner, tee, cross, or straight glyph
-when it draws. Cells do not own junctions.
+Table item. It decides which rules exist, reserves their rows and columns during
+its own measurement, selects their glyph repertoires, and records their geometry
+as one `LineNetwork` command per connected network when it draws. Line-network
+rasterization derives each corner, tee, cross, or straight glyph from that
+network's incident directions. Cells do not own junctions.
 
-The exact absence, blank-occupancy, and junction rules belong to the Table
-presentation rather than Grid because that is the algorithm drawing them; see
-[Canvas](canvas.md) and
-[Component Presentation Boundary](component-presentation.md).
+The exact absence, blank occupancy, repertoire choice, and command ordering
+belong to the Table presentation rather than Grid. Direction union and glyph
+selection belong to `LineNetwork` rasterization; applying its resulting cells
+belongs to ordinary Canvas composition. See [Canvas](canvas.md) and [Component
+Presentation Boundary](component-presentation.md).
 
 ## Effect on the superseded proposal
 
@@ -127,14 +130,16 @@ The canceled earlier proposal correctly identified several constraints:
 
 - Table roles must not enter Grid vocabulary;
 - line absence and an occupied blank line are distinct;
-- one owner with neighbourhood information must derive junctions;
+- one presentation must own the complete `LineNetwork` it records;
 - Table and Block keep their public border policy; and
 - a presentation must not receive the root area during composition.
 
 This design retains those constraints but changes their owner. The bound Table
-item and its sizing value, not Grid, own Table rules, occupancy, and junction
-derivation. Composition receives no area; ordinary resolution selects the
-Canvas size before the item draws.
+item and its sizing value, not Grid, own Table rules, occupancy, repertoire
+choice, and line-network command ordering. `LineNetwork` rasterization owns the
+generic mechanics that derive junctions from incident directions. Canvas composition
+receives no area; ordinary resolution selects the Canvas size before the item
+draws.
 
 The rest of that proposal is not adopted:
 
@@ -160,8 +165,9 @@ which of its conclusions survived and which did not.
 - **A header or selective Table-rule switch on Grid.** It exposes Table meaning
   on an unrelated primitive.
 - **Cell-owned rules and junction glyphs.** Adjacent cells can disagree about a
-  shared edge, and no one cell sees every direction arriving at an
-  intersection.
+  shared edge. The Table item instead records each complete connected rule
+  geometry as one `LineNetwork`, which derives its glyphs before Canvas
+  composition.
 - **Column or row span now.** It introduces interval constraints and partial
   tracks without a current Grid requirement.
 - **Presentation composition receiving `Available`.** A nested component does

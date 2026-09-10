@@ -182,6 +182,30 @@ impl TextStyle {
         self.modifiers
     }
 
+    pub(crate) fn overlay(mut self, contribution: &Self) -> Self {
+        let Self {
+            fg,
+            bg,
+            underline,
+            hyperlink,
+            modifiers,
+        } = contribution;
+        if let Some(color) = fg {
+            self.fg = Some(*color);
+        }
+        if let Some(color) = bg {
+            self.bg = Some(*color);
+        }
+        if let Some(underline) = underline {
+            self.underline = Some(*underline);
+        }
+        if let Some(hyperlink) = hyperlink {
+            self.hyperlink = Some(hyperlink.clone());
+        }
+        self.modifiers = self.modifiers.union(*modifiers);
+        self
+    }
+
     /// Folds values that cannot reach the output, so that two styles with the
     /// same appearance are the same value.
     ///

@@ -174,31 +174,75 @@ wrappers to satisfy their type systems, but both implementations must expose
 the same item semantics. Commands are not part of retained View data and do not
 participate in View equality; they exist only for one resolve.
 
+Every recorded command satisfies one internal rasterization contract. Given
+the final Canvas size, it returns positioned cell contributions and any
+anchors, but it cannot inspect or mutate the Canvas surface. Canvas completes
+rasterization after sizing, one command at a time during Canvas assembly. A
+single compositor immediately applies that command's contributions through its
+recorded composition rule, then the output is released before the next command
+rasterizes. Command implementations therefore cannot bypass clipping,
+wide-grapheme handling, ordering, or composition with a private paint path, and
+Canvas does not retain the rasterized output of all commands at once.
+
 ## The command vocabulary
 
-The public context API and the recorded command abstraction have the same
-semantic vocabulary. A convenience constructor may fill in a documented
-default, but it does not lower into a differently shaped internal command.
-Canvas starts with four commands because each represents a distinct
-rasterization operation and has a useful command-wide composition default:
+The public context API separates operations whose terminal capabilities differ.
+Cell-space marker drawing and cardinal line networks are not variants of one
+`Path`: they accept different input, rasterize differently, and have different
+intersection semantics. The future sampled-drawing model described below is
+separate for the same reason.
 
-| Command | Meaning | Default composition |
+| Operation | Meaning | Composition |
 | --- | --- | --- |
 | `View` | Resolve one `View` at a signed origin, optionally with a finite allocation per axis; propagate its cells and anchors. | `Replace` |
 | `Text` | Place styled graphemes directly at a signed origin without introducing View allocation semantics. | `Overlay` |
-| `Path` | Rasterize connected geometry such as a line, polyline, rectangle, or arc. | `Overlay` |
+| `Line`, `Polyline`, `Rectangle` | Place an arbitrary marker along cell-space geometry, including diagonals. Intersections remain ordinary cells. | `Overlay`, or an explicit general composition |
+| `LineNetwork` | Draw horizontal and vertical ranges, union their incident directions within one network, and select junction glyphs. | `Overlay`, or an explicit general composition |
 | `Cells` | Place sparse, already-rasterized cell contributions. This is the escape hatch for item-specific rasterizers. | `Overlay` |
 
-A `Path::line` or `Path::rectangle` constructor still creates a `Path` command;
-there is no parallel `context.line(...)` operation that secretly lowers to a
-different abstraction.
+`CanvasContext::line`, `polyline`, and `rectangle` operate directly in terminal
+cell coordinates. They place the caller's marker in every rasterized cell, so a
+diagonal line is possible, but crossing two lines does not create a semantic
+junction. Their cells follow ordinary Canvas composition.
 
-`Points` is not a separate standard command. Points already expressed at cell
-coordinates are sparse `Cells`. World-space or subcell points require
-item-specific choices of transform, marker, sampling, and aggregation; the
-owning item makes those choices and emits `Cells`. Braille plotting is one
-example: an item may aggregate a 2-by-4 subcell grid into Unicode Braille cell
-contributions, but Canvas and the `Cells` command know nothing about Braille.
+`LineNetwork` exposes only `horizontal(y, columns)` and `vertical(x, rows)`.
+The range is one argument and includes both endpoints. This API makes a
+diagonal network unrepresentable instead of accepting one and failing during
+rasterization. A network owns its `LineGlyphs` and style. Each rasterized cell
+carries its incident up, right, down, and left directions; it does not infer
+connections from neighboring cells or decode them from a rendered symbol.
+All segments that must form junctions belong to the same `LineNetwork` value.
+After that network selects its glyphs, the command emits ordinary cell
+contributions. A separate `LineNetwork` command combines with earlier Canvas
+content only through its own recorded `Composition`.
+
+`LineGlyphs` maps every one of the 16 cardinal direction combinations to a
+one-cell character. It provides normal, rounded, and ASCII values, and exposes
+the complete mapping as an ordinary comparable value so a caller can supply a
+domain-specific repertoire.
+
+### Future sampled drawing model
+
+Sampled geometric drawing is not a current Canvas command. Its agreed target
+model remains separate from both cell markers and `LineNetwork`; implementation
+and validation belong to follow-up work.
+
+A future `Drawing` retains geometric primitives such as points, lines, polylines,
+rectangles, and circles independently of their terminal encoding. Its
+`RasterStrategy` separates two choices:
+
+- `RasterMode` selects `FullBlock`, `HalfBlock`, `Quadrant`, `Sextant`,
+  `Braille`, or `Octant`, whose native sample factors are respectively 1-by-1,
+  1-by-2, 2-by-2, 2-by-3, 2-by-4, and 2-by-4 per terminal cell; and
+- `RasterScale` selects cell coordinates or native subcell coordinates. Cell
+  coordinates are expanded by the mode's factor. Subcell dimensions must be
+  exact multiples of that factor; padding or cropping is an explicit policy,
+  not implicit rounding.
+
+`FullBlock` means the fixed full-cell block glyph. Arbitrary marker drawing is
+already provided by the cell-space primitives. `Drawing` shares a geometric
+input model across raster modes; it does not require the modes to share one
+per-cell color or mask representation internally.
 
 ### Resolving a View command
 
@@ -220,9 +264,9 @@ the Canvas. Clipping does not cause a second layout or reflow. This preserves
 the general layout rule that a decided size is never revised and no node is
 assembled twice.
 
-## Composition is paired with a command
+## Composition is paired with every command
 
-Every recorded command consists conceptually of two independent values:
+Every command pairs its operation with an independent composition value:
 
 ```text
 RecordedCommand = { command, composition }
@@ -244,13 +288,13 @@ applied in their deterministic emission order. The standard rules are:
 - `Overlay` applies the fields present in the contribution and preserves fields
   the contribution leaves absent. Absence, rather than a space or default
   style, expresses transparency.
-
-The composition vocabulary is extensible. A specialized rule can, for example,
-union Braille dot masks or merge box-drawing connections. Such rules belong to
-the commands that require them; Canvas does not recognize either drawing
-domain. Keeping composition separate from command semantics lets the same
-`Path` use ordinary overlay or box-junction merging without turning those into
-different geometry commands.
+The general composition vocabulary remains extensible through `Custom`.
+Line incidence exists only while one `LineNetwork` command rasterizes its own
+segments. It is not public cell content, private Canvas surface state, or
+retained View state. Segment recording order within one network does not change
+its corner, tee, or cross. Clipping happens before segment expansion but uses
+the original segment direction, so a one-cell visible fragment of a longer
+off-screen segment remains a segment rather than becoming an isolated point.
 
 One recorded command uses one composition rule. A composite item that needs
 different rules records multiple commands. This keeps command application
@@ -294,7 +338,7 @@ and a minimap policy.
    size.
 2. Canvas creates a context whose local bounds are `(0, 0, 62, 20)`.
 3. The graph item reads those bounds, projects visible world coordinates, and
-   records edge `Path` commands using a box-junction composition rule.
+   records each connected set of cardinal edges as one `LineNetwork` command.
 4. It records node `View` commands in display order. An intrinsic node at
    `(-2, 3)` needs no allocation: it resolves completely, then its left two
    columns are clipped. A node whose root width is `Fill` records the finite
@@ -302,19 +346,21 @@ and a minimap policy.
 5. A label item records `Text` with its default overlay. A popup item records a
    `View` with `Replace`, so the popup's intentional blank cells cover graph
    cells beneath it.
-6. The minimap item uses the Canvas size to select its projection, aggregates
-   subcell samples, and records sparse `Cells` with a dot-union composition.
-7. Canvas rasterizes the recorded commands and applies every cell contribution
-   in recording order. It clips at all four surface edges while preserving
-   wide-grapheme ownership.
+6. The minimap item uses the Canvas size to select its projection, performs its
+   own sampling, and records sparse `Cells`.
+7. During Canvas assembly, each command independently rasterizes to the common
+   positioned-contribution form. Canvas immediately applies those contributions
+   through the command's composition in recording order, clipping at all four
+   surface edges while preserving wide-grapheme ownership, then releases the
+   command output before rasterizing the next one.
 8. Anchors from node and popup Views are translated by their command origins.
    Canvas returns one rectangle of cells plus those anchors; parent assembly
    adds the Block's content offset, and the ordinary root `ResolvedView`
    contains the final cells and anchor coordinates.
 
 The same model also covers simpler cases. A popup is one `View` command, a
-timeline can combine `Text`, `Path`, and sparse `Cells`, and a scatter plot can
-rasterize its points directly to `Cells`. The graph-specific camera, routing,
+timeline can combine `Text`, cell-space lines, and sparse `Cells`, and a scatter
+plot can rasterize its current-frame samples into `Cells`. The graph-specific camera, routing,
 and sampling policies stay in items or their owning presentation rather than
 becoming Canvas state.
 
@@ -348,23 +394,35 @@ generic Canvas APIs.
 
 **Provide only positioned child Views.** This handles opaque boxes but forces
 edges, marks, subcell plots, and sparse decorations back through artificial
-Views or backend writes. The four commands cover the distinct rasterization
+Views or backend writes. The command capabilities cover the distinct rasterization
 needs found in the target applications.
 
-**Make every primitive shape a command.** Separate point, line, rectangle,
-Braille, and marker commands confuse input convenience with rasterization
-semantics. Constructors may build `Path`, while specialized sampling lowers to
-`Cells`.
+**Put cell markers, line networks, and sampled geometry in one `Path`.** A
+terminal cannot rasterize all three with one capability contract. Marker lines
+allow diagonals but have no junction semantics; line networks are cardinal and
+merge incidence; sampled drawings depend on raster mode and scale. Separate
+public entrances make those differences explicit.
 
 **Put one composition mode on the context.** Composition depends on the
 recorded operation: a popup replaces, ordinary text overlays, and crossing
-edges may merge. Global mutable mode would make unrelated commands depend on
+cells may use a custom rule. Global mutable mode would make unrelated commands depend on
 ambient state.
 
-**Make composition part of command semantics.** A path remains connected
-geometry whether its cells overlay or merge. Keeping the values separate
-allows the same command to use another compatible rule without duplicating the
-command vocabulary.
+**Merge separate line-network commands implicitly.** That bypasses the
+per-command composition contract and makes a later command depend on hidden
+surface topology. A connected network owns all segments whose incidence must
+be unioned; separate commands produce ordinary cells and use ordinary Canvas
+composition.
+
+**Recover line topology from rendered glyphs.** ASCII and custom repertoires may
+map several connection sets to the same character, so reverse lookup is
+ambiguous. `LineNetwork` instead derives glyphs from its own segments before
+its command output reaches Canvas composition.
+
+**Put the glyph repertoire on global Canvas state.** Different table rules or
+overlaid diagrams may deliberately use different repertoires. Each
+`LineNetwork` owns its comparable repertoire. Separate networks remain separate
+commands, so their recorded composition determines which rendered cells remain.
 
 **Retain commands in the View.** Commands depend on the final Canvas size and
 are an execution artifact. Retaining them would either prevent responsive
@@ -378,7 +436,10 @@ only the renderer-neutral drawing of the current frame.
 
 Urushi and Noctui use the same Canvas sizing modes, staged intrinsic
 measurement, command types, coordinate rules, defaults, ordering, clipping,
-composition semantics, anchor results, and value equality. Language and
-runtime constraints may change the spelling and private type-erasure machinery
-only. A representation is acceptable when both implementations produce the
-same `ResolvedView` for equivalent input.
+composition semantics, anchor results, and value equality. Line networks use
+the same four cardinal incident directions, 16-way caller-owned glyph mapping,
+order-independent union within one network, and final-cell result. Noctui does not
+yet implement Canvas or these drawing operations; that is migration scope rather than a different
+target model. Language and runtime constraints may change the spelling and
+private type-erasure machinery only. A representation is acceptable when both
+implementations produce the same `ResolvedView` for equivalent input.

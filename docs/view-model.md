@@ -102,13 +102,21 @@ Table are defined in
 [`design/grid.md`](design/grid.md).
 
 Canvas is a finite, local drawing surface whose owned items see its final size
-and record `View`, `Text`, `Path`, or sparse `Cells` commands for that resolve.
+and record `View`, `Text`, cell-space primitives, `LineNetwork`, or sparse
+`Cells` commands for that resolve. A future sampled `Drawing` model remains a
+separate capability rather than a kind of line network.
 It carries exactly one sizing mode. The default viewport mode consumes finite
 allocation and requires explicit extents on unbounded axes; an intrinsic mode
 may instead be supplied by a built-in presentation to report width
 requirements and height at the selected width. Neither mode derives size from
-item bounds. Commands compose in recording order at cell granularity and may
-use signed positions beyond any edge; clipping occurs during Canvas assembly.
+item bounds. After sizing, Canvas assembly rasterizes one command at a time
+through the same internal contract without access to the Canvas surface,
+immediately applies its output through one compositor, and releases that output
+before rasterizing the next command. Commands may use signed positions beyond
+any edge; the compositor clips them to Canvas. `LineNetwork` derives corners,
+tees, and crossings from the incident directions of segments within that one
+network, then emits ordinary cells through the same command composition path.
+Neither `CanvasCell` nor the final `ResolvedView` owns line topology.
 The sizing, command, composition, anchor, and equality contracts are defined in
 [`design/canvas.md`](design/canvas.md).
 

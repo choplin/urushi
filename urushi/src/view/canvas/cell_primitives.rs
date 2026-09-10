@@ -1,21 +1,19 @@
 use crate::{Grapheme, TextStyle};
 
-use super::cell::validate_symbol;
+use super::cell::validate_cell_glyph;
 use super::{CellContribution, Position, PositionedCell};
 use crate::view::geometry::Size;
 
-/// Connected cell geometry.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Path {
+#[derive(Debug, Clone)]
+pub(super) struct CellPath {
     vertices: Vec<Position>,
     symbol: String,
     style: TextStyle,
 }
 
-impl Path {
-    /// Creates one connected segment.
-    pub fn line(from: Position, to: Position, symbol: &Grapheme, style: TextStyle) -> Self {
-        validate_symbol(symbol.as_str());
+impl CellPath {
+    pub(super) fn line(from: Position, to: Position, symbol: &Grapheme, style: TextStyle) -> Self {
+        validate_cell_glyph(symbol.as_str());
         Self {
             vertices: vec![from, to],
             symbol: symbol.as_str().to_owned(),
@@ -23,13 +21,12 @@ impl Path {
         }
     }
 
-    /// Creates connected segments between each consecutive pair of vertices.
-    pub fn polyline(
+    pub(super) fn polyline(
         points: impl IntoIterator<Item = Position>,
         symbol: &Grapheme,
         style: TextStyle,
     ) -> Self {
-        validate_symbol(symbol.as_str());
+        validate_cell_glyph(symbol.as_str());
         Self {
             vertices: points.into_iter().collect(),
             symbol: symbol.as_str().to_owned(),
@@ -37,15 +34,14 @@ impl Path {
         }
     }
 
-    /// Creates the closed outline of a cell-aligned rectangle.
-    pub fn rectangle(
+    pub(super) fn rectangle(
         origin: Position,
         width: usize,
         height: usize,
         symbol: &Grapheme,
         style: TextStyle,
     ) -> Self {
-        validate_symbol(symbol.as_str());
+        validate_cell_glyph(symbol.as_str());
         if width == 0 || height == 0 {
             return Self {
                 vertices: Vec::new(),
@@ -105,40 +101,67 @@ impl Path {
     }
 }
 
-fn line_points(from: Position, to: Position) -> Vec<Position> {
-    let (mut x, mut y) = (from.x, from.y);
-    let dx = (to.x - from.x).abs();
-    let sx = if from.x < to.x { 1 } else { -1 };
-    let dy = -(to.y - from.y).abs();
-    let sy = if from.y < to.y { 1 } else { -1 };
-    let mut error = dx + dy;
-    let mut points = Vec::new();
-    loop {
-        points.push(Position::new(x, y));
-        if x == to.x && y == to.y {
-            break;
-        }
-        let twice = error.saturating_mul(2);
-        if twice >= dy {
-            error += dy;
-            x += sx;
-        }
-        if twice <= dx {
-            error += dx;
-            y += sy;
-        }
+pub(super) fn line_points(from: Position, to: Position) -> LinePoints {
+    LinePoints {
+        current: from,
+        to,
+        dx: (to.x - from.x).abs(),
+        sx: if from.x < to.x { 1 } else { -1 },
+        dy: -(to.y - from.y).abs(),
+        sy: if from.y < to.y { 1 } else { -1 },
+        error: (to.x - from.x).abs() - (to.y - from.y).abs(),
+        finished: false,
     }
-    points
 }
 
-fn inside(position: Position, size: Size) -> bool {
+pub(super) struct LinePoints {
+    current: Position,
+    to: Position,
+    dx: i64,
+    sx: i64,
+    dy: i64,
+    sy: i64,
+    error: i64,
+    finished: bool,
+}
+
+impl Iterator for LinePoints {
+    type Item = Position;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.finished {
+            return None;
+        }
+        let point = self.current;
+        if point == self.to {
+            self.finished = true;
+            return Some(point);
+        }
+        let twice = self.error.saturating_mul(2);
+        if twice >= self.dy {
+            self.error += self.dy;
+            self.current.x += self.sx;
+        }
+        if twice <= self.dx {
+            self.error += self.dx;
+            self.current.y += self.sy;
+        }
+        Some(point)
+    }
+}
+
+pub(super) fn inside(position: Position, size: Size) -> bool {
     position.x >= 0
         && position.y >= 0
         && usize::try_from(position.x).is_ok_and(|x| x < size.width())
         && usize::try_from(position.y).is_ok_and(|y| y < size.height())
 }
 
-fn clip_line(mut from: Position, mut to: Position, size: Size) -> Option<(Position, Position)> {
+pub(super) fn clip_line(
+    mut from: Position,
+    mut to: Position,
+    size: Size,
+) -> Option<(Position, Position)> {
     if size.is_empty() {
         return None;
     }
