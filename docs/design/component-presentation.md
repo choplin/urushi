@@ -171,6 +171,13 @@ meaning of its presets. The exact Canvas flow is in
 [`canvas.md`](canvas.md), while Table/Grid separation and line-network
 ownership are in [`grid.md`](grid.md).
 
+`TableBorder` makes the rule model explicit. Its connected form contains one
+caller-owned `LineGlyphs` repertoire, ruling out different straight glyphs for
+the same direction while retaining complete custom corner, tee, and cross
+selection. Its Markdown and booktabs forms are semantic straight-rule presets.
+Block's `Border` remains a distinct box-frame value whose top, bottom, left,
+and right glyphs may differ; it contains no Table separator or junction fields.
+
 A per-cell style strategy is executable presentation policy, so
 `TablePresentation` stores it as an owned, type-erased, comparable value rather
 than a function address. Equality first requires the same concrete strategy

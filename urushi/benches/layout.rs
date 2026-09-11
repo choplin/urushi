@@ -28,8 +28,8 @@
 
 use divan::{Bencher, black_box};
 use urushi::{
-    Align, Available, BlockStyle, Border, Length, Overflow, Table, TablePresentation, TextStyle,
-    VerticalAlign, View, measure, resolve,
+    Align, Available, BlockStyle, Border, Length, Overflow, Table, TableBorder, TablePresentation,
+    TextStyle, VerticalAlign, View, measure, resolve,
 };
 
 fn main() {
@@ -142,7 +142,7 @@ fn table(rows: usize) -> View {
         )
     });
     TablePresentation::new(BlockStyle::new(), BlockStyle::new(), TextStyle::new())
-        .border(Border::NORMAL)
+        .border(TableBorder::NORMAL)
         .compose(&table)
 }
 

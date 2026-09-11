@@ -217,9 +217,9 @@ contributions. A separate `LineNetwork` command combines with earlier Canvas
 content only through its own recorded `Composition`.
 
 `LineGlyphs` maps every one of the 16 cardinal direction combinations to a
-one-cell character. It provides normal, rounded, and ASCII values, and exposes
-the complete mapping as an ordinary comparable value so a caller can supply a
-domain-specific repertoire.
+one-cell character. It provides normal, rounded, thick, double, ASCII, and
+hidden values, and exposes the complete mapping as an ordinary comparable value
+so a caller can supply a domain-specific repertoire.
 
 ### Future sampled drawing model
 

@@ -1,7 +1,7 @@
 use urushi::{
     Align, AnsiPolicy, AnsiRenderer, BlockStyle, Border, Color, ColorProfile, List, ListItem,
-    SemanticTokens, Table, TerminalProfile, TextStyle, Theme, Tree, TreeNode, VerticalAlign, View,
-    arabic_enumerator, measure,
+    SemanticTokens, Table, TableBorder, TablePresentation, TerminalProfile, TextStyle, Theme, Tree,
+    TreeNode, VerticalAlign, View, arabic_enumerator, measure,
 };
 
 /// Blank space of a fixed width, used to separate samples.
@@ -70,38 +70,7 @@ fn horizontal_alignment_sample(left: &str, center: &str, right: &str) -> View {
     )
 }
 
-fn junction_grid(border: Border) -> String {
-    let top = border.top.to_string().repeat(3);
-    let middle = border.middle_horizontal.to_string().repeat(3);
-    let bottom = border.bottom.to_string().repeat(3);
-
-    format!(
-        "{}{}{}{}{}\n{}甲 {}乙 {}\n{}{}{}{}{}\n{}丙 {}丁 {}\n{}{}{}{}{}",
-        border.top_left,
-        top,
-        border.middle_top,
-        top,
-        border.top_right,
-        border.left,
-        border.left,
-        border.right,
-        border.middle_left,
-        middle,
-        border.middle,
-        middle,
-        border.middle_right,
-        border.left,
-        border.left,
-        border.right,
-        border.bottom_left,
-        bottom,
-        border.middle_bottom,
-        bottom,
-        border.bottom_right,
-    )
-}
-
-fn border_card(label: &str, border: Border, color: Color) -> View {
+fn border_card(label: &str, border: TableBorder, color: Color) -> View {
     let label = View::block(
         BlockStyle::new()
             .foreground(color)
@@ -110,11 +79,17 @@ fn border_card(label: &str, border: Border, color: Color) -> View {
             .align(Align::Center),
         View::text(label, TextStyle::new().foreground(color).bold()),
     );
-    let mut grid_style = TextStyle::new().foreground(color);
-    if border == Border::HIDDEN {
-        grid_style = grid_style.background(Color::BRIGHT_BLACK);
+    let mut cell_style = BlockStyle::new();
+    let mut border_style = TextStyle::new().foreground(color);
+    if border == TableBorder::HIDDEN {
+        cell_style = cell_style.background(Color::BRIGHT_BLACK);
+        border_style = border_style.background(Color::BRIGHT_BLACK);
     }
-    let grid = View::text(junction_grid(border), grid_style);
+    let grid = TablePresentation::new(cell_style.clone(), cell_style, border_style)
+        .border(border)
+        .padding(0)
+        .width(9)
+        .compose(&Table::new().headers(["甲", "乙"]).row(["丙", "丁"]));
 
     View::column(Align::Left, [label, grid])
 }
@@ -125,23 +100,23 @@ fn border_preset_sample() -> View {
         Align::Left,
         [
             pair(
-                border_card("標準", Border::NORMAL, Color::BRIGHT_GREEN),
-                border_card("角丸", Border::ROUNDED, Color::BRIGHT_CYAN),
+                border_card("標準", TableBorder::NORMAL, Color::BRIGHT_GREEN),
+                border_card("角丸", TableBorder::ROUNDED, Color::BRIGHT_CYAN),
             ),
             gap(19),
             pair(
-                border_card("太線", Border::THICK, Color::BRIGHT_MAGENTA),
-                border_card("二重線", Border::DOUBLE, Color::BRIGHT_BLUE),
+                border_card("太線", TableBorder::THICK, Color::BRIGHT_MAGENTA),
+                border_card("二重線", TableBorder::DOUBLE, Color::BRIGHT_BLUE),
             ),
             gap(19),
             pair(
-                border_card("ASCII", Border::ASCII, Color::BRIGHT_YELLOW),
-                border_card("Markdown", Border::MARKDOWN, Color::BRIGHT_RED),
+                border_card("ASCII", TableBorder::ASCII, Color::BRIGHT_YELLOW),
+                border_card("Markdown", TableBorder::MARKDOWN, Color::BRIGHT_RED),
             ),
             gap(19),
             pair(
-                border_card("三線表", Border::BOOKTABS, Color::BRIGHT_CYAN),
-                border_card("非表示", Border::HIDDEN, Color::BRIGHT_BLACK),
+                border_card("三線表", TableBorder::BOOKTABS, Color::BRIGHT_CYAN),
+                border_card("非表示", TableBorder::HIDDEN, Color::BRIGHT_BLACK),
             ),
         ],
     )

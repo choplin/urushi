@@ -122,6 +122,66 @@ impl LineGlyphs {
         cross: '+',
     };
 
+    /// Heavy box-drawing characters.
+    pub const THICK: Self = Self {
+        isolated: '•',
+        end_up: '┃',
+        end_right: '━',
+        end_down: '┃',
+        end_left: '━',
+        vertical: '┃',
+        horizontal: '━',
+        corner_down_right: '┏',
+        corner_down_left: '┓',
+        corner_up_right: '┗',
+        corner_up_left: '┛',
+        tee_right: '┣',
+        tee_down: '┳',
+        tee_left: '┫',
+        tee_up: '┻',
+        cross: '╋',
+    };
+
+    /// Double box-drawing characters.
+    pub const DOUBLE: Self = Self {
+        isolated: '•',
+        end_up: '║',
+        end_right: '═',
+        end_down: '║',
+        end_left: '═',
+        vertical: '║',
+        horizontal: '═',
+        corner_down_right: '╔',
+        corner_down_left: '╗',
+        corner_up_right: '╚',
+        corner_up_left: '╝',
+        tee_right: '╠',
+        tee_down: '╦',
+        tee_left: '╣',
+        tee_up: '╩',
+        cross: '╬',
+    };
+
+    /// Invisible line drawing that still occupies its cells.
+    pub const HIDDEN: Self = Self {
+        isolated: ' ',
+        end_up: ' ',
+        end_right: ' ',
+        end_down: ' ',
+        end_left: ' ',
+        vertical: ' ',
+        horizontal: ' ',
+        corner_down_right: ' ',
+        corner_down_left: ' ',
+        corner_up_right: ' ',
+        corner_up_left: ' ',
+        tee_right: ' ',
+        tee_down: ' ',
+        tee_left: ' ',
+        tee_up: ' ',
+        cross: ' ',
+    };
+
     pub(super) fn glyph(self, connections: LineConnections) -> char {
         match connections.0 {
             0 => self.isolated,

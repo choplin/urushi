@@ -91,7 +91,7 @@ mod view;
 
 pub use component::{
     List, ListEnumerator, ListIndenter, ListItem, ListPosition, ListStyle, SiblingPosition,
-    Summary, SummaryField, Table, TableCell, TableCellStyler, TablePresentation, Tree,
+    Summary, SummaryField, Table, TableBorder, TableCell, TableCellStyler, TablePresentation, Tree,
     TreeEnumerator, TreeIndenter, TreeNode, TreeStyle, Warning, alphabet_enumerator,
     arabic_enumerator, asterisk_enumerator, bullet_enumerator, dash_enumerator,
     default_list_indenter, default_tree_enumerator, default_tree_indenter, roman_enumerator,

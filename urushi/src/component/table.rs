@@ -5,36 +5,10 @@ use std::{any::Any, fmt, sync::Arc};
 use crate::text::wrapped_line_count;
 use crate::view::{CanvasMeasure, CanvasRequirements, Claim, Kind, distribute, fit_text_lines};
 use crate::{
-    Align, BlockStyle, BlockStylePropertyKey, Border, Canvas, CanvasContext, CanvasItem,
-    CanvasSizing, CellContribution, Composition, Grapheme, Length, Overflow, Position,
-    PositionedCell, PrintableLines, PrintableText, TableRole, TextStyle, VerticalAlign, View,
+    Align, BlockStyle, BlockStylePropertyKey, Canvas, CanvasContext, CanvasItem, CanvasSizing,
+    Composition, Grapheme, Length, LineGlyphs, LineNetwork, Overflow, Position, PrintableLines,
+    PrintableText, TableRole, TextStyle, VerticalAlign, View,
 };
-
-/// Selects the glyph implied by the four incident line directions.
-const fn junction(
-    border: &Border,
-    up: bool,
-    down: bool,
-    left: bool,
-    right: bool,
-    horizontal: char,
-    vertical: char,
-) -> char {
-    match (up, down, left, right) {
-        (true, true, true, true) => border.middle,
-        (false, true, true, true) => border.middle_top,
-        (true, false, true, true) => border.middle_bottom,
-        (true, true, false, true) => border.middle_left,
-        (true, true, true, false) => border.middle_right,
-        (false, true, false, true) => border.top_left,
-        (false, true, true, false) => border.top_right,
-        (true, false, false, true) => border.bottom_left,
-        (true, false, true, false) => border.bottom_right,
-        (true, _, false, false) | (false, true, false, false) => vertical,
-        (false, false, true, _) | (false, false, false, true) => horizontal,
-        (false, false, false, false) => ' ',
-    }
-}
 
 /// Which row of a table a cell belongs to.
 ///
@@ -330,6 +304,61 @@ impl Table {
     }
 }
 
+/// Line model used by a [`TablePresentation`].
+///
+/// Connected grids use a [`LineGlyphs`] repertoire so [`LineNetwork`] can
+/// derive every corner, tee, and crossing from the recorded geometry.
+/// Markdown and booktabs tables contain only independent straight rules and
+/// therefore use Canvas cell lines instead.
+///
+/// ```
+/// use urushi::{
+///     BlockStyle, LineGlyphs, Table, TableBorder, TablePresentation, TextStyle,
+/// };
+///
+/// let table = Table::new().headers(["Name"]).row(["Iris"]);
+/// let presentation = TablePresentation::new(
+///     BlockStyle::new(),
+///     BlockStyle::new(),
+///     TextStyle::new(),
+/// )
+/// .border(TableBorder::network(LineGlyphs::ROUNDED));
+/// let _view = presentation.compose(&table);
+/// ```
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct TableBorder(TableBorderKind);
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum TableBorderKind {
+    Network(LineGlyphs),
+    Markdown,
+    Booktabs,
+}
+
+impl TableBorder {
+    /// A square single-line grid.
+    pub const NORMAL: Self = Self::network(LineGlyphs::NORMAL);
+    /// A single-line grid with rounded outer corners.
+    pub const ROUNDED: Self = Self::network(LineGlyphs::ROUNDED);
+    /// A heavy-line grid.
+    pub const THICK: Self = Self::network(LineGlyphs::THICK);
+    /// A double-line grid.
+    pub const DOUBLE: Self = Self::network(LineGlyphs::DOUBLE);
+    /// An ASCII-only grid.
+    pub const ASCII: Self = Self::network(LineGlyphs::ASCII);
+    /// A Markdown table made from `-` and `|` cell lines.
+    pub const MARKDOWN: Self = Self(TableBorderKind::Markdown);
+    /// A booktabs table with heavy outer rules and light inner rules.
+    pub const BOOKTABS: Self = Self(TableBorderKind::Booktabs);
+    /// An invisible grid that still occupies its rule rows and columns.
+    pub const HIDDEN: Self = Self::network(LineGlyphs::HIDDEN);
+
+    /// Creates a connected grid with a caller-owned glyph repertoire.
+    pub const fn network(glyphs: LineGlyphs) -> Self {
+        Self(TableBorderKind::Network(glyphs))
+    }
+}
+
 /// Presentation policy used to compose a [`Table`] into a [`View`].
 ///
 /// The policy owns the border, the edge toggles, cell padding, the total width
@@ -340,7 +369,7 @@ pub struct TablePresentation {
     header: BlockStyle,
     cell: BlockStyle,
     border_style: TextStyle,
-    border: Border,
+    border: TableBorder,
     border_top: bool,
     border_bottom: bool,
     border_left: bool,
@@ -379,7 +408,7 @@ impl TablePresentation {
             header,
             cell,
             border_style: border,
-            border: Border::NORMAL,
+            border: TableBorder::NORMAL,
             border_top: true,
             border_bottom: true,
             border_left: true,
@@ -435,9 +464,9 @@ impl TablePresentation {
         self
     }
 
-    /// Replaces the border character set.
+    /// Replaces the table's line model and glyph repertoire.
     #[must_use]
-    pub const fn border(mut self, border: Border) -> Self {
+    pub const fn border(mut self, border: TableBorder) -> Self {
         self.border = border;
         self
     }
@@ -479,8 +508,9 @@ impl TablePresentation {
 
     /// Draws or omits the rules between columns.
     ///
-    /// A column rule uses the border's `left` glyph, the same one that draws
-    /// the left edge; [`Border`] has no separate vertical-separator glyph.
+    /// A connected table uses its [`LineGlyphs::vertical`] glyph for outer and
+    /// inner vertical rules. A straight-rule preset supplies its own vertical
+    /// marker.
     #[must_use]
     pub const fn border_column(mut self, enabled: bool) -> Self {
         self.border_column = enabled;
@@ -692,54 +722,19 @@ impl TableFrame {
     fn draw(&self, context: &mut CanvasContext) {
         let columns = self.column_widths(context.size().width());
         let heights = self.row_heights(&columns);
-        let segments = self.line_segments(&columns);
-        let mut line_cells = Vec::new();
-        let mut y = 0;
 
         self.record_cell_rows(context, &columns, &heights);
-
-        if self.presentation.border_top {
-            self.push_rule(
-                &mut line_cells,
-                &segments,
-                y,
-                false,
-                true,
-                self.presentation.border.top,
-            );
-            y += 1;
-        }
-
-        for (row_index, (_row, height)) in self.rows.iter().zip(&heights).enumerate() {
-            for offset in 0..*height {
-                self.push_verticals(&mut line_cells, &segments, y + offset);
+        match self.presentation.border.0 {
+            TableBorderKind::Network(glyphs) => {
+                self.record_line_network(context, &columns, &heights, glyphs);
             }
-            y = y.saturating_add(*height);
-
-            if row_index + 1 < self.rows.len() && self.draws_row_rule(row_index) {
-                self.push_rule(
-                    &mut line_cells,
-                    &segments,
-                    y,
-                    true,
-                    true,
-                    self.presentation.border.middle_horizontal,
-                );
-                y += 1;
+            TableBorderKind::Markdown => {
+                self.record_straight_rules(context, &columns, &heights, '|', '-', '-', '-', true);
+            }
+            TableBorderKind::Booktabs => {
+                self.record_straight_rules(context, &columns, &heights, ' ', '━', '─', '━', false);
             }
         }
-
-        if self.presentation.border_bottom {
-            self.push_rule(
-                &mut line_cells,
-                &segments,
-                y,
-                true,
-                false,
-                self.presentation.border.bottom,
-            );
-        }
-        context.cells(line_cells);
     }
 
     fn record_cell_rows(&self, context: &mut CanvasContext, columns: &[usize], heights: &[usize]) {
@@ -787,73 +782,168 @@ impl TableFrame {
         }
     }
 
-    fn line_segments(&self, columns: &[usize]) -> Vec<LineSegment> {
-        let mut segments = Vec::with_capacity(columns.len() * 2 + 2);
+    fn rule_columns(&self, columns: &[usize]) -> Vec<usize> {
+        let mut rules = Vec::with_capacity(columns.len() + 1);
+        let mut x = 0usize;
         if self.presentation.border_left {
-            segments.push(LineSegment::Rule(self.presentation.border.left));
+            rules.push(x);
+            x += 1;
         }
         for (index, width) in columns.iter().enumerate() {
             if index > 0 && self.presentation.border_column {
-                segments.push(LineSegment::Rule(self.presentation.border.left));
+                rules.push(x);
+                x += 1;
             }
-            segments.push(LineSegment::Span(*width));
+            x = x.saturating_add(*width);
         }
         if self.presentation.border_right {
-            segments.push(LineSegment::Rule(self.presentation.border.right));
+            rules.push(x);
         }
-        segments
+        rules
     }
 
-    fn push_verticals(&self, output: &mut Vec<PositionedCell>, segments: &[LineSegment], y: usize) {
-        let mut x = 0;
-        for segment in segments {
-            match segment {
-                LineSegment::Rule(glyph) => {
-                    output.push(self.line_cell(x, y, *glyph));
-                    x += 1;
-                }
-                LineSegment::Span(width) => x = x.saturating_add(*width),
+    fn rule_rows(&self, heights: &[usize]) -> Vec<usize> {
+        let mut rules = Vec::with_capacity(self.rows.len() + 1);
+        let mut y = 0usize;
+        if self.presentation.border_top {
+            rules.push(y);
+            y += 1;
+        }
+        for (row_index, height) in heights.iter().enumerate() {
+            y = y.saturating_add(*height);
+            if row_index + 1 < heights.len() && self.draws_row_rule(row_index) {
+                rules.push(y);
+                y += 1;
             }
         }
+        if self.presentation.border_bottom {
+            rules.push(y);
+        }
+        rules
     }
 
-    fn push_rule(
+    fn record_line_network(
         &self,
-        output: &mut Vec<PositionedCell>,
-        segments: &[LineSegment],
-        y: usize,
-        up: bool,
-        down: bool,
-        horizontal: char,
+        context: &mut CanvasContext,
+        columns: &[usize],
+        heights: &[usize],
+        glyphs: LineGlyphs,
     ) {
-        let mut x = 0;
-        for (index, segment) in segments.iter().enumerate() {
-            match segment {
-                LineSegment::Rule(vertical) => {
-                    let glyph = junction(
-                        &self.presentation.border,
-                        up,
-                        down,
-                        index > 0,
-                        index + 1 < segments.len(),
-                        horizontal,
-                        *vertical,
-                    );
-                    output.push(self.line_cell(x, y, glyph));
-                    x += 1;
-                }
-                LineSegment::Span(width) => {
-                    for offset in 0..*width {
-                        output.push(self.line_cell(x + offset, y, horizontal));
-                    }
-                    x = x.saturating_add(*width);
-                }
+        let width = columns
+            .iter()
+            .sum::<usize>()
+            .saturating_add(self.line_width());
+        let height = heights
+            .iter()
+            .sum::<usize>()
+            .saturating_add(self.line_height());
+        if width == 0 || height == 0 {
+            return;
+        }
+
+        let rows = self.rule_rows(heights);
+        let columns = self.rule_columns(columns);
+        if rows.is_empty() && columns.is_empty() {
+            return;
+        }
+
+        let mut network = LineNetwork::new(glyphs, self.rule_style());
+        // A disabled outer edge removes its rule cell, not the logical
+        // continuation of a perpendicular rule. Keep that incidence just
+        // outside the Canvas so clipping preserves straight lines and the
+        // corners next to zero-width cells.
+        let first_x = if self.presentation.border_left { 0 } else { -1 };
+        let last_x = if self.presentation.border_right {
+            position(width - 1)
+        } else {
+            position(width)
+        };
+        let first_y = if self.presentation.border_top { 0 } else { -1 };
+        let last_y = if self.presentation.border_bottom {
+            position(height - 1)
+        } else {
+            position(height)
+        };
+        for y in rows {
+            network.horizontal(position(y), first_x..=last_x);
+        }
+        for x in columns {
+            network.vertical(position(x), first_y..=last_y);
+        }
+        context.line_network(network);
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn record_straight_rules(
+        &self,
+        context: &mut CanvasContext,
+        columns: &[usize],
+        heights: &[usize],
+        vertical: char,
+        top: char,
+        middle: char,
+        bottom: char,
+        vertical_last: bool,
+    ) {
+        let width = columns
+            .iter()
+            .sum::<usize>()
+            .saturating_add(self.line_width());
+        let height = heights
+            .iter()
+            .sum::<usize>()
+            .saturating_add(self.line_height());
+        if width == 0 || height == 0 {
+            return;
+        }
+
+        let record_verticals = |context: &mut CanvasContext| {
+            for x in self.rule_columns(columns) {
+                self.record_cell_line(context, x, 0, x, height - 1, vertical);
             }
+        };
+        let record_horizontals = |context: &mut CanvasContext| {
+            let rows = self.rule_rows(heights);
+            for (index, y) in rows.iter().copied().enumerate() {
+                let glyph = if self.presentation.border_top && index == 0 {
+                    top
+                } else if self.presentation.border_bottom && index + 1 == rows.len() {
+                    bottom
+                } else {
+                    middle
+                };
+                self.record_cell_line(context, 0, y, width - 1, y, glyph);
+            }
+        };
+
+        if vertical_last {
+            record_horizontals(context);
+            record_verticals(context);
+        } else {
+            record_verticals(context);
+            record_horizontals(context);
         }
     }
 
-    fn line_cell(&self, x: usize, y: usize, glyph: char) -> PositionedCell {
+    fn record_cell_line(
+        &self,
+        context: &mut CanvasContext,
+        from_x: usize,
+        from_y: usize,
+        to_x: usize,
+        to_y: usize,
+        glyph: char,
+    ) {
         let glyph = glyph.to_string();
+        context.line(
+            Position::new(position(from_x), position(from_y)),
+            Position::new(position(to_x), position(to_y)),
+            Grapheme::new(&glyph),
+            self.rule_style(),
+        );
+    }
+
+    fn rule_style(&self) -> TextStyle {
         let mut style = TextStyle::new();
         if let Some(color) = self.presentation.border_style.foreground_color() {
             style = style.foreground(color);
@@ -861,12 +951,7 @@ impl TableFrame {
         if let Some(color) = self.presentation.border_style.background_color() {
             style = style.background(color);
         }
-        PositionedCell::new(
-            Position::new(position(x), position(y)),
-            CellContribution::new()
-                .symbol(Grapheme::new(&glyph))
-                .style(style),
-        )
+        style
     }
 }
 
@@ -1023,12 +1108,6 @@ fn push_run(runs: &mut Vec<TextRun>, x: usize, text: &str, style: TextStyle) {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
-enum LineSegment {
-    Rule(char),
-    Span(usize),
-}
-
 #[derive(Debug, Clone, PartialEq)]
 struct TableItem(Arc<TableFrame>);
 
@@ -1084,7 +1163,7 @@ mod tests {
     use super::*;
     use crate::test_support::{plain_exact as plain, plain_rows, style_at};
     use crate::{
-        Align, Available, Color, ComponentStyles, Overflow, PrintableText, SemanticTokens,
+        Align, Available, Border, Color, ComponentStyles, Overflow, PrintableText, SemanticTokens,
         StyledGrapheme, VerticalAlign, measure, resolve,
     };
 
@@ -1308,7 +1387,7 @@ mod tests {
         let table_style = styles().table().clone();
         let cases = [
             (
-                Border::MARKDOWN,
+                TableBorder::MARKDOWN,
                 [
                     "|------|----------|",
                     "| Name | Location |",
@@ -1323,7 +1402,7 @@ mod tests {
                 // The heavy outer rules and the light header rule come from
                 // separate glyphs; the blank left and right edges still occupy
                 // one cell each.
-                Border::BOOKTABS,
+                TableBorder::BOOKTABS,
                 [
                     "━━━━━━━━━━━━━━━━━━━",
                     "  Name   Location  ",
@@ -1335,7 +1414,7 @@ mod tests {
                 .join("\n"),
             ),
             (
-                Border::HIDDEN,
+                TableBorder::HIDDEN,
                 [
                     "                   ",
                     "  Name   Location  ",
@@ -1473,6 +1552,69 @@ mod tests {
 │ only │
 └──────┘"
         );
+    }
+
+    #[test]
+    fn a_standalone_network_rule_uses_its_straight_glyph() {
+        let glyphs = LineGlyphs {
+            isolated: 'o',
+            end_up: 'u',
+            end_right: 'r',
+            end_down: 'd',
+            end_left: 'l',
+            vertical: 'v',
+            horizontal: 'h',
+            ..LineGlyphs::NORMAL
+        };
+        let one_column = Table::new().row([""]);
+        let vertical = styles()
+            .table()
+            .clone()
+            .border(TableBorder::network(glyphs))
+            .padding(0)
+            .border_top(false)
+            .border_bottom(false)
+            .border_right(false)
+            .border_column(false)
+            .compose(&one_column);
+        assert_eq!(plain(&vertical), "v");
+
+        let one_cell = Table::new().row(["x"]);
+        let horizontal = styles()
+            .table()
+            .clone()
+            .border(TableBorder::network(glyphs))
+            .padding(0)
+            .border_bottom(false)
+            .border_left(false)
+            .border_right(false)
+            .border_column(false)
+            .compose(&one_cell);
+        assert_eq!(plain(&horizontal), "h\nx");
+    }
+
+    #[test]
+    fn zero_width_cells_preserve_corners_next_to_disabled_edges() {
+        let table = Table::new().row([""]);
+        let left = styles()
+            .table()
+            .clone()
+            .padding(0)
+            .border_bottom(false)
+            .border_right(false)
+            .border_column(false)
+            .compose(&table);
+        assert_eq!(plain(&left), "┌\n│");
+
+        let right = styles()
+            .table()
+            .clone()
+            .padding(0)
+            .border_bottom(false)
+            .border_left(false)
+            .border_column(false)
+            .compose(&table);
+        assert_eq!(plain(&right), "┐\n│");
     }
 
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1813,7 +1955,7 @@ mod tests {
             table_style.clone(),
             table_style.clone().cell_styler(AccentHeader)
         );
-        assert_ne!(table_style.clone(), table_style.border(Border::ASCII));
+        assert_ne!(table_style.clone(), table_style.border(TableBorder::ASCII));
     }
 
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1920,14 +2062,14 @@ mod tests {
     fn every_border_preset_keeps_its_observable_glyphs() {
         let table = Table::new().headers(["A", "B"]).row(["1", "2"]);
         let cases = [
-            (Border::NORMAL, '┌', '┬', '┼', '└'),
-            (Border::ROUNDED, '╭', '┬', '┼', '╰'),
-            (Border::THICK, '┏', '┳', '╋', '┗'),
-            (Border::DOUBLE, '╔', '╦', '╬', '╚'),
-            (Border::ASCII, '+', '+', '+', '+'),
-            (Border::MARKDOWN, '|', '|', '|', '|'),
-            (Border::BOOKTABS, '━', '━', '─', '━'),
-            (Border::HIDDEN, ' ', ' ', ' ', ' '),
+            (TableBorder::NORMAL, '┌', '┬', '┼', '└'),
+            (TableBorder::ROUNDED, '╭', '┬', '┼', '╰'),
+            (TableBorder::THICK, '┏', '┳', '╋', '┗'),
+            (TableBorder::DOUBLE, '╔', '╦', '╬', '╚'),
+            (TableBorder::ASCII, '+', '+', '+', '+'),
+            (TableBorder::MARKDOWN, '|', '|', '|', '|'),
+            (TableBorder::BOOKTABS, '━', '━', '─', '━'),
+            (TableBorder::HIDDEN, ' ', ' ', ' ', ' '),
         ];
 
         for (border, top_left, top_middle, middle, bottom_left) in cases {
@@ -1940,22 +2082,24 @@ mod tests {
     }
 
     #[test]
-    fn a_custom_border_derives_corners_tees_and_crosses_from_incident_rules() {
-        let border = Border {
-            top: 't',
-            bottom: 'b',
-            left: 'l',
-            right: 'r',
-            top_left: 'A',
-            top_right: 'B',
-            bottom_left: 'C',
-            bottom_right: 'D',
-            middle_left: 'E',
-            middle_right: 'F',
-            middle: 'G',
-            middle_horizontal: 'm',
-            middle_top: 'H',
-            middle_bottom: 'I',
+    fn caller_owned_line_glyphs_derive_every_table_junction() {
+        let glyphs = LineGlyphs {
+            isolated: 'o',
+            end_up: 'u',
+            end_right: 'r',
+            end_down: 'd',
+            end_left: 'l',
+            vertical: 'v',
+            horizontal: 'h',
+            corner_down_right: 'A',
+            corner_down_left: 'B',
+            corner_up_right: 'C',
+            corner_up_left: 'D',
+            tee_right: 'E',
+            tee_down: 'H',
+            tee_left: 'F',
+            tee_up: 'I',
+            cross: 'G',
         };
         let table = Table::new()
             .headers(["a", "b"])
@@ -1964,20 +2108,20 @@ mod tests {
         let view = styles()
             .table()
             .clone()
-            .border(border)
+            .border(TableBorder::network(glyphs))
             .border_row(true)
             .compose(&table);
 
         assert_eq!(
             plain(&view),
             [
-                "AtttHtttB",
-                "l a l b r",
-                "EmmmGmmmF",
-                "l 1 l 2 r",
-                "EmmmGmmmF",
-                "l 3 l 4 r",
-                "CbbbIbbbD",
+                "AhhhHhhhB",
+                "v a v b v",
+                "EhhhGhhhF",
+                "v 1 v 2 v",
+                "EhhhGhhhF",
+                "v 3 v 4 v",
+                "ChhhIhhhD",
             ]
             .join("\n")
         );

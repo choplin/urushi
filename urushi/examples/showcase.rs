@@ -1,7 +1,8 @@
 use urushi::{
     Align, AnsiPolicy, AnsiRenderer, BlockStyle, Border, Color, ColorProfile, List, ListItem,
-    SemanticTokens, Table, TableCell, TableCellStyler, TerminalProfile, TextStyle, Theme, Tree,
-    TreeNode, VerticalAlign, View, arabic_enumerator, measure,
+    SemanticTokens, Table, TableBorder, TableCell, TableCellStyler, TablePresentation,
+    TerminalProfile, TextStyle, Theme, Tree, TreeNode, VerticalAlign, View, arabic_enumerator,
+    measure,
 };
 
 /// Blank space of a fixed width, used to separate samples.
@@ -123,38 +124,7 @@ fn maximum_height_sample() -> View {
     View::row(VerticalAlign::Top, [before, gap(2), after])
 }
 
-fn junction_grid(border: Border) -> String {
-    let top = border.top.to_string().repeat(3);
-    let middle = border.middle_horizontal.to_string().repeat(3);
-    let bottom = border.bottom.to_string().repeat(3);
-
-    format!(
-        "{}{}{}{}{}\n{} A {} B {}\n{}{}{}{}{}\n{} C {} D {}\n{}{}{}{}{}",
-        border.top_left,
-        top,
-        border.middle_top,
-        top,
-        border.top_right,
-        border.left,
-        border.left,
-        border.right,
-        border.middle_left,
-        middle,
-        border.middle,
-        middle,
-        border.middle_right,
-        border.left,
-        border.left,
-        border.right,
-        border.bottom_left,
-        bottom,
-        border.middle_bottom,
-        bottom,
-        border.bottom_right,
-    )
-}
-
-fn border_card(label: &str, border: Border, color: Color) -> View {
+fn border_card(label: &str, border: TableBorder, color: Color) -> View {
     let label = View::block(
         BlockStyle::new()
             .foreground(color)
@@ -163,11 +133,16 @@ fn border_card(label: &str, border: Border, color: Color) -> View {
             .align(Align::Center),
         View::text(label, TextStyle::new().foreground(color).bold()),
     );
-    let mut grid_style = TextStyle::new().foreground(color);
-    if border == Border::HIDDEN {
-        grid_style = grid_style.background(Color::BRIGHT_BLACK);
+    let mut cell_style = BlockStyle::new();
+    let mut border_style = TextStyle::new().foreground(color);
+    if border == TableBorder::HIDDEN {
+        cell_style = cell_style.background(Color::BRIGHT_BLACK);
+        border_style = border_style.background(Color::BRIGHT_BLACK);
     }
-    let grid = View::text(junction_grid(border), grid_style);
+    let grid = TablePresentation::new(cell_style.clone(), cell_style, border_style)
+        .border(border)
+        .width(9)
+        .compose(&Table::new().headers(["A", "B"]).row(["C", "D"]));
 
     View::column(Align::Left, [label, grid])
 }
@@ -178,23 +153,23 @@ fn border_preset_sample() -> View {
         Align::Left,
         [
             pair(
-                border_card("NORMAL", Border::NORMAL, Color::BRIGHT_GREEN),
-                border_card("ROUNDED", Border::ROUNDED, Color::BRIGHT_CYAN),
+                border_card("NORMAL", TableBorder::NORMAL, Color::BRIGHT_GREEN),
+                border_card("ROUNDED", TableBorder::ROUNDED, Color::BRIGHT_CYAN),
             ),
             gap(19),
             pair(
-                border_card("THICK", Border::THICK, Color::BRIGHT_MAGENTA),
-                border_card("DOUBLE", Border::DOUBLE, Color::BRIGHT_BLUE),
+                border_card("THICK", TableBorder::THICK, Color::BRIGHT_MAGENTA),
+                border_card("DOUBLE", TableBorder::DOUBLE, Color::BRIGHT_BLUE),
             ),
             gap(19),
             pair(
-                border_card("ASCII", Border::ASCII, Color::BRIGHT_YELLOW),
-                border_card("MARKDOWN", Border::MARKDOWN, Color::BRIGHT_RED),
+                border_card("ASCII", TableBorder::ASCII, Color::BRIGHT_YELLOW),
+                border_card("MARKDOWN", TableBorder::MARKDOWN, Color::BRIGHT_RED),
             ),
             gap(19),
             pair(
-                border_card("BOOKTABS", Border::BOOKTABS, Color::BRIGHT_CYAN),
-                border_card("HIDDEN", Border::HIDDEN, Color::BRIGHT_BLACK),
+                border_card("BOOKTABS", TableBorder::BOOKTABS, Color::BRIGHT_CYAN),
+                border_card("HIDDEN", TableBorder::HIDDEN, Color::BRIGHT_BLACK),
             ),
         ],
     )
