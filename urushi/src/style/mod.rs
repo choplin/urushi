@@ -23,4 +23,4 @@ pub use property::{
     TextStyleProperty, TextStylePropertyKey,
 };
 pub use text::TextStyle;
-pub use underline::{Underline, UnderlineStyle};
+pub use underline::{Underline, UnderlineStyle, UnderlineStyleSet};

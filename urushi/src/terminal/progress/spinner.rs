@@ -5,46 +5,44 @@ use std::io;
 use crate::{ComponentRole, ComponentTheme, View};
 
 use super::{
-    StderrTerminal,
     indicatif_backend::LiveRegion,
     themed_message,
     view::{self, FinishKind},
 };
-use crate::OutputMode;
+use crate::terminal::stderr::{OutputMode, ProgressOutput};
 
 /// Indeterminate work that leaves one stable completion record.
 #[derive(Debug)]
 pub struct Spinner {
     live: Option<LiveRegion>,
-    terminal: StderrTerminal,
+    terminal: ProgressOutput,
     styles: ComponentTheme,
     message: String,
     finished: bool,
 }
 
 impl Spinner {
-    pub(crate) fn new(
-        terminal: StderrTerminal,
+    /// Starts an indeterminate progress display on stderr.
+    pub fn new(styles: &ComponentTheme, message: impl Into<String>) -> io::Result<Self> {
+        ProgressOutput::detect()?.spinner(styles, message)
+    }
+
+    pub(in crate::terminal) fn with_output(
+        terminal: ProgressOutput,
         styles: ComponentTheme,
         message: String,
     ) -> io::Result<Self> {
         let live = match terminal.mode() {
             OutputMode::Live => {
-                let rail = terminal
-                    .renderer
-                    .render(&View::text(
-                        "│",
-                        styles.text_style(ComponentRole::Muted).clone(),
-                    ))
-                    .into_string();
+                let rail = terminal.render_text(&View::text(
+                    "│",
+                    styles.text_style(ComponentRole::Muted).clone(),
+                ));
                 let ticks = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"].map(|tick| {
-                    terminal
-                        .renderer
-                        .render(&View::text(
-                            tick,
-                            styles.text_style(ComponentRole::Accent).clone(),
-                        ))
-                        .into_string()
+                    terminal.render_text(&View::text(
+                        tick,
+                        styles.text_style(ComponentRole::Accent).clone(),
+                    ))
                 });
                 Some(LiveRegion::spinner(
                     &rail,

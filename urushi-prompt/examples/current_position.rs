@@ -2,7 +2,7 @@ use std::io::{self, Write};
 
 use urushi_prompt::{
     FieldKey, Form, FormOutcome, Group, Input, PromptStart,
-    urushi::{Color, SemanticTokens, TerminalProfile, Theme},
+    urushi::{Color, SemanticTokens, Theme},
 };
 
 const PREFIX: &str = "Configuration: ";
@@ -45,8 +45,7 @@ fn main() {
     output.flush().expect("flush prompt prefix");
     drop(output);
 
-    let profile = TerminalProfile::detect_for(&stderr);
-    match form.run(&theme(), &profile) {
+    match form.run(&theme()) {
         Ok(FormOutcome::Submitted(values)) => {
             let name = values.get(&name_key).expect("submitted name");
             println!("Configured for {name}.");

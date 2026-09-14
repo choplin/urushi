@@ -14,7 +14,7 @@
 //! ```
 //! use urushi::{
 //!     Available, Canvas, CanvasContext, CanvasItem, Composition, Position,
-//!     Size, TextStyle, View, resolve, try_resolve,
+//!     Size, TextStyle, View, resolve,
 //! };
 //!
 //! #[derive(Debug, Clone, PartialEq)]
@@ -35,13 +35,13 @@
 //!
 //! // Explicit extents make an otherwise-unbounded Canvas finite.
 //! let view = View::canvas(Canvas::new().extent(Size::new(8, 2)).item(Label("ok")));
-//! assert_eq!(resolve(&view, Available::NONE).size(), Size::new(8, 2));
+//! assert_eq!(resolve(&view, Available::NONE).unwrap().size(), Size::new(8, 2));
 //!
 //! // A parent allocation takes precedence over an explicit extent. Omit an
 //! // extent only when that axis will always receive a finite allocation.
 //! let allocated = View::canvas(Canvas::new().item(Label("ok")));
-//! assert_eq!(resolve(&allocated, Available::size(12, 3)).size(), Size::new(12, 3));
-//! assert!(try_resolve(&allocated, Available::NONE).is_err());
+//! assert_eq!(resolve(&allocated, Available::size(12, 3)).unwrap().size(), Size::new(12, 3));
+//! assert!(resolve(&allocated, Available::NONE).is_err());
 //! ```
 
 mod assemble;
@@ -302,7 +302,7 @@ mod tests {
         );
         events.lock().unwrap().clear();
 
-        let resolved = resolve(&view, Available::size(5, 2));
+        let resolved = resolve(&view, Available::size(5, 2)).unwrap();
 
         assert_eq!(resolved.size(), Size::new(5, 2));
         assert_eq!(
@@ -349,7 +349,7 @@ mod tests {
                 .item(DrawPastHeight(Arc::clone(&events))),
         );
 
-        let resolved = resolve(&view, Available::size(1, 1));
+        let resolved = resolve(&view, Available::size(1, 1)).unwrap();
 
         assert_eq!(resolved.size(), Size::new(1, 1));
         assert_eq!(
@@ -381,7 +381,7 @@ mod tests {
             ],
         );
 
-        let resolved = resolve(&view, Available::size(3, 10));
+        let resolved = resolve(&view, Available::size(3, 10)).unwrap();
 
         assert_eq!(resolved.size(), Size::new(3, 10));
         assert_eq!(

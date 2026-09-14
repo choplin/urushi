@@ -5,6 +5,7 @@ use crate::{Available, StyledGrapheme, View, resolve};
 /// Resolves `view` and returns its rows, exactly as laid out.
 pub(crate) fn plain_rows(view: &View) -> Vec<String> {
     resolve(view, Available::NONE)
+        .unwrap()
         .rows()
         .iter()
         .map(|row| row.iter().map(StyledGrapheme::symbol).collect())
@@ -28,7 +29,22 @@ pub(crate) fn plain(view: &View) -> String {
 
 /// Resolves `view` and returns the logical style of one grapheme.
 pub(crate) fn style_at(view: &View, row: usize, column: usize) -> crate::TextStyle {
-    resolve(view, Available::NONE).rows()[row][column]
+    resolve(view, Available::NONE).unwrap().rows()[row][column]
         .style()
         .clone()
+}
+
+/// Resolves one styled block and renders every output feature.
+pub(crate) fn render_block(style: &crate::BlockStyle, content: &str) -> String {
+    let view = View::block(style.clone(), View::text(content, style.text().clone()));
+    let resolved = resolve(&view, Available::NONE).unwrap();
+    crate::render(
+        &resolved,
+        &crate::RenderSettings::default()
+            .with_colors(crate::ColorLevel::TrueColor)
+            .with_modifiers(crate::Modifier::all())
+            .with_underline_styles(crate::UnderlineStyleSet::all())
+            .with_underline_colors(true)
+            .with_hyperlinks(true),
+    )
 }

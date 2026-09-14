@@ -56,9 +56,8 @@ impl Widget for &ViewWidget<'_> {
 
 /// A stateless Ratatui widget backed by an Urushi [`BlockStyle`].
 ///
-/// This is the single-block case of [`ViewWidget`], the counterpart of
-/// [`BlockStyle::render`]: both resolve `Block(style, Text(content, …))`.
-/// `BlockStyle::render` resolves at the block's intrinsic size, while this
+/// This is the single-block case of [`ViewWidget`]. It constructs
+/// `Block(style, Text(content, …))`, while this
 /// widget resolves under the target `Rect`'s width and height constraints.
 #[derive(Debug, Clone, Copy)]
 pub struct RatatuiWidget<'a> {
@@ -107,7 +106,11 @@ impl Widget for &RatatuiWidget<'_> {
 
 /// Resolves `view` for `area` and writes the resulting rectangle.
 fn draw(view: &View, area: Rect, buffer: &mut Buffer) {
-    draw_resolved(&resolve(view, available(area)), area, buffer);
+    draw_resolved(
+        &resolve(view, available(area)).expect("a ratatui area supplies finite view geometry"),
+        area,
+        buffer,
+    );
 }
 
 /// Writes an already resolved view into `buffer`, anchored at `area`'s origin.
@@ -397,7 +400,7 @@ mod tests {
         }
     }
 
-    /// The widget resolves the same view `BlockStyle::render` does, so a `Rect`
+    /// The widget resolves the same block-and-text view as the core pass, so a `Rect`
     /// at least as large as the block reproduces the direct output verbatim.
     #[test]
     fn widget_matches_direct_rendering_for_border_side_combinations() {
@@ -638,7 +641,7 @@ mod tests {
 
         ViewWidget::new(&view).render(area, &mut through_widget);
         draw_resolved(
-            &resolve(&view, available(area)),
+            &resolve(&view, available(area)).expect("a ratatui area supplies finite view geometry"),
             area,
             &mut through_resolved,
         );
@@ -649,11 +652,15 @@ mod tests {
         assert_eq!(buffer_line(&through_widget, 1), " status: │");
     }
 
-    /// Asserts the widget reproduces `BlockStyle::render` in a `Rect` sized to
-    /// the block.
+    /// Asserts the widget reproduces the resolved block in a `Rect` sized to it.
     fn assert_widget_matches_direct(style: &BlockStyle, content: &str, case: &str) {
-        let direct = style.render(content);
-        let expected: Vec<&str> = direct.as_str().lines().collect();
+        let view = View::block(style.clone(), View::text(content, style.text().clone()));
+        let direct = resolve(&view, Available::NONE).unwrap();
+        let expected: Vec<String> = direct
+            .rows()
+            .iter()
+            .map(|row| row.iter().map(StyledGrapheme::symbol).collect())
+            .collect();
         let area = Rect::new(
             0,
             0,

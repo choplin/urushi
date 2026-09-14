@@ -503,7 +503,7 @@ mod tests {
         );
         assert!(rows[1].text().contains("› あ"));
         assert!(rows[1].runs().iter().any(|run| run.style == styles.cursor));
-        let resolved = urushi::resolve(&view.body, urushi::Available::NONE);
+        let resolved = urushi::resolve(&view.body, urushi::Available::NONE).unwrap();
         let cursor = resolved
             .anchor(view.cursor.expect("focused input has a cursor anchor"))
             .expect("cursor anchor resolves");

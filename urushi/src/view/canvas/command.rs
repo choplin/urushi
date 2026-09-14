@@ -7,7 +7,7 @@ use super::line_network::LineNetwork;
 use super::{CellContribution, Composition, Position, PositionedCell};
 use crate::view::geometry::Size;
 use crate::view::grid;
-use crate::view::resolve::{AnchoredRect, LayoutError, ResolvedView, try_resolve};
+use crate::view::resolve::{AnchoredRect, LayoutError, ResolvedView, resolve};
 
 /// A command's complete output before it is composed into the Canvas surface.
 ///
@@ -84,7 +84,7 @@ impl CanvasCommand for ViewCommand {
         if self.allocation.1.is_none() && requires_allocation(&self.view, Axis::Height) {
             return Err(LayoutError::missing_allocation(Axis::Height));
         }
-        let resolved = try_resolve(
+        let resolved = resolve(
             &self.view,
             Available::new(self.allocation.0, self.allocation.1),
         )?;
@@ -101,7 +101,7 @@ pub(super) struct TextCommand {
 
 impl CanvasCommand for TextCommand {
     fn rasterize(self: Box<Self>, _: Size) -> Result<CommandOutput, LayoutError> {
-        let resolved = try_resolve(&View::text(self.text, self.style), Available::NONE)?;
+        let resolved = resolve(&View::text(self.text, self.style), Available::NONE)?;
         Ok(resolved_output(self.origin, &resolved))
     }
 }

@@ -9,3 +9,4 @@ license.workspace = true
 crossterm = "0.29"
 unicode-segmentation.workspace = true
 urushi = { path = "../urushi", version = "=0.1.0" }
+urushi-terminal = { path = "../urushi-terminal", version = "=0.1.0" }

@@ -1,85 +1,30 @@
-//! Composable styling and rendering for terminal applications.
+//! Composable styling, layout, and rendering for terminal applications.
 //!
-//! `urushi` separates logical styles, renderer-neutral component views, output
-//! rendering, and terminal lifecycle. Presentation splits in two: a [`TextStyle`]
-//! is everything a terminal can express about a run of text, and a
-//! [`BlockStyle`] is a rectangle. [`BlockStyle::render`] returns a
-//! [`RenderedBlock`] that displays as a string, so it composes with `println!`,
-//! logging, or any other place text goes. The optional `terminal` feature adds
-//! stderr output and live progress.
-//!
-//! The API is modeled after Go's [lipgloss](https://github.com/charmbracelet/lipgloss).
+//! `urushi` separates logical [`View`] construction, layout resolution, ANSI
+//! serialization, and output. [`resolve`] turns a view into a [`ResolvedView`]
+//! under an [`Available`] area. [`render`] then serializes that rectangle using
+//! explicit [`RenderSettings`]. [`print()`], [`println()`], [`eprint()`], and
+//! [`eprintln()`] are the convenient path for the process standard streams.
 //!
 //! # Example
 //!
 //! ```
-//! use urushi::{Align, BlockStyle, Border, Color};
+//! use urushi::{Available, BlockStyle, Border, RenderSettings, TextStyle, View, render, resolve};
 //!
-//! let style = BlockStyle::new()
-//!     .foreground(Color::Ansi256(212))
-//!     .border(Border::ROUNDED)
-//!     .padding((0, 1))
-//!     .align(Align::Center)
-//!     .width(20);
+//! let style = BlockStyle::new().border(Border::ROUNDED).padding((0, 1));
+//! let view = View::block(style, View::text("こんにちは, urushi!", TextStyle::new()));
+//! let resolved = resolve(&view, Available::NONE).unwrap();
 //!
-//! println!("{}", style.render("こんにちは, urushi!"));
+//! assert_eq!(render(&resolved, &RenderSettings::default()).lines().count(), 3);
 //! ```
 //!
-//! Width calculations are aware of East Asian wide characters, so padding,
-//! borders, and alignment stay correct for CJK text.
-//!
-//! Reusable components return [`View`] values: trees of text, blocks, rows, and
-//! columns carrying logical styles. [`resolve`] turns a tree into one
-//! [`ResolvedView`] rectangle, and [`AnsiRenderer`] resolves the styles in it
-//! for a [`TerminalProfile`] at the output boundary. Applications retain
-//! ownership of workflow-specific composition such as command headers and final
-//! outcomes.
-//!
-//! # Theme-aware CLI output
-//!
-//! Define light and dark themes once, choose the color scheme explicitly, and
-//! detect capabilities for the writer that will receive the rendered string:
-//!
-//! ```
-//! use std::io::stdout;
-//!
-//! use urushi::{
-//!     Color, ColorScheme, PanelRole, SemanticTokens, TerminalProfile, Theme, ThemeSet,
-//! };
-//!
-//! let light = SemanticTokens {
-//!     text: Color::BLACK,
-//!     text_muted: Color::BRIGHT_BLACK,
-//!     background: Color::WHITE,
-//!     surface: Color::BRIGHT_WHITE,
-//!     accent: Color::BLUE,
-//!     accent_text: Color::WHITE,
-//!     success: Color::GREEN,
-//!     warning: Color::YELLOW,
-//!     error: Color::RED,
-//!     border: Color::BRIGHT_BLACK,
-//! };
-//! let dark = SemanticTokens { surface: Color::BLACK, ..light };
-//! let themes = ThemeSet::new(Theme::from_tokens(light), Theme::from_tokens(dark));
-//!
-//! let theme = themes.select(ColorScheme::Dark);
-//! let output = stdout();
-//! let profile = TerminalProfile::detect_for(&output);
-//! let panel = profile.resolve_block_style(&theme.block_style(PanelRole::PanelFocused));
-//! assert!(!panel.render("保存しました").as_str().is_empty());
-//! ```
-//!
-//! Call [`TerminalProfile::detect_for`] for each output writer rather than
-//! reusing a profile from another stream. A non-TTY writer (such as a file or
-//! pipe) disables ANSI entirely; a non-empty `NO_COLOR` removes colors but
-//! keeps text modifiers. Use [`TerminalProfile::new`] when an application
-//! needs a deterministic explicit override instead of detection.
-//!
-//! Ratatui conversion and widgets live in the separate `urushi-tui` crate so
-//! this core crate remains independent from full-screen TUI backends.
+//! Width calculations are aware of East Asian wide characters. Terminal
+//! inspection lives in the lower-level `urushi-terminal` crate; arbitrary
+//! writers combine it with [`resolve`], [`render`], and [`std::io::Write`].
 
 mod component;
 mod key;
+mod output;
 mod render;
 mod style;
 mod terminal;
@@ -96,24 +41,25 @@ pub use component::{
     dash_enumerator, roman_enumerator,
 };
 pub use key::Key;
-pub use render::AnsiRenderer;
+pub use output::{eprint, eprintln, print, println};
+pub use render::{RenderSettings, render};
 pub use style::{
     Align, BlockStyle, BlockStyleProperty, BlockStylePropertyKey, Border, Color, GridStyle,
     GridStyleProperty, GridStylePropertyKey, Hyperlink, InvalidFillWeight, Length, Modifier,
     Overflow, Sides, TextStyle, TextStyleProperty, TextStylePropertyKey, Underline, UnderlineStyle,
-    VerticalAlign,
+    UnderlineStyleSet, VerticalAlign,
 };
-pub use terminal::{AnsiPolicy, ColorProfile, TerminalProfile};
 #[cfg(feature = "terminal")]
-pub use terminal::{OutputMode, ProgressBar, Spinner, StderrTerminal};
+pub use terminal::{ProgressBar, Spinner};
 pub use text::{Grapheme, PrintableLines, PrintableText, StyledText, StyledTextError, TextSpan};
 pub use theme::{
     BlockThemeRole, ColorScheme, ComponentRole, ComponentTheme, ListRole, PanelRole,
     SemanticTokens, TableRole, TextThemeRole, Theme, ThemeSet, TreeRole,
 };
+pub use urushi_terminal::ColorLevel;
 pub use view::{
     AnchoredRect, Available, Axis, Canvas, CanvasCell, CanvasContext, CanvasItem, CanvasSizing,
     CellContribution, Composition, LayoutError, LayoutErrorKind, LineContinuations, LineGlyphs,
-    LineNetwork, Position, PositionedCell, RenderedBlock, ResolvedView, Size, StyledGrapheme, View,
-    join_horizontal, join_vertical, measure, resolve, try_measure, try_resolve,
+    LineNetwork, Position, PositionedCell, ResolvedView, Size, StyledGrapheme, View, measure,
+    resolve, try_measure,
 };

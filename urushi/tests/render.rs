@@ -1,12 +1,83 @@
-use urushi::{Align, BlockStyle, Border, Color, Modifier, Overflow, RenderedBlock, VerticalAlign};
+use urushi::{
+    Align, Available, BlockStyle, Border, Color, ColorLevel, Modifier, Overflow, RenderSettings,
+    Size, UnderlineStyleSet, VerticalAlign, View, render, resolve,
+};
+
+struct TestRender {
+    text: String,
+    size: Size,
+}
+
+impl TestRender {
+    fn as_str(&self) -> &str {
+        &self.text
+    }
+
+    fn into_string(self) -> String {
+        self.text
+    }
+
+    fn size(&self) -> Size {
+        self.size
+    }
+}
+
+trait RenderBlockForTest {
+    fn render(&self, content: &str) -> TestRender;
+}
+
+impl RenderBlockForTest for BlockStyle {
+    fn render(&self, content: &str) -> TestRender {
+        let text_style = self.text().clone();
+        let view = View::block(self.clone(), View::text(content, text_style));
+        let resolved = resolve(&view, Available::NONE).unwrap();
+        let settings = RenderSettings::default()
+            .with_colors(ColorLevel::TrueColor)
+            .with_modifiers(Modifier::all())
+            .with_underline_styles(UnderlineStyleSet::all())
+            .with_underline_colors(true)
+            .with_hyperlinks(true);
+        TestRender {
+            text: render(&resolved, &settings),
+            size: resolved.size(),
+        }
+    }
+}
 
 /// The cells one rendered row occupies.
 ///
-/// Rendered output is measured through the crate's one ANSI-aware entry point,
-/// so a test asserting that a block really is a rectangle measures its rows the
-/// same way the block itself was measured.
+/// The test strips the escape sequences emitted by `render` before measuring,
+/// so a rectangle assertion observes visible cells rather than serialized bytes.
 fn row_width(line: &str) -> usize {
-    RenderedBlock::from_ansi(line).size().width()
+    let mut plain = String::new();
+    let mut characters = line.chars().peekable();
+    while let Some(character) = characters.next() {
+        if character != '\x1b' {
+            plain.push(character);
+            continue;
+        }
+        match characters.next() {
+            Some('[') => {
+                for control in characters.by_ref() {
+                    if ('@'..='~').contains(&control) {
+                        break;
+                    }
+                }
+            }
+            Some(']') => {
+                let mut escape = false;
+                for control in characters.by_ref() {
+                    if control == '\x07' || (escape && control == '\\') {
+                        break;
+                    }
+                    escape = control == '\x1b';
+                }
+            }
+            Some(other) => plain.push(other),
+            None => {}
+        }
+    }
+    urushi::PrintableText::new(&plain).width()
 }
 
 /// The cells an expected-output literal occupies.

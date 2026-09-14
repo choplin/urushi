@@ -1,3 +1,4 @@
+use crate::test_support::render_block;
 use crate::{BlockStyle, Color, TablePresentation, TextStyle};
 
 use super::*;
@@ -40,11 +41,11 @@ fn component_theme_follows_the_token_mapping() {
         assert_eq!(components.text_style(role).paint("x"), painted);
     }
     assert_eq!(
-        components.panel().render("x").as_str(),
+        render_block(components.panel(), "x"),
         "\x1b[92m╭───╮\x1b[0m\n\x1b[92m│\x1b[0m\x1b[31;44m x \x1b[0m\x1b[92m│\x1b[0m\n\x1b[92m╰───╯\x1b[0m"
     );
     assert_eq!(
-        components.panel_focused().render("x").as_str(),
+        render_block(components.panel_focused(), "x"),
         "\x1b[35m╭───╮\x1b[0m\n\x1b[35m│\x1b[0m\x1b[31;44m x \x1b[0m\x1b[35m│\x1b[0m\n\x1b[35m╰───╯\x1b[0m"
     );
     assert_eq!(
@@ -68,14 +69,11 @@ fn component_theme_follows_the_token_mapping() {
         "\x1b[32mx\x1b[0m"
     );
     assert_eq!(
-        components
-            .table_style(TableRole::Header)
-            .render("x")
-            .as_str(),
+        render_block(components.table_style(TableRole::Header), "x"),
         "\x1b[1;31mx\x1b[0m"
     );
     assert_eq!(
-        components.table_style(TableRole::Cell).render("x").as_str(),
+        render_block(components.table_style(TableRole::Cell), "x"),
         "\x1b[31mx\x1b[0m"
     );
     assert_eq!(
@@ -169,17 +167,11 @@ fn custom_table_style_replaces_the_default() {
         .with_table_style(TableRole::Header, BlockStyle::new().underline());
 
     assert_eq!(
-        components
-            .table_style(TableRole::Header)
-            .render("head")
-            .as_str(),
+        render_block(components.table_style(TableRole::Header), "head"),
         "\x1b[4mhead\x1b[0m"
     );
     assert_eq!(
-        components
-            .table_style(TableRole::Cell)
-            .render("cell")
-            .as_str(),
+        render_block(components.table_style(TableRole::Cell), "cell"),
         "\x1b[31mcell\x1b[0m"
     );
 }
@@ -217,10 +209,7 @@ fn replacing_the_table_policy_keeps_the_other_component_defaults() {
     ));
 
     assert_eq!(
-        replaced
-            .table_style(TableRole::Header)
-            .render("head")
-            .as_str(),
+        render_block(replaced.table_style(TableRole::Header), "head"),
         "\x1b[4mhead\x1b[0m"
     );
     assert_eq!(

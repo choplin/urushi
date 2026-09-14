@@ -2,11 +2,11 @@
 
 use std::{any::Any, collections::HashMap, fmt, marker::PhantomData};
 
-use urushi::{TerminalProfile, Theme};
+use urushi::{ColorLevel, RenderSettings, Theme};
 
 use super::{
     TextSpan,
-    crossterm::{CrosstermEventSource, CrosstermRenderer, CrosstermTerminalControl, terminal_size},
+    crossterm::{CrosstermEventSource, CrosstermRenderer, CrosstermTerminalControl},
     error::{FormBuildError, GroupBuildError, IoOperation, RunError},
     field::{self, Field, FieldAction, FieldEntry},
     terminal::{
@@ -242,14 +242,36 @@ impl Form {
 
     /// Runs this form using the process terminal input and standard error.
     ///
-    /// The supplied theme and terminal profile are resolved once into the
+    /// The supplied theme and detected terminal capabilities are resolved once into the
     /// prompt's styles, and fields build their view from those resolved
     /// values; no component role reaches the renderer.
-    pub fn run(self, theme: &Theme, profile: &TerminalProfile) -> Result<FormOutcome, RunError> {
+    pub fn run(self, theme: &Theme) -> Result<FormOutcome, RunError> {
+        let stderr = std::io::stderr();
+        let (size, mut settings) =
+            match urushi_terminal::detect(&stderr).map_err(|source| RunError::Io {
+                operation: IoOperation::EnterTerminal,
+                source,
+                cleanup: None,
+            })? {
+                urushi_terminal::TerminalDetection::Terminal(info) => (
+                    (
+                        info.size().columns().try_into().unwrap_or(u16::MAX),
+                        info.size().rows().try_into().unwrap_or(u16::MAX),
+                    ),
+                    RenderSettings::from(info.capabilities()),
+                ),
+                urushi_terminal::TerminalDetection::NonTerminal => {
+                    ((80, 24), RenderSettings::default())
+                }
+            };
+        settings = apply_no_color(
+            settings,
+            std::env::var_os("NO_COLOR").is_some_and(|value| !value.is_empty()),
+        );
         let mut events = CrosstermEventSource;
-        let mut renderer = CrosstermRenderer::stderr(terminal_size().unwrap_or((80, 24)));
+        let mut renderer = CrosstermRenderer::stderr(size);
         let mut terminal = CrosstermTerminalControl;
-        let styles = PromptStyles::resolve(theme, profile);
+        let styles = PromptStyles::resolve(theme, &settings);
         self.run_with(&mut events, &mut renderer, &mut terminal, &styles)
     }
 
@@ -520,6 +542,14 @@ impl Form {
     }
 }
 
+fn apply_no_color(settings: RenderSettings, no_color: bool) -> RenderSettings {
+    if no_color {
+        settings.with_colors(ColorLevel::None)
+    } else {
+        settings
+    }
+}
+
 /// A group of fields executed in builder insertion order.
 pub struct Group {
     fields: Vec<FieldEntry>,
@@ -609,6 +639,20 @@ mod tests {
     use crate::{
         Confirm, ConfirmAnswer, ConfirmSource, FieldConfigError, Input, Select, SelectOption,
     };
+
+    #[test]
+    fn no_color_only_narrows_the_prompt_color_level() {
+        let settings = RenderSettings::default()
+            .with_colors(ColorLevel::TrueColor)
+            .with_hyperlinks(true);
+
+        let narrowed = apply_no_color(settings, true);
+
+        assert_eq!(narrowed.colors(), ColorLevel::None);
+        assert!(narrowed.hyperlinks());
+        assert_eq!(apply_no_color(settings, false), settings);
+    }
+
     #[test]
     fn builder_rejects_empty_and_duplicate_configuration() {
         assert!(matches!(

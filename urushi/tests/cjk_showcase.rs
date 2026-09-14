@@ -1,14 +1,46 @@
 #[path = "../examples/cjk_showcase.rs"]
 mod cjk_showcase;
 
-use urushi::RenderedBlock;
+use urushi::PrintableText;
 
 /// The cells one rendered row occupies.
 ///
 /// Rendered output is measured through the crate's one ANSI-aware entry point;
 /// there is no free function that takes a string and guesses at its domain.
 fn row_width(line: &str) -> usize {
-    RenderedBlock::from_ansi(line).size().width()
+    PrintableText::new(&strip_ansi(line)).width()
+}
+
+fn strip_ansi(input: &str) -> String {
+    let mut plain = String::new();
+    let mut characters = input.chars().peekable();
+    while let Some(character) = characters.next() {
+        if character != '\x1b' {
+            plain.push(character);
+            continue;
+        }
+        match characters.next() {
+            Some('[') => {
+                for control in characters.by_ref() {
+                    if ('@'..='~').contains(&control) {
+                        break;
+                    }
+                }
+            }
+            Some(']') => {
+                let mut escape = false;
+                for control in characters.by_ref() {
+                    if control == '\x07' || (escape && control == '\\') {
+                        break;
+                    }
+                    escape = control == '\x1b';
+                }
+            }
+            Some(other) => plain.push(other),
+            None => {}
+        }
+    }
+    plain
 }
 
 #[test]

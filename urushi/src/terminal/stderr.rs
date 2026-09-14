@@ -1,54 +1,60 @@
-//! Stable stderr output and live-mode detection.
+//! Private stderr output used by the transitional progress implementation.
 
-use std::{
-    env,
-    io::{self, IsTerminal, Write},
-};
+use std::io::{self, Write};
 
-use crate::{AnsiRenderer, Available, ComponentTheme, RenderedBlock, TerminalProfile, View};
+use crate::{Available, ComponentTheme, RenderSettings, Size, View, render, resolve};
+use urushi_terminal::{ColorLevel, TerminalDetection};
 
 use super::{ProgressBar, Spinner};
 
 const PLAIN_OUTPUT_WIDTH: usize = 4096;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum OutputMode {
+pub(super) enum OutputMode {
     Live,
     Plain,
 }
 
 #[derive(Debug, Clone)]
-pub struct StderrTerminal {
-    pub(super) renderer: AnsiRenderer,
+pub(super) struct ProgressOutput {
+    pub(super) settings: RenderSettings,
     pub(super) mode: OutputMode,
     width: usize,
 }
 
-impl StderrTerminal {
-    pub fn detect() -> Self {
+impl ProgressOutput {
+    pub(super) fn detect() -> io::Result<Self> {
         let stderr = io::stderr();
-        let profile = TerminalProfile::detect_for(&stderr);
-        let mode = detect_output_mode(stderr.is_terminal(), env::var("TERM").ok().as_deref());
-        let width = match mode {
-            OutputMode::Live => usize::from(console::Term::stderr().size().1),
-            OutputMode::Plain => PLAIN_OUTPUT_WIDTH,
+        let detection = urushi_terminal::detect(&stderr)?;
+        let (mode, width, settings) = match detection {
+            TerminalDetection::Terminal(info) => (
+                output_mode(true, std::env::var("TERM").ok().as_deref()),
+                info.size().columns(),
+                RenderSettings::from(info.capabilities()),
+            ),
+            TerminalDetection::NonTerminal => (
+                OutputMode::Plain,
+                PLAIN_OUTPUT_WIDTH,
+                RenderSettings::default(),
+            ),
         };
-        Self::new(profile, mode, width)
+        let mut settings = settings;
+        if no_color() {
+            settings = settings.with_colors(ColorLevel::None);
+        }
+        Ok(Self::new(settings, mode, width))
     }
 
-    pub fn new(profile: TerminalProfile, mode: OutputMode, width: usize) -> Self {
+    pub(super) fn new(settings: RenderSettings, mode: OutputMode, width: usize) -> Self {
         Self {
-            renderer: AnsiRenderer::new(profile),
+            settings,
             mode,
             width: width.max(10),
         }
     }
 
-    pub const fn mode(&self) -> OutputMode {
+    pub(super) const fn mode(&self) -> OutputMode {
         self.mode
-    }
-    pub const fn width(&self) -> usize {
-        self.width
     }
 
     /// The area a written view is resolved under.
@@ -65,13 +71,20 @@ impl StderrTerminal {
     }
 
     /// Resolves a view under the terminal's area and serializes it.
-    fn rendered(&self, view: &View) -> RenderedBlock {
-        self.renderer.render_within(view, self.available())
+    fn rendered(&self, view: &View) -> (String, Size) {
+        let resolved = resolve(view, self.available())
+            .expect("progress views must have finite intrinsic geometry");
+        let size = resolved.size();
+        (render(&resolved, &self.settings), size)
     }
 
-    pub fn write(&self, view: &View) -> io::Result<()> {
-        let rendered = self.rendered(view);
-        if rendered.size().height() == 0 {
+    pub(super) fn render_text(&self, view: &View) -> String {
+        self.rendered(view).0
+    }
+
+    pub(super) fn write(&self, view: &View) -> io::Result<()> {
+        let (rendered, size) = self.rendered(view);
+        if size.height() == 0 {
             return Ok(());
         }
         let stderr = io::stderr();
@@ -80,36 +93,40 @@ impl StderrTerminal {
         writer.flush()
     }
 
-    pub fn spinner(
+    pub(super) fn spinner(
         &self,
         styles: &ComponentTheme,
         message: impl Into<String>,
     ) -> io::Result<Spinner> {
-        Spinner::new(self.clone(), styles.clone(), message.into())
+        Spinner::with_output(self.clone(), styles.clone(), message.into())
     }
 
-    pub fn progress(
+    pub(super) fn progress(
         &self,
         styles: &ComponentTheme,
         total: u64,
         message: impl Into<String>,
     ) -> io::Result<ProgressBar> {
-        ProgressBar::new(self.clone(), styles.clone(), total, message.into())
+        ProgressBar::with_output(self.clone(), styles.clone(), total, message.into())
     }
 }
 
-fn detect_output_mode(stderr_is_terminal: bool, term: Option<&str>) -> OutputMode {
-    if stderr_is_terminal && !term.is_some_and(|value| value.eq_ignore_ascii_case("dumb")) {
+fn output_mode(is_terminal: bool, term: Option<&str>) -> OutputMode {
+    if is_terminal && !term.is_some_and(|value| value.eq_ignore_ascii_case("dumb")) {
         OutputMode::Live
     } else {
         OutputMode::Plain
     }
 }
 
+fn no_color() -> bool {
+    std::env::var_os("NO_COLOR").is_some_and(|value| !value.is_empty())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{AnsiPolicy, BlockStyle, Border, ColorProfile, RenderedBlock, TextStyle, measure};
+    use crate::{BlockStyle, Border, RenderSettings, TextStyle, measure};
 
     const SENTENCE: &str = "the quick brown fox jumps over the lazy dog";
 
@@ -120,23 +137,16 @@ mod tests {
         )
     }
 
-    fn terminal(mode: OutputMode, width: usize) -> StderrTerminal {
-        StderrTerminal::new(
-            TerminalProfile::new(ColorProfile::Monochrome, AnsiPolicy::Disabled),
-            mode,
-            width,
-        )
+    fn terminal(mode: OutputMode, width: usize) -> ProgressOutput {
+        ProgressOutput::new(RenderSettings::default(), mode, width)
     }
 
     #[test]
     fn live_mode_requires_an_attended_non_dumb_terminal() {
+        assert_eq!(output_mode(true, Some("unknown")), OutputMode::Live);
+        assert_eq!(output_mode(true, Some("dumb")), OutputMode::Plain);
         assert_eq!(
-            detect_output_mode(true, Some("xterm-256color")),
-            OutputMode::Live
-        );
-        assert_eq!(detect_output_mode(true, Some("dumb")), OutputMode::Plain);
-        assert_eq!(
-            detect_output_mode(false, Some("xterm-256color")),
+            output_mode(false, Some("xterm-256color")),
             OutputMode::Plain
         );
     }
@@ -159,29 +169,22 @@ mod tests {
 
     #[test]
     fn a_view_wider_than_the_terminal_is_written_within_it() {
-        let rendered = terminal(OutputMode::Live, 20).rendered(&bordered_sentence());
+        let (rendered, size) = terminal(OutputMode::Live, 20).rendered(&bordered_sentence());
 
-        assert_eq!(rendered.size().width(), 20);
+        assert_eq!(size.width(), 20);
         assert!(
-            rendered.size().height() > 3,
+            size.height() > 3,
             "the text reflowed to the area, so the box is taller than one content row"
         );
-        let lines = rendered.into_string();
-        for line in lines.lines() {
-            assert_eq!(
-                RenderedBlock::from_ansi(line).size().width(),
-                20,
-                "every line closes at the area"
-            );
-        }
+        assert!(rendered.lines().all(|line| line.chars().count() == 20));
     }
 
     #[test]
     fn plain_output_keeps_the_intrinsic_size() {
         let view = bordered_sentence();
-        let rendered = terminal(OutputMode::Plain, PLAIN_OUTPUT_WIDTH).rendered(&view);
+        let (_, size) = terminal(OutputMode::Plain, PLAIN_OUTPUT_WIDTH).rendered(&view);
 
-        assert_eq!(rendered.size(), measure(&view));
-        assert_eq!(rendered.size().height(), 3);
+        assert_eq!(size, measure(&view));
+        assert_eq!(size.height(), 3);
     }
 }

@@ -727,11 +727,11 @@ checksum = "81e544489bf3d8ef66c953931f56617f423cd4b5494be343d9b9d3dda037b9a3"
 name = "urushi"
 version = "0.1.0"
 dependencies = [
- "console",
  "divan",
  "indicatif",
  "unicode-segmentation",
  "unicode-width 0.2.0",
+ "urushi-terminal",
 ]
 
 [[package]]
@@ -741,6 +741,14 @@ dependencies = [
  "crossterm",
  "unicode-segmentation",
  "urushi",
+ "urushi-terminal",
+]
+
+[[package]]
+name = "urushi-terminal"
+version = "0.1.0"
+dependencies = [
+ "terminal_size",
 ]
 
 [[package]]

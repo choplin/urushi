@@ -8,8 +8,8 @@ keywords = ["cli", "terminal", "style", "ansi", "tui"]
 categories = ["command-line-interface"]
 
 [dependencies]
-console = { version = "0.16", optional = true }
 indicatif = { version = "0.18", optional = true }
+urushi-terminal = { path = "../urushi-terminal", version = "=0.1.0" }
 unicode-segmentation.workspace = true
 unicode-width.workspace = true
 
@@ -19,7 +19,7 @@ harness = false
 
 [features]
 default = []
-terminal = ["dep:console", "dep:indicatif"]
+terminal = ["dep:indicatif"]
 
 [dev-dependencies]
 divan = "0.1.21"

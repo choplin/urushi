@@ -1,8 +1,6 @@
-use std::io;
-
 use urushi_prompt::{
     Confirm, ConfirmAnswer, FieldKey, Form, FormOutcome, Group, Input, Select, SelectOption,
-    urushi::{Color, SemanticTokens, TerminalProfile, Theme},
+    urushi::{Color, SemanticTokens, Theme},
 };
 
 fn theme() -> Theme {
@@ -60,9 +58,7 @@ fn main() {
         .build()
         .expect("example form has unique field names");
 
-    let stderr = io::stderr();
-    let profile = TerminalProfile::detect_for(&stderr);
-    match form.run(&theme(), &profile) {
+    match form.run(&theme()) {
         Ok(FormOutcome::Submitted(values)) => {
             let name = values.get(&name_key).expect("submitted name");
             let style = values.get(&style_key).expect("submitted style");

@@ -1,8 +1,7 @@
-use std::fs::File;
-
 use urushi::{
-    Align, AnsiPolicy, BlockStyle, Border, Color, ColorProfile, ColorScheme, ComponentRole,
-    ComponentTheme, PanelRole, RenderedBlock, SemanticTokens, TerminalProfile, Theme, ThemeSet,
+    Align, Available, BlockStyle, Border, Color, ColorLevel, ColorScheme, ComponentRole,
+    ComponentTheme, Modifier, PanelRole, RenderSettings, SemanticTokens, Theme, ThemeSet,
+    UnderlineStyleSet, View, render, resolve,
 };
 
 fn light_tokens() -> SemanticTokens {
@@ -44,12 +43,9 @@ fn theme(tokens: SemanticTokens) -> Theme {
             .border(Border::ROUNDED)
             .border_foreground(tokens.accent)
             .padding((0, 1))
-            // The width measures the outer box: two border columns, two
-            // padding columns, and ten cells of content.
             .width(14)
             .align(Align::Center),
     );
-
     Theme::new(tokens, components)
 }
 
@@ -57,122 +53,60 @@ fn themes() -> ThemeSet {
     ThemeSet::new(theme(light_tokens()), theme(dark_tokens()))
 }
 
-fn strip_csi(input: &str) -> String {
-    let mut output = String::new();
-    let mut characters = input.chars();
-
-    while let Some(character) = characters.next() {
-        if character == '\x1b' && characters.as_str().starts_with('[') {
-            characters.next();
-            for control in characters.by_ref() {
-                if ('@'..='~').contains(&control) {
-                    break;
-                }
-            }
-        } else {
-            output.push(character);
-        }
-    }
-
-    output
+fn settings(colors: ColorLevel) -> RenderSettings {
+    RenderSettings::default()
+        .with_colors(colors)
+        .with_modifiers(Modifier::all())
+        .with_underline_styles(UnderlineStyleSet::all())
+        .with_underline_colors(true)
+        .with_hyperlinks(true)
 }
 
-/// The cells one rendered row occupies.
-///
-/// Rendered output is measured through the crate's one ANSI-aware entry point;
-/// there is no free function that takes a string and guesses at its domain.
-fn row_width(line: &str) -> usize {
-    RenderedBlock::from_ansi(line).size().width()
+fn render_text(view: View, settings: &RenderSettings) -> String {
+    render(&resolve(&view, Available::NONE).unwrap(), settings)
+}
+
+fn panel_view(style: BlockStyle, content: &str) -> View {
+    let text = style.text().clone();
+    View::block(style, View::text(content, text))
 }
 
 #[test]
-fn theme_set_resolves_roles_for_each_terminal_profile() {
+fn render_settings_degrade_theme_roles_at_the_output_boundary() {
     let themes = themes();
-    let expected_panel = "╭────────────╮\n│    名前    │\n╰────────────╯";
-    let profiles = [
+    let role = themes
+        .select(ColorScheme::Light)
+        .text_style(ComponentRole::PromptOptionSelected);
+    let expected = [
         (
-            TerminalProfile::new(ColorProfile::TrueColor, AnsiPolicy::Enabled),
+            ColorLevel::TrueColor,
             "\x1b[1;38;2;255;255;255;48;2;95;135;175mselected\x1b[0m",
-            "\x1b[38;2;95;135;175m╭",
         ),
-        (
-            TerminalProfile::new(ColorProfile::Ansi256, AnsiPolicy::Enabled),
-            "\x1b[1;97;48;5;67mselected\x1b[0m",
-            "\x1b[38;5;67m╭",
-        ),
-        (
-            TerminalProfile::new(ColorProfile::Ansi16, AnsiPolicy::Enabled),
-            "\x1b[1;97;100mselected\x1b[0m",
-            "\x1b[90m╭",
-        ),
-        (
-            TerminalProfile::new(ColorProfile::Monochrome, AnsiPolicy::Enabled),
-            "\x1b[1mselected\x1b[0m",
-            "╭",
-        ),
+        (ColorLevel::Ansi256, "\x1b[1;97;48;5;67mselected\x1b[0m"),
+        (ColorLevel::Ansi16, "\x1b[1;97;100mselected\x1b[0m"),
+        (ColorLevel::None, "\x1b[1mselected\x1b[0m"),
     ];
 
-    for (profile, expected_selection, expected_panel_border) in profiles {
-        let selection = profile
-            .resolve_text_style(
-                &themes
-                    .select(ColorScheme::Light)
-                    .text_style(ComponentRole::PromptOptionSelected),
-            )
-            .paint("selected");
-        assert_eq!(selection, expected_selection);
-
-        let panel = profile
-            .resolve_block_style(
-                &themes
-                    .select(ColorScheme::Dark)
-                    .block_style(PanelRole::PanelFocused),
-            )
-            .render("名前")
-            .into_string();
-        assert!(panel.starts_with(expected_panel_border));
-        assert_eq!(strip_csi(&panel), expected_panel);
-        assert!(panel.lines().all(|line| row_width(line) == 14));
+    for (colors, expected) in expected {
+        assert_eq!(
+            render_text(View::text("selected", role.clone()), &settings(colors)),
+            expected
+        );
     }
 }
 
 #[test]
-fn explicit_profile_is_a_deterministic_consumer_override() {
-    let forced = TerminalProfile::new(ColorProfile::Ansi16, AnsiPolicy::Enabled);
+fn panel_layout_is_independent_from_render_settings() {
+    let style = themes()
+        .select(ColorScheme::Dark)
+        .block_style(PanelRole::PanelFocused);
+    let view = panel_view(style, "名前");
+    let resolved = resolve(&view, Available::NONE).unwrap();
 
-    assert_eq!(forced.color_profile(), ColorProfile::Ansi16);
-    assert_eq!(forced.ansi_policy(), AnsiPolicy::Enabled);
+    assert_eq!(resolved.size().width(), 14);
     assert_eq!(
-        forced
-            .resolve_text_style(
-                &themes()
-                    .select(ColorScheme::Light)
-                    .text_style(ComponentRole::PromptOptionSelected),
-            )
-            .paint("selected"),
-        "\x1b[1;97;100mselected\x1b[0m"
+        render(&resolved, &RenderSettings::default()),
+        "╭────────────╮\n│    名前    │\n╰────────────╯"
     );
-}
-
-#[test]
-fn non_tty_file_disables_ansi_without_changing_theme_layout() {
-    let manifest = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("Cargo.toml");
-    let file = File::open(manifest).unwrap();
-    let profile = TerminalProfile::detect_for(&file);
-
-    assert_eq!(profile.color_profile(), ColorProfile::Monochrome);
-    assert_eq!(profile.ansi_policy(), AnsiPolicy::Disabled);
-
-    let rendered = profile
-        .resolve_block_style(
-            &themes()
-                .select(ColorScheme::Dark)
-                .block_style(PanelRole::PanelFocused),
-        )
-        .render("名前")
-        .into_string();
-
-    assert!(!rendered.contains("\x1b["));
-    assert_eq!(rendered, "╭────────────╮\n│    名前    │\n╰────────────╯");
-    assert!(rendered.lines().all(|line| row_width(line) == 14));
+    assert!(render(&resolved, &settings(ColorLevel::Ansi16)).contains("\x1b["));
 }

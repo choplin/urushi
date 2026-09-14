@@ -43,7 +43,8 @@ pub(crate) fn resolve_prompt(columns: u16, view: &PromptView) -> ResolvedPrompt 
             .lines
             .iter()
             .map(|line| {
-                let resolved = resolve(&line.view, available);
+                let resolved = resolve(&line.view, available)
+                    .expect("prompt views must resolve within a finite terminal width");
                 let regions = line
                     .regions
                     .iter()

@@ -1,9 +1,13 @@
 //! Public styled-text construction and layout contracts.
 
 use urushi::{
-    Available, BlockStyle, Color, Overflow, StyledGrapheme, StyledText, TextSpan, TextStyle, View,
-    resolve,
+    Available, BlockStyle, Color, Overflow, ResolvedView, StyledGrapheme, StyledText, TextSpan,
+    TextStyle, View, resolve,
 };
+
+fn resolve_ok(view: &View, available: Available) -> ResolvedView {
+    resolve(view, available).unwrap()
+}
 
 fn row_text(row: &[StyledGrapheme]) -> String {
     row.iter().map(StyledGrapheme::symbol).collect()
@@ -58,7 +62,7 @@ fn wrapping_and_clipping_cross_style_boundaries() {
     ])
     .expect("whole grapheme boundaries");
 
-    let wrapped = resolve(
+    let wrapped = resolve_ok(
         &View::block(
             BlockStyle::new().max_width(4),
             View::styled_text(text.clone()),
@@ -76,7 +80,7 @@ fn wrapping_and_clipping_cross_style_boundaries() {
     assert_eq!(wrapped.rows()[0][1].style(), &red);
     assert_eq!(wrapped.rows()[0][2].style(), &blue);
 
-    let clipped = resolve(
+    let clipped = resolve_ok(
         &View::block(
             BlockStyle::new()
                 .max_width(4)
@@ -105,7 +109,7 @@ fn multiline_cjk_and_emoji_keep_segment_styles() {
     ])
     .expect("whole grapheme boundaries");
 
-    let resolved = resolve(&View::styled_text(text), Available::NONE);
+    let resolved = resolve_ok(&View::styled_text(text), Available::NONE);
     assert_eq!(resolved.size(), urushi::Size::new(4, 2));
     assert_eq!(row_text(&resolved.rows()[0]), "日本");
     assert_eq!(row_text(&resolved.rows()[1]), "👩‍💻x ");

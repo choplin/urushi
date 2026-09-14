@@ -2,12 +2,26 @@
 //! and what one layout pass hands a renderer.
 
 use urushi::{
-    Align, AnsiPolicy, AnsiRenderer, Available, BlockStyle, Border, Color, ColorProfile, Length,
-    StyledGrapheme, TerminalProfile, TextStyle, VerticalAlign, View, measure, resolve,
+    Align, Available, BlockStyle, Border, Color, ColorLevel, Length, Modifier, RenderSettings,
+    ResolvedView, Size, StyledGrapheme, TextStyle, UnderlineStyleSet, VerticalAlign, View, measure,
+    render, resolve,
 };
 
+fn resolve_ok(view: &View, available: Available) -> ResolvedView {
+    resolve(view, available).unwrap()
+}
+
+fn ansi_settings() -> RenderSettings {
+    RenderSettings::default()
+        .with_colors(ColorLevel::TrueColor)
+        .with_modifiers(Modifier::all())
+        .with_underline_styles(UnderlineStyleSet::all())
+        .with_underline_colors(true)
+        .with_hyperlinks(true)
+}
+
 fn plain_rows(view: &View) -> Vec<String> {
-    resolve(view, Available::NONE)
+    resolve_ok(view, Available::NONE)
         .rows()
         .iter()
         .map(|row| row.iter().map(StyledGrapheme::symbol).collect())
@@ -80,7 +94,7 @@ fn a_row_mixing_cjk_text_and_a_block_keeps_its_columns() {
             View::text(" です", TextStyle::new()),
         ],
     );
-    let resolved = resolve(&view, Available::NONE);
+    let resolved = resolve_ok(&view, Available::NONE);
 
     // Width is decided once, by the layout pass, and carried per grapheme.
     for row in resolved.rows() {
@@ -147,7 +161,7 @@ fn an_area_wider_than_a_text_leaf_leaves_it_at_its_own_width() {
     // width its lines need, so nothing downstream sees phantom trailing cells.
     let view = View::text("hi", TextStyle::new());
 
-    assert_eq!(resolve(&view, Available::columns(20)).size().width(), 2);
+    assert_eq!(resolve_ok(&view, Available::columns(20)).size().width(), 2);
 }
 
 #[test]
@@ -194,7 +208,7 @@ fn a_resolved_view_carries_logical_styles_and_grapheme_widths() {
             View::text("a", TextStyle::new()),
         ],
     );
-    let resolved = resolve(&view, Available::NONE);
+    let resolved = resolve_ok(&view, Available::NONE);
     let row = &resolved.rows()[0];
 
     assert_eq!(row[0].symbol(), "日");
@@ -213,17 +227,13 @@ fn the_area_and_a_blocks_own_maximum_are_one_cap() {
     // Both bound the same box, and the tighter one wins: the maximum shapes
     // the intrinsic size, and a narrower area tightens it further.
     assert_eq!(measure(&view).width(), 8);
-    assert_eq!(resolve(&view, Available::NONE).size().width(), 8);
-    assert_eq!(resolve(&view, Available::columns(4)).size().width(), 4);
-    assert_eq!(resolve(&view, Available::size(4, 1)).size().height(), 1);
+    assert_eq!(resolve_ok(&view, Available::NONE).size().width(), 8);
+    assert_eq!(resolve_ok(&view, Available::columns(4)).size().width(), 4);
+    assert_eq!(resolve_ok(&view, Available::size(4, 1)).size().height(), 1);
 }
 
 #[test]
 fn a_renderer_coalesces_adjacent_graphemes_of_equal_style() {
-    let renderer = AnsiRenderer::new(TerminalProfile::new(
-        ColorProfile::TrueColor,
-        AnsiPolicy::Enabled,
-    ));
     let view = View::row(
         VerticalAlign::Top,
         [
@@ -234,7 +244,7 @@ fn a_renderer_coalesces_adjacent_graphemes_of_equal_style() {
     );
 
     assert_eq!(
-        renderer.render(&view).as_str(),
+        render(&resolve_ok(&view, Available::NONE), &ansi_settings()),
         "\x1b[31mabcd\x1b[0mef",
         "one SGR scope spans the run, not one per node"
     );
@@ -243,15 +253,14 @@ fn a_renderer_coalesces_adjacent_graphemes_of_equal_style() {
 #[test]
 fn a_style_renders_the_single_block_case_of_the_same_pass() {
     let style = BlockStyle::new().border(Border::ROUNDED).padding((0, 1));
-    let direct = style.render("ok");
-    let through_the_tree = AnsiRenderer::new(TerminalProfile::new(
-        ColorProfile::TrueColor,
-        AnsiPolicy::Enabled,
-    ))
-    .render(&View::block(style, View::text("ok", TextStyle::new())));
+    let block = View::block(style, View::text("ok", TextStyle::new()));
+    let resolved = resolve_ok(&block, Available::NONE);
 
-    assert_eq!(direct.as_str(), through_the_tree.as_str());
-    assert_eq!(direct.size(), through_the_tree.size());
+    assert_eq!(
+        render(&resolved, &ansi_settings()),
+        "╭────╮\n│ ok │\n╰────╯"
+    );
+    assert_eq!(resolved.size(), Size::new(6, 3));
 }
 
 // --- The area as an input to layout.
@@ -263,7 +272,7 @@ fn a_bounded_area_closes_the_frame_instead_of_cutting_it() {
         View::text("hello world", TextStyle::new()),
     );
 
-    let resolved = resolve(&view, Available::columns(7));
+    let resolved = resolve_ok(&view, Available::columns(7));
     assert_eq!(resolved.size().width(), 7);
     assert_eq!(
         view_rows(&view, Available::columns(7)),
@@ -282,7 +291,7 @@ fn a_bounded_area_closes_the_frame_instead_of_cutting_it() {
 
 /// Resolving a view under an area, as rows of symbols.
 fn view_rows(view: &View, available: Available) -> Vec<String> {
-    resolve(view, available)
+    resolve_ok(view, available)
         .rows()
         .iter()
         .map(|row| row.iter().map(StyledGrapheme::symbol).collect())
@@ -298,7 +307,7 @@ fn a_fill_length_resolves_against_the_area_and_falls_back_to_the_intrinsic_size(
         View::text("ab", TextStyle::new()),
     );
 
-    assert_eq!(resolve(&view, Available::columns(10)).size().width(), 10);
+    assert_eq!(resolve_ok(&view, Available::columns(10)).size().width(), 10);
     // Under no area a Fill length has nothing to divide, so it contributes the
     // intrinsic size.
     assert_eq!(measure(&view).width(), 4);
@@ -466,7 +475,7 @@ fn a_capped_fill_leaves_its_remainder_unused_and_the_group_is_placed_by_align() 
         ],
     );
     assert_eq!(
-        resolve(&capped, Available::columns(20)).size().width(),
+        resolve_ok(&capped, Available::columns(20)).size().width(),
         14,
         "the capped child's six unused cells are not given to its sibling"
     );

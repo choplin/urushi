@@ -94,6 +94,7 @@ fn drive(effect: Effect<Message>) -> Vec<Message> {
 
 fn lines(view: &View) -> Vec<String> {
     resolve(view, Available::NONE)
+        .unwrap()
         .rows()
         .iter()
         .map(|row| row.iter().map(|grapheme| grapheme.symbol()).collect())

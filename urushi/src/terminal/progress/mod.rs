@@ -10,24 +10,21 @@ pub use spinner::Spinner;
 
 use crate::{ComponentRole, ComponentTheme};
 
-use super::StderrTerminal;
+use super::stderr::ProgressOutput;
 
-fn themed_message(terminal: &StderrTerminal, styles: &ComponentTheme, message: &str) -> String {
-    terminal
-        .renderer
-        .render(&crate::View::text(
-            message,
-            styles.text_style(ComponentRole::Body).clone(),
-        ))
-        .into_string()
+fn themed_message(terminal: &ProgressOutput, styles: &ComponentTheme, message: &str) -> String {
+    terminal.render_text(&crate::View::text(
+        message,
+        styles.text_style(ComponentRole::Body).clone(),
+    ))
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::{AnsiPolicy, Color, ColorProfile, SemanticTokens, TerminalProfile, Theme};
+    use crate::{Color, ColorLevel, Modifier, RenderSettings, SemanticTokens, Theme};
 
     use super::*;
-    use crate::OutputMode;
+    use crate::terminal::stderr::OutputMode;
 
     const TOKENS: SemanticTokens = SemanticTokens {
         text: Color::Ansi(2),
@@ -45,8 +42,10 @@ mod tests {
     #[test]
     fn live_messages_use_the_same_body_role_as_stable_views() {
         let theme = Theme::from_tokens(TOKENS);
-        let terminal = StderrTerminal::new(
-            TerminalProfile::new(ColorProfile::Ansi16, AnsiPolicy::Enabled),
+        let terminal = ProgressOutput::new(
+            RenderSettings::default()
+                .with_colors(ColorLevel::Ansi16)
+                .with_modifiers(Modifier::all()),
             OutputMode::Live,
             80,
         );
@@ -60,11 +59,7 @@ mod tests {
     #[test]
     fn live_messages_follow_disabled_ansi_policy() {
         let theme = Theme::from_tokens(TOKENS);
-        let terminal = StderrTerminal::new(
-            TerminalProfile::new(ColorProfile::Monochrome, AnsiPolicy::Disabled),
-            OutputMode::Live,
-            80,
-        );
+        let terminal = ProgressOutput::new(RenderSettings::default(), OutputMode::Live, 80);
 
         assert_eq!(
             themed_message(&terminal, theme.components(), "Working"),

@@ -31,10 +31,6 @@ use super::{
 
 pub(super) struct CrosstermEventSource;
 
-pub(super) fn terminal_size() -> io::Result<(u16, u16)> {
-    terminal::size()
-}
-
 impl EventSource for CrosstermEventSource {
     fn read_event(&mut self) -> io::Result<Event> {
         loop {
@@ -226,7 +222,7 @@ mod tests {
         view::tests::*,
     };
     use crate::{Confirm, FieldKey, Input, Select, SelectOption};
-    use urushi::{AnsiPolicy, ColorProfile, TerminalProfile};
+    use urushi::RenderSettings;
     /// The plan the renderer would execute for `view`, without writing it.
     fn draw_plan<W>(renderer: &CrosstermRenderer<W>, view: &PromptView) -> InlineRenderPlan {
         draw_plan_at(
@@ -362,8 +358,8 @@ mod tests {
     #[test]
     fn inline_renderer_uses_resolved_theme_styles_and_anchors_on_the_current_row() {
         let theme = test_theme();
-        let profile = TerminalProfile::new(ColorProfile::TrueColor, AnsiPolicy::Enabled);
-        let styles = PromptStyles::resolve(&theme, &profile);
+        let settings = ansi_settings();
+        let styles = PromptStyles::resolve(&theme, &settings);
         let mut renderer = CrosstermRenderer::new(Vec::new(), (20, 4));
         let view = renderer_view(
             vec![PromptLine::spans(vec![
@@ -403,8 +399,8 @@ mod tests {
     #[test]
     fn a_new_line_prompt_comes_out_to_a_fresh_row_first() {
         let theme = test_theme();
-        let profile = TerminalProfile::new(ColorProfile::Monochrome, AnsiPolicy::Disabled);
-        let styles = PromptStyles::resolve(&theme, &profile);
+        let settings = RenderSettings::default();
+        let styles = PromptStyles::resolve(&theme, &settings);
         let mut renderer = CrosstermRenderer::new(Vec::new(), (20, 4));
         let view = renderer_view(
             vec![view_line("question", &styles.question)],
@@ -527,8 +523,8 @@ mod tests {
         let mut state = FormState::Running { group: 0, field: 0 };
         assert_eq!(form.reduce(&mut state, enter()), ReducerResult::Running);
         let theme = test_theme();
-        let profile = TerminalProfile::new(ColorProfile::Monochrome, AnsiPolicy::Disabled);
-        let styles = PromptStyles::resolve(&theme, &profile);
+        let settings = RenderSettings::default();
+        let styles = PromptStyles::resolve(&theme, &settings);
         let renderer = CrosstermRenderer::new(Vec::new(), (80, 10));
         let before = lay_out(
             renderer.columns,
@@ -565,8 +561,8 @@ mod tests {
     #[test]
     fn a_failure_while_the_origin_is_being_anchored_abandons_the_region() {
         let theme = test_theme();
-        let profile = TerminalProfile::new(ColorProfile::Monochrome, AnsiPolicy::Disabled);
-        let styles = PromptStyles::resolve(&theme, &profile);
+        let settings = RenderSettings::default();
+        let styles = PromptStyles::resolve(&theme, &settings);
         let mut renderer = CrosstermRenderer::new(FailOnLineFeedWriter::new(2), (20, 4));
 
         assert!(
@@ -615,8 +611,8 @@ mod tests {
     #[test]
     fn a_resize_abandons_the_region_and_cleanup_pushes_below_the_residue() {
         let theme = test_theme();
-        let profile = TerminalProfile::new(ColorProfile::Monochrome, AnsiPolicy::Disabled);
-        let styles = PromptStyles::resolve(&theme, &profile);
+        let settings = RenderSettings::default();
+        let styles = PromptStyles::resolve(&theme, &settings);
         let mut renderer = CrosstermRenderer::new(Vec::new(), (20, 4));
         renderer
             .draw(&renderer_view(
@@ -667,8 +663,8 @@ mod tests {
     #[test]
     fn clearing_after_a_resize_resets_the_viewport_before_redraw() {
         let theme = test_theme();
-        let profile = TerminalProfile::new(ColorProfile::Monochrome, AnsiPolicy::Disabled);
-        let styles = PromptStyles::resolve(&theme, &profile);
+        let settings = RenderSettings::default();
+        let styles = PromptStyles::resolve(&theme, &settings);
         let mut renderer = CrosstermRenderer::new(Vec::new(), (20, 4));
         let tall = renderer_view(
             vec![
@@ -712,8 +708,8 @@ mod tests {
     #[test]
     fn a_failed_viewport_clear_keeps_the_reflowed_region_abandoned() {
         let theme = test_theme();
-        let profile = TerminalProfile::new(ColorProfile::Monochrome, AnsiPolicy::Disabled);
-        let styles = PromptStyles::resolve(&theme, &profile);
+        let settings = RenderSettings::default();
+        let styles = PromptStyles::resolve(&theme, &settings);
         let mut renderer = CrosstermRenderer::new(ToggleFailFlushWriter::default(), (20, 4));
         renderer
             .draw(&renderer_view(
@@ -740,8 +736,8 @@ mod tests {
     #[test]
     fn error_cleanup_clears_the_rows_a_partial_first_draw_touched() {
         let theme = test_theme();
-        let profile = TerminalProfile::new(ColorProfile::Monochrome, AnsiPolicy::Disabled);
-        let styles = PromptStyles::resolve(&theme, &profile);
+        let settings = RenderSettings::default();
+        let styles = PromptStyles::resolve(&theme, &settings);
         let writer = PrefixThenFailWriter::new("first");
         let mut renderer = CrosstermRenderer::new(writer, (20, 4));
         let view = renderer_view(
@@ -783,8 +779,8 @@ mod tests {
     #[test]
     fn error_cleanup_after_partial_growth_owns_only_the_rows_the_frame_reached() {
         let theme = test_theme();
-        let profile = TerminalProfile::new(ColorProfile::Monochrome, AnsiPolicy::Disabled);
-        let styles = PromptStyles::resolve(&theme, &profile);
+        let settings = RenderSettings::default();
+        let styles = PromptStyles::resolve(&theme, &settings);
         let mut renderer = CrosstermRenderer::new(PrefixThenFailWriter::new("growth"), (20, 4));
         renderer
             .draw(&renderer_view(
@@ -826,8 +822,8 @@ mod tests {
     #[test]
     fn inline_renderer_clears_stale_rows_and_clamps_cjk_cursor_in_narrow_viewports() {
         let theme = test_theme();
-        let profile = TerminalProfile::new(ColorProfile::TrueColor, AnsiPolicy::Enabled);
-        let styles = PromptStyles::resolve(&theme, &profile);
+        let settings = ansi_settings();
+        let styles = PromptStyles::resolve(&theme, &settings);
         let mut renderer = CrosstermRenderer::new(Vec::new(), (4, 2));
         renderer
             .draw(&renderer_view(
@@ -886,8 +882,8 @@ mod tests {
     #[test]
     fn inline_renderer_applies_terminal_profile_before_writing_styles() {
         let theme = test_theme();
-        let profile = TerminalProfile::new(ColorProfile::Monochrome, AnsiPolicy::Disabled);
-        let styles = PromptStyles::resolve(&theme, &profile);
+        let settings = RenderSettings::default();
+        let styles = PromptStyles::resolve(&theme, &settings);
         let mut renderer = CrosstermRenderer::new(Vec::new(), (20, 2));
         renderer
             .draw(&renderer_view(

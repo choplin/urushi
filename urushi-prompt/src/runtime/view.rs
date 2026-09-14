@@ -1,7 +1,7 @@
 //! Prompt views and the presentation values fields compose.
 
 use urushi::{
-    BlockStyle, ComponentRole, Key, Overflow, PrintableText, StyledText, TerminalProfile, TextSpan,
+    BlockStyle, ComponentRole, Key, Overflow, PrintableText, RenderSettings, StyledText, TextSpan,
     TextStyle, Theme, VerticalAlign, View,
 };
 
@@ -38,7 +38,7 @@ impl PromptView {
     #[cfg(test)]
     pub(super) fn active_name(&self) -> Option<String> {
         let line = self.lines.iter().find(|line| line.active)?;
-        let resolved = urushi::resolve(&line.view, urushi::Available::NONE);
+        let resolved = urushi::resolve(&line.view, urushi::Available::NONE).unwrap();
         let text: String = resolved
             .rows()
             .first()?
@@ -327,6 +327,7 @@ impl FieldPresentation {
     #[cfg(test)]
     pub(crate) fn rows(&self) -> Vec<frame::FramedRow> {
         urushi::resolve(&self.body, urushi::Available::NONE)
+            .unwrap()
             .rows()
             .iter()
             .map(|row| frame::FramedRow::aggregate(row))
@@ -381,24 +382,24 @@ impl PromptStyles {
         if focused { &self.question } else { &self.muted }
     }
 
-    pub(crate) fn resolve(theme: &Theme, profile: &TerminalProfile) -> Self {
+    pub(crate) fn resolve(theme: &Theme, settings: &RenderSettings) -> Self {
         Self {
-            body: profile.resolve_text_style(&theme.text_style(ComponentRole::Body)),
-            muted: profile.resolve_text_style(&theme.text_style(ComponentRole::Muted)),
-            accent: profile.resolve_text_style(&theme.text_style(ComponentRole::Accent)),
-            question: profile.resolve_text_style(&theme.text_style(ComponentRole::PromptQuestion)),
-            answer: profile.resolve_text_style(&theme.text_style(ComponentRole::PromptAnswer)),
-            placeholder: profile
+            body: settings.resolve_text_style(&theme.text_style(ComponentRole::Body)),
+            muted: settings.resolve_text_style(&theme.text_style(ComponentRole::Muted)),
+            accent: settings.resolve_text_style(&theme.text_style(ComponentRole::Accent)),
+            question: settings.resolve_text_style(&theme.text_style(ComponentRole::PromptQuestion)),
+            answer: settings.resolve_text_style(&theme.text_style(ComponentRole::PromptAnswer)),
+            placeholder: settings
                 .resolve_text_style(&theme.text_style(ComponentRole::PromptPlaceholder)),
-            cursor: profile.resolve_text_style(&theme.text_style(ComponentRole::PromptCursor)),
-            option: profile.resolve_text_style(&theme.text_style(ComponentRole::PromptOption)),
-            option_selected: profile
+            cursor: settings.resolve_text_style(&theme.text_style(ComponentRole::PromptCursor)),
+            option: settings.resolve_text_style(&theme.text_style(ComponentRole::PromptOption)),
+            option_selected: settings
                 .resolve_text_style(&theme.text_style(ComponentRole::PromptOptionSelected)),
-            button: profile.resolve_text_style(&theme.text_style(ComponentRole::PromptButton)),
-            button_focused: profile
+            button: settings.resolve_text_style(&theme.text_style(ComponentRole::PromptButton)),
+            button_focused: settings
                 .resolve_text_style(&theme.text_style(ComponentRole::PromptButtonFocused)),
-            help: profile.resolve_text_style(&theme.text_style(ComponentRole::PromptHelp)),
-            error: profile.resolve_text_style(&theme.text_style(ComponentRole::PromptError)),
+            help: settings.resolve_text_style(&theme.text_style(ComponentRole::PromptHelp)),
+            error: settings.resolve_text_style(&theme.text_style(ComponentRole::PromptError)),
         }
     }
 }
@@ -434,9 +435,25 @@ pub(crate) mod tests {
     };
     use crate::{Confirm, FieldKey, Group, Input, Select, SelectOption};
     use urushi::{
-        AnsiPolicy, Color, ColorProfile, ComponentRole, ComponentTheme, SemanticTokens,
-        TerminalProfile, TextStyle, Theme,
+        Color, ColorLevel, ComponentRole, ComponentTheme, Modifier, RenderSettings, SemanticTokens,
+        TextStyle, Theme, UnderlineStyleSet,
     };
+
+    pub(crate) fn ansi_settings() -> RenderSettings {
+        settings(ColorLevel::TrueColor, true)
+    }
+
+    fn settings(colors: ColorLevel, enabled: bool) -> RenderSettings {
+        if !enabled {
+            return RenderSettings::default();
+        }
+        RenderSettings::default()
+            .with_colors(colors)
+            .with_modifiers(Modifier::all())
+            .with_underline_styles(UnderlineStyleSet::all())
+            .with_underline_colors(true)
+            .with_hyperlinks(true)
+    }
     pub(crate) fn lay_out(columns: u16, rows: u16, view: &PromptView) -> frame::FramedView {
         frame::frame(&resolve::resolve_prompt(columns, view), rows)
     }
@@ -481,14 +498,14 @@ pub(crate) mod tests {
         // reach the terminal as the same bytes.
         let theme = test_theme();
         for color in [
-            ColorProfile::TrueColor,
-            ColorProfile::Ansi256,
-            ColorProfile::Ansi16,
-            ColorProfile::Monochrome,
+            ColorLevel::TrueColor,
+            ColorLevel::Ansi256,
+            ColorLevel::Ansi16,
+            ColorLevel::None,
         ] {
-            for ansi in [AnsiPolicy::Enabled, AnsiPolicy::Disabled] {
-                let profile = TerminalProfile::new(color, ansi);
-                let styles = PromptStyles::resolve(&theme, &profile);
+            for enabled in [true, false] {
+                let settings = settings(color, enabled);
+                let styles = PromptStyles::resolve(&theme, &settings);
                 let roles = [
                     ("body", &styles.body),
                     ("muted", &styles.muted),
@@ -509,7 +526,7 @@ pub(crate) mod tests {
                         assert_eq!(
                             left == right,
                             left.paint("x") == right.paint("x"),
-                            "{left_name} vs {right_name} under {color:?}/{ansi:?}"
+                            "{left_name} vs {right_name} under {color:?}/{enabled:?}"
                         );
                     }
                 }
@@ -520,14 +537,8 @@ pub(crate) mod tests {
     #[test]
     fn a_profile_that_erases_a_difference_makes_the_runs_equal_and_merges_them() {
         let theme = test_theme();
-        let colored = PromptStyles::resolve(
-            &theme,
-            &TerminalProfile::new(ColorProfile::TrueColor, AnsiPolicy::Enabled),
-        );
-        let monochrome = PromptStyles::resolve(
-            &theme,
-            &TerminalProfile::new(ColorProfile::Monochrome, AnsiPolicy::Disabled),
-        );
+        let colored = PromptStyles::resolve(&theme, &ansi_settings());
+        let monochrome = PromptStyles::resolve(&theme, &RenderSettings::default());
 
         // Two roles the theme gives different appearances.
         assert_ne!(colored.question, colored.answer);

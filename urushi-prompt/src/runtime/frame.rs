@@ -49,7 +49,7 @@ impl FramedRow {
     /// The canonical form is what makes row equality mean "looks the same":
     /// adjacent graphemes of equal style merge greedily from the left, and no
     /// empty run is emitted. Styles are already resolved against the theme and
-    /// the terminal profile, so equal values are equal appearance.
+    /// selected render settings, so equal values are equal appearance.
     pub(crate) fn aggregate(row: &[StyledGrapheme]) -> Self {
         let mut runs: Vec<StyledRun> = Vec::new();
         for grapheme in row {
@@ -566,7 +566,7 @@ mod integration_tests {
         crossterm::CrosstermRenderer, frame, terminal::tests::enter, test_styles, view::tests::*,
     };
     use crate::{FieldKey, Form, Group, Input};
-    use urushi::{AnsiPolicy, ColorProfile, TerminalProfile};
+    use urushi::RenderSettings;
     #[test]
     fn a_wrapped_question_is_omitted_whole_before_focus_error_and_help() {
         let mut form = Form::builder()
@@ -658,8 +658,8 @@ mod integration_tests {
     #[test]
     fn narrow_viewports_omit_wide_scalars_without_losing_cursor_bounds() {
         let theme = test_theme();
-        let profile = TerminalProfile::new(ColorProfile::TrueColor, AnsiPolicy::Enabled);
-        let styles = PromptStyles::resolve(&theme, &profile);
+        let settings = ansi_settings();
+        let styles = PromptStyles::resolve(&theme, &settings);
         let cjk_line = view_line("あ", &styles.cursor);
         for columns in [0, 1] {
             let mut renderer = CrosstermRenderer::new(Vec::new(), (columns, 1));
@@ -684,8 +684,8 @@ mod integration_tests {
     #[test]
     fn short_viewports_never_replace_the_active_field_with_help() {
         let theme = test_theme();
-        let profile = TerminalProfile::new(ColorProfile::Monochrome, AnsiPolicy::Disabled);
-        let styles = PromptStyles::resolve(&theme, &profile);
+        let settings = RenderSettings::default();
+        let styles = PromptStyles::resolve(&theme, &settings);
         for rows in 1..=4 {
             let renderer = CrosstermRenderer::new(Vec::new(), (40, rows));
             let view = renderer_view(
@@ -731,8 +731,8 @@ mod integration_tests {
     #[test]
     fn one_row_viewports_show_the_actionable_choice() {
         let theme = test_theme();
-        let profile = TerminalProfile::new(ColorProfile::Monochrome, AnsiPolicy::Disabled);
-        let styles = PromptStyles::resolve(&theme, &profile);
+        let settings = RenderSettings::default();
+        let styles = PromptStyles::resolve(&theme, &settings);
         let renderer = CrosstermRenderer::new(Vec::new(), (40, 1));
         let view = renderer_view(
             vec![

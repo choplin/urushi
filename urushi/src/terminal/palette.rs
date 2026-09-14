@@ -2,14 +2,14 @@
 
 use crate::Color;
 
-pub(super) fn quantize_to_ansi256(color: Color) -> Color {
+pub(crate) fn quantize_to_ansi256(color: Color) -> Color {
     match color {
         Color::Ansi(_) | Color::Ansi256(_) => color,
         Color::Rgb(r, g, b) => color_from_index(nearest_palette_index((r, g, b), 256)),
     }
 }
 
-pub(super) fn quantize_to_ansi16(color: Color) -> Color {
+pub(crate) fn quantize_to_ansi16(color: Color) -> Color {
     Color::Ansi(nearest_palette_index(color_to_rgb(color), 16))
 }
 

@@ -1,109 +1,58 @@
-//! Output adapters for renderer-neutral views.
+//! Serialization of a resolved rectangle.
 
-use crate::{Available, RenderedBlock, TerminalProfile, View, resolve};
+use crate::{RenderSettings, ResolvedView, StyledGrapheme};
 
-/// Renders a [`View`] as ANSI-capable text for one terminal profile.
+/// Serializes `view` using the selected output features.
 ///
-/// The renderer computes no geometry: it resolves the view once and serializes
-/// the resulting rectangle, coalescing adjacent graphemes of equal effective
-/// style into one SGR scope.
-#[derive(Debug, Clone, Copy)]
-pub struct AnsiRenderer {
-    profile: TerminalProfile,
+/// Rendering does not perform layout, inspect a terminal, or write bytes. The
+/// caller must resolve the view first and explicitly choose the settings.
+pub fn render(view: &ResolvedView, settings: &RenderSettings) -> String {
+    view.rows()
+        .iter()
+        .map(|row| serialize_row(row, settings))
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
-impl AnsiRenderer {
-    /// Creates a renderer for explicit terminal capabilities.
-    pub const fn new(profile: TerminalProfile) -> Self {
-        Self { profile }
+fn serialize_row(row: &[StyledGrapheme], settings: &RenderSettings) -> String {
+    let mut output = String::new();
+    let mut index = 0;
+    while index < row.len() {
+        let style = settings.resolve_text_style(row[index].style());
+        let mut run = String::new();
+        while index < row.len() && settings.resolve_text_style(row[index].style()) == style {
+            run.push_str(row[index].symbol());
+            index += 1;
+        }
+        output.push_str(&style.paint(&run));
     }
-
-    /// Returns the terminal profile used by this renderer.
-    pub const fn profile(&self) -> TerminalProfile {
-        self.profile
-    }
-
-    /// Renders at the view's intrinsic size, without a trailing newline.
-    pub fn render(&self, view: &View) -> RenderedBlock {
-        self.render_within(view, Available::NONE)
-    }
-
-    /// Renders the view resolved under `available` — a terminal width, for
-    /// instance.
-    pub fn render_within(&self, view: &View, available: Available) -> RenderedBlock {
-        resolve(view, available)
-            .map_styles(|style| self.profile.resolve_text_style(style))
-            .into_rendered_block()
-    }
+    output
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::{AnsiPolicy, Color, ColorProfile, Hyperlink, TextStyle};
-
     use super::*;
+    use crate::{Available, Color, Hyperlink, TextStyle, View, resolve};
 
     #[test]
-    fn renderer_resolves_styles_at_the_output_boundary() {
+    fn rendering_preserves_logical_styles_in_the_resolved_view() {
         let style = TextStyle::new().foreground(Color::Rgb(10, 20, 30)).bold();
-        let view = View::text("result", style.clone());
-        let plain = AnsiRenderer::new(TerminalProfile::new(
-            ColorProfile::Monochrome,
-            AnsiPolicy::Disabled,
-        ));
+        let resolved = resolve(&View::text("result", style.clone()), Available::NONE).unwrap();
 
-        assert_eq!(plain.render(&view).as_str(), "result");
-        assert_eq!(
-            resolve(&view, Available::NONE).rows()[0][0].style(),
-            &style,
-            "the resolved view keeps logical styles"
-        );
+        assert_eq!(render(&resolved, &RenderSettings::default()), "result");
+        assert_eq!(resolved.rows()[0][0].style(), &style);
     }
 
     #[test]
-    fn a_bare_text_leaf_wraps_under_a_width_bound() {
-        let renderer = AnsiRenderer::new(TerminalProfile::new(
-            ColorProfile::TrueColor,
-            AnsiPolicy::Disabled,
-        ));
-        let view = View::text("abcdef", TextStyle::new());
-
-        assert_eq!(
-            renderer
-                .render_within(&view, Available::columns(3))
-                .as_str(),
-            "abc\ndef"
-        );
-    }
-
-    #[test]
-    fn renderer_closes_and_reopens_a_hyperlink_at_each_line() {
-        let renderer = AnsiRenderer::new(TerminalProfile::new(
-            ColorProfile::TrueColor,
-            AnsiPolicy::Enabled,
-        ));
+    fn hyperlinks_are_selected_independently_from_sgr_features() {
         let style = TextStyle::new()
-            .hyperlink(Hyperlink::new("https://example.com").with_parameter("id", "documentation"));
+            .hyperlink(Hyperlink::new("https://example.com").with_parameter("id", "docs"));
+        let resolved = resolve(&View::text("link", style), Available::NONE).unwrap();
 
+        assert_eq!(render(&resolved, &RenderSettings::default()), "link");
         assert_eq!(
-            renderer
-                .render(&View::text("first\nsecond", style))
-                .as_str(),
-            concat!(
-                "\x1b]8;id=documentation;https://example.com\x1b\\first \x1b]8;;\x1b\\\n",
-                "\x1b]8;id=documentation;https://example.com\x1b\\second\x1b]8;;\x1b\\",
-            )
+            render(&resolved, &RenderSettings::default().with_hyperlinks(true)),
+            "\x1b]8;id=docs;https://example.com\x1b\\link\x1b]8;;\x1b\\"
         );
-    }
-
-    #[test]
-    fn disabled_ansi_removes_a_hyperlink() {
-        let renderer = AnsiRenderer::new(TerminalProfile::new(
-            ColorProfile::TrueColor,
-            AnsiPolicy::Disabled,
-        ));
-        let view = View::text("link", TextStyle::new().hyperlink("https://example.com"));
-
-        assert_eq!(renderer.render(&view).as_str(), "link");
     }
 }

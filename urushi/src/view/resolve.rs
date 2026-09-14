@@ -23,7 +23,6 @@ use crate::{Key, TextStyle, View};
 use super::assemble::assemble;
 use super::geometry::{Available, Size};
 use super::height::{fit, heights};
-use super::rendered::RenderedBlock;
 use super::width::widths;
 
 /// An axis for which a finite Canvas extent was required.
@@ -134,11 +133,6 @@ impl StyledGrapheme {
 
     pub(super) fn space(style: TextStyle) -> Self {
         Self::new(Grapheme::space(), style)
-    }
-
-    pub(crate) fn map_style(mut self, map: impl FnOnce(&TextStyle) -> TextStyle) -> Self {
-        self.style = map(&self.style);
-        self
     }
 }
 
@@ -261,7 +255,7 @@ impl AnchoredRect {
 ///
 /// Every row's widths sum to `size.width()`, and the row count equals
 /// `size.height()`. Styles are logical: a
-/// [`TerminalProfile`](crate::TerminalProfile) is applied when a renderer
+/// [`RenderSettings`](crate::RenderSettings) is applied when a renderer
 /// serializes the rectangle, so capability resolution stays at the output
 /// boundary.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -313,7 +307,7 @@ impl ResolvedView {
     ///     VerticalAlign::Top,
     ///     [View::text("> ", TextStyle::new()), View::anchor("cursor")],
     /// );
-    /// let resolved = resolve(&view, Available::NONE);
+    /// let resolved = resolve(&view, Available::NONE).unwrap();
     ///
     /// assert_eq!(resolved.anchor("cursor").unwrap().x(), 2);
     /// assert!(resolved.anchor("elsewhere").is_none());
@@ -322,47 +316,6 @@ impl ResolvedView {
         let key = key.into();
         self.anchors.iter().find(|anchor| anchor.key == key)
     }
-
-    /// Replaces every grapheme style, keeping the geometry untouched.
-    pub(crate) fn map_styles(mut self, map: impl Fn(&TextStyle) -> TextStyle) -> Self {
-        self.rows = self
-            .rows
-            .into_iter()
-            .map(|row| {
-                row.into_iter()
-                    .map(|grapheme| grapheme.map_style(&map))
-                    .collect()
-            })
-            .collect();
-        self
-    }
-
-    /// Serializes this rectangle, coalescing adjacent graphemes of equal style
-    /// into one SGR scope.
-    pub(crate) fn into_rendered_block(self) -> RenderedBlock {
-        let text = self
-            .rows
-            .iter()
-            .map(|row| serialize_row(row))
-            .collect::<Vec<_>>()
-            .join("\n");
-        RenderedBlock::measured(text, self.size)
-    }
-}
-
-fn serialize_row(row: &[StyledGrapheme]) -> String {
-    let mut output = String::new();
-    let mut index = 0;
-    while index < row.len() {
-        let style = row[index].style();
-        let mut run = String::new();
-        while index < row.len() && row[index].style() == style {
-            run.push_str(row[index].symbol());
-            index += 1;
-        }
-        output.push_str(&style.paint(&run));
-    }
-    output
 }
 
 /// Returns the intrinsic rectangle `view` occupies: its size when no area
@@ -389,12 +342,7 @@ pub fn try_measure(view: &View) -> Result<Size, LayoutError> {
 /// rather than cutting it. The crop below is the degenerate-case safety net:
 /// it fires only when a rectangle could not be made to fit — an area that
 /// cannot hold a frame at all — and it cuts grapheme-atomically.
-pub fn resolve(view: &View, available: Available) -> ResolvedView {
-    try_resolve(view, available).expect("Canvas layout must have a finite extent on both axes")
-}
-
-/// Resolves a view or reports an unbounded Canvas axis without an explicit extent.
-pub fn try_resolve(view: &View, available: Available) -> Result<ResolvedView, LayoutError> {
+pub fn resolve(view: &View, available: Available) -> Result<ResolvedView, LayoutError> {
     let fitted = fit(widths(view, available.width()));
     let sized = heights(&fitted, available.height(), available.height().is_some());
     validate_canvas_extents(&sized)?;

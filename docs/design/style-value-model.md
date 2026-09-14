@@ -112,9 +112,8 @@ that state is.
 Removing a modifier from an immutable value therefore removes the value; it
 does not preserve an ANSI off-code instruction. A renderer that maintains prior
 terminal state diffs the previous and next effective styles itself.
-`TextStyle::paint` and `BlockStyle::render` surround emitted styling with a
-final ANSI reset. Between the two, no stored removal instruction is needed
-anywhere.
+ANSI rendering surrounds emitted styling with a final reset. No stored removal
+instruction is needed in an immutable style value.
 
 ## Why a closed vocabulary and one generic `remove`
 

@@ -41,9 +41,9 @@ pub struct BlockStyle {
 }
 ```
 
-`TextStyle` alone produces no rectangle. `TextStyle::paint` wraps text in its
-Select Graphic Rendition (SGR) scope; `BlockStyle::render` produces a
-rectangle. `TextStyleProperty` converts into `BlockStyleProperty`; there is no
+`TextStyle` alone produces no rectangle. A `BlockStyle` contributes geometry
+when it is attached to a `View::block`. `TextStyleProperty` converts into
+`BlockStyleProperty`; there is no
 conversion in the other direction, so no geometry property can be applied to a
 `TextStyle`.
 
@@ -174,7 +174,7 @@ pub struct ResolvedView {
 
 /// The intrinsic size: what the view asks for when nothing bounds it.
 pub fn measure(view: &View) -> Size;
-pub fn resolve(view: &View, available: Available) -> ResolvedView;
+pub fn resolve(view: &View, available: Available) -> Result<ResolvedView, LayoutError>;
 ```
 
 `Available` — a terminal width or a Ratatui `Rect` — participates in sizing
@@ -182,8 +182,8 @@ from the start. It is not a clip applied to a finished rectangle; a raw crop
 survives only as the degenerate-case safety net.
 
 Every row's widths sum to `size.width`, and the row count equals `size.height`.
-Styles in a `ResolvedView` are logical: a `TerminalProfile` is applied when a
-renderer serializes it, so terminal capability resolution stays at the output
+Styles in a `ResolvedView` are logical: `RenderSettings` are applied when
+`render` serializes it, so output feature selection stays at the output
 boundary. Rows hold per-grapheme tokens rather than styled text runs, so a
 renderer never sees text below grapheme granularity and receives every width
 from the layout pass instead of re-deriving it.
@@ -219,9 +219,9 @@ as sitting on the last row. What being outside means is the caller's: a
 full-screen runtime hides a cursor it cannot show or scrolls to it, and a
 caller drawing into a region intersects it with the resolved size first.
 
-The same pass covers the single-block case: `BlockStyle::render` resolves a
-`Block` containing uniformly styled text with unbounded `Available`. There is
-one implementation of the box model in the workspace.
+A single styled block is represented as a `View::block` containing a text view.
+It goes through the same `resolve` function as every other tree, so there is one
+implementation of the box model in the workspace.
 
 ## Sizing at a glance
 
@@ -308,50 +308,19 @@ are recorded in [`design/layout-resolution.md`](design/layout-resolution.md).
 
 ## Plain text and rendered output
 
-The layout pass never inspects text for escape sequences. Whether a string is
-plain text or already-rendered ANSI is carried by the type and measured once,
-where it is declared:
+The layout pass accepts model values, not rendered strings. A `Text` node holds
+one `StyledText`; its width is the display width of the joined source's
+graphemes, and segment boundaries do not affect it. `PrintableLines` and
+`PrintableText` carry the plain-text contract used by this path.
 
-```rust
-pub struct RenderedBlock { text: String, size: Size }
-
-impl RenderedBlock {
-    /// Adopts a string produced elsewhere. The caller asserts it is rendered
-    /// output, and this is the one place ANSI-aware measurement happens.
-    pub fn from_ansi(text: impl Into<String>) -> Self;
-    pub fn size(&self) -> Size;
-    pub fn as_str(&self) -> &str;
-}
-```
-
-- A `Text` node holds one `StyledText`. Its width is the display width of the
-  joined source's graphemes; segment boundaries do not affect it.
-- `BlockStyle::render` and `AnsiRenderer::render` return a `RenderedBlock`,
-  which implements `Display`.
-- `join_horizontal` and `join_vertical` take and return `RenderedBlock`. They
-  compose rendered output — text this crate did not lay out, or output destined
-  straight for a writer — and each input carries the size it was measured at, so
-  they never re-measure ANSI text.
-- A `RenderedBlock` does not re-enter the view tree. Content that participates
-  in layout is expressed as a tree.
-
-The plain side of the boundary is carried by types too: `PrintableLines` for
-text that spans rows and `PrintableText` for one row, which owns display width.
-Both take the caller's declaration on trust, as `from_ansi` does: the domain is
-declared, never detected. Passing escape sequences to a `Text` node is a
-contract violation, not a supported call with a degraded result.
-
-`from_ansi` measures what a terminal would show rather than what the byte
-stream contains — it resolves cursor movement to cells — and yields a
-rectangle that contains none, which is what lets a block be placed at any
-column of a join without its content sliding. The measurement rules, the
-domain boundary, and why there is exactly one width measure are recorded in
-[`design/rendered-output-measurement.md`](design/rendered-output-measurement.md).
+Passing escape sequences to a `Text` node is a contract violation. Content that
+participates in layout is composed as a `View` before `resolve`; `render`
+returns a final `String`, and that string does not re-enter the view tree.
 
 ## Backends
 
-- `AnsiRenderer` resolves a view and serializes each row, coalescing adjacent
-  graphemes of equal effective style into one SGR scope.
+- `render` serializes an already-resolved view under explicit `RenderSettings`,
+  coalescing adjacent graphemes of equal effective style into one SGR scope.
 - `urushi-tui`'s `ViewWidget` derives `Available` from the target `Rect`,
   resolves the view, converts each grapheme's logical `TextStyle` through
   `RatatuiStyle`, and writes cells. `RatatuiWidget` draws a single `BlockStyle`
@@ -371,10 +340,7 @@ implementation, and carried per grapheme in the `ResolvedView`. No component and
 no renderer defines its own notion of display width, and none re-measures one
 the layout pass already decided.
 
-There are exactly two measurement paths, and which one applies is decided by a
-type rather than by inspecting a string: `PrintableText::width` for plain text,
-and `RenderedBlock::from_ansi` for rendered output. The crate exposes no free
-function taking a `&str` and returning a width. An application asks the model
-instead — `measure`, `resolve(…).size()`, `RenderedBlock::size`, and
-`BlockStyle::frame_size` are the computable breakpoints the application is
-owed.
+The crate exposes no function that reparses a rendered `String` to recover
+geometry. An application asks the model instead: `measure`, the `ResolvedView`
+returned by `resolve`, and `BlockStyle::frame_size` are the computable
+breakpoints the application is owed.

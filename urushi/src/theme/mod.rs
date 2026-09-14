@@ -16,8 +16,8 @@
 //!    read from a config file — carries a reference to it in the role value, or
 //!    the application owns a composite type wrapping [`Theme`] alongside that
 //!    data.
-//! 4. Terminal-capability downgrading is not part of resolution; it stays in
-//!    [`crate::TerminalProfile::resolve_text_style`].
+//! 4. Terminal-capability downgrading is not part of theme resolution; it stays
+//!    in [`crate::RenderSettings`] at the output boundary.
 //!
 //! ```
 //! use urushi::{Color, ComponentRole, SemanticTokens, TextStyle, Theme, TextThemeRole};

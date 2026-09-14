@@ -17,9 +17,8 @@ use super::width;
 /// the lines this type splits into. Measuring across a line break would sum
 /// cells that never share a row.
 ///
-/// Construction is where the caller declares the domain, mirroring
-/// [`RenderedBlock::from_ansi`](crate::RenderedBlock::from_ansi) on the other
-/// side of the boundary. Debug builds check the declaration; release builds
+/// Construction is where the caller declares the plain-text domain. Debug builds
+/// check the declaration; release builds
 /// take the caller's word for it.
 #[derive(Debug, PartialEq, Eq)]
 #[repr(transparent)]
@@ -199,7 +198,7 @@ impl Grapheme {
 
     /// Returns the terminal cells this cluster occupies.
     ///
-    /// Defined by [`width`](super::width), the crate's one definition, exactly
+    /// Defined by the crate's shared width implementation, exactly
     /// as [`PrintableText::width`] is.
     pub fn width(&self) -> usize {
         width::grapheme(self)

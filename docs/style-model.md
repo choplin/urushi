@@ -82,8 +82,8 @@ value and its builders in [`design/underline.md`](design/underline.md).
 One duplication survives the vocabulary: an underline color equal to the
 foreground. It is a duplication *between* fields, so no signature makes it
 unrepresentable, and it is closed by normalization once the style is final —
-`TerminalProfile::resolve_text_style` and `resolve_block_style` apply the fold
-as their last step, so a style that has passed through a profile is canonical.
+`RenderSettings::resolve_text_style` applies the fold as its last step, so an
+effective style selected for output is canonical.
 The rule for admitting any fold is narrow: **fold only what is inert** — a
 value may be dropped only when doing so cannot change the output, whatever the
 terminal does. The precise fold, its timing, its one unclosable residue, and
@@ -212,12 +212,9 @@ Renderers consume the values present in one `TextStyle`.
   `add_modifier`; it does not populate `sub_modifier`. Ratatui's cell model has
   no hyperlink target or parameter field, so the adapter intentionally discards
   hyperlinks while retaining every representable text property.
-- `TerminalProfile::resolve_text_style` maps or removes the effective text
-  values; `TerminalProfile::resolve_block_style` does the same for a block's
-  fill and border colors while preserving its geometry. Both return a
-  canonical style. No profile degrades a shape — an underline shape, a border
-  glyph, a clip marker: which shapes a terminal renders is the application's
-  knowledge.
+- `RenderSettings::resolve_text_style` independently selects color fidelity,
+  modifiers, underline shapes, underline color, and hyperlinks, then returns a
+  canonical effective style.
 
 How each backend spells and degrades the underline is recorded in
 [`design/underline.md`](design/underline.md).
@@ -228,7 +225,6 @@ next effective styles and emitting any required reset codes.
 [`design/style-value-model.md`](design/style-value-model.md) records why a
 style holds no removal instruction.
 
-`TextStyle::paint` and `BlockStyle::render` surround emitted styling with a
-final ANSI reset. Both take plain text: the layout pass never inspects text for
-escape sequences, so already-rendered output is adopted as a `RenderedBlock`
-instead of being fed back in.
+`render` surrounds emitted SGR styling with a final reset and closes hyperlink
+scopes at line boundaries. The layout pass accepts plain model text, never a
+rendered string; its `String` output is terminal data rather than a layout input.

@@ -1,6 +1,4 @@
-use std::io::stdout;
-
-use urushi::{Color, ColorScheme, PanelRole, SemanticTokens, TerminalProfile, Theme, ThemeSet};
+use urushi::{Color, ColorScheme, PanelRole, SemanticTokens, Theme, ThemeSet, View};
 
 fn light_tokens() -> SemanticTokens {
     SemanticTokens {
@@ -39,9 +37,10 @@ fn main() {
     );
     let theme = themes.select(ColorScheme::Dark);
 
-    let output = stdout();
-    let profile = TerminalProfile::detect_for(&output);
-    let panel = profile.resolve_block_style(&theme.block_style(PanelRole::PanelFocused));
-
-    println!("{}", panel.render("保存しました"));
+    let panel = theme.block_style(PanelRole::PanelFocused);
+    let view = View::block(
+        panel.clone(),
+        View::text("保存しました", panel.text().clone()),
+    );
+    urushi::println(&view).unwrap();
 }

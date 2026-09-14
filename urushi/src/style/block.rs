@@ -1,7 +1,7 @@
 //! The [`BlockStyle`] builder: a rectangle, and the style filling the geometry
 //! it creates.
 
-use crate::view::{Available, RenderedBlock, Size, View, resolve};
+use crate::view::Size;
 use crate::{
     Align, BlockStyleProperty, BlockStylePropertyKey, Border, Color, Length, Modifier, Overflow,
     Sides, TextStyle, TextStyleProperty, Underline, UnderlineStyle, VerticalAlign,
@@ -12,20 +12,14 @@ use crate::{
 ///
 /// A `BlockStyle` is an immutable value, like [`TextStyle`]. Its text properties —
 /// colors and modifiers — are the style of the block's own fill: padding rows,
-/// alignment gaps, and the content of [`BlockStyle::render`]. A block's style
+/// alignment gaps, and text explicitly built from [`BlockStyle::text`]. A block's style
 /// does not flow into a child view; each child carries its own complete value.
 ///
 /// ```
-/// use urushi::{Align, BlockStyle, Border, Color};
+/// use urushi::{BlockStyle, Border, TextStyle, View};
 ///
-/// let panel = BlockStyle::new()
-///     .foreground(Color::CYAN)
-///     .border(Border::ROUNDED)
-///     .padding((0, 1))
-///     .align(Align::Center)
-///     .width(20);
-///
-/// println!("{}", panel.render("こんにちは, urushi!"));
+/// let panel = BlockStyle::new().border(Border::ROUNDED).padding((0, 1));
+/// let view = View::block(panel, View::text("こんにちは, urushi!", TextStyle::new()));
 /// ```
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BlockStyle {
@@ -457,53 +451,5 @@ impl BlockStyle {
             style = style.background(color);
         }
         style
-    }
-
-    /// Replaces every color property while preserving the rest of the style.
-    pub(crate) fn map_colors(mut self, map: impl Fn(Color) -> Color) -> Self {
-        self.text = self.text.map_colors(&map);
-        self.border_fg = self.border_fg.map(&map);
-        self.border_bg = self.border_bg.map(&map);
-        self
-    }
-
-    /// Removes fill and border colors while preserving the box model and text
-    /// modifiers.
-    pub(crate) fn without_colors(mut self) -> Self {
-        self.text = self.text.without_colors();
-        self.border_fg = None;
-        self.border_bg = None;
-        self
-    }
-
-    /// Removes every property that can emit an SGR sequence while preserving
-    /// the box model.
-    /// Folds the fill text's values that cannot reach the output, as
-    /// [`TextStyle::canonical`] defines.
-    pub(crate) fn canonical(mut self) -> Self {
-        self.text = self.text.canonical();
-        self
-    }
-
-    pub(crate) fn without_ansi(mut self) -> Self {
-        self = self.without_colors();
-        self.text = TextStyle::new();
-        self
-    }
-
-    /// Renders plain-text `content` as a rectangle.
-    ///
-    /// This is the single-block case of the one layout pass: it resolves
-    /// `Block(self, Text(content, self.text))` with an unbounded area. The
-    /// returned block contains no trailing newline; rows are joined with `\n`.
-    ///
-    /// `content` is plain text. Escape sequences and cursor movement in it break that contract:
-    /// debug builds panic, and release builds measure them as ordinary
-    /// characters and may split them when wrapping or truncating. Adopt
-    /// already-rendered output with
-    /// [`RenderedBlock::from_ansi`](crate::RenderedBlock::from_ansi) instead.
-    pub fn render(&self, content: &str) -> RenderedBlock {
-        let view = View::block(self.clone(), View::text(content, self.text.clone()));
-        resolve(&view, Available::NONE).into_rendered_block()
     }
 }

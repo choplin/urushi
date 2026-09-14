@@ -2,20 +2,20 @@
 
 use std::io;
 
-use crate::{ComponentRole, ComponentTheme, OutputMode, View};
+use crate::{ComponentRole, ComponentTheme, View};
 
 use super::{
-    StderrTerminal,
     indicatif_backend::LiveRegion,
     themed_message,
     view::{self, FinishKind},
 };
+use crate::terminal::stderr::{OutputMode, ProgressOutput};
 
 /// Determinate work measured in a caller-defined unit.
 #[derive(Debug)]
 pub struct ProgressBar {
     live: Option<LiveRegion>,
-    terminal: StderrTerminal,
+    terminal: ProgressOutput,
     styles: ComponentTheme,
     total: u64,
     position: u64,
@@ -24,28 +24,31 @@ pub struct ProgressBar {
 }
 
 impl ProgressBar {
-    pub(crate) fn new(
-        terminal: StderrTerminal,
+    /// Starts a determinate progress display on stderr.
+    pub fn new(
+        styles: &ComponentTheme,
+        total: u64,
+        message: impl Into<String>,
+    ) -> io::Result<Self> {
+        ProgressOutput::detect()?.progress(styles, total, message)
+    }
+
+    pub(in crate::terminal) fn with_output(
+        terminal: ProgressOutput,
         styles: ComponentTheme,
         total: u64,
         message: String,
     ) -> io::Result<Self> {
         let live = match terminal.mode() {
             OutputMode::Live => {
-                let rail = terminal
-                    .renderer
-                    .render(&View::text(
-                        "│",
-                        styles.text_style(ComponentRole::Muted).clone(),
-                    ))
-                    .into_string();
-                let progress = terminal
-                    .renderer
-                    .render(&View::text(
-                        "{wide_bar}",
-                        styles.text_style(ComponentRole::Accent).clone(),
-                    ))
-                    .into_string();
+                let rail = terminal.render_text(&View::text(
+                    "│",
+                    styles.text_style(ComponentRole::Muted).clone(),
+                ));
+                let progress = terminal.render_text(&View::text(
+                    "{wide_bar}",
+                    styles.text_style(ComponentRole::Accent).clone(),
+                ));
                 Some(LiveRegion::progress(
                     total,
                     &rail,

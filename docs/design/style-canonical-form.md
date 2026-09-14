@@ -19,10 +19,10 @@ and it is closed by normalization, applied to both style types alike:
 An underline is drawn in the foreground color unless one is set, so stating the
 color a run already has changes nothing but the bytes.
 
-The fold applies once the style is final. `TerminalProfile::resolve_text_style`
-and `resolve_block_style` apply it as their last step, after degradation,
+The fold applies once the style is final. `RenderSettings::resolve_text_style`
+applies it as its last step, after degradation,
 because degradation is what makes two logical colors equal; a style that has
-passed through a profile is therefore canonical, and no separate normalizing
+passed through render settings is therefore canonical, and no separate normalizing
 call is part of the public API.
 
 The rule for admitting any future fold is narrow:
@@ -45,13 +45,13 @@ therefore emits runs in a canonical form:
 
 - adjacent runs with equal styles are merged, greedily and left to right;
 - no run is empty; and
-- a run's style is the style **as it will be emitted** — resolved for the
-  terminal profile, in a representation where equal appearance means equal
+- a run's style is the style **as it will be emitted** — resolved under the
+  selected `RenderSettings`, in a representation where equal appearance means equal
   value, and in the canonical form defined above.
 
 Run aggregation is where the form is established, because rows are aggregated
 from grapheme-level content on each frame. This is also why the prompt's view
-carries profile-resolved styles from the moment it is built, several stages
+carries settings-resolved styles from the moment it is built, several stages
 above the writer — the one deliberate exception to the rule that `TextStyle`
 stays logical until an output boundary.
 
@@ -82,11 +82,11 @@ real; it is still refused.
 When the fold happens is settled separately. Folding after the style is final,
 rather than as it is built, is forced by the style being an immutable value with
 a builder: any value folded earlier is restored by the next call that changes
-the foreground. A profile stage is one instance of "final", not the reason for
-the rule. Capability degradation is why that stage matters at all: two colors a
-terminal profile collapses to the same output are equal on screen and unequal in
-a logical style, so a consumer that compares runs for equality must resolve
-against the profile before it compares.
+the foreground. Applying selected render settings is one instance of "final",
+not the reason for the rule. Capability degradation is why that stage matters at
+all: two colors the settings collapse to the same output are equal on screen and
+unequal in a logical style, so a consumer that compares runs for equality must
+apply the settings before it compares.
 
 One residue is not closable. When the foreground is absent, its concrete color
 is the terminal's default, unknown here, so an underline color equal to it

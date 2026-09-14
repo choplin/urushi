@@ -57,6 +57,11 @@ impl Modifier {
         Self(self.0 & (Self::ALL_BITS ^ other.0))
     }
 
+    /// Returns the modifiers present in both sets.
+    pub const fn intersection(self, other: Self) -> Self {
+        Self(self.0 & other.0)
+    }
+
     /// Returns whether every modifier in `other` is present in this set.
     pub const fn contains(self, other: Self) -> bool {
         self.0 & other.0 == other.0

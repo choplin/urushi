@@ -1,16 +1,20 @@
 //! The grid node: a rectangle with one shared width per column.
 
 use urushi::{
-    Align, Available, BlockStyle, Border, GridStyle, Length, Size, StyledGrapheme, TextStyle,
-    VerticalAlign, View, measure, resolve,
+    Align, Available, BlockStyle, Border, GridStyle, Length, ResolvedView, Size, StyledGrapheme,
+    TextStyle, VerticalAlign, View, measure, resolve,
 };
+
+fn resolve_ok(view: &View, available: Available) -> ResolvedView {
+    resolve(view, available).unwrap()
+}
 
 fn text(content: &str) -> View {
     View::text(content, TextStyle::new())
 }
 
 fn rows(view: &View, available: Available) -> Vec<String> {
-    resolve(view, available)
+    resolve_ok(view, available)
         .rows()
         .iter()
         .map(|row| row.iter().map(StyledGrapheme::symbol).collect())
@@ -46,7 +50,7 @@ fn a_column_is_as_wide_as_its_widest_cell_in_every_row() {
 
 #[test]
 fn a_narrow_area_keeps_every_row_at_the_shared_column_widths() {
-    let resolved = resolve(&report(), Available::columns(18));
+    let resolved = resolve_ok(&report(), Available::columns(18));
 
     assert_eq!(resolved.size().width(), 18);
     assert!(resolved.size().height() > 3, "narrow cells wrap");
@@ -62,7 +66,7 @@ fn a_narrow_area_keeps_every_row_at_the_shared_column_widths() {
 #[test]
 fn an_area_wider_than_the_grid_leaves_it_at_its_own_width() {
     assert_eq!(
-        resolve(&report(), Available::columns(200)).size(),
+        resolve_ok(&report(), Available::columns(200)).size(),
         Size::new(37, 3)
     );
     assert_eq!(
@@ -246,7 +250,7 @@ fn an_anchor_inside_a_cell_reports_where_the_grid_put_it() {
         ],
     );
 
-    let resolved = resolve(&view, Available::NONE);
+    let resolved = resolve_ok(&view, Available::NONE);
     let region = resolved.anchor("chart").expect("the anchor resolved");
 
     assert_eq!((region.x(), region.y()), (5, 1));
@@ -267,7 +271,7 @@ fn an_anchor_cell_is_placed_by_its_own_alignment_like_any_box() {
         ],
     );
 
-    let resolved = resolve(&view, Available::NONE);
+    let resolved = resolve_ok(&view, Available::NONE);
     let region = resolved.anchor("region").expect("the anchor resolved");
 
     assert_eq!((region.x(), region.y()), (10, 1));

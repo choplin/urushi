@@ -45,8 +45,8 @@ At the output boundary:
   `Modifier::UNDERLINED` in the `urushi-tui` adapter, and the underline color
   is dropped — reaching it would require the `underline-color` feature, which
   pulls in a backend the adapter does not depend on.
-- An underline survives a colorless `TerminalProfile` — it is a shape — while
-  its color degrades with the foreground and background.
+- An underline survives `RenderSettings` with `ColorLevel::None` when its shape
+  remains selected, while its color degrades with foreground and background.
 
 ## Why an underline is a value rather than a flag and a color
 

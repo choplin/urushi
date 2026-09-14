@@ -41,11 +41,11 @@ pub(crate) const RESET: &str = "\x1b[0m";
 /// ```
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct TextStyle {
-    fg: Option<Color>,
-    bg: Option<Color>,
-    underline: Option<Underline>,
-    hyperlink: Option<Hyperlink>,
-    modifiers: Modifier,
+    pub(crate) fg: Option<Color>,
+    pub(crate) bg: Option<Color>,
+    pub(crate) underline: Option<Underline>,
+    pub(crate) hyperlink: Option<Hyperlink>,
+    pub(crate) modifiers: Modifier,
 }
 
 impl TextStyle {
@@ -216,7 +216,7 @@ impl TextStyle {
     /// why reversed video, whose equivalence assumes how a terminal implements
     /// `dim`, stays as written.
     ///
-    /// Applied once the style is final: [`TerminalProfile`](crate::TerminalProfile)
+    /// Applied once the style is final: [`RenderSettings`](crate::RenderSettings)
     /// calls it as its last step, after degradation, because degradation is what
     /// makes two logical colors equal. A `TextStyle` is an immutable value built
     /// by consuming builders, so any earlier fold is undone by the next call that
@@ -293,8 +293,8 @@ impl TextStyle {
 
     /// Removes every color while preserving modifiers and the underline shape.
     ///
-    /// An underline survives a colorless profile — it is a shape, not a color —
-    /// but its color does not, exactly as a foreground does not.
+    /// An underline survives colorless render settings — it is a shape, not a
+    /// color — but its color does not, exactly as a foreground does not.
     pub(crate) fn without_colors(mut self) -> Self {
         self.fg = None;
         self.bg = None;

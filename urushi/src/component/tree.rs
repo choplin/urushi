@@ -29,9 +29,7 @@ impl TreeNode {
     ///
     /// `value` is plain text. Escape sequences and cursor movement in it break that contract:
     /// debug builds panic, and release builds measure them as ordinary
-    /// characters and may split them when wrapping or truncating. Adopt
-    /// already-rendered output with
-    /// [`RenderedBlock::from_ansi`](crate::RenderedBlock::from_ansi) instead.
+    /// characters and may split them when wrapping or truncating. Raw ANSI is not accepted as component text.
     ///
     /// Style the component through its [`ComponentTheme`](crate::ComponentTheme)
     /// rather than by pre-rendering its content.
@@ -608,6 +606,7 @@ mod tests {
 
     fn plain_at(view: &View, width: usize) -> String {
         crate::resolve(view, crate::Available::columns(width))
+            .unwrap()
             .rows()
             .iter()
             .map(|row| {

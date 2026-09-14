@@ -7,21 +7,21 @@ use ratatui::{
     widgets::Widget as _,
 };
 use urushi::{
-    Align, AnsiPolicy, AnsiRenderer, Available, BlockStyle, Border, Color, ColorProfile, Length,
-    Modifier as UrushiModifier, Overflow, PanelRole, PrintableText, SemanticTokens, StyledText,
-    TerminalProfile, TextSpan, TextStyle, Theme, VerticalAlign, View, measure,
+    Align, Available, BlockStyle, Border, Color, ColorLevel, Length, Modifier as UrushiModifier,
+    Overflow, PanelRole, PrintableText, RenderSettings, SemanticTokens, Size, StyledText, TextSpan,
+    TextStyle, Theme, UnderlineStyleSet, VerticalAlign, View, measure, render, resolve,
 };
 use urushi_tui::ratatui::{RatatuiStyle, RatatuiStyleExt as _, ViewWidget};
 
 #[test]
 fn one_theme_component_renders_to_plain_cli_and_ratatui() {
     let theme = Theme::from_tokens(tokens());
-    let profile = TerminalProfile::new(ColorProfile::TrueColor, AnsiPolicy::Enabled);
-    let panel = profile.resolve_block_style(&theme.block_style(PanelRole::PanelFocused));
+    let panel = theme.block_style(PanelRole::PanelFocused);
 
-    let block = panel.render("保存しました");
-    assert_eq!(block.size().width(), 16);
-    let plain = block.into_string();
+    let block = panel_view(panel.clone(), "保存しました");
+    let resolved = resolve(&block, Available::NONE).unwrap();
+    assert_eq!(resolved.size().width(), 16);
+    let plain = render(&resolved, &ansi_settings());
     assert!(plain.contains("保存しました"));
     assert!(plain.contains("38;2;80;160;255"));
 
@@ -47,8 +47,7 @@ fn one_theme_component_renders_to_plain_cli_and_ratatui() {
 #[test]
 fn theme_widget_refits_safely_at_a_boundary_size() {
     let theme = Theme::from_tokens(tokens());
-    let profile = TerminalProfile::new(ColorProfile::TrueColor, AnsiPolicy::Enabled);
-    let panel = profile.resolve_block_style(&theme.block_style(PanelRole::PanelFocused));
+    let panel = theme.block_style(PanelRole::PanelFocused);
     let backend = TestBackend::new(6, 3);
     let mut terminal = Terminal::new(backend).expect("test terminal");
 
@@ -72,20 +71,16 @@ fn theme_widget_refits_safely_at_a_boundary_size() {
 #[test]
 fn both_backends_render_the_shared_view_corpus_identically() {
     for (case, view, area) in corpus() {
-        let rendered = plain_renderer().render_within(&view, area_of(area));
+        let (rendered, size) = render_plain(&view, area_of(area));
         // Cells beyond the resolved rectangle belong to the caller's buffer,
         // not to the view, so the comparison is bounded by the resolved size.
-        let width = u16::try_from(rendered.size().width()).expect("resolved width");
-        let expected: Vec<&str> = rendered.as_str().lines().collect();
+        let width = u16::try_from(size.width()).expect("resolved width");
+        let expected: Vec<&str> = rendered.lines().collect();
 
         let mut buffer = Buffer::empty(area);
         ViewWidget::new(&view).render(area, &mut buffer);
 
-        assert_eq!(
-            rendered.size().height(),
-            expected.len(),
-            "{case}: row count"
-        );
+        assert_eq!(size.height(), expected.len(), "{case}: row count");
         for (row, expected_line) in expected.into_iter().enumerate() {
             assert_eq!(
                 visual_row(&buffer, row as u16, width),
@@ -108,9 +103,9 @@ fn a_bordered_block_inside_a_row_has_the_same_rectangle_in_both_backends() {
     let mut buffer = Buffer::empty(area);
     ViewWidget::new(&view).render(area, &mut buffer);
 
-    let ansi = plain_renderer().render(&view);
-    assert_eq!(ansi.size(), size);
-    for (row, expected_line) in ansi.as_str().lines().enumerate() {
+    let (plain, rendered_size) = render_plain(&view, Available::NONE);
+    assert_eq!(rendered_size, size);
+    for (row, expected_line) in plain.lines().enumerate() {
         assert_eq!(visual_line(&buffer, row as u16), expected_line);
     }
 }
@@ -382,45 +377,24 @@ fn area_of(area: Rect) -> Available {
     Available::size(usize::from(area.width), usize::from(area.height))
 }
 
-fn plain_renderer() -> AnsiRenderer {
-    AnsiRenderer::new(TerminalProfile::new(
-        ColorProfile::TrueColor,
-        AnsiPolicy::Disabled,
-    ))
+fn render_plain(view: &View, available: Available) -> (String, Size) {
+    let resolved = resolve(view, available).unwrap();
+    let size = resolved.size();
+    (render(&resolved, &RenderSettings::default()), size)
 }
 
-#[test]
-fn ratatui_uses_the_same_terminal_profile_degradation_as_plain_output() {
-    let theme = Theme::from_tokens(tokens());
+fn panel_view(style: BlockStyle, content: &str) -> View {
+    let text = style.text().clone();
+    View::block(style, View::text(content, text))
+}
 
-    for (color_profile, expected_border) in [
-        (ColorProfile::TrueColor, RatatuiColor::Rgb(80, 160, 255)),
-        (ColorProfile::Ansi256, RatatuiColor::Indexed(75)),
-        (ColorProfile::Ansi16, RatatuiColor::LightCyan),
-    ] {
-        let profile = TerminalProfile::new(color_profile, AnsiPolicy::Enabled);
-        let panel = profile.resolve_block_style(&theme.block_style(PanelRole::PanelFocused));
-        let buffer = render_panel(&panel);
-        assert_eq!(
-            buffer.cell((0, 0)).expect("border cell").fg,
-            expected_border
-        );
-        assert!(panel.render("保存しました").as_str().contains('\x1b'));
-    }
-
-    for profile in [
-        TerminalProfile::new(ColorProfile::Monochrome, AnsiPolicy::Enabled),
-        TerminalProfile::new(ColorProfile::TrueColor, AnsiPolicy::Disabled),
-    ] {
-        let panel = profile.resolve_block_style(&theme.block_style(PanelRole::PanelFocused));
-        let buffer = render_panel(&panel);
-        let border = buffer.cell((0, 0)).expect("border cell");
-        let content = buffer.cell((2, 1)).expect("content cell");
-        assert_eq!(border.fg, RatatuiColor::Reset);
-        assert_eq!(content.fg, RatatuiColor::Reset);
-        assert_eq!(content.bg, RatatuiColor::Reset);
-        assert!(!panel.render("保存しました").as_str().contains('\x1b'));
-    }
+fn ansi_settings() -> RenderSettings {
+    RenderSettings::default()
+        .with_colors(ColorLevel::TrueColor)
+        .with_modifiers(UrushiModifier::all())
+        .with_underline_styles(UnderlineStyleSet::all())
+        .with_underline_colors(true)
+        .with_hyperlinks(true)
 }
 
 #[test]
@@ -434,15 +408,6 @@ fn ratatui_converts_the_active_modifier_set() {
 
     assert_eq!(converted.add_modifier, Modifier::BOLD);
     assert!(converted.sub_modifier.is_empty());
-}
-
-fn render_panel(style: &urushi::BlockStyle) -> ratatui::buffer::Buffer {
-    let backend = TestBackend::new(16, 3);
-    let mut terminal = Terminal::new(backend).expect("test terminal");
-    terminal
-        .draw(|frame| frame.render_widget(style.widget("保存しました"), frame.area()))
-        .expect("draw frame");
-    terminal.backend().buffer().clone()
 }
 
 fn tokens() -> SemanticTokens {

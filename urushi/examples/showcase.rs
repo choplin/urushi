@@ -1,8 +1,8 @@
 use urushi::{
-    Align, AnsiPolicy, AnsiRenderer, BlockStyle, Border, Color, ColorProfile, List, ListItem,
-    SemanticTokens, Table, TableBorder, TableCell, TableCellStyler, TablePresentation,
-    TerminalProfile, TextStyle, Theme, Tree, TreeNode, VerticalAlign, View, arabic_enumerator,
-    measure,
+    Align, Available, BlockStyle, Border, Color, ColorLevel, List, ListItem, Modifier,
+    RenderSettings, SemanticTokens, Table, TableBorder, TableCell, TableCellStyler,
+    TablePresentation, TextStyle, Theme, Tree, TreeNode, UnderlineStyleSet, VerticalAlign, View,
+    arabic_enumerator, measure, render, resolve,
 };
 
 /// Blank space of a fixed width, used to separate samples.
@@ -613,12 +613,16 @@ pub fn showcase_view() -> View {
 
 /// Renders the catalog for a terminal that keeps every color as written.
 pub fn render_showcase() -> String {
-    AnsiRenderer::new(TerminalProfile::new(
-        ColorProfile::TrueColor,
-        AnsiPolicy::Enabled,
-    ))
-    .render(&showcase_view())
-    .into_string()
+    let resolved = resolve(&showcase_view(), Available::NONE).unwrap();
+    render(
+        &resolved,
+        &RenderSettings::default()
+            .with_colors(ColorLevel::TrueColor)
+            .with_modifiers(Modifier::all())
+            .with_underline_styles(UnderlineStyleSet::all())
+            .with_underline_colors(true)
+            .with_hyperlinks(true),
+    )
 }
 
 #[cfg_attr(test, allow(dead_code))]

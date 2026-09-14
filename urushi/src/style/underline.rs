@@ -16,6 +16,52 @@ pub enum UnderlineStyle {
     Dashed,
 }
 
+/// A set of underline shapes selected for rendering.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
+pub struct UnderlineStyleSet(u8);
+
+impl UnderlineStyleSet {
+    pub const SINGLE: Self = Self(1 << 0);
+    pub const DOUBLE: Self = Self(1 << 1);
+    pub const CURLY: Self = Self(1 << 2);
+    pub const DOTTED: Self = Self(1 << 3);
+    pub const DASHED: Self = Self(1 << 4);
+
+    const ALL_BITS: u8 =
+        Self::SINGLE.0 | Self::DOUBLE.0 | Self::CURLY.0 | Self::DOTTED.0 | Self::DASHED.0;
+
+    pub const fn empty() -> Self {
+        Self(0)
+    }
+
+    pub const fn all() -> Self {
+        Self(Self::ALL_BITS)
+    }
+
+    pub const fn union(self, other: Self) -> Self {
+        Self(self.0 | other.0)
+    }
+
+    pub const fn contains(self, style: UnderlineStyle) -> bool {
+        let style = match style {
+            UnderlineStyle::Single => Self::SINGLE,
+            UnderlineStyle::Double => Self::DOUBLE,
+            UnderlineStyle::Curly => Self::CURLY,
+            UnderlineStyle::Dotted => Self::DOTTED,
+            UnderlineStyle::Dashed => Self::DASHED,
+        };
+        self.0 & style.0 != 0
+    }
+}
+
+impl std::ops::BitOr for UnderlineStyleSet {
+    type Output = Self;
+
+    fn bitor(self, rhs: Self) -> Self::Output {
+        self.union(rhs)
+    }
+}
+
 impl UnderlineStyle {
     /// The SGR parameter selecting this shape (e.g. `"4:3"`).
     ///

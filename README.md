@@ -14,9 +14,9 @@ Rust has excellent TUI foundations ([ratatui](https://ratatui.rs)) and several
 prompt libraries, but no shared styling substrate that works across plain CLI
 output, interactive prompts, and full TUIs. `urushi` aims to fill that gap:
 
-- **Standalone first.** A `BlockStyle` renders to a block that displays as a
-  plain ANSI string, so it works with `println!` — no terminal setup, raw mode,
-  or event loop.
+- **Standalone first.** A `View` resolves independently from output and renders
+  to a `String`; `urushi::print` and `urushi::println` handle ordinary terminal
+  output without raw mode or an event loop.
 - **Ride the ratatui ecosystem via an adapter.** The `urushi-tui` crate draws
   urushi styles and view trees into a ratatui `Buffer`, mapping the
   fg/bg/modifier subset onto `ratatui::style::Style` and keeping the box model
@@ -34,6 +34,7 @@ surface layers, including which parts are implemented today.
 | Crate | Description | Status |
 |---|---|---|
 | [`urushi`](urushi/) | Style definitions: colors, modifiers, padding, margin, borders, alignment, wrapping | Core rendering works |
+| [`urushi-terminal`](urushi-terminal/) | Target-specific terminal size and output-capability inspection | Core detection works |
 | [`urushi-prompt`](urushi-prompt/) | Theme-aware `Input`, `Select`, and `Confirm` fields with synchronous validation | Core prompt flow works |
 | [`urushi-tui`](urushi-tui/) | The `ratatui` adapter — style conversion, box-model widgets, and the cell-writing path they share with a renderer — and the home of the full-screen runtime | Adapter works; runtime is not implemented |
 
@@ -51,7 +52,7 @@ styling and layout:
 
 | The application owns | urushi provides |
 |---|---|
-| Terminal entry and restoration, raw mode, the event loop, when a frame is drawn | `Theme` and `TerminalProfile`: one palette resolved for the actual writer |
+| Terminal entry and restoration, raw mode, the event loop, when a frame is drawn | Logical `Theme` and renderer-neutral `View` values |
 | Model state, focus, scroll offset, key handling | The box model — margin, border, padding, dimensions, alignment — resolved in one layout pass |
 | Which `Rect` each part of the screen gets | The `View` tree and reusable components that return one |
 
@@ -78,7 +79,7 @@ more than once — resolves under `available` and writes the result with
 use urushi::resolve;
 use urushi_tui::ratatui::{available, draw_resolved};
 
-let resolved = resolve(&view, available(area));
+let resolved = resolve(&view, available(area))?;
 draw_resolved(&resolved, area, frame.buffer_mut());
 ```
 
@@ -115,21 +116,19 @@ cargo run --example cjk_showcase
 ### Theme-aware plain CLI output
 
 Define one light theme and one dark theme, choose `ColorScheme` explicitly,
-then resolve a component role through the profile of the writer that will
-receive it. The runnable example uses the public path from `ThemeSet` to
-`BlockStyle::render`:
+compose a `View`, then pass it to `urushi::println`. The convenience function
+inspects stdout, resolves with the terminal width, selects supported rendering
+features, and writes the result:
 
 ```sh
 cargo run -p urushi --example themed_output
 ```
 
-`TerminalProfile::detect_for` must be called for the actual writer: use
-`stdout` for normal output and `stderr` for diagnostics, rather than carrying a
-profile between streams. File and pipe writers are non-TTY, so their resolved
-styles have no ANSI escape sequences while retaining borders, padding,
-alignment, and visible text. A non-empty `NO_COLOR` similarly removes colors
-while retaining modifiers; use `TerminalProfile::new` for a deterministic
-application override.
+`print` and `println` target stdout; `eprint` and `eprintln` target stderr.
+Redirected output is an unbounded plain dump. A non-empty `NO_COLOR` removes
+colors while retaining other supported features. Code writing an arbitrary
+`std::io::Write` target uses `urushi_terminal::detect`, `resolve`, and `render`
+directly and can select different `RenderSettings` from the detected maximum.
 
 ### The same Theme in ratatui
 
@@ -141,23 +140,16 @@ urushi = "0.1.0"
 urushi-tui = "0.1.0"
 ```
 
-Resolve a component from the same `Theme` used by plain output, apply the
-terminal's `TerminalProfile`, then pass its widget adapter to a ratatui frame.
-Colors and modifiers stay in the Theme; the TUI layer does not define a second
-palette.
+Resolve a component from the same `Theme` used by plain output, then pass its
+widget adapter to a ratatui frame. Colors and modifiers stay logical in the
+Theme; Ratatui performs its own backend conversion.
 
 ```rust
 use urushi_tui::ratatui::RatatuiStyleExt as _;
 
-let panel = profile.resolve_block_style(&theme.block_style(PanelRole::PanelFocused));
+let panel = theme.block_style(PanelRole::PanelFocused);
 frame.render_widget(panel.widget("保存しました"), frame.area());
 ```
-
-Apply `TerminalProfile` before either rendering adapter. This keeps truecolor,
-256-color, 16-color, monochrome, and disabled output consistent between plain
-ANSI strings and ratatui. Detect the profile for the writer owned by your
-terminal setup, or construct an explicit profile when the application already
-knows the backend capability.
 
 `RatatuiStyle::from(&style)` converts a `TextStyle` when only foreground,
 background, and text modifiers are needed; that conversion carries no geometry,
@@ -184,9 +176,9 @@ and localized field help:
 nix develop --command cargo run -p urushi-prompt --example cjk_wizard
 ```
 
-The example passes one `Theme` and the terminal's `TerminalProfile` to a form
-containing `Input`, `Select`, and `Confirm`. The prompt resolves semantic roles
-from that Theme; it does not define a separate palette. A form starts on a new
+The example passes one `Theme` to a form containing `Input`, `Select`, and
+`Confirm`. The prompt inspects stderr and resolves semantic roles from that
+Theme; it does not define a separate palette. A form starts on a new
 line and uses the remaining terminal width by default. To place it after text
 on the current line and cap its width, run:
 
@@ -236,8 +228,8 @@ new size; expect all other visible primary-buffer content to be erased.
 
 - [x] `TextStyle` / `BlockStyle` builders: colors, modifiers, padding, margin, border, width, align
 - [x] ANSI-aware width measurement and CJK-aware word wrap
-- [x] Composition helpers (`join_horizontal`, `join_vertical`)
-- [x] Color profile detection and degradation (truecolor → 256 → 16), `NO_COLOR`, non-TTY
+- [x] View composition before layout and rendering
+- [x] Target-specific terminal detection and feature-granular rendering settings
 - [ ] Adaptive colors (light/dark terminal backgrounds)
 - [x] Nested styles as a view tree (`View::text` / `block` / `row` / `column`) resolved in one layout pass, rather than re-styling already-rendered text
 - [x] Theme layer: per-component style sets derived from a small set of semantic tokens

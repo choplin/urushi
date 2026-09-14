@@ -576,6 +576,7 @@ mod tests {
 
     fn plain_at(view: &View, width: usize) -> String {
         resolve(view, Available::columns(width))
+            .unwrap()
             .rows()
             .iter()
             .map(|row| {

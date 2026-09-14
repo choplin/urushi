@@ -1,8 +1,13 @@
 use urushi::{
     Available, Axis, BlockStyle, Canvas, CanvasCell, CanvasContext, CanvasItem, CanvasSizing,
     CellContribution, Composition, Grapheme, LayoutErrorKind, Length, LineContinuations,
-    LineGlyphs, LineNetwork, Position, PositionedCell, Size, TextStyle, View, resolve, try_resolve,
+    LineGlyphs, LineNetwork, Position, PositionedCell, ResolvedView, Size, TextStyle, View,
+    resolve,
 };
+
+fn resolve_ok(view: &View, available: Available) -> ResolvedView {
+    resolve(view, available).unwrap()
+}
 
 #[derive(Debug, Clone, PartialEq)]
 struct Scene {
@@ -27,7 +32,7 @@ impl CanvasItem for Scene {
 }
 
 fn lines(view: &View, available: Available) -> Vec<String> {
-    resolve(view, available)
+    resolve_ok(view, available)
         .rows()
         .iter()
         .map(|row| row.iter().map(|cell| cell.symbol()).collect())
@@ -123,7 +128,7 @@ impl CanvasItem for FullRowReplace {
 
 #[test]
 fn a_full_row_text_replace_clears_prior_wide_content() {
-    let resolved = resolve(
+    let resolved = resolve_ok(
         &View::canvas(Canvas::new().extent(Size::new(4, 1)).item(FullRowReplace)),
         Available::NONE,
     );
@@ -170,7 +175,7 @@ fn cell_lines_reject_zero_width_markers() {
             .extent(Size::new(2, 1))
             .item(InvalidMarker("\u{301}")),
     );
-    let _ = resolve(&view, Available::NONE);
+    let _ = resolve_ok(&view, Available::NONE);
 }
 
 #[test]
@@ -181,7 +186,7 @@ fn cell_lines_reject_wide_markers() {
             .extent(Size::new(2, 1))
             .item(InvalidMarker("界")),
     );
-    let _ = resolve(&view, Available::NONE);
+    let _ = resolve_ok(&view, Available::NONE);
 }
 
 #[test]
@@ -259,7 +264,7 @@ impl CanvasItem for Anchored {
 
 #[test]
 fn clipping_keeps_signed_anchor_geometry() {
-    let resolved = resolve(
+    let resolved = resolve_ok(
         &View::canvas(Canvas::new().extent(Size::new(4, 3)).item(Anchored)),
         Available::NONE,
     );
@@ -327,11 +332,11 @@ impl CanvasItem for CappedMissingAllocation {
 
 #[test]
 fn unbounded_canvas_and_fill_view_commands_report_the_missing_axis() {
-    let extent = try_resolve(&View::canvas(Canvas::new()), Available::NONE).unwrap_err();
+    let extent = resolve(&View::canvas(Canvas::new()), Available::NONE).unwrap_err();
     assert_eq!(extent.kind(), LayoutErrorKind::CanvasExtent);
     assert_eq!(extent.axis(), Axis::Width);
 
-    let allocation = try_resolve(
+    let allocation = resolve(
         &View::canvas(
             Canvas::new()
                 .extent(Size::new(8, 2))
@@ -343,7 +348,7 @@ fn unbounded_canvas_and_fill_view_commands_report_the_missing_axis() {
     assert_eq!(allocation.kind(), LayoutErrorKind::ViewAllocation);
     assert_eq!(allocation.axis(), Axis::Width);
 
-    let nested = try_resolve(
+    let nested = resolve(
         &View::canvas(
             Canvas::new()
                 .extent(Size::new(8, 2))
@@ -355,7 +360,7 @@ fn unbounded_canvas_and_fill_view_commands_report_the_missing_axis() {
     assert_eq!(nested.kind(), LayoutErrorKind::ViewAllocation);
     assert_eq!(nested.axis(), Axis::Width);
 
-    let capped = try_resolve(
+    let capped = resolve(
         &View::canvas(
             Canvas::new()
                 .extent(Size::new(8, 2))
@@ -444,7 +449,7 @@ impl CanvasItem for StyleContinuation {
 
 #[test]
 fn style_only_overlay_on_a_continuation_updates_the_wide_grapheme_in_place() {
-    let resolved = resolve(
+    let resolved = resolve_ok(
         &View::canvas(
             Canvas::new()
                 .extent(Size::new(2, 1))
@@ -469,7 +474,7 @@ fn intrinsic_grid_share_does_not_masquerade_as_a_finite_parent_allocation() {
         [[View::canvas(Canvas::new().height(1))]],
     );
     assert_eq!(
-        try_resolve(&view, Available::NONE).unwrap_err().axis(),
+        resolve(&view, Available::NONE).unwrap_err().axis(),
         Axis::Width
     );
 }
@@ -478,7 +483,7 @@ fn intrinsic_grid_share_does_not_masquerade_as_a_finite_parent_allocation() {
 fn finite_column_and_grid_shares_are_canvas_allocations() {
     let column = View::column(urushi::Align::Left, [View::canvas(Canvas::new().width(2))]);
     assert_eq!(
-        resolve(&column, Available::size(2, 3)).size(),
+        resolve_ok(&column, Available::size(2, 3)).size(),
         Size::new(2, 3)
     );
 
@@ -487,7 +492,7 @@ fn finite_column_and_grid_shares_are_canvas_allocations() {
         [[View::canvas(Canvas::new().width(2))]],
     );
     assert_eq!(
-        resolve(&grid, Available::size(2, 3)).size(),
+        resolve_ok(&grid, Available::size(2, 3)).size(),
         Size::new(2, 0),
         "the auto-height grid assigns its intrinsic zero-height row a finite zero-cell share"
     );
@@ -962,7 +967,7 @@ impl CanvasItem for StyledNetwork {
 
 #[test]
 fn line_network_overlays_every_text_style_property() {
-    let resolved = resolve(
+    let resolved = resolve_ok(
         &View::canvas(Canvas::new().extent(Size::new(3, 3)).item(StyledNetwork)),
         Available::NONE,
     );
@@ -1057,7 +1062,7 @@ impl CanvasItem for RepresentativeGraph {
 
 #[test]
 fn representative_graph_composes_every_command_in_one_resolve() {
-    let resolved = resolve(
+    let resolved = resolve_ok(
         &View::canvas(
             Canvas::new()
                 .extent(Size::new(8, 4))

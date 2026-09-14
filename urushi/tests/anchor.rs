@@ -5,9 +5,13 @@
 //! moves nothing.
 
 use urushi::{
-    Align, AnchoredRect, AnsiPolicy, AnsiRenderer, Available, BlockStyle, Border, ColorProfile,
-    Key, Length, Size, TerminalProfile, TextStyle, VerticalAlign, View, resolve,
+    Align, AnchoredRect, Available, BlockStyle, Border, Key, Length, RenderSettings, ResolvedView,
+    Size, TextStyle, VerticalAlign, View, render, resolve,
 };
+
+fn resolve_ok(view: &View, available: Available) -> ResolvedView {
+    resolve(view, available).unwrap()
+}
 
 fn text(content: &str) -> View {
     View::text(content, TextStyle::new())
@@ -15,7 +19,7 @@ fn text(content: &str) -> View {
 
 /// A view's cells, without styles, one string per row.
 fn rows(view: &View, available: Available) -> Vec<String> {
-    resolve(view, available)
+    resolve_ok(view, available)
         .rows()
         .iter()
         .map(|row| row.iter().map(|cell| cell.symbol()).collect())
@@ -24,7 +28,7 @@ fn rows(view: &View, available: Available) -> Vec<String> {
 
 /// The one region `view` reports, as `(x, y, width, height)`.
 fn region(view: &View, available: Available) -> (i64, i64, usize, usize) {
-    let resolved = resolve(view, available);
+    let resolved = resolve_ok(view, available);
     assert_eq!(resolved.anchors().len(), 1, "exactly one anchor");
     let region = &resolved.anchors()[0];
     (region.x(), region.y(), region.width(), region.height())
@@ -40,9 +44,11 @@ fn a_tree_without_an_anchor_reports_nothing() {
         ],
     );
 
-    assert!(resolve(&view, Available::NONE).anchors().is_empty());
+    assert!(resolve_ok(&view, Available::NONE).anchors().is_empty());
     assert!(
-        resolve(&view, Available::size(3, 2)).anchors().is_empty(),
+        resolve_ok(&view, Available::size(3, 2))
+            .anchors()
+            .is_empty(),
         "nor after a crop"
     );
 }
@@ -58,7 +64,7 @@ fn an_anchor_reports_the_cell_that_follows_the_text_it_sits_after() {
     assert_eq!((x, y), (2, 0), "the cell after the prompt");
     assert_eq!((width, height), (0, 0), "a cursor covers no cells");
     assert!(
-        resolve(&prompt, Available::NONE)
+        resolve_ok(&prompt, Available::NONE)
             .anchor("cursor")
             .expect("the anchor resolved")
             .is_within_resolved_view(),
@@ -175,7 +181,7 @@ fn a_box_is_reported_before_what_it_encloses() {
         View::row(VerticalAlign::Top, [cell("left"), cell("right")]),
     );
 
-    let resolved = resolve(&view, Available::NONE);
+    let resolved = resolve_ok(&view, Available::NONE);
     let reported: Vec<(Key, i64)> = resolved
         .anchors()
         .iter()
@@ -202,7 +208,7 @@ fn one_key_names_one_region() {
         [View::anchor("cursor"), View::anchor("cursor")],
     );
 
-    resolve(&view, Available::NONE);
+    resolve_ok(&view, Available::NONE);
 }
 
 #[test]
@@ -215,7 +221,7 @@ fn a_bounded_area_reshapes_the_box_and_the_region_with_it() {
         View::empty(),
     );
 
-    let resolved = resolve(&view, Available::size(5, 2));
+    let resolved = resolve_ok(&view, Available::size(5, 2));
     let region = &resolved.anchors()[0];
 
     assert_eq!(resolved.size(), Size::new(5, 2));
@@ -237,7 +243,7 @@ fn a_cursor_below_the_view_is_reported_below_it_and_says_so() {
         ],
     );
 
-    let resolved = resolve(&view, Available::size(1, 2));
+    let resolved = resolve_ok(&view, Available::size(1, 2));
     let cursor = resolved.anchor("cursor").expect("the anchor resolved");
 
     assert_eq!(resolved.size().height(), 2, "the area bounded the rows");
@@ -252,10 +258,6 @@ fn a_cursor_below_the_view_is_reported_below_it_and_says_so() {
 
 #[test]
 fn an_anchor_resolves_to_the_blanks_a_backend_without_one_draws() {
-    let renderer = AnsiRenderer::new(TerminalProfile::new(
-        ColorProfile::Monochrome,
-        AnsiPolicy::Disabled,
-    ));
     let view = View::anchor_block(
         "chart",
         BlockStyle::new()
@@ -266,12 +268,18 @@ fn an_anchor_resolves_to_the_blanks_a_backend_without_one_draws() {
     );
 
     assert_eq!(
-        renderer.render(&view).into_string(),
+        render(
+            &resolve_ok(&view, Available::NONE),
+            &RenderSettings::default()
+        ),
         "┌──┐\n└──┘",
         "the region is blank, and the frame around it is not"
     );
     assert_eq!(
-        renderer.render(&View::anchor("cursor")).into_string(),
+        render(
+            &resolve_ok(&View::anchor("cursor"), Available::NONE),
+            &RenderSettings::default()
+        ),
         "",
         "an empty anchor draws nothing at all"
     );

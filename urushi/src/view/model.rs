@@ -66,9 +66,8 @@ impl View {
     ///
     /// The text is plain. Escape sequences and cursor movement in it break that contract:
     /// debug builds panic, and release builds measure them as ordinary
-    /// characters and may split them when wrapping or truncating. Adopt
-    /// already-rendered output with
-    /// [`RenderedBlock::from_ansi`](crate::RenderedBlock::from_ansi) instead.
+    /// characters and may split them when wrapping or truncating. Raw ANSI is
+    /// not a valid `Text` payload.
     pub fn text(text: impl Into<String>, style: TextStyle) -> Self {
         Self::Text(StyledText::new(text, style))
     }
@@ -115,7 +114,7 @@ impl View {
     ///     BlockStyle::new().width(Length::Cells(20)).height(Length::Cells(8)),
     ///     View::empty(),
     /// );
-    /// let resolved = resolve(&chart, Available::NONE);
+    /// let resolved = resolve(&chart, Available::NONE).unwrap();
     ///
     /// let region = resolved.anchor("chart").expect("the anchor resolved");
     /// assert_eq!((region.width(), region.height()), (20, 8));
@@ -137,7 +136,7 @@ impl View {
     ///     VerticalAlign::Top,
     ///     [View::text("> ", TextStyle::new()), View::anchor("cursor")],
     /// );
-    /// let resolved = resolve(&prompt, Available::NONE);
+    /// let resolved = resolve(&prompt, Available::NONE).unwrap();
     ///
     /// let cursor = resolved.anchor("cursor").expect("the anchor resolved");
     /// assert_eq!((cursor.x(), cursor.y()), (2, 0));

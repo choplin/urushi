@@ -1,9 +1,8 @@
 //! Plain-text measurement and wrapping.
 //!
 //! Everything here works on [`PrintableText`] and [`PrintableLines`]: text
-//! that carries no escape sequences and no cursor movement. Rendered output is measured by
-//! [`RenderedBlock::from_ansi`](crate::RenderedBlock::from_ansi) instead, which
-//! is the crate's only ANSI-aware path.
+//! that carries no escape sequences and no cursor movement. Raw ANSI is outside
+//! this plain-text model.
 
 mod printable;
 mod styled;

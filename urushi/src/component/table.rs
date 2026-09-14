@@ -220,9 +220,7 @@ impl Table {
     /// A table without headers composes its body rows only. Each cell is plain
     /// text. Escape sequences and cursor movement in it break that contract:
     /// debug builds panic, and release builds measure them as ordinary
-    /// characters and may split them when wrapping or truncating. Adopt
-    /// already-rendered output with
-    /// [`RenderedBlock::from_ansi`](crate::RenderedBlock::from_ansi) instead.
+    /// characters and may split them when wrapping or truncating. Raw ANSI is not accepted as component text.
     #[must_use]
     pub fn headers<I, S>(mut self, headers: I) -> Self
     where
@@ -248,9 +246,7 @@ impl Table {
     ///
     /// Escape sequences and cursor movement in it break that contract:
     /// debug builds panic, and release builds measure them as ordinary
-    /// characters and may split them when wrapping or truncating. Adopt
-    /// already-rendered output with
-    /// [`RenderedBlock::from_ansi`](crate::RenderedBlock::from_ansi) instead.
+    /// characters and may split them when wrapping or truncating. Raw ANSI is not accepted as component text.
     #[must_use]
     pub fn rows<I, R, S>(mut self, rows: I) -> Self
     where
@@ -1898,6 +1894,7 @@ mod tests {
         assert_eq!(measure(&view).width(), 41, "the natural width");
 
         let rows: Vec<String> = resolve(&view, Available::columns(18))
+            .unwrap()
             .rows()
             .iter()
             .map(|row| row.iter().map(StyledGrapheme::symbol).collect())
@@ -1932,6 +1929,7 @@ mod tests {
         let view = styles().table().compose(&wide());
 
         let rows: Vec<String> = resolve(&view, Available::columns(200))
+            .unwrap()
             .rows()
             .iter()
             .map(|row| row.iter().map(StyledGrapheme::symbol).collect())
@@ -2006,14 +2004,15 @@ mod tests {
     #[test]
     fn narrow_height_measurement_matches_drawing_and_shorter_height_crops() {
         let view = styles().table().compose(&wide());
-        let complete = resolve(&view, Available::columns(18));
+        let complete = resolve(&view, Available::columns(18)).unwrap();
         let exact = resolve(&view, Available::size(18, complete.size().height()));
         assert_eq!(
-            exact, complete,
+            exact.unwrap(),
+            complete,
             "measurement and drawing use one bound frame"
         );
 
-        let cropped = resolve(&view, Available::size(18, 3));
+        let cropped = resolve(&view, Available::size(18, 3)).unwrap();
         assert_eq!(cropped.size().height(), 3);
         assert_eq!(cropped.rows(), &complete.rows()[..3]);
     }
@@ -2039,6 +2038,7 @@ mod tests {
                 assert_eq!(
                     cell.height_at(width),
                     resolve(&cell.view(), Available::columns(width))
+                        .unwrap()
                         .size()
                         .height(),
                     "{cell:?} at width {width}"
@@ -2051,10 +2051,16 @@ mod tests {
     fn an_outer_borderless_block_can_state_fixed_or_fill_table_size() {
         let table = styles().table().compose(&sample());
         let fixed = View::block(BlockStyle::new().width(30), table.clone());
-        assert_eq!(resolve(&fixed, Available::NONE).size().width(), 30);
+        assert_eq!(resolve(&fixed, Available::NONE).unwrap().size().width(), 30);
 
         let fill = View::block(BlockStyle::new().width(Length::fill(1)), table);
-        assert_eq!(resolve(&fill, Available::columns(32)).size().width(), 32);
+        assert_eq!(
+            resolve(&fill, Available::columns(32))
+                .unwrap()
+                .size()
+                .width(),
+            32
+        );
     }
 
     #[test]

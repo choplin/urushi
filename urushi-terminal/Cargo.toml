@@ -1,0 +1,11 @@
+[package]
+name = "urushi-terminal"
+description = "Terminal inspection primitives for the Urushi ecosystem"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+keywords = ["cli", "terminal", "tty"]
+categories = ["command-line-interface"]
+
+[dependencies]
+terminal_size = "0.4.4"

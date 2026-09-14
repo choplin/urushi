@@ -191,7 +191,7 @@ mod resolving {
     fn run(bencher: Bencher, size: usize, build: fn(usize) -> View) {
         bencher
             .with_inputs(|| build(size))
-            .bench_refs(|view| black_box(resolve(view, AREA).size()));
+            .bench_refs(|view| black_box(resolve(view, AREA).unwrap().size()));
     }
 
     #[divan::bench(args = SIZES)]
@@ -228,7 +228,7 @@ mod resolving {
     fn table_cold(bencher: Bencher, size: usize) {
         bencher.bench(|| {
             let view = super::table(black_box(size));
-            black_box(resolve(&view, AREA).size())
+            black_box(resolve(&view, AREA).unwrap().size())
         });
     }
 }

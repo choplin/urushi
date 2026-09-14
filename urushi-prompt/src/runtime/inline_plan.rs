@@ -407,7 +407,7 @@ mod tests {
         LineKind, PromptStyles, PromptView, ViewCursor, crossterm::CrosstermRenderer,
         terminal::Renderer, test_styles, view::tests::*,
     };
-    use urushi::{AnsiPolicy, ColorProfile, TerminalProfile};
+    use urushi::RenderSettings;
     /// The plan the renderer would execute for `view`, without writing it.
     fn draw_plan<W>(renderer: &CrosstermRenderer<W>, view: &PromptView) -> InlineRenderPlan {
         draw_plan_at(
@@ -480,8 +480,8 @@ mod tests {
 
     fn every_plan_shape() -> Vec<(&'static str, Vec<InlineCommand>)> {
         let theme = test_theme();
-        let profile = TerminalProfile::new(ColorProfile::Monochrome, AnsiPolicy::Disabled);
-        let styles = PromptStyles::resolve(&theme, &profile);
+        let settings = RenderSettings::default();
+        let styles = PromptStyles::resolve(&theme, &settings);
         let one_row = |cursor| renderer_view(vec![view_line("only", &styles.question)], cursor);
         let three_rows = |cursor| {
             renderer_view(
@@ -677,8 +677,8 @@ mod tests {
     #[test]
     fn first_draw_reserves_rows_before_saving_the_render_origin() {
         let theme = test_theme();
-        let profile = TerminalProfile::new(ColorProfile::Monochrome, AnsiPolicy::Disabled);
-        let styles = PromptStyles::resolve(&theme, &profile);
+        let settings = RenderSettings::default();
+        let styles = PromptStyles::resolve(&theme, &settings);
         let mut renderer = CrosstermRenderer::new(Vec::new(), (20, 4));
         let view = renderer_view(
             vec![
@@ -734,8 +734,8 @@ mod tests {
     #[test]
     fn unchanged_frames_only_reposition_the_cursor() {
         let theme = test_theme();
-        let profile = TerminalProfile::new(ColorProfile::Monochrome, AnsiPolicy::Disabled);
-        let styles = PromptStyles::resolve(&theme, &profile);
+        let settings = RenderSettings::default();
+        let styles = PromptStyles::resolve(&theme, &settings);
         let mut renderer = CrosstermRenderer::new(Vec::new(), (20, 4));
         let view = renderer_view(
             vec![view_line("stable", &styles.answer)],
@@ -774,8 +774,8 @@ mod tests {
     #[test]
     fn submitted_prompt_finishes_with_a_scrolling_line_feed() {
         let theme = test_theme();
-        let profile = TerminalProfile::new(ColorProfile::Monochrome, AnsiPolicy::Disabled);
-        let styles = PromptStyles::resolve(&theme, &profile);
+        let settings = RenderSettings::default();
+        let styles = PromptStyles::resolve(&theme, &settings);
         let mut renderer = CrosstermRenderer::new(Vec::new(), (20, 2));
         renderer
             .draw(&renderer_view(
@@ -810,8 +810,8 @@ mod tests {
     #[test]
     fn recovery_state_is_the_fold_of_the_commands_that_succeeded() {
         let theme = test_theme();
-        let profile = TerminalProfile::new(ColorProfile::Monochrome, AnsiPolicy::Disabled);
-        let styles = PromptStyles::resolve(&theme, &profile);
+        let settings = RenderSettings::default();
+        let styles = PromptStyles::resolve(&theme, &settings);
         let renderer = CrosstermRenderer::new(Vec::new(), (20, 4));
         let plan = draw_plan(
             &renderer,
@@ -861,8 +861,8 @@ mod tests {
     #[test]
     fn every_row_is_cleared_before_it_is_written_in_the_same_frame() {
         let theme = test_theme();
-        let profile = TerminalProfile::new(ColorProfile::Monochrome, AnsiPolicy::Disabled);
-        let styles = PromptStyles::resolve(&theme, &profile);
+        let settings = RenderSettings::default();
+        let styles = PromptStyles::resolve(&theme, &settings);
         let mut renderer = CrosstermRenderer::new(Vec::new(), (20, 4));
         let tall = renderer_view(
             vec![

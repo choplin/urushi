@@ -1,7 +1,7 @@
 use urushi::{
-    Align, AnsiPolicy, AnsiRenderer, BlockStyle, Border, Color, ColorProfile, List, ListItem,
-    SemanticTokens, Table, TableBorder, TablePresentation, TerminalProfile, TextStyle, Theme, Tree,
-    TreeNode, VerticalAlign, View, arabic_enumerator, measure,
+    Align, Available, BlockStyle, Border, Color, ColorLevel, List, ListItem, Modifier,
+    RenderSettings, SemanticTokens, Table, TableBorder, TablePresentation, TextStyle, Theme, Tree,
+    TreeNode, UnderlineStyleSet, VerticalAlign, View, arabic_enumerator, measure, render, resolve,
 };
 
 /// Blank space of a fixed width, used to separate samples.
@@ -415,12 +415,16 @@ pub fn cjk_showcase_view() -> View {
 
 /// Renders the Japanese catalog for a 16-color terminal.
 pub fn render_cjk_showcase() -> String {
-    AnsiRenderer::new(TerminalProfile::new(
-        ColorProfile::Ansi16,
-        AnsiPolicy::Enabled,
-    ))
-    .render(&cjk_showcase_view())
-    .into_string()
+    let resolved = resolve(&cjk_showcase_view(), Available::NONE).unwrap();
+    render(
+        &resolved,
+        &RenderSettings::default()
+            .with_colors(ColorLevel::Ansi16)
+            .with_modifiers(Modifier::all())
+            .with_underline_styles(UnderlineStyleSet::all())
+            .with_underline_colors(true)
+            .with_hyperlinks(true),
+    )
 }
 
 #[cfg_attr(test, allow(dead_code))]
