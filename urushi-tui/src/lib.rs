@@ -5,7 +5,7 @@
 //! draw a resolved Urushi view into a caller-owned buffer — and, behind the
 //! `runtime` feature, the full-screen runtime's application value:
 //! [`Application`], [`Effect`], and [`Subscription`]. Frame scheduling,
-//! delivery, and terminal lifecycle remain future work behind the same
+//! effect execution, and terminal lifecycle remain future work behind the same
 //! feature.
 //!
 //! The adapter computes no geometry. The box model lives in `urushi`'s layout

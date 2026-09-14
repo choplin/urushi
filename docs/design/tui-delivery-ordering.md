@@ -25,11 +25,12 @@ event reaches `update`, so selection, cursor, viewport, and other logical state
 stay responsive and deterministic. An application or source-specific policy may
 aggregate input when its own semantics permit that optimization.
 
-Messages within a delivery retain their order. Deliveries from all sources are
-processed in the runtime-wide accepted order. A `Sync` delivery does not
-overtake an earlier accepted `Async` delivery.
+Messages within a `Sync` delivery retain their order. Deliveries from all
+sources are processed in the runtime-wide accepted order. A `Sync` delivery
+does not overtake an earlier accepted `Async` delivery.
 
-`Delivery` and its mode are runtime-internal. An application-defined source
+`Delivery` and its variants are runtime-internal. `Async` contains exactly one
+message; only `Sync` contains a non-empty batch. An application-defined source
 (`Subscription::stream`, `run`, `run_blocking` in
 [`tui-application.md`](tui-application.md)) is always `Async`; only the
 runtime's own `surface` source produces `Sync` deliveries. What an application
@@ -45,11 +46,37 @@ otherwise gets the bounded default. Effect completions and the runtime's own
 sources carry the policies the source table at the top of this section gives
 them and take no `Admission` from the application.
 
+The runtime surface source does not pass through the generic application-source
+inbox. When an observation occurs, the source applies the current subscription
+mapper and publishes the resulting application message into one replaceable,
+unaccepted slot. Accepting that slot places a `Sync` delivery directly into the
+runtime-wide order. This keeps both mapper timing and surface replacement policy
+with the only producer that needs the render barrier, while
+`Admission::latest()` remains available for application-defined snapshot
+sources whose accepted messages are ordinary `Async` deliveries.
+
+### Implementation synchronization
+
+The delivery implementation uses these synchronization paths:
+
+| Path | State protected by its mutex | Waiting and notification | Acceptance |
+| --- | --- | --- | --- |
+| Application source inbox | Unaccepted FIFO, endpoint closure, receiver Waker, and blocked async-sender Wakers | An async sender stores a Waker when a bounded inbox is full; a blocking sender waits on a condition variable. Accepting a value wakes both forms after releasing locks. | The inbox lock remains held while the oldest message is appended to the global queue as `Async`. |
+| Surface slot | One replaceable mapped message, endpoint closure, and receiver Waker | Publication never waits. It replaces the slot and wakes the runtime after releasing the slot lock. | The slot lock remains held while the message is appended to the global queue as `Sync`. |
+| Delivery queue | The runtime-wide FIFO and its async receiver Waker | The async runtime waits with a Waker; a blocking runtime waits on a condition variable. Insertion takes the Waker, releases the queue lock, then signals both forms. | Insertion under the queue mutex assigns the global delivery position. |
+| Latest-only effect | Whether one execution is pending, accepted, or canceled | Neither completion nor cancellation waits for capacity. Runtime notification happens after the freshness lock is released. | Cancellation and queue insertion are ordered by the freshness mutex, so an accepted completion cannot be removed retroactively. |
+
+When a transition needs both a producer-local mutex and the delivery-queue
+mutex, it always acquires the producer lock first. The delivery queue never
+acquires a producer lock. No Waker is invoked while either mutex is held,
+because waking may synchronously execute scheduler code.
+
 ### Async delivery and draw scheduling
 
-`Async` is the default delivery mode. Key input, text input, cursor movement,
+`Async` is the default delivery variant. Key input, text input, cursor movement,
 selection changes, viewport movement, and ordinary effect completions normally
-use it. A message is not `Sync` merely because it changes visible content.
+use it, and each accepted message occupies its own delivery. A message is not
+`Sync` merely because it changes visible content.
 
 The runtime processes accepted messages independently of physical drawing. It
 may consume several messages and then draw only the latest resulting model when
@@ -69,7 +96,7 @@ boundary.
 
 ### Sync delivery as a render barrier
 
-`Sync` is an exceptional delivery mode for changes to the logical rendering
+`Sync` is an exceptional delivery variant for changes to the logical rendering
 environment. Examples include terminal dimensions, cell pixel dimensions, or a
 graphics capability change that the application must reflect in its model
 before the corresponding frame is built.
@@ -177,7 +204,7 @@ controllable clock, an in-memory backend, and observable effect scheduling.
 Tests should assert externally meaningful ordering and presentation behavior,
 not private task structure.
 
-## Why `Delivery` and its mode stay internal
+## Why `Delivery` and its variants stay internal
 
 `Sync` exists for one thing: a fact about the rendering environment that the
 next frame must already reflect. The runtime's `surface` source is the only
@@ -185,7 +212,8 @@ producer of such facts, so nothing an application declares needs the mode, and
 exposing it would open the barrier to a source that merely wants its change
 drawn promptly — which is what `Async` already does, minus the forced draw.
 Should a rendering-environment source ever come from an application — a
-graphics capability probe, say — a mode on `Admission` is an additive change.
+graphics capability probe, say — a barrier choice on `Admission` is an additive
+change.
 
 ## Why the startup limit is not configurable
 

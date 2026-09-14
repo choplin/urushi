@@ -170,15 +170,21 @@ Message handling has two distinct stages. An **admission policy** belongs to a
 message source and decides whether an incoming item is accepted, delayed with
 backpressure, replaced, or rejected; the runtime never inspects application
 message variants to infer it. Once accepted, a **delivery** receives one
-position in a single runtime-wide order. A delivery contains one or more
-messages and a mode:
+position in a single runtime-wide order. An ordinary delivery contains exactly
+one message; the exceptional rendering barrier contains a non-empty batch:
 
 ```text
-Delivery<Message> {
-  mode: Async | Sync,
-  messages: NonEmpty<Message>,
-}
+Delivery<Message> =
+  Async(Message)
+  | Sync(NonEmpty<Message>)
 ```
+
+Application-defined sources use their declared `Admission` through a generic
+inbox and always produce `Async` deliveries, including when they use the
+replaceable `latest` policy. The runtime-owned surface producer instead owns a
+dedicated latest-observation slot. It applies the current subscription mapper
+when each observation occurs, then keeps the resulting application message in
+that slot until acceptance. Surface is the only source that produces `Sync`.
 
 Deliveries from all sources are processed in the runtime-wide accepted order; a
 `Sync` delivery does not overtake an earlier accepted `Async` one.
