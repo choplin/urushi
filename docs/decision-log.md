@@ -6,6 +6,7 @@ describe the current snapshot.
 
 | Date | Decision | Recorded in |
 | --- | --- | --- |
+| 2026-09-14 | Made a border title optional Block content rather than a style property, semantic presentation, or new View variant; its styled single line contributes automatic width and clips inside finite top-edge geometry. | [`view-model.md`](view-model.md), [`design/block-title.md`](design/block-title.md) |
 | 2026-09-14 | Removed the core-owned, self-driving progress lifecycle: execution state, ticks, redraw scheduling, and terminal cleanup belong to a host runtime rather than to renderer-neutral components or a third runtime inside `urushi`. | [`architecture.md`](architecture.md) |
 | 2026-09-14 | Made ordinary delivery exactly one `Async` message and reserved non-empty batches for the exceptional `Sync` render barrier, so an asynchronous batch is unrepresentable. | [`design/tui-delivery-ordering.md`](design/tui-delivery-ordering.md) |
 | 2026-09-14 | Lowered the canonical Tree presentation to one intrinsically sized Canvas item with protected depth prefixes and endpoint-continued `LineNetwork` connectors; one Connector role and `LineGlyphs` policy replace the former enumerator/indenter callbacks and split styles. | [`design/tree-lowering.md`](design/tree-lowering.md), [`design/tree-width-resolution.md`](design/tree-width-resolution.md) |

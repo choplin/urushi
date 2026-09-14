@@ -82,6 +82,10 @@ narrower than they are and unchanged where it is wider. `Fill` is the one
 length that reads an area as a size to take, which is why a box containing one
 spans its own extent.
 
+A non-empty Block title contributes another intrinsic width demand beside the
+child, but no height demand. Its exact demand and degradation inside a bounded
+top edge are defined in [`block-title.md`](block-title.md).
+
 A minimum states the size below which the application's layout stops making
 sense; the implicit floor below it — the widest grapheme the box cannot
 split — is not exposed as a query. Bounds are absent by default; use generic

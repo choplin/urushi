@@ -15,6 +15,8 @@ have their own files — [`box-sizing.md`](box-sizing.md),
 [`rendered-output-measurement.md`](rendered-output-measurement.md). How several
 text styles remain one text flow is defined separately in
 [`styled-text.md`](styled-text.md).
+How optional title content occupies a Block border is defined separately in
+[`block-title.md`](block-title.md).
 
 ## Why text cannot carry geometry
 
@@ -67,9 +69,9 @@ defined in [`canvas.md`](canvas.md).
 
 The two are peers — the model privileges neither — and the node names say which
 is which at every call site: `Text(StyledText)` beside
-`Block(BlockStyle, View)`. An unqualified `Style` would also read as one thing
-to a Lip Gloss reader and the other to a Ratatui reader, so it is the one name
-here that cannot mean the same thing to both audiences.
+`Block(BlockStyle, Option<BlockTitle>, Box<View>)`. An unqualified `Style` would
+also read as one thing to a Lip Gloss reader and the other to a Ratatui reader,
+so it is the one name here that cannot mean the same thing to both audiences.
 
 ## Why styles do not inherit
 

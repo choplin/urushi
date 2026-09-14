@@ -1994,7 +1994,7 @@ mod tests {
     #[test]
     fn canonical_composition_binds_an_intrinsic_canvas_item() {
         let view = styles().table().compose(&sample());
-        let View::Block(style, child) = view else {
+        let View::Block(style, _, child) = view else {
             panic!("a Table is boxed only to state its outer sizing")
         };
         assert_eq!(style.border_kind(), None);

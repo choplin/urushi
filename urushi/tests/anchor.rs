@@ -5,8 +5,8 @@
 //! moves nothing.
 
 use urushi::{
-    Align, AnchoredRect, Available, BlockStyle, Border, Key, Length, RenderSettings, ResolvedView,
-    Size, TextStyle, VerticalAlign, View, render, resolve,
+    Align, AnchoredRect, Available, BlockStyle, BlockTitle, Border, Key, Length, RenderSettings,
+    ResolvedView, Size, TextStyle, VerticalAlign, View, render, resolve,
 };
 
 fn resolve_ok(view: &View, available: Available) -> ResolvedView {
@@ -115,6 +115,49 @@ fn a_sized_anchor_reports_the_rectangle_inside_its_frame() {
         region(&framed, Available::NONE),
         (4, 2, 2, 1),
         "past the margin, inside the border and the padding"
+    );
+}
+
+#[test]
+fn adding_a_title_to_an_anchor_changes_only_its_border_cells() {
+    let style = BlockStyle::new()
+        .width(10)
+        .height(4)
+        .border(Border::NORMAL)
+        .padding((0, 1))
+        .margin((1, 2));
+    let plain = View::anchor_block("panel", style.clone(), text("x"));
+    let titled = View::titled_anchor_block("panel", style, BlockTitle::new("Files"), text("x"));
+
+    assert_eq!(
+        region(&titled, Available::NONE),
+        region(&plain, Available::NONE)
+    );
+    assert_eq!(
+        resolve_ok(&titled, Available::NONE).size(),
+        resolve_ok(&plain, Available::NONE).size()
+    );
+    assert_ne!(
+        rows(&titled, Available::NONE),
+        rows(&plain, Available::NONE)
+    );
+}
+
+#[test]
+fn a_titled_anchor_preserves_nested_anchor_geometry() {
+    let child = || View::anchor_block("inner", BlockStyle::new().width(2).height(1), View::empty());
+    let style = BlockStyle::new()
+        .width(10)
+        .height(4)
+        .border(Border::NORMAL)
+        .padding((0, 1))
+        .margin((1, 2));
+    let plain = View::anchor_block("outer", style.clone(), child());
+    let titled = View::titled_anchor_block("outer", style, "Files", child());
+
+    assert_eq!(
+        resolve_ok(&titled, Available::NONE).anchors(),
+        resolve_ok(&plain, Available::NONE).anchors()
     );
 }
 

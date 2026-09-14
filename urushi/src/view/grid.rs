@@ -65,7 +65,7 @@ pub(super) fn cell_alignment(cell: &View) -> (Align, VerticalAlign) {
 /// grid reads its style the same way it reads a plain block's.
 const fn box_style(cell: &View) -> Option<&BlockStyle> {
     match cell {
-        View::Block(block, _) | View::AnchorBlock(_, block, _) => Some(block),
+        View::Block(block, _, _) | View::AnchorBlock(_, block, _, _) => Some(block),
         _ => None,
     }
 }

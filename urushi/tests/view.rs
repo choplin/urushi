@@ -2,9 +2,9 @@
 //! and what one layout pass hands a renderer.
 
 use urushi::{
-    Align, Available, BlockStyle, Border, Color, ColorLevel, Length, Modifier, RenderSettings,
-    ResolvedView, Size, StyledGrapheme, TextStyle, UnderlineStyleSet, VerticalAlign, View, measure,
-    render, resolve,
+    Align, Available, BlockStyle, BlockTitle, Border, Color, ColorLevel, Length, Modifier,
+    Overflow, RenderSettings, ResolvedView, Size, StyledGrapheme, StyledText, TextSpan, TextStyle,
+    UnderlineStyleSet, VerticalAlign, View, measure, render, resolve,
 };
 
 fn resolve_ok(view: &View, available: Available) -> ResolvedView {
@@ -261,6 +261,287 @@ fn a_style_renders_the_single_block_case_of_the_same_pass() {
         "╭────╮\n│ ok │\n╰────╯"
     );
     assert_eq!(resolved.size(), Size::new(6, 3));
+}
+
+#[test]
+fn a_title_is_block_content_and_sets_an_automatic_width_demand() {
+    let view = View::titled_block(
+        BlockStyle::new().border(Border::NORMAL),
+        "Files",
+        View::text("x", TextStyle::new()),
+    );
+
+    assert_eq!(measure(&view), Size::new(9, 3));
+    assert_eq!(
+        plain_rows(&view),
+        vec!["┌ Files ┐", "│x      │", "└───────┘"]
+    );
+}
+
+#[test]
+fn a_title_aligns_its_complete_slot_between_the_corners() {
+    let titled = |align| {
+        View::titled_block(
+            BlockStyle::new().border(Border::ROUNDED).width(12),
+            BlockTitle::new("X").align(align),
+            View::empty(),
+        )
+    };
+
+    assert_eq!(plain_rows(&titled(Align::Left))[0], "╭ X ───────╮");
+    assert_eq!(plain_rows(&titled(Align::Center))[0], "╭─── X ────╮");
+    assert_eq!(plain_rows(&titled(Align::Right))[0], "╭─────── X ╮");
+}
+
+#[test]
+fn a_narrow_title_gives_up_padding_then_clips_between_graphemes() {
+    let titled = |width| {
+        View::titled_block(
+            BlockStyle::new().border(Border::NORMAL).width(width),
+            BlockTitle::new("日本語"),
+            View::empty(),
+        )
+    };
+
+    assert_eq!(view_rows(&titled(5), Available::NONE)[0], "┌ 日┐");
+    assert_eq!(view_rows(&titled(4), Available::NONE)[0], "┌日┐");
+    assert_eq!(
+        view_rows(&titled(2), Available::NONE)[0],
+        "┌┐",
+        "corners survive when no title grapheme fits"
+    );
+}
+
+#[test]
+fn title_spans_keep_complete_styles_and_padding_keeps_the_border_style() {
+    let border = TextStyle::new().foreground(Color::RED);
+    let first = TextStyle::new().foreground(Color::CYAN).bold();
+    let second = TextStyle::new().foreground(Color::GREEN);
+    let title = StyledText::try_from_spans([
+        TextSpan::new("A", first.clone()),
+        TextSpan::new("B", second.clone()),
+    ])
+    .unwrap();
+    let view = View::titled_block(
+        BlockStyle::new()
+            .border(Border::DOUBLE)
+            .border_foreground(Color::RED),
+        BlockTitle::new(title),
+        View::empty(),
+    );
+
+    let resolved = resolve_ok(&view, Available::NONE);
+    let top = &resolved.rows()[0];
+    assert_eq!(
+        top.iter().map(StyledGrapheme::symbol).collect::<String>(),
+        "╔ AB ╗"
+    );
+    assert_eq!(top[0].style(), &border);
+    assert_eq!(top[1].style(), &border);
+    assert_eq!(top[2].style(), &first);
+    assert_eq!(top[3].style(), &second);
+    assert_eq!(top[4].style(), &border);
+    assert_eq!(top[5].style(), &border);
+}
+
+#[test]
+fn a_title_uses_the_whole_top_edge_when_side_borders_are_disabled() {
+    let view = View::titled_block(
+        BlockStyle::new()
+            .border(Border::NORMAL)
+            .border_left(false)
+            .border_right(false),
+        BlockTitle::new("Files"),
+        View::text("x", TextStyle::new()),
+    );
+
+    assert_eq!(plain_rows(&view), vec![" Files ", "x      ", "───────"]);
+}
+
+#[test]
+fn an_empty_title_does_not_open_the_border_or_add_width() {
+    let view = View::titled_block(
+        BlockStyle::new().border(Border::NORMAL),
+        BlockTitle::new(""),
+        View::text("x", TextStyle::new()),
+    );
+
+    assert_eq!(measure(&view).width(), 3);
+    assert_eq!(plain_rows(&view)[0], "┌─┐");
+}
+
+#[test]
+fn explicit_and_external_width_caps_clip_a_title_without_changing_height() {
+    let automatic = View::titled_block(
+        BlockStyle::new().border(Border::NORMAL),
+        "abcdefgh",
+        View::text("x", TextStyle::new()),
+    );
+    let explicit = View::titled_block(
+        BlockStyle::new().border(Border::NORMAL).width(7),
+        "abcdefgh",
+        View::text("x", TextStyle::new()),
+    );
+    let maximum = View::titled_block(
+        BlockStyle::new().border(Border::NORMAL).max_width(6),
+        "abcdefgh",
+        View::text("x", TextStyle::new()),
+    );
+
+    assert_eq!(measure(&automatic), Size::new(12, 3));
+    assert_eq!(plain_rows(&explicit)[0], "┌abcde┐");
+    assert_eq!(plain_rows(&maximum)[0], "┌abcd┐");
+    assert_eq!(view_rows(&automatic, Available::columns(5))[0], "┌abc┐");
+    assert_eq!(
+        resolve_ok(&automatic, Available::columns(5)).size(),
+        Size::new(5, 3)
+    );
+}
+
+#[test]
+fn a_fill_width_uses_its_allocation_instead_of_the_title_demand() {
+    let view = View::titled_block(
+        BlockStyle::new()
+            .border(Border::NORMAL)
+            .width(Length::fill(1)),
+        "Title",
+        View::empty(),
+    );
+
+    assert_eq!(measure(&view).width(), 9);
+    assert_eq!(resolve_ok(&view, Available::columns(12)).size().width(), 12);
+    assert_eq!(resolve_ok(&view, Available::columns(6)).size().width(), 6);
+}
+
+#[test]
+fn an_automatic_titled_block_keeps_its_title_demand_over_a_fill_child() {
+    let view = View::titled_block(
+        BlockStyle::new().border(Border::NORMAL),
+        "Files",
+        View::block(BlockStyle::new().width(Length::fill(1)), View::empty()),
+    );
+
+    assert_eq!(measure(&view), Size::new(9, 2));
+    assert_eq!(resolve_ok(&view, Available::NONE).size(), Size::new(9, 2));
+    assert_eq!(plain_rows(&view)[0], "┌ Files ┐");
+    assert_eq!(resolve_ok(&view, Available::columns(12)).size().width(), 12);
+}
+
+#[test]
+fn a_minimum_width_applies_after_title_demand() {
+    let view = View::titled_block(
+        BlockStyle::new().border(Border::NORMAL).min_width(10),
+        "X",
+        View::empty(),
+    );
+
+    assert_eq!(measure(&view).width(), 10);
+    assert_eq!(plain_rows(&view)[0], "┌ X ─────┐");
+}
+
+#[test]
+fn block_overflow_does_not_add_a_marker_to_a_clipped_title() {
+    let view = View::titled_block(
+        BlockStyle::new()
+            .border(Border::NORMAL)
+            .width(6)
+            .overflow(Overflow::ellipsis()),
+        "abcdefgh",
+        View::text("12345678", TextStyle::new()),
+    );
+
+    assert_eq!(plain_rows(&view), vec!["┌abcd┐", "│123…│", "└────┘"]);
+}
+
+#[test]
+fn a_nonempty_zero_width_title_still_demands_its_padding() {
+    let view = View::titled_block(
+        BlockStyle::new().border(Border::NORMAL),
+        "\u{0301}",
+        View::empty(),
+    );
+
+    assert_eq!(measure(&view).width(), 4);
+}
+
+#[test]
+fn an_emoji_title_is_clipped_as_one_grapheme() {
+    let titled = |width| {
+        View::titled_block(
+            BlockStyle::new().border(Border::NORMAL).width(width),
+            "👩‍💻",
+            View::empty(),
+        )
+    };
+
+    assert_eq!(plain_rows(&titled(4))[0], "┌👩‍💻┐");
+    assert_eq!(plain_rows(&titled(3))[0], "┌─┐");
+}
+
+#[test]
+fn title_placement_respects_each_border_edge_toggle() {
+    let top =
+        |style: BlockStyle| plain_rows(&View::titled_block(style.width(6), "X", View::empty()));
+
+    assert_eq!(
+        top(BlockStyle::new().border(Border::NORMAL).border_left(false))[0],
+        " X ──┐"
+    );
+    assert_eq!(
+        top(BlockStyle::new().border(Border::NORMAL).border_right(false))[0],
+        "┌ X ──"
+    );
+    assert_eq!(
+        top(BlockStyle::new()
+            .border(Border::NORMAL)
+            .border_bottom(false)),
+        vec!["┌ X ─┐"]
+    );
+}
+
+#[test]
+fn block_spacing_and_title_padding_have_independent_widths() {
+    let view = View::titled_block(
+        BlockStyle::new()
+            .border(Border::NORMAL)
+            .padding((0, 2))
+            .margin((0, 1)),
+        BlockTitle::new("X").padding(0),
+        View::text("long", TextStyle::new()),
+    );
+
+    assert_eq!(measure(&view), Size::new(12, 3));
+    assert_eq!(plain_rows(&view)[0], " ┌X───────┐ ");
+}
+
+#[test]
+fn extreme_title_padding_saturates_and_degrades_before_text() {
+    let view = View::titled_block(
+        BlockStyle::new().border(Border::NORMAL),
+        BlockTitle::new("X").padding(u16::MAX),
+        View::empty(),
+    );
+
+    assert_eq!(view_rows(&view, Available::columns(3))[0], "┌X┐");
+    assert_eq!(view_rows(&view, Available::columns(2))[0], "┌┐");
+    assert_eq!(view_rows(&view, Available::columns(1))[0], "┌");
+    assert_eq!(view_rows(&view, Available::columns(0)), vec!["", ""]);
+}
+
+#[test]
+#[should_panic(expected = "a block title must be exactly one line")]
+fn a_block_title_rejects_multiple_lines() {
+    let _ = BlockTitle::new("top\nbottom");
+}
+
+#[test]
+#[should_panic(expected = "a titled block requires an enabled top border")]
+fn a_titled_block_rejects_a_missing_top_edge() {
+    let _ = View::titled_block(
+        BlockStyle::new().border(Border::NORMAL).border_top(false),
+        BlockTitle::new("Title"),
+        View::empty(),
+    );
 }
 
 // --- The area as an input to layout.

@@ -8,7 +8,7 @@
 //! geometry existed before either of them saw it.
 
 use crate::text::{PrintableText, StyledTextGrapheme};
-use crate::{Align, Sides, TextStyle, VerticalAlign};
+use crate::{Align, BlockTitle, Sides, TextStyle, VerticalAlign};
 
 use super::canvas::compose_canvas;
 use super::geometry::Size;
@@ -116,6 +116,7 @@ fn fill_style(sized: &Sized<'_>) -> TextStyle {
 fn block(sized: &Sized<'_>) -> Result<Rect, LayoutError> {
     let SizedNode::Block {
         style,
+        title,
         anchor,
         padding,
         margin,
@@ -254,6 +255,17 @@ fn block(sized: &Sized<'_>) -> Result<Rect, LayoutError> {
                 &border_style,
             ));
         }
+        if let Some(title) = title
+            && style.is_border_top_enabled()
+        {
+            embed_title(
+                &mut bordered.rows[0],
+                title,
+                style.is_border_left_enabled(),
+                style.is_border_right_enabled(),
+                &border_style,
+            );
+        }
         rect = bordered;
     }
 
@@ -262,6 +274,68 @@ fn block(sized: &Sized<'_>) -> Result<Rect, LayoutError> {
         rect = spaced(rect, *margin);
     }
     Ok(rect)
+}
+
+fn embed_title(
+    row: &mut Vec<StyledGrapheme>,
+    title: &BlockTitle,
+    left_border: bool,
+    right_border: bool,
+    border_style: &TextStyle,
+) {
+    let band_width = row_width(row)
+        .saturating_sub(usize::from(left_border))
+        .saturating_sub(usize::from(right_border));
+    if band_width == 0 {
+        return;
+    }
+
+    let lines = title.text().lines();
+    let Some(line) = lines.first() else {
+        return;
+    };
+    let mut text = Vec::new();
+    let mut text_width = 0;
+    for grapheme in line {
+        if text_width + grapheme.width() > band_width {
+            break;
+        }
+        text_width += grapheme.width();
+        text.push(StyledGrapheme::new(
+            grapheme.grapheme,
+            grapheme.style.clone(),
+        ));
+    }
+    if text.is_empty() {
+        return;
+    }
+
+    let preferred = usize::from(title.horizontal_padding());
+    let padding = band_width
+        .saturating_sub(text_width)
+        .min(preferred.saturating_mul(2));
+    let (left_padding, right_padding) = match title.alignment() {
+        Align::Left => {
+            let left = preferred.min(padding);
+            (left, padding - left)
+        }
+        Align::Center => {
+            let left = padding / 2;
+            (left, padding - left)
+        }
+        Align::Right => {
+            let right = preferred.min(padding);
+            (padding - right, right)
+        }
+    };
+    let slot_width = left_padding + text_width + right_padding;
+    let start = usize::from(left_border)
+        + align_offset(band_width.saturating_sub(slot_width), title.alignment());
+
+    let mut replacement = blank(left_padding, border_style);
+    replacement.extend(text);
+    replacement.extend(blank(right_padding, border_style));
+    row.splice(start..start + slot_width, replacement);
 }
 
 /// Surrounds a rectangle with plain, unstyled margin.

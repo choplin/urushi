@@ -2,6 +2,101 @@
 
 use crate::{Align, BlockStyle, Canvas, GridStyle, Key, StyledText, TextStyle, VerticalAlign};
 
+/// One styled line embedded in a block's top border.
+///
+/// A title is content owned by a block, not part of its [`BlockStyle`]. Its
+/// text carries complete styles, and its alignment and padding apply only
+/// within the top edge between enabled side borders.
+///
+/// ```
+/// use urushi::{Align, BlockTitle, Color, StyledText, TextSpan, TextStyle};
+///
+/// let title = StyledText::try_from_spans([
+///     TextSpan::new("F", TextStyle::new().foreground(Color::CYAN)),
+///     TextSpan::from("iles"),
+/// ])
+/// .unwrap();
+/// let title = BlockTitle::new(title).align(Align::Center).padding(0);
+///
+/// assert_eq!(title.text().as_str(), "Files");
+/// ```
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BlockTitle {
+    text: StyledText,
+    align: Align,
+    padding: u16,
+}
+
+impl BlockTitle {
+    /// Creates a left-aligned title with one blank cell on each side.
+    ///
+    /// # Panics
+    ///
+    /// Panics when `text` contains a line break. A border title occupies
+    /// exactly one row and never wraps.
+    pub fn new(text: impl Into<StyledText>) -> Self {
+        let text = text.into();
+        assert!(
+            !text.as_str().contains('\n'),
+            "a block title must be exactly one line"
+        );
+        Self {
+            text,
+            align: Align::Left,
+            padding: 1,
+        }
+    }
+
+    /// Sets the title's alignment between the block's enabled side borders.
+    #[must_use]
+    pub const fn align(mut self, align: Align) -> Self {
+        self.align = align;
+        self
+    }
+
+    /// Sets the preferred blank cells on both sides of the title.
+    ///
+    /// A narrow border gives space to title text before this padding.
+    #[must_use]
+    pub const fn padding(mut self, padding: u16) -> Self {
+        self.padding = padding;
+        self
+    }
+
+    /// Returns the title's single styled line.
+    pub const fn text(&self) -> &StyledText {
+        &self.text
+    }
+
+    /// Returns the title's alignment between enabled side borders.
+    pub const fn alignment(&self) -> Align {
+        self.align
+    }
+
+    /// Returns the preferred blank cells on both sides of the title.
+    pub const fn horizontal_padding(&self) -> u16 {
+        self.padding
+    }
+}
+
+impl From<&str> for BlockTitle {
+    fn from(text: &str) -> Self {
+        Self::new(text)
+    }
+}
+
+impl From<String> for BlockTitle {
+    fn from(text: String) -> Self {
+        Self::new(text)
+    }
+}
+
+impl From<StyledText> for BlockTitle {
+    fn from(text: StyledText) -> Self {
+        Self::new(text)
+    }
+}
+
 /// A fully composed, renderer-neutral terminal view.
 ///
 /// A view tree combines text, boxes, linear and grid layout, and finite Canvas
@@ -31,8 +126,8 @@ pub enum View {
     /// styles. Never holds escape sequences or cursor movement: the layout
     /// pass measures its graphemes without scanning for them.
     Text(StyledText),
-    /// One [`BlockStyle`] around exactly one child.
-    Block(BlockStyle, Box<View>),
+    /// One [`BlockStyle`] and optional [`BlockTitle`] around exactly one child.
+    Block(BlockStyle, Option<BlockTitle>, Box<View>),
     /// Children placed side by side, aligned vertically.
     Row(VerticalAlign, Vec<View>),
     /// Children stacked, aligned horizontally.
@@ -52,7 +147,7 @@ pub enum View {
     /// the same one child, the same style, the same sizing — and the name says
     /// so. [`resolve`](crate::resolve) reports its content rectangle beside
     /// the resolved rows, for the caller that knows what belongs there.
-    AnchorBlock(Key, BlockStyle, Box<View>),
+    AnchorBlock(Key, BlockStyle, Option<BlockTitle>, Box<View>),
 }
 
 impl Default for View {
@@ -79,7 +174,33 @@ impl View {
 
     /// Wraps one child in a block.
     pub fn block(style: BlockStyle, child: Self) -> Self {
-        Self::Block(style, Box::new(child))
+        Self::Block(style, None, Box::new(child))
+    }
+
+    /// Wraps one child in a block with a styled title in its top border.
+    ///
+    /// The title participates in automatic width demand but never increases
+    /// the box past an explicit or available width. It is clipped without
+    /// wrapping when the top edge is narrower than its text and padding.
+    ///
+    /// ```
+    /// use urushi::{BlockStyle, Border, View, measure};
+    ///
+    /// let panel = View::titled_block(
+    ///     BlockStyle::new().border(Border::NORMAL),
+    ///     "Files",
+    ///     View::empty(),
+    /// );
+    ///
+    /// assert_eq!(measure(&panel).width(), 9);
+    /// ```
+    ///
+    /// # Panics
+    ///
+    /// Panics when `style` has no top border edge.
+    pub fn titled_block(style: BlockStyle, title: impl Into<BlockTitle>, child: Self) -> Self {
+        assert_title_edge(&style);
+        Self::Block(style, Some(title.into()), Box::new(child))
     }
 
     /// Places children side by side.
@@ -120,7 +241,25 @@ impl View {
     /// assert_eq!((region.width(), region.height()), (20, 8));
     /// ```
     pub fn anchor_block(key: impl Into<Key>, style: BlockStyle, child: Self) -> Self {
-        Self::AnchorBlock(key.into(), style, Box::new(child))
+        Self::AnchorBlock(key.into(), style, None, Box::new(child))
+    }
+
+    /// Wraps one child in a titled block and reports its content rectangle.
+    ///
+    /// Geometry and title behavior are identical to [`titled_block`](Self::titled_block);
+    /// the key adds only the same report as [`anchor_block`](Self::anchor_block).
+    ///
+    /// # Panics
+    ///
+    /// Panics when `style` has no top border edge.
+    pub fn titled_anchor_block(
+        key: impl Into<Key>,
+        style: BlockStyle,
+        title: impl Into<BlockTitle>,
+        child: Self,
+    ) -> Self {
+        assert_title_edge(&style);
+        Self::AnchorBlock(key.into(), style, Some(title.into()), Box::new(child))
     }
 
     /// Creates an anchor with no box around it: an empty region, named.
@@ -170,4 +309,11 @@ impl View {
     pub const fn empty() -> Self {
         Self::Column(Align::Left, Vec::new())
     }
+}
+
+fn assert_title_edge(style: &BlockStyle) {
+    assert!(
+        style.border_kind().is_some() && style.is_border_top_enabled(),
+        "a titled block requires an enabled top border"
+    );
 }

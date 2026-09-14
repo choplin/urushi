@@ -21,7 +21,8 @@ use crate::text::{
     PrintableLines, PrintableText, StyledTextGrapheme, wrap_styled_lines, wrap_text,
 };
 use crate::{
-    Align, BlockStyle, Canvas, Key, Overflow, Sides, StyledText, TextStyle, VerticalAlign,
+    Align, BlockStyle, BlockTitle, Canvas, Key, Overflow, Sides, StyledText, TextStyle,
+    VerticalAlign,
 };
 
 use super::sizing::{
@@ -47,6 +48,7 @@ enum FittedNode<'a> {
     },
     Block {
         style: &'a BlockStyle,
+        title: Option<&'a BlockTitle>,
         anchor: Option<Key>,
         padding: Sides,
         margin: Sides,
@@ -94,6 +96,7 @@ pub(super) fn fit(widths: Widths<'_>) -> Fitted<'_> {
         }
         WidthNode::Block(block) => FittedNode::Block {
             style: block.style,
+            title: block.title,
             anchor: block.anchor,
             padding: block.padding,
             margin: block.margin,
@@ -246,6 +249,7 @@ pub(super) enum SizedNode<'f> {
     },
     Block {
         style: &'f BlockStyle,
+        title: Option<&'f BlockTitle>,
         anchor: Option<Key>,
         padding: Sides,
         margin: Sides,
@@ -298,6 +302,7 @@ pub(super) fn heights<'f>(fitted: &'f Fitted<'_>, area: Option<usize>, bounded: 
         },
         FittedNode::Block {
             style,
+            title,
             anchor,
             padding,
             margin,
@@ -348,6 +353,7 @@ pub(super) fn heights<'f>(fitted: &'f Fitted<'_>, area: Option<usize>, bounded: 
                 height: used + vertical(margin),
                 node: SizedNode::Block {
                     style,
+                    title: *title,
                     anchor: *anchor,
                     padding,
                     margin,

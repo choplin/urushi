@@ -17,7 +17,7 @@ pub use canvas::{
 };
 pub use geometry::{Available, Size};
 pub(crate) use height::fit_text_lines;
-pub use model::View;
+pub use model::{BlockTitle, View};
 pub use resolve::{
     AnchoredRect, Axis, LayoutError, LayoutErrorKind, ResolvedView, StyledGrapheme, measure,
     resolve, try_measure,

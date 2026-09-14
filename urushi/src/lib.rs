@@ -55,8 +55,8 @@ pub use theme::{
 };
 pub use urushi_terminal::ColorLevel;
 pub use view::{
-    AnchoredRect, Available, Axis, Canvas, CanvasCell, CanvasContext, CanvasItem, CanvasSizing,
-    CellContribution, Composition, LayoutError, LayoutErrorKind, LineContinuations, LineGlyphs,
-    LineNetwork, Position, PositionedCell, ResolvedView, Size, StyledGrapheme, View, measure,
-    resolve, try_measure,
+    AnchoredRect, Available, Axis, BlockTitle, Canvas, CanvasCell, CanvasContext, CanvasItem,
+    CanvasSizing, CellContribution, Composition, LayoutError, LayoutErrorKind, LineContinuations,
+    LineGlyphs, LineNetwork, Position, PositionedCell, ResolvedView, Size, StyledGrapheme, View,
+    measure, resolve, try_measure,
 };

@@ -52,17 +52,18 @@ A view is a tree of six primitive nodes, and a keyed form of one of them:
 ```rust
 pub enum View {
     Text(StyledText),
-    Block(BlockStyle, Box<View>),
+    Block(BlockStyle, Option<BlockTitle>, Box<View>),
     Row(VerticalAlign, Vec<View>),
     Column(Align, Vec<View>),
     Grid(GridStyle, Vec<Vec<View>>),
     Canvas(Canvas),
-    AnchorBlock(Key, BlockStyle, Box<View>),
+    AnchorBlock(Key, BlockStyle, Option<BlockTitle>, Box<View>),
 }
 ```
 
 - `Text` is a leaf: one plain-text flow with zero or more styled segments.
-- `Block` applies one `BlockStyle` around exactly one child.
+- `Block` applies one `BlockStyle` and an optional border title around exactly
+  one child.
 - `Row` places children side by side.
 - `Column` stacks children.
 - `Grid` lines child Views up in shared columns.
@@ -74,9 +75,16 @@ These primitives cover the current common mechanics: carry text, put a box
 around something, place things beside each other, stack them, and line them up
 in columns. They are not claimed to exhaust every renderer-neutral operation a
 full-screen frame needs. Applications and concrete presentations construct
-views through `View::text`, `View::styled_text`, `View::block`, `View::row`,
-`View::column`, `View::grid` and `View::canvas`; there is one way to express
-each node.
+views through `View::text`, `View::styled_text`, `View::block`,
+`View::titled_block`, `View::row`, `View::column`, `View::grid` and
+`View::canvas`; there is one way to express each node.
+
+`BlockTitle` is one styled line of content embedded in a Block's top border.
+It is not a `BlockStyle` property: changing the text does not change the
+reusable geometry and paint value. A title adds an automatic width demand but
+never adds a row, and finite or stated widths clip it within the surviving top
+edge. The precise sizing, alignment, padding, and clipping rules are defined
+in [`design/block-title.md`](design/block-title.md).
 
 `TextSpan` is caller input: a string fragment and one complete `TextStyle`.
 `StyledText` joins those fragments into one source string and keeps private,
@@ -126,12 +134,13 @@ The sizing, command, composition, anchor, and equality contracts are defined in
 [`design/canvas.md`](design/canvas.md).
 
 `AnchorBlock` adds no seventh thing. It is a box in every respect sizing reasons
-about — one child, one `BlockStyle`, the same rules — and the key adds only a
-report, for a caller that draws in that rectangle content this crate does not
-produce. `View::anchor_block` builds one; `View::anchor` is the boxless case,
-an empty region that covers no cells and so changes no layout. The `Key` naming
-it is the one [`design/tui-application.md`](design/tui-application.md) defines,
-and the anchor's rule and the reasoning behind it are recorded in
+about — one child, one `BlockStyle`, the same optional `BlockTitle`, the same
+rules — and the key adds only a report, for a caller that draws in that
+rectangle content this crate does not produce. `View::anchor_block` and
+`View::titled_anchor_block` build the two forms; `View::anchor` is the boxless
+case, an empty region that covers no cells and so changes no layout. The `Key`
+naming it is the one [`design/tui-application.md`](design/tui-application.md)
+defines, and the anchor's rule and the reasoning behind it are recorded in
 [`design/tui-view.md`](design/tui-view.md).
 
 Alignment belongs to the `Row` or `Column`, not to its children: a child cannot

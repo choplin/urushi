@@ -23,8 +23,8 @@
 //! changed.
 
 use crate::{
-    Align, BlockStyle, Canvas, GridStyle, Key, Length, Overflow, Sides, StyledText, TextStyle,
-    VerticalAlign, View,
+    Align, BlockStyle, BlockTitle, Canvas, GridStyle, Key, Length, Overflow, Sides, StyledText,
+    TextStyle, VerticalAlign, View,
 };
 
 use super::grid;
@@ -104,13 +104,16 @@ fn metrics(view: &View) -> Metrics {
         }
         // An anchor measures as the block it is: the key says where to report,
         // never how large to be.
-        View::Block(style, child) | View::AnchorBlock(_, style, child) => {
+        View::Block(style, title, child) | View::AnchorBlock(_, style, title, child) => {
             let inner = metrics(child);
             let frame = style.frame_size();
             let margin = style.margin_sides();
+            let intrinsic = inner
+                .natural
+                .max(title_width(style, title.as_ref()).saturating_sub(frame.width()));
             // The undegraded frame: no area is known yet, and degradation is
             // what an area does to a frame.
-            let natural = width_axis(style, frame.width()).used(None, inner.natural, inner.floor)
+            let natural = width_axis(style, frame.width()).used(None, intrinsic, inner.floor)
                 + horizontal(margin);
             let floor = style
                 .minimum_width()
@@ -321,6 +324,7 @@ pub(super) struct TextBox<'a> {
 #[derive(Debug)]
 pub(super) struct BlockBox<'a> {
     pub style: &'a BlockStyle,
+    pub title: Option<&'a BlockTitle>,
     /// The key to report this box's content rectangle under, if it is an
     /// anchor.
     pub anchor: Option<Key>,
@@ -391,7 +395,7 @@ fn place<'a>(
                 node: WidthNode::Canvas(canvas, bounded, height),
             }
         }
-        View::Block(style, child) | View::AnchorBlock(_, style, child) => {
+        View::Block(style, title, child) | View::AnchorBlock(_, style, title, child) => {
             let inner = &metrics.children[0];
             let border = border_extent(style);
             let mut padding = style.padding_sides();
@@ -425,10 +429,13 @@ fn place<'a>(
             );
             // Every sizing property measures the box; margin lies outside it.
             let box_width = area.map(|area| area.saturating_sub(horizontal(margin)));
-            let intrinsic = if inner.fills {
-                box_width.map_or(inner.natural, |area| area.saturating_sub(axis.frame))
+            let title_intrinsic = title_width(style, title.as_ref()).saturating_sub(axis.frame);
+            let intrinsic = if inner.fills
+                && let Some(area) = box_width
+            {
+                area.saturating_sub(axis.frame)
             } else {
-                inner.natural
+                inner.natural.max(title_intrinsic)
             };
             let used = axis.used(box_width, intrinsic, inner.floor);
             let content_width = used - axis.frame;
@@ -465,8 +472,9 @@ fn place<'a>(
                 height_floor,
                 node: WidthNode::Block(BlockBox {
                     style,
+                    title: title.as_ref(),
                     anchor: match view {
-                        View::AnchorBlock(key, _, _) => Some(*key),
+                        View::AnchorBlock(key, _, _, _) => Some(*key),
                         _ => None,
                     },
                     padding,
@@ -604,6 +612,33 @@ fn place<'a>(
             }
         }
     }
+}
+
+fn title_width(style: &BlockStyle, title: Option<&BlockTitle>) -> usize {
+    let Some(title) = title else {
+        return 0;
+    };
+    debug_assert!(
+        style.border_kind().is_some() && style.is_border_top_enabled(),
+        "a titled block requires an enabled top border"
+    );
+    if style.border_kind().is_none() || !style.is_border_top_enabled() {
+        return 0;
+    }
+
+    if title.text().as_str().is_empty() {
+        return 0;
+    }
+    let text = title
+        .text()
+        .lines()
+        .first()
+        .map(|line| line.iter().map(|grapheme| grapheme.width()).sum())
+        .unwrap_or(0);
+    let border = border_extent(style).width();
+    border
+        .saturating_add(text)
+        .saturating_add(usize::from(title.horizontal_padding()).saturating_mul(2))
 }
 
 /// The width a text leaf uses, without fitting a single line.

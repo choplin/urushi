@@ -176,7 +176,7 @@ fn requires_allocation(view: &View, axis: Axis) -> bool {
             Axis::Width => canvas.explicit_width().is_none(),
             Axis::Height => canvas.explicit_height().is_none(),
         },
-        View::Block(style, child) | View::AnchorBlock(_, style, child) => {
+        View::Block(style, _, child) | View::AnchorBlock(_, style, _, child) => {
             let (length, maximum) = match axis {
                 Axis::Width => (style.width_length(), style.maximum_width()),
                 Axis::Height => (style.height_length(), style.maximum_height()),
