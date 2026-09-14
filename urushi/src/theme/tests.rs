@@ -64,11 +64,7 @@ fn component_styles_follow_the_token_mapping() {
         "\x1b[31mx\x1b[0m"
     );
     assert_eq!(
-        components.tree_style(TreeRole::Enumerator).paint("x"),
-        "\x1b[32mx\x1b[0m"
-    );
-    assert_eq!(
-        components.tree_style(TreeRole::Indenter).paint("x"),
+        components.tree_style(TreeRole::Connector).paint("x"),
         "\x1b[32mx\x1b[0m"
     );
     assert_eq!(
@@ -101,9 +97,9 @@ fn custom_component_style_replaces_the_default() {
 #[test]
 fn custom_tree_style_replaces_the_default() {
     let components = ComponentStyles::from_tokens(&TOKENS)
-        .with_tree_style(TreeRole::Enumerator, TextStyle::new().underline());
+        .with_tree_style(TreeRole::Connector, TextStyle::new().underline());
     assert_eq!(
-        components.tree_style(TreeRole::Enumerator).paint("branch"),
+        components.tree_style(TreeRole::Connector).paint("branch"),
         "\x1b[4mbranch\x1b[0m"
     );
 }
@@ -118,7 +114,7 @@ fn list_roles_are_independent_from_tree_roles() {
         "\x1b[4mmarker\x1b[0m"
     );
     assert_eq!(
-        components.tree_style(TreeRole::Enumerator).paint("branch"),
+        components.tree_style(TreeRole::Connector).paint("branch"),
         "\x1b[32mbranch\x1b[0m"
     );
 }
@@ -149,6 +145,14 @@ fn tree_roles_resolve_through_the_theme_contract() {
         &theme.text_style(TreeRole::Root),
         theme.components().tree_style(TreeRole::Root)
     );
+}
+
+#[test]
+fn theme_tree_shortcut_delegates_to_the_canonical_presentation() {
+    let theme = Theme::from_tokens(TOKENS);
+    let tree = crate::Tree::new().child("item");
+
+    assert_eq!(theme.tree(&tree), theme.components().tree().compose(&tree));
 }
 
 #[test]

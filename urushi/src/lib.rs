@@ -90,11 +90,10 @@ mod theme;
 mod view;
 
 pub use component::{
-    List, ListEnumerator, ListItem, ListPosition, ListPresentation, SiblingPosition, Summary,
-    SummaryField, Table, TableBorder, TableCell, TableCellStyler, TablePresentation, Tree,
-    TreeEnumerator, TreeIndenter, TreeNode, TreeStyle, Warning, alphabet_enumerator,
-    arabic_enumerator, asterisk_enumerator, bullet_enumerator, dash_enumerator,
-    default_tree_enumerator, default_tree_indenter, roman_enumerator,
+    List, ListEnumerator, ListItem, ListPosition, ListPresentation, Summary, SummaryField, Table,
+    TableBorder, TableCell, TableCellStyler, TablePresentation, Tree, TreeNode, TreePresentation,
+    Warning, alphabet_enumerator, arabic_enumerator, asterisk_enumerator, bullet_enumerator,
+    dash_enumerator, roman_enumerator,
 };
 pub use key::Key;
 pub use render::AnsiRenderer;

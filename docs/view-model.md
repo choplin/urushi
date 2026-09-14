@@ -93,6 +93,11 @@ styles, and behavior into a Canvas item. The item may retain and interpret
 presentation-specific data, but `View` and the resolver expose no
 component-specific variant or branch.
 
+For example, the canonical Tree presentation binds its hierarchy into an
+intrinsically sized Canvas item. The item records ordinary `LineNetwork` and
+text commands at the final local width; neither Canvas nor `View` learns what a
+tree node or connector role means.
+
 `GridStyle` is the grid node's own geometry: an optional `Length` per column
 and the default padding its cells take. It holds no box geometry or line
 network — a grid that needs a border, a margin, or a stated size is placed

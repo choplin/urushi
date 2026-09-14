@@ -176,6 +176,18 @@ intrinsic sizing value from that same bound frame. During `resolve`, sizing
 reports column requirements and height at the selected width; after the final
 viewport is known, the item records cell and rule commands. It is not a Grid
 and the core resolver cannot inspect the bound Table or presentation.
+
+The canonical Tree presentation follows the same binding boundary while
+retaining its own algorithm. It binds visible `Tree` data, connector policy,
+and role styles into one intrinsically sized Canvas item. The selected local
+width controls content wrapping, while the indentation prefix remains protected
+and the item records generic `LineNetwork` and text commands only after the
+Canvas size is final. Tree branches remain presentation policy rather than
+`Tree` data or `View` vocabulary; the exact lowering is recorded in
+[`design/tree-lowering.md`](design/tree-lowering.md), and its intrinsic sizing
+contract is recorded separately in
+[`design/tree-width-resolution.md`](design/tree-width-resolution.md).
+
 Presentations that need no specialized area-dependent algorithm continue to
 compose ordinary primitive trees.
 

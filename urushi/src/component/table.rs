@@ -26,9 +26,8 @@ enum TableRow {
 ///
 /// Lip Gloss passes a bare `(row, column)` pair and encodes the header row as
 /// the sentinel index `-1`. urushi passes this opaque value instead, matching
-/// the [`ListPosition`](crate::ListPosition) and
-/// [`SiblingPosition`](crate::SiblingPosition) precedent: further context can
-/// be exposed as new accessors without changing the styler signature.
+/// the [`ListPosition`](crate::ListPosition) precedent: further context can be
+/// exposed as new accessors without changing the styler signature.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct TableCell<'a> {
     text: &'a str,

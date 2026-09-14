@@ -305,7 +305,7 @@ fn tree_sample() -> View {
         )
         .child("Cargo.toml");
 
-    sample_theme().components().tree().view(&tree)
+    sample_theme().components().tree().compose(&tree)
 }
 
 fn list_sample() -> View {

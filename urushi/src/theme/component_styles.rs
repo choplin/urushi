@@ -1,6 +1,6 @@
 //! Standard style mapping for reusable component roles.
 
-use crate::{BlockStyle, Border, ListPresentation, TablePresentation, TextStyle, TreeStyle};
+use crate::{BlockStyle, Border, ListPresentation, TablePresentation, TextStyle, TreePresentation};
 
 use super::{ComponentRole, ListRole, SemanticTokens, TableRole, TreeRole};
 
@@ -13,7 +13,7 @@ pub struct ComponentStyles {
     panel: BlockStyle,
     panel_focused: BlockStyle,
     list: ListPresentation,
-    tree: TreeStyle,
+    tree: TreePresentation,
     table: TablePresentation,
 }
 
@@ -60,10 +60,9 @@ impl ComponentStyles {
                 TextStyle::new().foreground(tokens.text),
                 TextStyle::new().foreground(tokens.text_muted),
             ),
-            tree: TreeStyle::new(
+            tree: TreePresentation::new(
                 TextStyle::new().foreground(tokens.text).bold(),
                 TextStyle::new().foreground(tokens.text),
-                TextStyle::new().foreground(tokens.text_muted),
                 TextStyle::new().foreground(tokens.text_muted),
             ),
             table: TablePresentation::new(
@@ -109,7 +108,7 @@ impl ComponentStyles {
     }
 
     /// Returns the default presentation policy for trees.
-    pub fn tree(&self) -> &TreeStyle {
+    pub fn tree(&self) -> &TreePresentation {
         &self.tree
     }
 
@@ -168,7 +167,7 @@ impl ComponentStyles {
 
     /// Replaces the complete default tree presentation policy.
     #[must_use]
-    pub fn with_tree(mut self, tree: TreeStyle) -> Self {
+    pub fn with_tree(mut self, tree: TreePresentation) -> Self {
         self.tree = tree;
         self
     }

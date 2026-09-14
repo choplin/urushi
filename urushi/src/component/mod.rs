@@ -13,8 +13,5 @@ pub use list::{
 };
 pub use summary::{Summary, SummaryField};
 pub use table::{Table, TableBorder, TableCell, TableCellStyler, TablePresentation};
-pub use tree::{
-    SiblingPosition, Tree, TreeEnumerator, TreeIndenter, TreeNode, TreeStyle,
-    default_tree_enumerator, default_tree_indenter,
-};
+pub use tree::{Tree, TreeNode, TreePresentation};
 pub use warning::Warning;

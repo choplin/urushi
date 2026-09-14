@@ -90,7 +90,7 @@ fn showcase_has_a_consistent_visible_width() {
         "Cargo.toml",
     ] {
         assert!(
-            output.contains(tree_content),
+            plain_output.contains(tree_content),
             "missing Tree showcase content: {tree_content}"
         );
     }

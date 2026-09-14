@@ -1,72 +1,13 @@
 //! Renderer-neutral trees with reusable owned nodes.
 
-use crate::{TextStyle, TreeRole, View};
+use std::sync::Arc;
 
-use super::traversable::{Traversable, TraversalStyles, render as render_traversable};
-
-/// A tree node's position among its visible siblings.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct SiblingPosition {
-    index: usize,
-    len: usize,
-}
-
-impl SiblingPosition {
-    /// Creates a tree sibling position.
-    pub const fn new(index: usize, len: usize) -> Self {
-        Self { index, len }
-    }
-
-    /// Returns the zero-based visible sibling index.
-    pub const fn index(self) -> usize {
-        self.index
-    }
-
-    /// Returns the number of visible siblings.
-    pub const fn len(self) -> usize {
-        self.len
-    }
-
-    /// Returns whether there are no visible siblings.
-    pub const fn is_empty(self) -> bool {
-        self.len == 0
-    }
-
-    /// Returns whether this is the final visible sibling.
-    pub const fn is_last(self) -> bool {
-        self.len > 0 && self.index == self.len - 1
-    }
-}
-
-/// Produces the single-line marker drawn before one visible tree node.
-///
-/// Line breaks in returned markers are normalized to spaces so a marker cannot
-/// violate the one-horizontal-row contract of a row cell.
-pub type TreeEnumerator = fn(SiblingPosition) -> String;
-
-/// Produces the single-line continuation drawn beneath one visible tree node.
-///
-/// Line breaks in returned markers are normalized to spaces so a marker cannot
-/// violate the one-horizontal-row contract of a row cell.
-pub type TreeIndenter = fn(SiblingPosition) -> String;
-
-/// Draws the standard square tree branch for one node.
-pub fn default_tree_enumerator(position: SiblingPosition) -> String {
-    if position.is_last() {
-        "└── ".to_owned()
-    } else {
-        "├── ".to_owned()
-    }
-}
-
-/// Draws a vertical continuation while more siblings follow.
-pub fn default_tree_indenter(position: SiblingPosition) -> String {
-    if position.is_last() {
-        "    ".to_owned()
-    } else {
-        "│   ".to_owned()
-    }
-}
+use crate::text::{PrintableLines, PrintableText, wrap_text};
+use crate::view::{CanvasMeasure, CanvasRequirements};
+use crate::{
+    Canvas, CanvasContext, CanvasItem, CanvasSizing, Composition, Grapheme, LineContinuations,
+    LineGlyphs, LineNetwork, Position, TextStyle, TreeRole, View,
+};
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 struct ChildOffset {
@@ -155,16 +96,6 @@ impl TreeNode {
     }
 }
 
-impl Traversable for TreeNode {
-    fn value(&self) -> &str {
-        &self.value
-    }
-
-    fn visible_children(&self) -> Vec<&Self> {
-        self.visible_children()
-    }
-}
-
 impl From<String> for TreeNode {
     fn from(value: String) -> Self {
         Self::new(value)
@@ -178,42 +109,24 @@ impl From<&str> for TreeNode {
 }
 
 /// Presentation policy used to compose a [`Tree`] into a [`View`].
-#[derive(Debug, Clone)]
-pub struct TreeStyle {
+#[derive(Debug, Clone, PartialEq)]
+pub struct TreePresentation {
     root: TextStyle,
     item: TextStyle,
-    enumerator_style: TextStyle,
-    indenter_style: TextStyle,
-    enumerator: TreeEnumerator,
-    indenter: TreeIndenter,
+    connector: TextStyle,
+    line_glyphs: LineGlyphs,
+    indent_width: usize,
 }
 
-impl PartialEq for TreeStyle {
-    fn eq(&self, other: &Self) -> bool {
-        self.root == other.root
-            && self.item == other.item
-            && self.enumerator_style == other.enumerator_style
-            && self.indenter_style == other.indenter_style
-            && std::ptr::fn_addr_eq(self.enumerator, other.enumerator)
-            && std::ptr::fn_addr_eq(self.indenter, other.indenter)
-    }
-}
-
-impl TreeStyle {
-    /// Creates a tree style with the default branch and continuation policies.
-    pub fn new(
-        root: TextStyle,
-        item: TextStyle,
-        enumerator: TextStyle,
-        indenter: TextStyle,
-    ) -> Self {
+impl TreePresentation {
+    /// Creates the canonical tree presentation with square line glyphs.
+    pub fn new(root: TextStyle, item: TextStyle, connector: TextStyle) -> Self {
         Self {
             root,
             item,
-            enumerator_style: enumerator,
-            indenter_style: indenter,
-            enumerator: default_tree_enumerator,
-            indenter: default_tree_indenter,
+            connector,
+            line_glyphs: LineGlyphs::NORMAL,
+            indent_width: 4,
         }
     }
 
@@ -222,8 +135,7 @@ impl TreeStyle {
         match role {
             TreeRole::Root => &self.root,
             TreeRole::Item => &self.item,
-            TreeRole::Enumerator => &self.enumerator_style,
-            TreeRole::Indenter => &self.indenter_style,
+            TreeRole::Connector => &self.connector,
         }
     }
 
@@ -233,8 +145,7 @@ impl TreeStyle {
         match role {
             TreeRole::Root => self.root = style,
             TreeRole::Item => self.item = style,
-            TreeRole::Enumerator => self.enumerator_style = style,
-            TreeRole::Indenter => self.indenter_style = style,
+            TreeRole::Connector => self.connector = style,
         }
         self
     }
@@ -251,60 +162,264 @@ impl TreeStyle {
         self.with_style(TreeRole::Item, style)
     }
 
-    /// Replaces the branch-marker style.
+    /// Replaces the connector style.
     #[must_use]
-    pub fn enumerator_style(self, style: TextStyle) -> Self {
-        self.with_style(TreeRole::Enumerator, style)
+    pub fn connector_style(self, style: TextStyle) -> Self {
+        self.with_style(TreeRole::Connector, style)
     }
 
-    /// Replaces the continuation style.
+    /// Replaces the complete one-cell connector glyph repertoire.
     #[must_use]
-    pub fn indenter_style(self, style: TextStyle) -> Self {
-        self.with_style(TreeRole::Indenter, style)
-    }
-
-    /// Replaces the branch-marker policy.
-    #[must_use]
-    pub const fn enumerator(mut self, enumerator: TreeEnumerator) -> Self {
-        self.enumerator = enumerator;
+    pub const fn line_glyphs(mut self, line_glyphs: LineGlyphs) -> Self {
+        self.line_glyphs = line_glyphs;
         self
     }
 
-    /// Replaces the nested-continuation policy.
+    /// Sets the cell distance from one connector column to the next.
+    ///
+    /// The width includes the junction, at least one horizontal continuation
+    /// cell, and one gap before the node body.
+    ///
+    /// # Panics
+    ///
+    /// Panics when `indent_width` is less than three cells.
     #[must_use]
-    pub const fn indenter(mut self, indenter: TreeIndenter) -> Self {
-        self.indenter = indenter;
+    pub const fn indent_width(mut self, indent_width: usize) -> Self {
+        assert!(
+            indent_width >= 3,
+            "tree indentation must be at least three cells"
+        );
+        self.indent_width = indent_width;
         self
     }
 
-    /// Composes tree data into a renderer-neutral view.
-    pub fn view(&self, tree: &Tree) -> View {
+    /// Composes tree data into an intrinsically sized, renderer-neutral Canvas.
+    pub fn compose(&self, tree: &Tree) -> View {
         if tree.hidden {
             return View::empty();
         }
 
-        let traversal_styles = TraversalStyles {
-            item: self.item.clone(),
-            enumerator: self.enumerator_style.clone(),
-            indenter: self.indenter_style.clone(),
-        };
-        let mut rows = Vec::new();
-        if let Some(root) = &tree.root {
-            for line in root.split('\n') {
-                rows.push(View::text(line, self.root.clone()));
-            }
+        let children = visible_children(&tree.children, tree.child_offset);
+        if tree.root.is_none() && children.is_empty() {
+            return View::empty();
         }
 
-        let children = visible_children(&tree.children, tree.child_offset);
-        render_traversable(
-            rows,
-            &children,
-            &traversal_styles,
-            SiblingPosition::new,
-            self.enumerator,
-            self.indenter,
-        )
+        let mut nodes = Vec::new();
+        let mut groups = Vec::new();
+        bind_group(&mut nodes, &mut groups, &children, 0, self.indent_width);
+        let item = TreeCanvasItem(Arc::new(TreeFrame {
+            root: tree.root.clone(),
+            nodes,
+            groups,
+            root_style: self.root.clone(),
+            item_style: self.item.clone(),
+            connector_style: self.connector.clone(),
+            line_glyphs: self.line_glyphs,
+            indent_width: self.indent_width,
+        }));
+        View::canvas(Canvas::new().sizing(item.sizing()).item(item))
     }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct BoundTreeNode {
+    value: String,
+    connector_x: usize,
+    content_x: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct BoundSiblingGroup {
+    connector_x: usize,
+    nodes: Vec<usize>,
+}
+
+fn bind_group(
+    bound: &mut Vec<BoundTreeNode>,
+    groups: &mut Vec<BoundSiblingGroup>,
+    nodes: &[&TreeNode],
+    depth: usize,
+    indent_width: usize,
+) {
+    if nodes.is_empty() {
+        return;
+    }
+
+    let connector_x = depth.saturating_mul(indent_width);
+    let content_x = connector_x.saturating_add(indent_width);
+    let group_index = groups.len();
+    groups.push(BoundSiblingGroup {
+        connector_x,
+        nodes: Vec::with_capacity(nodes.len()),
+    });
+
+    for node in nodes {
+        let node_index = bound.len();
+        bound.push(BoundTreeNode {
+            value: node.value.clone(),
+            connector_x,
+            content_x,
+        });
+        groups[group_index].nodes.push(node_index);
+
+        let children = node.visible_children();
+        bind_group(
+            bound,
+            groups,
+            &children,
+            depth.saturating_add(1),
+            indent_width,
+        );
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+struct TreeFrame {
+    root: Option<String>,
+    nodes: Vec<BoundTreeNode>,
+    groups: Vec<BoundSiblingGroup>,
+    root_style: TextStyle,
+    item_style: TextStyle,
+    connector_style: TextStyle,
+    line_glyphs: LineGlyphs,
+    indent_width: usize,
+}
+
+impl TreeFrame {
+    fn width_requirements(&self) -> CanvasRequirements {
+        let mut demand = 0;
+        let mut floor = 0;
+        if let Some(root) = &self.root {
+            let widths = text_widths(root);
+            demand = widths.0;
+            floor = widths.1;
+        }
+        for node in &self.nodes {
+            let (content_demand, content_floor) = text_widths(&node.value);
+            demand = demand.max(node.content_x.saturating_add(content_demand));
+            floor = floor.max(node.content_x.saturating_add(content_floor));
+        }
+        CanvasRequirements::new(demand, floor)
+    }
+
+    fn rows(&self, width: usize) -> TreeRows {
+        let mut rows = Vec::new();
+        if let Some(root) = &self.root {
+            rows.extend(wrapped_rows(root, width).into_iter().map(TreeRow::Root));
+        }
+
+        let mut node_y = Vec::with_capacity(self.nodes.len());
+        for (node_index, node) in self.nodes.iter().enumerate() {
+            node_y.push(rows.len());
+            let content_width = width.saturating_sub(node.content_x);
+            rows.extend(
+                wrapped_rows(&node.value, content_width)
+                    .into_iter()
+                    .map(|text| TreeRow::Node { node_index, text }),
+            );
+        }
+        TreeRows { rows, node_y }
+    }
+
+    fn draw(&self, context: &mut CanvasContext) {
+        let plan = self.rows(context.size().width());
+        let mut network = LineNetwork::new(self.line_glyphs, self.connector_style.clone());
+        let branch_length = self.indent_width - 2;
+        for group in &self.groups {
+            let first_y = plan.node_y[group.nodes[0]];
+            let last_y = plan.node_y[*group.nodes.last().expect("a bound group is non-empty")];
+            network.vertical_with(
+                position(group.connector_x),
+                position(first_y)..=position(last_y),
+                LineContinuations::START,
+            );
+            for &node_index in &group.nodes {
+                let node = &self.nodes[node_index];
+                let y = plan.node_y[node_index];
+                network.horizontal(
+                    position(y),
+                    position(node.connector_x)
+                        ..=position(node.connector_x.saturating_add(branch_length)),
+                );
+            }
+        }
+        context.line_network(network);
+
+        for (y, row) in plan.rows.into_iter().enumerate() {
+            let (x, text, style) = match row {
+                TreeRow::Root(text) => (0, text, self.root_style.clone()),
+                TreeRow::Node { node_index, text } => (
+                    self.nodes[node_index].content_x,
+                    text,
+                    self.item_style.clone(),
+                ),
+            };
+            context.text_with(
+                Position::new(position(x), position(y)),
+                text,
+                style,
+                Composition::Replace,
+            );
+        }
+    }
+}
+
+fn wrapped_rows(text: &str, width: usize) -> Vec<String> {
+    text.split('\n')
+        .flat_map(|line| wrap_text(PrintableLines::new(line), width))
+        .collect()
+}
+
+fn text_widths(text: &str) -> (usize, usize) {
+    text.split('\n')
+        .map(PrintableText::new)
+        .fold((0, 0), |(demand, floor), line| {
+            (
+                demand.max(line.width()),
+                floor.max(line.graphemes().map(Grapheme::width).max().unwrap_or(0)),
+            )
+        })
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct TreeRows {
+    rows: Vec<TreeRow>,
+    node_y: Vec<usize>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum TreeRow {
+    Root(String),
+    Node { node_index: usize, text: String },
+}
+
+#[derive(Debug, Clone, PartialEq)]
+struct TreeCanvasItem(Arc<TreeFrame>);
+
+impl TreeCanvasItem {
+    fn sizing(&self) -> CanvasSizing {
+        CanvasSizing::intrinsic(self.clone())
+    }
+}
+
+impl CanvasMeasure for TreeCanvasItem {
+    fn width_requirements(&self) -> CanvasRequirements {
+        self.0.width_requirements()
+    }
+
+    fn height_requirements(&self, width: usize) -> CanvasRequirements {
+        CanvasRequirements::new(self.0.rows(width).rows.len(), 0)
+    }
+}
+
+impl CanvasItem for TreeCanvasItem {
+    fn draw(&self, context: &mut CanvasContext) {
+        self.0.draw(context);
+    }
+}
+
+fn position(value: usize) -> i64 {
+    i64::try_from(value).unwrap_or(i64::MAX)
 }
 
 /// Owned tree data independent of presentation policy.
@@ -392,7 +507,6 @@ fn visible_children(children: &[TreeNode], offset: ChildOffset) -> Vec<&TreeNode
 mod tests {
     use super::*;
     use crate::test_support::{plain, plain_rows, style_at};
-    use crate::text::PrintableText;
     use crate::{Color, ComponentStyles, SemanticTokens, measure};
 
     fn styles() -> ComponentStyles {
@@ -412,9 +526,9 @@ mod tests {
 
     #[test]
     fn renders_empty_and_root_only_trees() {
-        assert!(measure(&styles().tree().view(&Tree::new())).is_empty());
+        assert!(measure(&styles().tree().compose(&Tree::new())).is_empty());
         assert_eq!(
-            plain(&styles().tree().view(&Tree::new().root("root"))),
+            plain(&styles().tree().compose(&Tree::new().root("root"))),
             "root"
         );
     }
@@ -427,7 +541,7 @@ mod tests {
             .child("omega");
 
         assert_eq!(
-            plain(&styles().tree().view(&tree)),
+            plain(&styles().tree().compose(&tree)),
             "├── alpha\n├── beta\n│   └── nested\n└── omega"
         );
     }
@@ -439,7 +553,7 @@ mod tests {
             .child(TreeNode::new("last").children(["one", "two"]));
 
         assert_eq!(
-            plain(&styles().tree().view(&tree)),
+            plain(&styles().tree().compose(&tree)),
             "├── first\n└── last\n    ├── one\n    └── two"
         );
     }
@@ -450,8 +564,8 @@ mod tests {
             .child("visible")
             .child(TreeNode::new("hidden").hidden(true));
 
-        assert_eq!(plain(&styles().tree().view(&tree)), "└── visible");
-        assert!(measure(&styles().tree().view(&tree.hidden(true))).is_empty());
+        assert_eq!(plain(&styles().tree().compose(&tree)), "└── visible");
+        assert!(measure(&styles().tree().compose(&tree.hidden(true))).is_empty());
     }
 
     #[test]
@@ -465,9 +579,9 @@ mod tests {
                 .child_offset(1, 1),
         );
 
-        assert_eq!(plain(&styles().tree().view(&tree)), "├── one\n└── two");
+        assert_eq!(plain(&styles().tree().compose(&tree)), "├── one\n└── two");
         assert_eq!(
-            plain(&styles().tree().view(&nested)),
+            plain(&styles().tree().compose(&nested)),
             "└── parent\n    └── kept"
         );
     }
@@ -481,10 +595,10 @@ mod tests {
         );
 
         assert_eq!(
-            plain(&styles().tree().view(&tree)),
+            plain(&styles().tree().compose(&tree)),
             "└── 親\n    ├── 日本語\n    │   second\n    └── 終端\n        続き"
         );
-        let rows = plain_rows(&styles().tree().view(&tree));
+        let rows = plain_rows(&styles().tree().compose(&tree));
         assert!(
             rows[2].starts_with("    │   "),
             "a continuation aligns under its node body: {:?}",
@@ -492,103 +606,156 @@ mod tests {
         );
     }
 
-    fn custom_enumerator(position: SiblingPosition) -> String {
-        format!("{}: ", position.index() + 1)
-    }
-
-    fn custom_indenter(_: SiblingPosition) -> String {
-        "→ ".to_owned()
+    fn plain_at(view: &View, width: usize) -> String {
+        crate::resolve(view, crate::Available::columns(width))
+            .rows()
+            .iter()
+            .map(|row| {
+                row.iter()
+                    .map(crate::StyledGrapheme::symbol)
+                    .collect::<String>()
+                    .trim_end()
+                    .to_owned()
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
     }
 
     #[test]
-    fn supports_custom_enumerator_and_indenter() {
-        let tree = Tree::new().child(TreeNode::new("parent").child("child"));
-        let tree_style = styles()
+    fn selected_width_reflows_content_without_recomposing() {
+        let view = styles().tree().compose(&Tree::new().child("alpha beta"));
+
+        assert_eq!(plain_at(&view, 14), "└── alpha beta");
+        assert_eq!(plain_at(&view, 9), "└── alpha\n    beta");
+    }
+
+    #[test]
+    fn protects_deep_prefixes_and_wraps_cjk_and_emoji_content() {
+        let tree = Tree::new().child(
+            TreeNode::new("親").child(TreeNode::new("branch").children(["日本語", "👩‍💻 end"])),
+        );
+        let view = styles().tree().compose(&tree);
+
+        assert_eq!(
+            plain_at(&view, 15),
+            "└── 親\n    └── branch\n        ├── 日\n        │   本\n        │   語\n        └── 👩‍💻\n            end"
+        );
+    }
+
+    #[test]
+    fn preserves_explicit_and_wrapped_continuations() {
+        let tree = Tree::new().children(["ab cd\n日\n", "last"]);
+        let view = styles().tree().compose(&tree);
+
+        assert_eq!(plain_at(&view, 8), "├── ab\n│   cd\n│   日\n│\n└── last");
+    }
+
+    #[test]
+    fn supports_rounded_ascii_and_custom_connector_glyphs() {
+        let tree = Tree::new().children(["one", "two"]);
+        let rounded = styles()
             .tree()
             .clone()
-            .enumerator(custom_enumerator)
-            .indenter(custom_indenter);
+            .line_glyphs(LineGlyphs::ROUNDED)
+            .compose(&tree);
+        let ascii = styles()
+            .tree()
+            .clone()
+            .line_glyphs(LineGlyphs::ASCII)
+            .compose(&tree);
+        let custom = styles()
+            .tree()
+            .clone()
+            .line_glyphs(LineGlyphs {
+                tee_right: 'T',
+                corner_up_right: 'L',
+                horizontal: '=',
+                end_left: '=',
+                ..LineGlyphs::ASCII
+            })
+            .compose(&tree);
 
-        assert_eq!(plain(&tree_style.view(&tree)), "1: parent\n→  1: child");
+        assert_eq!(plain(&rounded), "├── one\n╰── two");
+        assert_eq!(plain(&ascii), "+-- one\n+-- two");
+        assert_eq!(plain(&custom), "T== one\nL== two");
     }
 
     #[test]
-    fn applies_each_style_hook_to_its_semantic_span() {
+    fn applies_root_item_and_connector_styles() {
         let root = TextStyle::new().foreground(Color::RED);
         let item = TextStyle::new().foreground(Color::GREEN);
-        let enumerator = TextStyle::new().foreground(Color::BLUE);
-        let indenter = TextStyle::new().foreground(Color::YELLOW);
+        let connector = TextStyle::new().foreground(Color::BLUE);
         let tree = Tree::new()
             .root("root")
-            .child(TreeNode::new("parent").child("child"));
-        let tree_style = styles()
+            .child(TreeNode::new("parent").children(["one", "two"]))
+            .child("last");
+        let view = styles()
             .tree()
             .clone()
             .root_style(root.clone())
             .item_style(item.clone())
-            .enumerator_style(enumerator.clone())
-            .indenter_style(indenter.clone());
-        let view = tree_style.view(&tree);
+            .connector_style(connector.clone())
+            .compose(&tree);
 
         assert_eq!(style_at(&view, 0, 0), root);
-        assert_eq!(style_at(&view, 1, 0), enumerator);
+        assert_eq!(style_at(&view, 1, 0), connector);
         assert_eq!(style_at(&view, 1, 4), item);
-        assert_eq!(style_at(&view, 2, 0), indenter);
-        assert_eq!(style_at(&view, 2, 4), enumerator);
+        assert_eq!(style_at(&view, 2, 0), connector);
+        assert_eq!(style_at(&view, 2, 4), connector);
         assert_eq!(style_at(&view, 2, 8), item);
     }
 
-    fn mixed_width_enumerator(position: SiblingPosition) -> String {
-        if position.index() == 0 {
-            "界".to_owned()
-        } else {
-            ".".to_owned()
-        }
-    }
-
     #[test]
-    fn aligns_mixed_enumerator_lengths_by_terminal_cell_width() {
-        let tree = Tree::new().children(["one", "two"]);
-        let tree_style = styles().tree().clone().enumerator(mixed_width_enumerator);
-        let view = tree_style.view(&tree);
-
-        assert_eq!(plain(&view), "  界one\n   .two");
-        let rows = plain_rows(&view);
-        assert_eq!(
-            PrintableText::new(&rows[0][..rows[0].find("one").unwrap()]).width(),
-            PrintableText::new(&rows[1][..rows[1].find("two").unwrap()]).width(),
-            "markers of different cell widths still start the values in one column"
-        );
-    }
-
-    fn multiline_marker(_: SiblingPosition) -> String {
-        "a\r\nb\u{2028}c\u{2029}d".to_owned()
-    }
-
-    #[test]
-    fn normalizes_custom_markers_to_semantic_lines() {
+    fn presentation_and_composed_view_equality_include_policy() {
+        let base = styles().tree().clone();
         let tree = Tree::new().child("item");
-        let tree_style = styles()
-            .tree()
-            .clone()
-            .enumerator(multiline_marker)
-            .indenter(multiline_marker);
-        let view = tree_style.view(&tree);
 
-        assert_eq!(measure(&view).height(), 1);
-        assert_eq!(plain(&view), "a b c ditem");
+        assert_eq!(base, base.clone());
+        assert_eq!(base.compose(&tree), base.clone().compose(&tree));
+        assert_ne!(base, base.clone().line_glyphs(LineGlyphs::ASCII));
+        assert_ne!(base, base.clone().indent_width(3));
+        assert_ne!(base, base.clone().connector_style(TextStyle::new().bold()));
     }
 
     #[test]
-    fn nested_nodes_inherit_the_outer_render_policy() {
-        let tree = Tree::new().child(TreeNode::new("parent").child("child"));
-        let tree_style = styles()
-            .tree()
-            .clone()
-            .enumerator(custom_enumerator)
-            .indenter(custom_indenter);
-        let view = tree_style.view(&tree);
+    fn width_requirements_include_content_prefix_and_widest_grapheme() {
+        let tree = Tree::new()
+            .root("root")
+            .child(TreeNode::new("a").child(TreeNode::new("b").child("日本語")));
+        let children = visible_children(&tree.children, tree.child_offset);
+        let mut nodes = Vec::new();
+        let mut groups = Vec::new();
+        bind_group(&mut nodes, &mut groups, &children, 0, 4);
+        let requirements = TreeFrame {
+            root: tree.root,
+            nodes,
+            groups,
+            root_style: TextStyle::new(),
+            item_style: TextStyle::new(),
+            connector_style: TextStyle::new(),
+            line_glyphs: LineGlyphs::NORMAL,
+            indent_width: 4,
+        }
+        .width_requirements();
 
-        assert_eq!(plain(&view), "1: parent\n→  1: child");
+        assert_eq!(requirements.demand(), 18);
+        assert_eq!(requirements.floor(), 14);
+    }
+
+    #[test]
+    #[should_panic(expected = "tree indentation must be at least three cells")]
+    fn rejects_indentation_without_junction_continuation_and_gap_cells() {
+        let _ = styles().tree().clone().indent_width(2);
+    }
+
+    #[test]
+    fn tree_nodes_remain_independent_semantic_values() {
+        let node = TreeNode::new("parent").children(["one", "two"]);
+        let tree = Tree::new().root("root").child(node.clone());
+
+        assert_eq!(node.value(), "parent");
+        assert_eq!(node.child_nodes().len(), 2);
+        assert_eq!(tree.root_value(), Some("root"));
+        assert_eq!(tree.child_nodes(), &[node]);
     }
 }

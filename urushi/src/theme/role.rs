@@ -86,8 +86,7 @@ impl TextThemeRole for ListRole {
 pub enum TreeRole {
     Root,
     Item,
-    Enumerator,
-    Indenter,
+    Connector,
 }
 
 impl TextThemeRole for TreeRole {

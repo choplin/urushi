@@ -6,6 +6,7 @@ describe the current snapshot.
 
 | Date | Decision | Recorded in |
 | --- | --- | --- |
+| 2026-09-14 | Lowered the canonical Tree presentation to one intrinsically sized Canvas item with protected depth prefixes and endpoint-continued `LineNetwork` connectors; one Connector role and `LineGlyphs` policy replace the former enumerator/indenter callbacks and split styles. | [`design/tree-lowering.md`](design/tree-lowering.md), [`design/tree-width-resolution.md`](design/tree-width-resolution.md) |
 | 2026-09-14 | Added explicit start/end continuation to `LineNetwork` segments so endpoint incidence can extend beyond an inclusive range without drawing an outside cell. Segment axis remains part of the retained value, and clipping preserves the original topology. | [`design/canvas.md`](design/canvas.md) |
 | 2026-09-14 | Gave List enumerators the visible sibling index, sibling count, and nesting depth, and fixed their normalized result during composition. This supports level-dependent markers without an indenter callback. | [`design/list-enumerator.md`](design/list-enumerator.md) |
 | 2026-09-14 | Made each visible List sibling group own a right-aligned marker track at a presentation-owned fixed nesting step. Item continuations retain the same content origin, and List has no separate indenter policy or role. | [`design/list-marker-layout.md`](design/list-marker-layout.md) |

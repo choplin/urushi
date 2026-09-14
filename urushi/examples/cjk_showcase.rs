@@ -247,7 +247,7 @@ fn tree_sample() -> View {
         .child(TreeNode::new("ソース").child("部品").child("描画"))
         .child("設定");
 
-    component_theme().components().tree().view(&tree)
+    component_theme().components().tree().compose(&tree)
 }
 
 fn list_sample() -> View {
