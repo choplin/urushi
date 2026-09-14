@@ -20,15 +20,33 @@ impl LineConnections {
     pub(super) const fn union(self, other: Self) -> Self {
         Self(self.0 | other.0)
     }
+}
 
-    const fn from_step(x: i64, y: i64) -> Self {
-        match (x, y) {
-            (0, -1) => Self::UP,
-            (1, 0) => Self::RIGHT,
-            (0, 1) => Self::DOWN,
-            (-1, 0) => Self::LEFT,
-            _ => Self(0),
-        }
+/// Incidence that continues beyond a line segment's inclusive range.
+///
+/// `START` and `END` refer to the ascending endpoints of the supplied range.
+/// For a horizontal segment they continue left and right respectively; for a
+/// vertical segment they continue up and down. Continuation affects the glyph
+/// selected at the endpoint without drawing or occupying the outside cell.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct LineContinuations(u8);
+
+impl LineContinuations {
+    /// No endpoint continues beyond the inclusive range.
+    pub const NONE: Self = Self(0);
+    /// Only the start endpoint continues beyond the inclusive range.
+    pub const START: Self = Self(1);
+    /// Only the end endpoint continues beyond the inclusive range.
+    pub const END: Self = Self(2);
+    /// Both endpoints continue beyond the inclusive range.
+    pub const BOTH: Self = Self(Self::START.0 | Self::END.0);
+
+    const fn includes_start(self) -> bool {
+        self.0 & Self::START.0 != 0
+    }
+
+    const fn includes_end(self) -> bool {
+        self.0 & Self::END.0 != 0
     }
 }
 
@@ -233,6 +251,14 @@ impl LineGlyphs {
 struct Segment {
     from: Position,
     to: Position,
+    axis: SegmentAxis,
+    continuations: LineContinuations,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SegmentAxis {
+    Horizontal,
+    Vertical,
 }
 
 /// One connected drawing whose horizontal and vertical segments form junctions.
@@ -242,13 +268,19 @@ struct Segment {
 /// corners, tees, and crossings selected from its [`LineGlyphs`]. Only
 /// segments recorded in the same value contribute to those junctions;
 /// separate Canvas commands combine through their recorded composition.
+/// [`LineContinuations`] can add outward incidence at either endpoint without
+/// adding a cell outside the segment's inclusive range.
 ///
 /// ```
-/// use urushi::{CanvasContext, LineGlyphs, LineNetwork, TextStyle};
+/// use urushi::{
+///     CanvasContext, LineContinuations, LineGlyphs, LineNetwork, TextStyle,
+/// };
 ///
 /// fn draw(context: &mut CanvasContext) {
 ///     let mut network = LineNetwork::new(LineGlyphs::NORMAL, TextStyle::new());
-///     network.horizontal(1, 0..=4).vertical(2, 0..=2);
+///     network
+///         .horizontal(1, 0..=4)
+///         .vertical_with(2, 0..=2, LineContinuations::START);
 ///     context.line_network(network);
 /// }
 /// ```
@@ -279,12 +311,28 @@ impl LineNetwork {
     ///
     /// An empty range adds nothing.
     pub fn horizontal(&mut self, y: i64, columns: RangeInclusive<i64>) -> &mut Self {
+        self.horizontal_with(y, columns, LineContinuations::NONE)
+    }
+
+    /// Adds a horizontal segment with endpoint continuation at `y`.
+    ///
+    /// `START` continues left from the first column and `END` continues right
+    /// from the last column. Continuation changes endpoint incidence without
+    /// drawing outside the inclusive range. An empty range adds nothing.
+    pub fn horizontal_with(
+        &mut self,
+        y: i64,
+        columns: RangeInclusive<i64>,
+        continuations: LineContinuations,
+    ) -> &mut Self {
         if columns.is_empty() {
             return self;
         }
         self.segments.push(Segment {
             from: Position::new(*columns.start(), y),
             to: Position::new(*columns.end(), y),
+            axis: SegmentAxis::Horizontal,
+            continuations,
         });
         self
     }
@@ -293,12 +341,28 @@ impl LineNetwork {
     ///
     /// An empty range adds nothing.
     pub fn vertical(&mut self, x: i64, rows: RangeInclusive<i64>) -> &mut Self {
+        self.vertical_with(x, rows, LineContinuations::NONE)
+    }
+
+    /// Adds a vertical segment with endpoint continuation at `x`.
+    ///
+    /// `START` continues up from the first row and `END` continues down from
+    /// the last row. Continuation changes endpoint incidence without drawing
+    /// outside the inclusive range. An empty range adds nothing.
+    pub fn vertical_with(
+        &mut self,
+        x: i64,
+        rows: RangeInclusive<i64>,
+        continuations: LineContinuations,
+    ) -> &mut Self {
         if rows.is_empty() {
             return self;
         }
         self.segments.push(Segment {
             from: Position::new(x, *rows.start()),
             to: Position::new(x, *rows.end()),
+            axis: SegmentAxis::Vertical,
+            continuations,
         });
         self
     }
@@ -309,7 +373,7 @@ impl LineNetwork {
         for segment in &self.segments {
             if let Some((from, to)) = clip_line(segment.from, segment.to, size) {
                 for position in line_points(from, to) {
-                    let connections = segment_connections(position, segment.from, segment.to);
+                    let connections = segment_connections(position, *segment);
                     if let Some(index) = indexes.get(&position).copied() {
                         cells[index].connections = cells[index].connections.union(connections);
                     } else {
@@ -339,32 +403,17 @@ pub(super) struct NetworkCell {
     pub(super) connections: LineConnections,
 }
 
-fn segment_connections(
-    position: Position,
-    original_from: Position,
-    original_to: Position,
-) -> LineConnections {
-    if original_from == original_to {
-        return LineConnections::default();
-    }
-    let step = Position::new(
-        match original_to.x.cmp(&original_from.x) {
-            std::cmp::Ordering::Less => -1,
-            std::cmp::Ordering::Equal => 0,
-            std::cmp::Ordering::Greater => 1,
-        },
-        match original_to.y.cmp(&original_from.y) {
-            std::cmp::Ordering::Less => -1,
-            std::cmp::Ordering::Equal => 0,
-            std::cmp::Ordering::Greater => 1,
-        },
-    );
+fn segment_connections(position: Position, segment: Segment) -> LineConnections {
+    let (toward_start, toward_end) = match segment.axis {
+        SegmentAxis::Horizontal => (LineConnections::LEFT, LineConnections::RIGHT),
+        SegmentAxis::Vertical => (LineConnections::UP, LineConnections::DOWN),
+    };
     let mut connections = LineConnections::default();
-    if position != original_from {
-        connections = connections.union(LineConnections::from_step(-step.x, -step.y));
+    if position != segment.from || segment.continuations.includes_start() {
+        connections = connections.union(toward_start);
     }
-    if position != original_to {
-        connections = connections.union(LineConnections::from_step(step.x, step.y));
+    if position != segment.to || segment.continuations.includes_end() {
+        connections = connections.union(toward_end);
     }
     connections
 }

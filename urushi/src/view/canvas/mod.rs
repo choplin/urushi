@@ -59,7 +59,7 @@ use super::geometry::Size;
 
 pub use cell::{CanvasCell, CellContribution, Composition, PositionedCell};
 pub use context::CanvasContext;
-pub use line_network::{LineGlyphs, LineNetwork};
+pub use line_network::{LineContinuations, LineGlyphs, LineNetwork};
 pub(crate) use sizing::CanvasRequirements;
 pub use sizing::CanvasSizing;
 

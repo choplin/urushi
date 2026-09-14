@@ -13,6 +13,7 @@ and a zero-based nesting `depth`:
 pub const fn new(index: usize, len: usize, depth: usize) -> Self;
 pub const fn index(self) -> usize;
 pub const fn len(self) -> usize;
+pub const fn is_empty(self) -> bool;
 pub const fn depth(self) -> usize;
 ```
 

@@ -256,13 +256,13 @@ fn list_sample() -> View {
         .item(ListItem::new("実装する").items(["モデル", "ビュー"]))
         .item("検証する");
     let theme = component_theme();
-    let list_style = theme
+    let presentation = theme
         .components()
         .list()
         .clone()
         .enumerator(arabic_enumerator);
 
-    list_style.view(&list)
+    presentation.compose(&list)
 }
 
 fn table_sample() -> View {

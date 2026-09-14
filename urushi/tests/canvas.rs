@@ -1,7 +1,7 @@
 use urushi::{
     Available, Axis, BlockStyle, Canvas, CanvasCell, CanvasContext, CanvasItem, CanvasSizing,
-    CellContribution, Composition, Grapheme, LayoutErrorKind, Length, LineGlyphs, LineNetwork,
-    Position, PositionedCell, Size, TextStyle, View, resolve, try_resolve,
+    CellContribution, Composition, Grapheme, LayoutErrorKind, Length, LineContinuations,
+    LineGlyphs, LineNetwork, Position, PositionedCell, Size, TextStyle, View, resolve, try_resolve,
 };
 
 #[derive(Debug, Clone, PartialEq)]
@@ -771,6 +771,146 @@ fn network_endpoints_collinear_overlap_and_isolated_points_keep_connections() {
     let view = View::canvas(Canvas::new().extent(Size::new(6, 1)).item(NetworkOverlap));
 
     assert_eq!(lines(&view, Available::NONE), ["rhhhli"]);
+}
+
+const CONNECTION_GLYPHS: LineGlyphs = LineGlyphs {
+    isolated: 'i',
+    end_up: 'u',
+    end_right: 'r',
+    end_down: 'd',
+    end_left: 'l',
+    vertical: 'v',
+    horizontal: 'h',
+    corner_down_right: '1',
+    corner_down_left: '2',
+    corner_up_right: '3',
+    corner_up_left: '4',
+    tee_right: '5',
+    tee_down: '6',
+    tee_left: '7',
+    tee_up: '8',
+    cross: 'x',
+};
+
+#[derive(Debug, Clone, PartialEq)]
+struct SingleCellContinuations;
+
+impl CanvasItem for SingleCellContinuations {
+    fn draw(&self, context: &mut CanvasContext) {
+        for (x, continuations) in [
+            LineContinuations::NONE,
+            LineContinuations::START,
+            LineContinuations::END,
+            LineContinuations::BOTH,
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let mut horizontal = LineNetwork::new(CONNECTION_GLYPHS, TextStyle::new());
+            horizontal.horizontal_with(0, x as i64..=x as i64, continuations);
+            context.line_network(horizontal);
+
+            let mut vertical = LineNetwork::new(CONNECTION_GLYPHS, TextStyle::new());
+            vertical.vertical_with(x as i64, 1..=1, continuations);
+            context.line_network(vertical);
+        }
+    }
+}
+
+#[test]
+fn line_continuations_select_single_cell_axis_endpoints() {
+    let view = View::canvas(
+        Canvas::new()
+            .extent(Size::new(4, 2))
+            .item(SingleCellContinuations),
+    );
+
+    assert_eq!(lines(&view, Available::NONE), ["ilrh", "iudv"]);
+}
+
+#[derive(Debug, Clone, PartialEq)]
+struct ContinuedJunction;
+
+impl CanvasItem for ContinuedJunction {
+    fn draw(&self, context: &mut CanvasContext) {
+        let mut network = LineNetwork::new(CONNECTION_GLYPHS, TextStyle::new());
+        network
+            .vertical_with(0, 0..=0, LineContinuations::START)
+            .horizontal(0, 0..=1);
+        context.line_network(network);
+    }
+}
+
+#[test]
+fn endpoint_continuation_unions_with_intersecting_segments() {
+    let view = View::canvas(
+        Canvas::new()
+            .extent(Size::new(2, 1))
+            .item(ContinuedJunction),
+    );
+
+    assert_eq!(lines(&view, Available::NONE), ["3l"]);
+}
+
+#[derive(Debug, Clone, PartialEq)]
+enum ClippedNetwork {
+    Horizontal(std::ops::RangeInclusive<i64>),
+    Vertical(std::ops::RangeInclusive<i64>),
+    Outside,
+}
+
+impl CanvasItem for ClippedNetwork {
+    fn draw(&self, context: &mut CanvasContext) {
+        let mut network = LineNetwork::new(CONNECTION_GLYPHS, TextStyle::new());
+        match self {
+            Self::Horizontal(columns) => {
+                network.horizontal_with(0, columns.clone(), LineContinuations::BOTH);
+            }
+            Self::Vertical(rows) => {
+                network.vertical_with(0, rows.clone(), LineContinuations::BOTH);
+            }
+            Self::Outside => {
+                network.horizontal_with(0, -3..=-1, LineContinuations::BOTH);
+            }
+        }
+        context.line_network(network);
+    }
+}
+
+#[test]
+fn continued_segments_preserve_topology_through_all_canvas_edges() {
+    let render = |item| {
+        lines(
+            &View::canvas(Canvas::new().extent(Size::new(2, 2)).item(item)),
+            Available::NONE,
+        )
+    };
+
+    assert_eq!(render(ClippedNetwork::Horizontal(-2..=1)), ["hh", "  "]);
+    assert_eq!(render(ClippedNetwork::Horizontal(0..=3)), ["hh", "  "]);
+    assert_eq!(render(ClippedNetwork::Vertical(-2..=1)), ["v ", "v "]);
+    assert_eq!(render(ClippedNetwork::Vertical(0..=3)), ["v ", "v "]);
+    assert_eq!(render(ClippedNetwork::Outside), ["  ", "  "]);
+}
+
+#[test]
+fn line_network_equality_includes_axis_and_continuation_but_not_empty_ranges() {
+    let empty = LineNetwork::new(LineGlyphs::NORMAL, TextStyle::new());
+    let mut still_empty = empty.clone();
+    let empty_start = 1;
+    let empty_end = 0;
+    still_empty.horizontal_with(0, empty_start..=empty_end, LineContinuations::BOTH);
+    assert_eq!(empty, still_empty);
+
+    let mut horizontal = empty.clone();
+    horizontal.horizontal(0, 0..=0);
+    let mut vertical = empty.clone();
+    vertical.vertical(0, 0..=0);
+    let mut continued = empty;
+    continued.horizontal_with(0, 0..=0, LineContinuations::START);
+
+    assert_ne!(horizontal, vertical);
+    assert_ne!(horizontal, continued);
 }
 
 #[derive(Debug, Clone, PartialEq)]

@@ -73,7 +73,6 @@ impl BlockThemeRole for PanelRole {
 pub enum ListRole {
     Item,
     Enumerator,
-    Indenter,
 }
 
 impl TextThemeRole for ListRole {

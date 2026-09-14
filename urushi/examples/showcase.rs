@@ -314,13 +314,13 @@ fn list_sample() -> View {
         .item(ListItem::new("Implement").items(["model", "view"]))
         .item("Verify behavior");
     let theme = sample_theme();
-    let list_style = theme
+    let presentation = theme
         .components()
         .list()
         .clone()
         .enumerator(arabic_enumerator);
 
-    list_style.view(&list)
+    presentation.compose(&list)
 }
 
 fn table_sample() -> View {

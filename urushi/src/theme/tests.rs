@@ -56,10 +56,6 @@ fn component_styles_follow_the_token_mapping() {
         "\x1b[32mx\x1b[0m"
     );
     assert_eq!(
-        components.list_style(ListRole::Indenter).paint("x"),
-        "\x1b[32mx\x1b[0m"
-    );
-    assert_eq!(
         components.tree_style(TreeRole::Root).paint("x"),
         "\x1b[1;31mx\x1b[0m"
     );
@@ -135,6 +131,14 @@ fn list_roles_resolve_through_the_theme_contract() {
         &theme.text_style(ListRole::Item),
         theme.components().list_style(ListRole::Item)
     );
+}
+
+#[test]
+fn theme_list_shortcut_delegates_to_the_canonical_presentation() {
+    let theme = Theme::from_tokens(TOKENS);
+    let list = crate::List::new().item("item");
+
+    assert_eq!(theme.list(&list), theme.components().list().compose(&list));
 }
 
 #[test]

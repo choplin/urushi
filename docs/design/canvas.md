@@ -205,16 +205,31 @@ cell coordinates. They place the caller's marker in every rasterized cell, so a
 diagonal line is possible, but crossing two lines does not create a semantic
 junction. Their cells follow ordinary Canvas composition.
 
-`LineNetwork` exposes only `horizontal(y, columns)` and `vertical(x, rows)`.
-The range is one argument and includes both endpoints. This API makes a
-diagonal network unrepresentable instead of accepting one and failing during
-rasterization. A network owns its `LineGlyphs` and style. Each rasterized cell
-carries its incident up, right, down, and left directions; it does not infer
-connections from neighboring cells or decode them from a rendered symbol.
-All segments that must form junctions belong to the same `LineNetwork` value.
-After that network selects its glyphs, the command emits ordinary cell
-contributions. A separate `LineNetwork` command combines with earlier Canvas
-content only through its own recorded `Composition`.
+`LineNetwork` exposes ordinary `horizontal(y, columns)` and `vertical(x,
+rows)` calls plus `horizontal_with` and `vertical_with` variants that accept
+`LineContinuations::{NONE, START, END, BOTH}`. The range is one argument and
+includes both endpoints. `START` and `END` add outward incidence immediately
+beyond the ascending range: left/right for a horizontal segment and up/down
+for a vertical segment. They change the glyph selected at the endpoint without
+drawing or occupying the outside cell. An empty range contributes nothing even
+when a continuation is specified.
+
+The segment retains its axis and continuation separately from its endpoint
+coordinates. A one-cell segment can therefore interpret START and END without
+guessing an axis: BOTH selects the horizontal or vertical glyph, while NONE
+selects the isolated glyph. Clipping limits which cells are emitted but derives
+their incidence from the original segment and its explicit continuation. A
+visible fragment therefore retains topology across all four Canvas edges, and
+a continuation never materializes an off-surface cell.
+
+This API makes a diagonal network unrepresentable instead of accepting one and
+failing during rasterization. A network owns its `LineGlyphs` and style. Each
+rasterized cell carries its incident up, right, down, and left directions; it
+does not infer connections from neighboring cells or decode them from a
+rendered symbol. All segments that must form junctions belong to the same
+`LineNetwork` value. After that network selects its glyphs, the command emits
+ordinary cell contributions. A separate `LineNetwork` command combines with
+earlier Canvas content only through its own recorded `Composition`.
 
 `LineGlyphs` maps every one of the 16 cardinal direction combinations to a
 one-cell character. It provides normal, rounded, thick, double, ASCII, and

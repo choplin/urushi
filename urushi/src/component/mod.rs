@@ -8,9 +8,8 @@ mod tree;
 mod warning;
 
 pub use list::{
-    List, ListEnumerator, ListIndenter, ListItem, ListPosition, ListStyle, alphabet_enumerator,
-    arabic_enumerator, asterisk_enumerator, bullet_enumerator, dash_enumerator,
-    default_list_indenter, roman_enumerator,
+    List, ListEnumerator, ListItem, ListPosition, ListPresentation, alphabet_enumerator,
+    arabic_enumerator, asterisk_enumerator, bullet_enumerator, dash_enumerator, roman_enumerator,
 };
 pub use summary::{Summary, SummaryField};
 pub use table::{Table, TableBorder, TableCell, TableCellStyler, TablePresentation};

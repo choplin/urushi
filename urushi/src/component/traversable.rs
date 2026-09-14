@@ -130,7 +130,7 @@ fn align_left(mut text: String, width: usize) -> String {
     text
 }
 
-fn normalize_marker(marker: String) -> String {
+pub(super) fn normalize_marker(marker: String) -> String {
     let mut output = String::with_capacity(marker.len());
     let mut characters = marker.chars().peekable();
     while let Some(character) = characters.next() {

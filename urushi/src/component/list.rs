@@ -1,20 +1,28 @@
 //! Renderer-neutral lists with an independent public model.
 
-use crate::{ListRole, TextStyle, View};
+use std::sync::Arc;
 
-use super::traversable::{Traversable, TraversalStyles, render as render_traversable};
+use crate::text::{PrintableLines, PrintableText, wrap_text};
+use crate::view::{CanvasMeasure, CanvasRequirements};
+use crate::{
+    Canvas, CanvasContext, CanvasItem, CanvasSizing, Composition, Grapheme, ListRole, Position,
+    TextStyle, View,
+};
+
+use super::traversable::normalize_marker;
 
 /// A list item's position among its visible siblings.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ListPosition {
     index: usize,
     len: usize,
+    depth: usize,
 }
 
 impl ListPosition {
     /// Creates a list sibling position.
-    pub const fn new(index: usize, len: usize) -> Self {
-        Self { index, len }
+    pub const fn new(index: usize, len: usize, depth: usize) -> Self {
+        Self { index, len, depth }
     }
 
     /// Returns the zero-based visible sibling index.
@@ -32,17 +40,14 @@ impl ListPosition {
         self.len == 0
     }
 
-    /// Returns whether this is the final visible sibling.
-    pub const fn is_last(self) -> bool {
-        self.len > 0 && self.index == self.len - 1
+    /// Returns the zero-based nesting depth.
+    pub const fn depth(self) -> usize {
+        self.depth
     }
 }
 
 /// Produces the single-line marker drawn before one visible list item.
 pub type ListEnumerator = fn(ListPosition) -> String;
-
-/// Produces the single-line continuation drawn beneath one visible list item.
-pub type ListIndenter = fn(ListPosition) -> String;
 
 /// Draws the default bullet marker.
 pub fn bullet_enumerator(_: ListPosition) -> String {
@@ -116,11 +121,6 @@ pub fn roman_enumerator(position: ListPosition) -> String {
     format!("{numeral}. ")
 }
 
-/// Draws the blank continuation used by the default list layout.
-pub fn default_list_indenter(_: ListPosition) -> String {
-    "  ".to_owned()
-}
-
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 struct ItemOffset {
     start: usize,
@@ -130,8 +130,7 @@ struct ItemOffset {
 /// One owned value and its recursive nested list items.
 ///
 /// `ListItem` is deliberately independent of the Tree component's public node
-/// model. The components share only a private traversal contract, so either
-/// public API can evolve without changing the other.
+/// model, so either public API can evolve without changing the other.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ListItem {
     value: String,
@@ -217,45 +216,32 @@ impl From<&str> for ListItem {
     }
 }
 
-impl Traversable for ListItem {
-    fn value(&self) -> &str {
-        &self.value
-    }
-
-    fn visible_children(&self) -> Vec<&Self> {
-        self.visible_items()
-    }
-}
-
 /// Presentation policy used to compose a [`List`] into a [`View`].
 #[derive(Debug, Clone)]
-pub struct ListStyle {
+pub struct ListPresentation {
     item: TextStyle,
     enumerator_style: TextStyle,
-    indenter_style: TextStyle,
     enumerator: ListEnumerator,
-    indenter: ListIndenter,
+    nesting_indent: usize,
 }
 
-impl PartialEq for ListStyle {
+impl PartialEq for ListPresentation {
     fn eq(&self, other: &Self) -> bool {
         self.item == other.item
             && self.enumerator_style == other.enumerator_style
-            && self.indenter_style == other.indenter_style
             && std::ptr::fn_addr_eq(self.enumerator, other.enumerator)
-            && std::ptr::fn_addr_eq(self.indenter, other.indenter)
+            && self.nesting_indent == other.nesting_indent
     }
 }
 
-impl ListStyle {
-    /// Creates a list style with the default bullet and continuation policies.
-    pub fn new(item: TextStyle, enumerator: TextStyle, indenter: TextStyle) -> Self {
+impl ListPresentation {
+    /// Creates the canonical list presentation with bullet markers.
+    pub fn new(item: TextStyle, enumerator: TextStyle) -> Self {
         Self {
             item,
             enumerator_style: enumerator,
-            indenter_style: indenter,
             enumerator: bullet_enumerator,
-            indenter: default_list_indenter,
+            nesting_indent: 2,
         }
     }
 
@@ -264,7 +250,6 @@ impl ListStyle {
         match role {
             ListRole::Item => &self.item,
             ListRole::Enumerator => &self.enumerator_style,
-            ListRole::Indenter => &self.indenter_style,
         }
     }
 
@@ -274,7 +259,6 @@ impl ListStyle {
         match role {
             ListRole::Item => self.item = style,
             ListRole::Enumerator => self.enumerator_style = style,
-            ListRole::Indenter => self.indenter_style = style,
         }
         self
     }
@@ -291,12 +275,6 @@ impl ListStyle {
         self.with_style(ListRole::Enumerator, style)
     }
 
-    /// Replaces the continuation style.
-    #[must_use]
-    pub fn indenter_style(self, style: TextStyle) -> Self {
-        self.with_style(ListRole::Indenter, style)
-    }
-
     /// Replaces the item-marker policy.
     #[must_use]
     pub const fn enumerator(mut self, enumerator: ListEnumerator) -> Self {
@@ -304,41 +282,207 @@ impl ListStyle {
         self
     }
 
-    /// Replaces the nested-continuation policy.
+    /// Sets the fixed horizontal step between nesting levels, in terminal cells.
     #[must_use]
-    pub const fn indenter(mut self, indenter: ListIndenter) -> Self {
-        self.indenter = indenter;
+    pub const fn nesting_indent(mut self, nesting_indent: usize) -> Self {
+        self.nesting_indent = nesting_indent;
         self
     }
 
-    /// Composes list data into a renderer-neutral view.
-    pub fn view(&self, list: &List) -> View {
+    /// Composes list data into an intrinsically sized, renderer-neutral Canvas.
+    pub fn compose(&self, list: &List) -> View {
         if list.hidden {
             return View::empty();
         }
 
-        let traversal_styles = TraversalStyles {
-            item: self.item.clone(),
-            enumerator: self.enumerator_style.clone(),
-            indenter: self.indenter_style.clone(),
-        };
         let items = visible_items(&list.items, list.offset);
-        render_traversable(
-            Vec::new(),
-            &items,
-            &traversal_styles,
-            ListPosition::new,
-            self.enumerator,
-            self.indenter,
-        )
+        if items.is_empty() {
+            return View::empty();
+        }
+
+        let mut bound = Vec::new();
+        bind_items(&mut bound, &items, 0, self);
+        let item = ListCanvasItem(Arc::new(ListFrame {
+            items: bound,
+            item_style: self.item.clone(),
+            enumerator_style: self.enumerator_style.clone(),
+        }));
+        View::canvas(Canvas::new().sizing(item.sizing()).item(item))
     }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct BoundListItem {
+    value: String,
+    marker: String,
+    track_x: usize,
+    marker_x: usize,
+    content_x: usize,
+    track_width: usize,
+}
+
+fn bind_items(
+    bound: &mut Vec<BoundListItem>,
+    items: &[&ListItem],
+    depth: usize,
+    presentation: &ListPresentation,
+) {
+    let markers = (0..items.len())
+        .map(|index| {
+            normalize_marker((presentation.enumerator)(ListPosition::new(
+                index,
+                items.len(),
+                depth,
+            )))
+        })
+        .collect::<Vec<_>>();
+    let track_width = markers
+        .iter()
+        .map(|marker| PrintableText::new(marker).width())
+        .max()
+        .unwrap_or(0);
+    let track_x = depth.saturating_mul(presentation.nesting_indent);
+    let content_x = track_x.saturating_add(track_width);
+
+    for (item, marker) in items.iter().zip(markers) {
+        let marker_width = PrintableText::new(&marker).width();
+        bound.push(BoundListItem {
+            value: item.value.clone(),
+            marker,
+            track_x,
+            marker_x: track_x.saturating_add(track_width - marker_width),
+            content_x,
+            track_width,
+        });
+        let children = item.visible_items();
+        if !children.is_empty() {
+            bind_items(bound, &children, depth.saturating_add(1), presentation);
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+struct ListFrame {
+    items: Vec<BoundListItem>,
+    item_style: TextStyle,
+    enumerator_style: TextStyle,
+}
+
+impl ListFrame {
+    fn width_requirements(&self) -> CanvasRequirements {
+        let (demand, floor) = self.items.iter().fold((0, 0), |requirements, item| {
+            let lines = item.value.split('\n').map(PrintableText::new);
+            let (content_demand, content_floor) = lines.fold((0, 0), |widths, line| {
+                (
+                    widths.0.max(line.width()),
+                    widths
+                        .1
+                        .max(line.graphemes().map(Grapheme::width).max().unwrap_or(0)),
+                )
+            });
+            (
+                requirements
+                    .0
+                    .max(item.content_x.saturating_add(content_demand)),
+                requirements
+                    .1
+                    .max(item.content_x.saturating_add(content_floor)),
+            )
+        });
+        CanvasRequirements::new(demand, floor)
+    }
+
+    fn rows(&self, width: usize) -> Vec<ListRow> {
+        let mut rows = Vec::new();
+        for (item_index, item) in self.items.iter().enumerate() {
+            let content_width = width.saturating_sub(item.content_x);
+            let mut first = true;
+            for line in item.value.split('\n') {
+                for text in wrap_text(PrintableLines::new(line), content_width) {
+                    rows.push(ListRow {
+                        item_index,
+                        text,
+                        first,
+                    });
+                    first = false;
+                }
+            }
+        }
+        rows
+    }
+
+    fn draw(&self, context: &mut CanvasContext) {
+        let width = context.size().width();
+        for (y, row) in self.rows(width).into_iter().enumerate() {
+            let item = &self.items[row.item_index];
+            if row.first {
+                let visible_track = width.saturating_sub(item.track_x).min(item.track_width);
+                if visible_track > 0 {
+                    context.text_with(
+                        Position::new(position(item.track_x), position(y)),
+                        " ".repeat(visible_track),
+                        self.enumerator_style.clone(),
+                        Composition::Replace,
+                    );
+                }
+                context.text_with(
+                    Position::new(position(item.marker_x), position(y)),
+                    item.marker.clone(),
+                    self.enumerator_style.clone(),
+                    Composition::Replace,
+                );
+            }
+            context.text_with(
+                Position::new(position(item.content_x), position(y)),
+                row.text,
+                self.item_style.clone(),
+                Composition::Replace,
+            );
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ListRow {
+    item_index: usize,
+    text: String,
+    first: bool,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+struct ListCanvasItem(Arc<ListFrame>);
+
+impl ListCanvasItem {
+    fn sizing(&self) -> CanvasSizing {
+        CanvasSizing::intrinsic(self.clone())
+    }
+}
+
+impl CanvasMeasure for ListCanvasItem {
+    fn width_requirements(&self) -> CanvasRequirements {
+        self.0.width_requirements()
+    }
+
+    fn height_requirements(&self, width: usize) -> CanvasRequirements {
+        CanvasRequirements::new(self.0.rows(width).len(), 0)
+    }
+}
+
+impl CanvasItem for ListCanvasItem {
+    fn draw(&self, context: &mut CanvasContext) {
+        self.0.draw(context);
+    }
+}
+
+fn position(value: usize) -> i64 {
+    i64::try_from(value).unwrap_or(i64::MAX)
 }
 
 /// Owned list data independent of presentation policy.
 ///
-/// List owns its public model independently from Tree. Both components implement
-/// a private traversal contract that shares recursive layout without coupling
-/// either public data API to the other component.
+/// List owns its public model independently from Tree. Its presentation binds
+/// this recursive data without coupling either public data API to the other
+/// component.
 ///
 /// Offsets are supported with [`List::offset`] and [`ListItem::offset`]. A
 /// filter callback is intentionally not part of this API: omit items before
@@ -407,9 +551,13 @@ fn visible_items(items: &[ListItem], offset: ItemOffset) -> Vec<&ListItem> {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
     use super::*;
-    use crate::test_support::{plain, plain_rows, style_at};
-    use crate::{Color, ComponentStyles, SemanticTokens, measure};
+    use crate::test_support::{plain, style_at};
+    use crate::{
+        Available, Color, ComponentStyles, SemanticTokens, StyledGrapheme, measure, resolve,
+    };
 
     fn styles() -> ComponentStyles {
         ComponentStyles::from_tokens(&SemanticTokens {
@@ -426,9 +574,24 @@ mod tests {
         })
     }
 
+    fn plain_at(view: &View, width: usize) -> String {
+        resolve(view, Available::columns(width))
+            .rows()
+            .iter()
+            .map(|row| {
+                row.iter()
+                    .map(StyledGrapheme::symbol)
+                    .collect::<String>()
+                    .trim_end()
+                    .to_owned()
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
     #[test]
     fn renders_empty_flat_and_nested_lists() {
-        assert!(measure(&styles().list().view(&List::new())).is_empty());
+        assert!(measure(&styles().list().compose(&List::new())).is_empty());
 
         let list = List::new()
             .item("alpha")
@@ -436,7 +599,7 @@ mod tests {
             .item("omega");
 
         assert_eq!(
-            plain(&styles().list().view(&list)),
+            plain(&styles().list().compose(&list)),
             "• alpha\n• beta\n  • nested\n  • last\n• omega"
         );
     }
@@ -470,8 +633,8 @@ mod tests {
 
         for (enumerator, expected) in cases {
             let list = List::new().items(items);
-            let list_style = styles().list().clone().enumerator(enumerator);
-            let view = list_style.view(&list);
+            let presentation = styles().list().clone().enumerator(enumerator);
+            let view = presentation.compose(&list);
             assert_eq!(plain(&view), expected);
         }
     }
@@ -486,40 +649,45 @@ mod tests {
             (702, "AAA. "),
         ];
         for (index, expected) in positions {
-            assert_eq!(alphabet_enumerator(ListPosition::new(index, 703)), expected);
+            assert_eq!(
+                alphabet_enumerator(ListPosition::new(index, 703, 0)),
+                expected
+            );
         }
     }
 
     #[test]
     fn numeric_enumerators_are_bounded_at_extreme_public_positions() {
         assert_eq!(
-            roman_enumerator(ListPosition::new(3998, 3999)),
+            roman_enumerator(ListPosition::new(3998, 3999, usize::MAX)),
             "MMMCMXCIX. "
         );
-        assert_eq!(roman_enumerator(ListPosition::new(3999, 4000)), "4000. ");
         assert_eq!(
-            roman_enumerator(ListPosition::new(usize::MAX, usize::MAX)),
+            roman_enumerator(ListPosition::new(3999, 4000, usize::MAX)),
+            "4000. "
+        );
+        assert_eq!(
+            roman_enumerator(ListPosition::new(usize::MAX, usize::MAX, usize::MAX)),
             format!("{}. ", usize::MAX)
         );
         assert_eq!(
-            arabic_enumerator(ListPosition::new(usize::MAX, usize::MAX)),
+            arabic_enumerator(ListPosition::new(usize::MAX, usize::MAX, usize::MAX)),
             format!("{}. ", usize::MAX)
         );
     }
 
     fn custom_enumerator(position: ListPosition) -> String {
-        format!("[{}] ", position.index())
-    }
-
-    fn custom_indenter(_: ListPosition) -> String {
-        "→ ".to_owned()
+        if position.depth() == 0 {
+            format!("[{}] ", position.index())
+        } else {
+            "• ".to_owned()
+        }
     }
 
     #[test]
     fn supports_custom_markers_styles_visibility_and_offsets() {
         let item = TextStyle::new().foreground(Color::GREEN);
         let enumerator = TextStyle::new().foreground(Color::BLUE);
-        let indenter = TextStyle::new().foreground(Color::YELLOW);
         let list = List::new()
             .items([
                 ListItem::new("skip"),
@@ -528,21 +696,19 @@ mod tests {
                 ListItem::new("drop"),
             ])
             .offset(1, 1);
-        let list_style = styles()
+        let presentation = styles()
             .list()
             .clone()
             .enumerator(custom_enumerator)
-            .indenter(custom_indenter)
             .item_style(item.clone())
-            .enumerator_style(enumerator.clone())
-            .indenter_style(indenter.clone());
-        let view = list_style.view(&list);
+            .enumerator_style(enumerator.clone());
+        let view = presentation.compose(&list);
 
-        assert_eq!(plain(&view), "[0] parent\n→   [0] child");
+        assert_eq!(plain(&view), "[0] parent\n  • child");
         assert_eq!(style_at(&view, 0, 0), enumerator);
         assert_eq!(style_at(&view, 0, 4), item);
-        assert_eq!(style_at(&view, 1, 0), indenter);
-        assert_eq!(style_at(&view, 1, 4), enumerator);
+        assert_eq!(style_at(&view, 1, 2), enumerator);
+        assert_eq!(style_at(&view, 1, 4), item);
     }
 
     #[test]
@@ -557,8 +723,8 @@ mod tests {
             ListItem::new("hidden").hidden(true),
         ]));
         let component_styles = styles();
-        let view = component_styles.list().view(&list);
-        let hidden = component_styles.list().view(&hidden_list);
+        let view = component_styles.list().compose(&list);
+        let hidden = component_styles.list().compose(&hidden_list);
 
         assert_eq!(plain(&view), "• parent\n  • hidden\n  • kept");
         assert_eq!(plain(&hidden), "• parent\n  • visible");
@@ -567,22 +733,139 @@ mod tests {
     #[test]
     fn aligns_multiline_cjk_items_by_terminal_cell_width() {
         let list = List::new().items(["日本語\nsecond", "終端\n続き"]);
-        let list_style = styles().list().clone().enumerator(arabic_enumerator);
-        let view = list_style.view(&list);
+        let presentation = styles().list().clone().enumerator(arabic_enumerator);
+        let view = presentation.compose(&list);
 
         assert_eq!(plain(&view), "1. 日本語\n   second\n2. 終端\n   続き");
-        let rows = plain_rows(&view);
-        assert!(
-            rows.iter().all(|row| row.starts_with("1. ")
-                || row.starts_with("2. ")
-                || row.starts_with("   ")),
-            "a continuation aligns under its marker: {rows:?}"
-        );
+    }
+
+    #[test]
+    fn selected_width_reflows_without_recomposing() {
+        let view = styles().list().compose(&List::new().item("alpha beta"));
+
+        assert_eq!(plain_at(&view, 12), "• alpha beta");
+        assert_eq!(plain_at(&view, 8), "• alpha\n  beta");
+    }
+
+    fn hanging_enumerator(position: ListPosition) -> String {
+        if position.depth() > 0 {
+            "• ".to_owned()
+        } else if position.index() == 0 {
+            "1. ".to_owned()
+        } else {
+            "1000. ".to_owned()
+        }
+    }
+
+    #[test]
+    fn aligns_markers_in_local_sibling_tracks() {
+        let list = List::new()
+            .item(ListItem::new("parent").item("child"))
+            .item("last");
+        let view = styles()
+            .list()
+            .clone()
+            .enumerator(hanging_enumerator)
+            .compose(&list);
+
+        assert_eq!(plain(&view), "   1. parent\n  • child\n1000. last");
+    }
+
+    #[test]
+    fn marker_style_covers_geometric_alignment_cells() {
+        let marker = TextStyle::new().background(Color::BLUE);
+        let view = styles()
+            .list()
+            .clone()
+            .enumerator(hanging_enumerator)
+            .enumerator_style(marker.clone())
+            .compose(&List::new().items(["first", "second"]));
+
+        assert_eq!(style_at(&view, 0, 0), marker);
+    }
+
+    #[test]
+    fn preserves_explicit_and_wrapped_continuations_including_trailing_empty_line() {
+        let view = styles().list().compose(&List::new().item("ab cd\n日\n"));
+
+        assert_eq!(plain_at(&view, 5), "• ab\n  cd\n  日\n");
+    }
+
+    fn normalized_wide_enumerator(position: ListPosition) -> String {
+        if position.index() == 0 {
+            "👩‍💻\r\n".to_owned()
+        } else {
+            "• ".to_owned()
+        }
+    }
+
+    #[test]
+    fn normalizes_and_aligns_cjk_and_emoji_markers() {
+        let view = styles()
+            .list()
+            .clone()
+            .enumerator(normalized_wide_enumerator)
+            .compose(&List::new().items(["one", "two"]));
+
+        assert_eq!(plain(&view), "👩‍💻 one\n • two");
+    }
+
+    #[test]
+    fn width_requirements_include_prefix_and_widest_grapheme() {
+        let list = List::new().item("a日本語");
+        let items = visible_items(&list.items, list.offset);
+        let presentation = styles().list().clone();
+        let mut bound = Vec::new();
+        bind_items(&mut bound, &items, 0, &presentation);
+        let requirements = ListFrame {
+            items: bound,
+            item_style: TextStyle::new(),
+            enumerator_style: TextStyle::new(),
+        }
+        .width_requirements();
+
+        assert_eq!(requirements.demand(), 9);
+        assert_eq!(requirements.floor(), 4);
+    }
+
+    static ENUMERATOR_CALLS: AtomicUsize = AtomicUsize::new(0);
+
+    fn counted_enumerator(_: ListPosition) -> String {
+        ENUMERATOR_CALLS.fetch_add(1, Ordering::Relaxed);
+        "• ".to_owned()
+    }
+
+    #[test]
+    fn evaluates_enumerators_only_while_composing() {
+        ENUMERATOR_CALLS.store(0, Ordering::Relaxed);
+        let view = styles()
+            .list()
+            .clone()
+            .enumerator(counted_enumerator)
+            .compose(&List::new().items(["one", "two"]));
+        assert_eq!(ENUMERATOR_CALLS.load(Ordering::Relaxed), 2);
+
+        let _ = resolve(&view, Available::columns(8));
+        let _ = resolve(&view, Available::columns(4));
+        assert_eq!(ENUMERATOR_CALLS.load(Ordering::Relaxed), 2);
+    }
+
+    #[test]
+    fn extreme_nesting_arithmetic_saturates() {
+        let list = List::new().item(ListItem::new("parent").item("child"));
+        let items = visible_items(&list.items, list.offset);
+        let presentation = styles().list().clone().nesting_indent(usize::MAX);
+        let mut bound = Vec::new();
+
+        bind_items(&mut bound, &items, 0, &presentation);
+
+        assert_eq!(bound[1].track_x, usize::MAX);
+        assert_eq!(bound[1].content_x, usize::MAX);
     }
 
     #[test]
     fn hidden_list_returns_an_empty_view() {
         let list = List::new().item("item").hidden(true);
-        assert!(measure(&styles().list().view(&list)).is_empty());
+        assert!(measure(&styles().list().compose(&list)).is_empty());
     }
 }

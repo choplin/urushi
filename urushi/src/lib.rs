@@ -90,11 +90,11 @@ mod theme;
 mod view;
 
 pub use component::{
-    List, ListEnumerator, ListIndenter, ListItem, ListPosition, ListStyle, SiblingPosition,
-    Summary, SummaryField, Table, TableBorder, TableCell, TableCellStyler, TablePresentation, Tree,
+    List, ListEnumerator, ListItem, ListPosition, ListPresentation, SiblingPosition, Summary,
+    SummaryField, Table, TableBorder, TableCell, TableCellStyler, TablePresentation, Tree,
     TreeEnumerator, TreeIndenter, TreeNode, TreeStyle, Warning, alphabet_enumerator,
     arabic_enumerator, asterisk_enumerator, bullet_enumerator, dash_enumerator,
-    default_list_indenter, default_tree_enumerator, default_tree_indenter, roman_enumerator,
+    default_tree_enumerator, default_tree_indenter, roman_enumerator,
 };
 pub use key::Key;
 pub use render::AnsiRenderer;
@@ -114,7 +114,7 @@ pub use theme::{
 };
 pub use view::{
     AnchoredRect, Available, Axis, Canvas, CanvasCell, CanvasContext, CanvasItem, CanvasSizing,
-    CellContribution, Composition, LayoutError, LayoutErrorKind, LineGlyphs, LineNetwork, Position,
-    PositionedCell, RenderedBlock, ResolvedView, Size, StyledGrapheme, View, join_horizontal,
-    join_vertical, measure, resolve, try_measure, try_resolve,
+    CellContribution, Composition, LayoutError, LayoutErrorKind, LineContinuations, LineGlyphs,
+    LineNetwork, Position, PositionedCell, RenderedBlock, ResolvedView, Size, StyledGrapheme, View,
+    join_horizontal, join_vertical, measure, resolve, try_measure, try_resolve,
 };
