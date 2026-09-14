@@ -3,13 +3,18 @@
 //! An application is a value: [`Application`] describes a program, its `Model`
 //! is the state the runtime owns, and its `update` returns an [`Effect`] rather
 //! than performing one. Everything the program wants to hear from — terminal
-//! input included — it declares as a [`Subscription`]. Nothing in this module
-//! reads a terminal, runs a closure, polls a future, or draws; those belong to
-//! the runtime that interprets these values.
+//! input included — it declares as a [`Subscription`]. Building those values
+//! reads no terminal and starts no work; the runtime's executor machinery
+//! interprets them behind boundaries that do not appear in application types.
 
 mod application;
 mod delivery;
 mod effect;
+#[cfg_attr(
+    not(test),
+    expect(dead_code, reason = "consumed by the runtime core and test harness")
+)]
+mod executor;
 mod source;
 mod subscription;
 #[cfg(test)]

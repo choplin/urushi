@@ -262,6 +262,18 @@ impl<Message> Effect<Message> {
     pub(crate) fn into_kind(self) -> EffectKind<Message> {
         self.kind
     }
+
+    /// Whether this effect tree asks the runtime to stop before starting work.
+    pub(crate) fn requests_shutdown(&self) -> bool {
+        match &self.kind {
+            EffectKind::Shutdown => true,
+            EffectKind::Batch(effects) => effects.iter().any(Self::requests_shutdown),
+            EffectKind::None
+            | EffectKind::Perform { .. }
+            | EffectKind::Future { .. }
+            | EffectKind::After { .. } => false,
+        }
+    }
 }
 
 impl<Message> Default for Effect<Message> {
