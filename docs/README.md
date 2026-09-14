@@ -26,6 +26,13 @@ top-level document grows a section whose precision serves the implementer
 rather than the model, that section belongs under `design/`, and the top-level
 document keeps a summary and a link.
 
+Placement is determined by what a passage lets the reader understand, not by
+whether it mentions an interface or implementation mechanism. An API shape,
+data flow, or implementation boundary belongs at the top level when it is
+needed to understand the unit's larger design. The same material belongs under
+`design/` when its purpose is to specify or defend one exact answer after that
+larger design is already understood.
+
 A top-level document describes the architecture Urushi is built toward, not
 the state of the code on a given day. Where the implementation has not reached
 that architecture, the document is not annotated with the gap; closing the gap
@@ -38,15 +45,22 @@ provide. A contract stated without its purpose is not comprehensible. What it
 does not carry is the defense of that shape against the alternatives it was
 chosen over.
 
-## `design/`: one topic in depth
+## `design/`: one design issue per file
 
-Each file under [`design/`](design/) treats one design topic in full: the rule
-as it is precisely stated, the reasoning behind it, the rejected alternatives,
-and past history where it explains the choice. A topic is a question that could
-have been answered another way — how a box resolves its size, how a prompt
-recovers a lost region, how the runtime orders deliveries — and its file is
-where a reader goes once the mental model is in place and the exact contract
-matters.
+Each file under [`design/`](design/) answers exactly one design issue in full:
+one reader-facing question that could have been answered another way, such as
+how a box resolves its size, how a prompt recovers a lost region, or how the
+runtime orders deliveries. The file states the precise rule, its reasoning,
+rejected alternatives, and past history where that history explains the
+choice. It is where a reader goes once the mental model is in place and that
+exact contract matters.
+
+A design issue is not a tracker Issue or another unit of work. One tracker
+Issue may resolve or revise several design issues, and a later tracker Issue
+may revise the file that continues to own an existing design issue. Do not
+collect decisions into one file merely because they were made during the same
+tracker Issue. Conversely, do not split one design issue across several files
+merely because its implementation touches several subsystems.
 
 Placement follows from what the reader needs. If a passage is required to hold
 the shape of a unit in mind, it belongs at the top level. If the reader can
@@ -54,7 +68,8 @@ hold the shape without it but needs it to implement, verify, or judge whether
 the rule should change — precise procedures, edge cases, canonical forms,
 worked examples, the defense against alternatives — it belongs here.
 
-Split by topic, not by source document. A top-level document may hand detail to
+Split by the question a reader needs answered, not by tracker Issue, source
+document, or implementation unit. A top-level document may hand detail to
 several design files, and one design file may serve several top-level
 documents.
 
