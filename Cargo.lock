@@ -638,6 +638,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "urushi-cli"
+version = "0.1.0"
+dependencies = [
+ "urushi",
+]
+
+[[package]]
 name = "urushi-prompt"
 version = "0.1.0"
 dependencies = [

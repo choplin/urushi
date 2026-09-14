@@ -113,7 +113,9 @@ with the derived local constraints before invoking Canvas items.
 
 Components own semantic data and concrete ways to lower it to primitive views
 or bound Canvas items.
-List, Tree, Table, Summary, and Warning remain the canonical common components.
+List, Tree, and Table remain the canonical core components. `urushi-cli` owns
+the opinionated Summary and Warning models and presentations on the same View
+foundation.
 Graphs, charts, sparklines, gauges, tabs, scrollbars, modal frames, and text-field
 visuals are component or presentation candidates when they add reusable
 semantic or visual policy; they are not reasons to add corresponding semantic

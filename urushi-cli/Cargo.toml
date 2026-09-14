@@ -1,0 +1,11 @@
+[package]
+name = "urushi-cli"
+description = "Human-facing non-interactive CLI presentations built on urushi"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+keywords = ["cli", "terminal", "style", "ansi"]
+categories = ["command-line-interface"]
+
+[dependencies]
+urushi = { path = "../urushi", version = "=0.1.0" }

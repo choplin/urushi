@@ -10,6 +10,8 @@ TUI runtime layered on Ratatui. The [`README`](../README.md#concept) explains
 why one library covers all three; this document explains how those surfaces
 share a foundation without being forced into one rendering model or one
 terminal lifecycle. Each surface's own design is a separate document:
+[`cli-presentation.md`](cli-presentation.md) for opinionated non-interactive
+CLI presentation,
 [`inline-prompt-rendering.md`](inline-prompt-rendering.md) for the prompt's
 rendering and terminal-surface choice, and
 [`tui-architecture.md`](tui-architecture.md) for the full-screen application
@@ -25,22 +27,23 @@ The exact terminal observation and output contract is recorded in
 
 ## Architecture at a glance
 
-Concrete component presentations compose semantic data into a renderer-neutral
-`View`. Terminal capabilities are applied only at the output boundary.
+The root flow begins with a renderer-neutral `View`, resolves it into cells,
+then serializes those cells for output.
 
 ```text
-SemanticTokens --> Theme --> ComponentTheme --> concrete Presentation
-                                                       |
-Semantic component data -------------------------------+-- compose
-Optional component-specific frame input ---------------+     |
-                                                             v
- View (built-ins and Canvas items) --> resolve(Available) --> ResolvedView
-                                                             |
-                         RenderSettings ----------------------+--> render --> String
-
- output handle --> urushi-terminal::detect --> TerminalDetection
-                                               | size + capabilities
-                                               +--> print / eprint convenience
+View
+  |
+  | resolve(Available)
+  v
+ResolvedView
+  |
+  | render(RenderSettings)
+  v
+String
+  |
+  | write
+  v
+std::io::Write
 ```
 
 The core [`View`](../urushi/src/view/model.rs) is a component-agnostic layout
@@ -132,7 +135,7 @@ The surfaces above the foundation, and the layer Urushi provides for each, are:
 
 | Surface | Urushi-provided layer | Lifecycle owner |
 | --- | --- | --- |
-| Plain CLI output | `View`; `resolve`; `render`; and `print` / `println` / `eprint` / `eprintln` convenience functions | The application owns its command workflow. Standard-stream convenience functions own only one static write. |
+| Plain CLI output | Core `View`, `resolve`, `render`, and static-write helpers; [`urushi-cli`](cli-presentation.md) adds opinionated Summary and Warning presentation | The application owns its command workflow. Standard-stream convenience functions own only one static write. |
 | Interactive prompt | `Form` / `Group`; typed `Input`, `Select`, and `Confirm`; synchronous validation; selectable inline or alternate-screen presentation; terminal session setup and cleanup | `urushi-prompt` owns the blocking prompt session and the resources it acquires. The application owns when the form runs and what submitted values mean. |
 | Full-screen TUI | `urushi-tui`: the runtime and its `ratatui` adapter — logical-style conversion, widgets that resolve a `View` and draw it into a Ratatui `Buffer`, and the cell-writing path the runtime's renderer takes with a view it resolved itself | The `urushi-tui` runtime owns event delivery, frame scheduling, terminal entry and restoration. The application owns its model, update, and view. |
 
@@ -145,15 +148,19 @@ application semantics
         |
         v
 SemanticTokens --> Theme --> ComponentTheme / logical styles
-                                      |
-             +------------------------+-------------------------------------+
-             |                                |                             |
-             v                                v                             v
-     plain CLI layer                  prompt layer                 Ratatui adapter
- data + Presentation / text      Form / Group / Field             application view
-             |                                |                             |
-             View                   View + prompt stages        BlockStyle / widget
-             |                                |                             |
+                         |            |
+                         |            +---------------------------------------------+
+                         v                                                          |
+                      CliTheme                                                      |
+                         |                                                          |
+             +-----------+--------------------+-------------------------------------+
+             |                                |                                     |
+             v                                v                                     v
+     plain CLI layer                  prompt layer                         Ratatui adapter
+ data + Presentation / text      Form / Group / Field                     application view
+             |                                |                                     |
+             View                   View + prompt stages                BlockStyle / widget
+             |                                |                                     |
  resolve / render / output      selected renderer + session       caller-owned Buffer
 ```
 
@@ -183,6 +190,7 @@ a role are documented with the extension point itself, in
 | --- | --- | --- |
 | [`urushi-terminal`](../urushi-terminal/) | Inspection of one output handle: terminal/non-terminal classification, visible size, and feature-granular capabilities. | None within the workspace |
 | [`urushi`](../urushi/) | Logical styles, themes, renderer-neutral views and components, layout, ANSI serialization, and standard-stream output convenience. | `urushi-terminal` |
+| [`urushi-cli`](../urushi-cli/) | Opinionated semantic summaries and warnings for human-facing, non-interactive CLI output. | `urushi` |
 | [`urushi-prompt`](../urushi-prompt/) | Typed input, select, and confirm forms; prompt state transitions; inline and alternate-screen presentations; terminal session setup and cleanup. | `urushi`, `urushi-terminal` |
 | [`urushi-tui`](../urushi-tui/) | The Ratatui backend adapter in [`ratatui`](../urushi-tui/src/ratatui/) — style conversion, widgets, and the cell-writing path they share with the renderer — and the full-screen TUI runtime behind the default-on `runtime` Cargo feature. | `urushi` |
 
@@ -226,9 +234,11 @@ not introduce a private definition of CJK display width.
 Themes describe meaning. They do not detect `NO_COLOR`, inspect TTY state, emit
 ANSI, or retain an output writer.
 
-Reusable components separate owned semantic data — `List`, `Tree`, `Table`,
-`Summary`, and `Warning` — from concrete presentations that compose it into a
-primitive `View`. The contract they follow is defined in
+Reusable core components separate owned semantic data — `List`, `Tree`, and
+`Table` — from concrete presentations that compose it into a primitive `View`.
+[`urushi-cli`](cli-presentation.md) applies the same contract to its `Summary`
+and `Warning` data and presentations without making their CLI visual language
+part of core. The general contract is defined in
 [`component-model.md`](component-model.md).
 
 ## Core contracts

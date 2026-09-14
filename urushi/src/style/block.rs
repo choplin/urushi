@@ -31,6 +31,7 @@ pub struct BlockStyle {
     border_right: bool,
     border_bottom: bool,
     border_left: bool,
+    border_text: TextStyle,
     border_fg: Option<Color>,
     border_bg: Option<Color>,
     width: Option<Length>,
@@ -55,6 +56,7 @@ impl Default for BlockStyle {
             border_right: true,
             border_bottom: true,
             border_left: true,
+            border_text: TextStyle::new(),
             border_fg: None,
             border_bg: None,
             width: None,
@@ -96,6 +98,7 @@ impl BlockStyle {
             BlockStyleProperty::BorderRight(enabled) => self.border_right = enabled,
             BlockStyleProperty::BorderBottom(enabled) => self.border_bottom = enabled,
             BlockStyleProperty::BorderLeft(enabled) => self.border_left = enabled,
+            BlockStyleProperty::BorderTextStyle(style) => self.border_text = style,
             BlockStyleProperty::BorderForeground(color) => self.border_fg = Some(color),
             BlockStyleProperty::BorderBackground(color) => self.border_bg = Some(color),
             BlockStyleProperty::Width(width) => self.width = Some(width),
@@ -122,6 +125,7 @@ impl BlockStyle {
             BlockStylePropertyKey::BorderRight => self.border_right = true,
             BlockStylePropertyKey::BorderBottom => self.border_bottom = true,
             BlockStylePropertyKey::BorderLeft => self.border_left = true,
+            BlockStylePropertyKey::BorderTextStyle => self.border_text = TextStyle::new(),
             BlockStylePropertyKey::BorderForeground => self.border_fg = None,
             BlockStylePropertyKey::BorderBackground => self.border_bg = None,
             BlockStylePropertyKey::Width => self.width = None,
@@ -241,6 +245,14 @@ impl BlockStyle {
     /// Enables or disables the left border edge.
     pub fn border_left(self, enabled: bool) -> Self {
         self.add(BlockStyleProperty::BorderLeft(enabled))
+    }
+
+    /// Replaces the complete logical style used for border glyphs.
+    ///
+    /// A subsequently applied border foreground or background overrides the
+    /// corresponding property in this style.
+    pub fn border_text_style(self, style: TextStyle) -> Self {
+        self.add(BlockStyleProperty::BorderTextStyle(style))
     }
 
     /// Sets the border foreground color.
@@ -364,6 +376,11 @@ impl BlockStyle {
         self.border_left
     }
 
+    /// Returns the complete logical style used as the border-style base.
+    pub const fn border_text(&self) -> &TextStyle {
+        &self.border_text
+    }
+
     /// Returns the border foreground color instruction.
     pub const fn border_foreground_color(&self) -> Option<Color> {
         self.border_fg
@@ -443,7 +460,7 @@ impl BlockStyle {
 
     /// The style drawn on this block's border glyphs.
     pub(crate) fn border_style(&self) -> TextStyle {
-        let mut style = TextStyle::new();
+        let mut style = self.border_text.clone();
         if let Some(color) = self.border_fg {
             style = style.foreground(color);
         }

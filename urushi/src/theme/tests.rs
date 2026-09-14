@@ -1,5 +1,5 @@
 use crate::test_support::render_block;
-use crate::{BlockStyle, Color, SummaryPresentation, TablePresentation, TextStyle};
+use crate::{BlockStyle, Color, TablePresentation, TextStyle};
 
 use super::*;
 
@@ -24,7 +24,6 @@ fn component_theme_follows_the_token_mapping() {
         (ComponentRole::Muted, "\x1b[2;32mx\x1b[0m"),
         (ComponentRole::Accent, "\x1b[1;35mx\x1b[0m"),
         (ComponentRole::Success, "\x1b[37mx\x1b[0m"),
-        (ComponentRole::Warning, "\x1b[90mx\x1b[0m"),
         (ComponentRole::Error, "\x1b[1;91mx\x1b[0m"),
         (ComponentRole::PromptQuestion, "\x1b[1;35mx\x1b[0m"),
         (ComponentRole::PromptAnswer, "\x1b[31mx\x1b[0m"),
@@ -79,16 +78,6 @@ fn component_theme_follows_the_token_mapping() {
     assert_eq!(
         components.table().border_glyph_style().paint("x"),
         "\x1b[92mx\x1b[0m"
-    );
-}
-
-#[test]
-fn custom_component_style_replaces_the_default() {
-    let components = ComponentTheme::from_tokens(&TOKENS)
-        .with_text_style(ComponentRole::Warning, TextStyle::new().underline());
-    assert_eq!(
-        components.text_style(ComponentRole::Warning).paint("note"),
-        "\x1b[4mnote\x1b[0m"
     );
 }
 
@@ -154,17 +143,6 @@ fn theme_tree_shortcut_delegates_to_the_canonical_presentation() {
 }
 
 #[test]
-fn theme_summary_shortcut_delegates_to_the_canonical_presentation() {
-    let theme = Theme::from_tokens(TOKENS);
-    let summary = crate::Summary::new("Result").field("Name", "urushi");
-
-    assert_eq!(
-        theme.summary(&summary),
-        theme.components().summary().compose(&summary)
-    );
-}
-
-#[test]
 fn theme_and_component_theme_keep_value_equality_after_cloning() {
     let theme = Theme::from_tokens(TOKENS);
 
@@ -223,22 +201,6 @@ fn replacing_the_table_policy_keeps_the_other_component_defaults() {
         render_block(replaced.table_style(TableRole::Header), "head"),
         "\x1b[4mhead\x1b[0m"
     );
-    assert_eq!(
-        replaced.list_style(ListRole::Item).paint("item"),
-        "\x1b[31mitem\x1b[0m"
-    );
-}
-
-#[test]
-fn replacing_the_summary_policy_keeps_the_other_component_defaults() {
-    let summary = SummaryPresentation::new(
-        TextStyle::new().underline(),
-        TextStyle::new(),
-        TextStyle::new(),
-    );
-    let replaced = ComponentTheme::from_tokens(&TOKENS).with_summary(summary.clone());
-
-    assert_eq!(replaced.summary(), &summary);
     assert_eq!(
         replaced.list_style(ListRole::Item).paint("item"),
         "\x1b[31mitem\x1b[0m"

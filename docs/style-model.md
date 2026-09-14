@@ -59,10 +59,12 @@ value, and a `…PropertyKey` naming one without it. The text vocabulary is
 foreground, background, underline, hyperlink, and modifier. A hyperlink is one
 URI plus zero or more OSC 8 parameters; construction percent-encodes control
 and delimiter characters so caller input cannot escape its field. The block
-vocabulary is the geometry — padding, margin, the border glyph set and its four
-edge switches and two colors, the six sizing properties, overflow, and the two
-alignments — plus, through a `Text` variant, every text property of the style
-filling it.
+vocabulary is the geometry — padding, margin, the border glyph set, its four
+edge switches, complete logical text style, and color overrides, the six sizing
+properties, overflow, and the two alignments — plus, through a `Text` variant,
+every text property of the style filling it. The complete border style lets a
+semantic rail retain modifiers as well as colors; explicit border foreground
+and background values override those two properties.
 
 `TextStyleProperty` converts into `BlockStyleProperty`, so `BlockStyle::add`
 accepts a text property directly, and `BlockStyle::foreground` reads the same
@@ -195,6 +197,10 @@ and `Theme::components` exposes the stored built-in styles and canonical
 presentations as borrows for consumers that want to avoid the copy. Component
 presentations are not style values: their separate role and naming are defined
 in [`component-model.md`](component-model.md).
+
+`urushi-cli::CliTheme` derives its own roles and presentations from a core
+`Theme`; core does not reserve the CLI-specific Warning role or store its
+presentations.
 
 Styles do not implicitly flow from a parent view to a child: as
 [`view-model.md`](view-model.md) specifies, each child carries its own

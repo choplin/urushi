@@ -1,13 +1,10 @@
 //! Canonical presentations and shared role styles for reusable components.
 
-use crate::{
-    BlockStyle, Border, ListPresentation, SummaryPresentation, TablePresentation, TextStyle,
-    TreePresentation,
-};
+use crate::{BlockStyle, Border, ListPresentation, TablePresentation, TextStyle, TreePresentation};
 
 use super::{ComponentRole, ListRole, SemanticTokens, TableRole, TreeRole};
 
-const COMPONENT_ROLE_COUNT: usize = 16;
+const COMPONENT_ROLE_COUNT: usize = 15;
 
 /// Theme-derived presentations and shared role styles for common components.
 #[derive(Debug, Clone, PartialEq)]
@@ -18,7 +15,6 @@ pub struct ComponentTheme {
     list: ListPresentation,
     tree: TreePresentation,
     table: TablePresentation,
-    summary: SummaryPresentation,
 }
 
 impl ComponentTheme {
@@ -36,7 +32,6 @@ impl ComponentTheme {
             TextStyle::new().foreground(tokens.text_muted).dim(),
             TextStyle::new().foreground(tokens.accent).bold(),
             TextStyle::new().foreground(tokens.success),
-            TextStyle::new().foreground(tokens.warning),
             TextStyle::new().foreground(tokens.error).bold(),
             TextStyle::new().foreground(tokens.accent).bold(),
             TextStyle::new().foreground(tokens.text),
@@ -57,12 +52,6 @@ impl ComponentTheme {
             TextStyle::new().foreground(tokens.text_muted).dim(),
             TextStyle::new().foreground(tokens.error),
         ];
-        let summary = SummaryPresentation::new(
-            styles[ComponentRole::Muted.index()].clone(),
-            styles[ComponentRole::Accent.index()].clone(),
-            styles[ComponentRole::Body.index()].clone(),
-        );
-
         Self {
             styles,
             panel: panel.clone(),
@@ -81,7 +70,6 @@ impl ComponentTheme {
                 BlockStyle::new().foreground(tokens.text),
                 TextStyle::new().foreground(tokens.border),
             ),
-            summary,
         }
     }
 
@@ -129,15 +117,9 @@ impl ComponentTheme {
         &self.table
     }
 
-    /// Returns the default presentation policy for summaries.
-    pub fn summary(&self) -> &SummaryPresentation {
-        &self.summary
-    }
-
     #[must_use]
     pub fn with_text_style(mut self, role: ComponentRole, style: TextStyle) -> Self {
-        self.styles[role.index()] = style.clone();
-        self.summary.set_component_style(role, style);
+        self.styles[role.index()] = style;
         self
     }
 
@@ -194,13 +176,6 @@ impl ComponentTheme {
     #[must_use]
     pub fn with_table(mut self, table: TablePresentation) -> Self {
         self.table = table;
-        self
-    }
-
-    /// Replaces the complete default summary presentation policy.
-    #[must_use]
-    pub fn with_summary(mut self, summary: SummaryPresentation) -> Self {
-        self.summary = summary;
         self
     }
 }

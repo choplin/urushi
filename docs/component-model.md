@@ -107,10 +107,11 @@ semantic component data. `TextStyle`, `BlockStyle`, and `GridStyle` configure
 the primitives they are attached to.
 
 A type that interprets semantic data and constructs primitives is named
-`...Presentation`. The built-in canonical types are
-`ListPresentation`, `TreePresentation`, `TablePresentation`,
-`SummaryPresentation`, and `WarningPresentation`. `ComponentTheme` stores
-their theme-derived defaults alongside shared component role styles.
+`...Presentation`. Core provides `ListPresentation`, `TreePresentation`, and
+`TablePresentation`; `ComponentTheme` stores their theme-derived defaults
+alongside shared component role styles. `urushi-cli` provides
+`SummaryPresentation` and `WarningPresentation`, stored with their CLI roles in
+`CliTheme`.
 
 Each presentation is an independent concrete type. `compose` is a naming and
 responsibility convention, not a shared trait or universal signature. Internal
@@ -154,19 +155,24 @@ use:
 theme.list(&list);
 theme.tree(&tree);
 theme.table(&table);
-theme.summary(&summary);
-theme.warning(&warning);
+
+let cli = CliTheme::from_theme(&theme);
+cli.summary(&summary);
+cli.warning(&warning);
 ```
 
-These methods add no second implementation. Each delegates to the corresponding
-presentation in `theme.components()`. Named alternate presentations and local
-customization stay explicit through `compose`.
+These methods add no second implementation. Core methods delegate through
+`theme.components()`; CLI methods delegate through `CliTheme`'s presentations.
+Named alternate presentations and local customization stay explicit through
+`compose`.
 
 ## Component classification
 
-`List`, `Tree`, `Table`, `Summary`, and `Warning` are semantic data. Their
-presentation types own every conversion into `View`, including the current
-canonical visual structure. A table header is Table meaning until
+`List`, `Tree`, and `Table` are core semantic data. `Summary` and `Warning` are
+semantic data owned by `urushi-cli`, where their rails, glyphs, hierarchy, and
+role assignments form one CLI visual language. Every presentation type owns
+its conversion into `View`, including the current canonical visual structure.
+A table header is Table meaning until
 `TablePresentation` lowers it; a list marker and a tree branch are presentation
 policy until their presentation expresses them as generic primitives.
 

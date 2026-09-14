@@ -45,7 +45,7 @@ signature or additional method. `render` remains an output-boundary verb,
 while `view` remains the type and the application-level function that describes
 a whole application screen.
 
-## Why canonical calls live on Theme
+## Why canonical calls live on the owning theme
 
 The ordinary caller wants the canonical, theme-derived presentation. Requiring
 the complete path
@@ -55,10 +55,13 @@ theme.components().tree().compose(&tree)
 ```
 
 at every call would expose selection machinery without adding information.
-`theme.tree(&tree)` is an exact delegating shortcut. `Theme` is the subject
-that chooses the canonical presentation, so the shortcut neither puts
-presentation behavior on semantic data nor implies that the canonical shape is
-the component's only possible shape.
+`theme.tree(&tree)` is an exact delegating shortcut. Core `Theme` is the subject
+that chooses canonical core presentations. Opinionated CLI presentation instead
+belongs to `CliTheme`, derived from that core theme, so
+`cli.summary(&summary)` is equally short without making CLI vocabulary part of
+core. In both cases the shortcut neither puts presentation behavior on semantic
+data nor implies that the canonical shape is the component's only possible
+shape.
 
 The complete path remains available for local customization. Alternate
 structural presentations are named explicitly and do not receive a shortcut
@@ -219,11 +222,12 @@ callers.
 
 ## Consequences
 
-The public target renames the existing component presentation values to
-`ListPresentation`, `TreePresentation`, and `TablePresentation`, moves Summary
-and Warning composition into concrete presentation values, names their
-aggregate `ComponentTheme`, and reserves `...Style` for declarative values.
-Canonical Theme shortcuts keep ordinary calls short.
+Core owns `ListPresentation`, `TreePresentation`, and `TablePresentation` in
+`ComponentTheme`. The separate `urushi-cli` crate owns `SummaryPresentation`
+and `WarningPresentation` in `CliTheme`, because their rails, glyphs,
+hierarchy, and role mapping form an opinionated CLI visual language. The
+`...Style` suffix remains reserved for declarative values, and each owning theme
+keeps its canonical calls short.
 
 This is a deliberate pre-alpha source break rather than a deprecation cycle.
 The implementation issues remove the old names and methods when they introduce
@@ -235,9 +239,9 @@ remain. The source-level migration is mechanical:
 | `ListStyle`, `TreeStyle`, `TableStyle` | `ListPresentation`, `TreePresentation`, `TablePresentation` |
 | `style.view(&data)` | `presentation.compose(&data)` |
 | `theme.components().list().view(&list)` | `theme.list(&list)` for the canonical call, or `theme.components().list().compose(&list)` for customization |
-| `summary.view(theme.components(), width)` | `theme.summary(&summary)` or `theme.components().summary().compose(&summary)`; `resolve` receives the width |
-| `warning.view(theme.components(), width)` | `theme.warning(&warning)` or `theme.components().warning().compose(&warning)`; `resolve` receives the width |
-| `ComponentStyles` | `ComponentTheme`, including terminal helper parameters that consume theme-derived component values |
+| `summary.view(theme.components(), width)` | `CliTheme::from_theme(&theme).summary(&summary)` or `SummaryPresentation::compose(&summary)`; `resolve` receives the width |
+| `warning.view(theme.components(), width)` | `CliTheme::from_theme(&theme).warning(&warning)` or `WarningPresentation::compose(&warning)`; `resolve` receives the width |
+| `ComponentStyles` | Core `ComponentTheme`; CLI-specific roles and presentations live in `CliTheme` |
 
 Component migrations replace width-dependent wrapping, measured padding, and
 repeated-glyph construction during composition with primitive layout intent or

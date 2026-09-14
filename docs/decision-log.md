@@ -6,6 +6,7 @@ describe the current snapshot.
 
 | Date | Decision | Recorded in |
 | --- | --- | --- |
+| 2026-09-14 | Moved the opinionated Summary and Warning visual language into `urushi-cli`, with both presentations composed from ordinary View primitives and a `CliTheme` derived from core `Theme`. | [`cli-presentation.md`](cli-presentation.md), [`architecture.md`](architecture.md), [`component-model.md`](component-model.md), [`design/component-presentation.md`](design/component-presentation.md) |
 | 2026-09-14 | Made a border title optional Block content rather than a style property, semantic presentation, or new View variant; its styled single line contributes automatic width and clips inside finite top-edge geometry. | [`view-model.md`](view-model.md), [`design/block-title.md`](design/block-title.md) |
 | 2026-09-14 | Removed the core-owned, self-driving progress lifecycle: execution state, ticks, redraw scheduling, and terminal cleanup belong to a host runtime rather than to renderer-neutral components or a third runtime inside `urushi`. | [`architecture.md`](architecture.md) |
 | 2026-09-14 | Made ordinary delivery exactly one `Async` message and reserved non-empty batches for the exceptional `Sync` render barrier, so an asynchronous batch is unrepresentable. | [`design/tui-delivery-ordering.md`](design/tui-delivery-ordering.md) |

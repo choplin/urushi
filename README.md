@@ -34,6 +34,7 @@ surface layers, including which parts are implemented today.
 | Crate | Description | Status |
 |---|---|---|
 | [`urushi`](urushi/) | Style definitions: colors, modifiers, padding, margin, borders, alignment, wrapping | Core rendering works |
+| [`urushi-cli`](urushi-cli/) | Opinionated `Summary` and `Warning` presentation for human-facing, non-interactive CLI output | Core presentations work |
 | [`urushi-terminal`](urushi-terminal/) | Target-specific terminal size and output-capability inspection | Core detection works |
 | [`urushi-prompt`](urushi-prompt/) | Theme-aware `Input`, `Select`, and `Confirm` fields with synchronous validation | Core prompt flow works |
 | [`urushi-tui`](urushi-tui/) | The `ratatui` adapter — style conversion, box-model widgets, and the cell-writing path they share with a renderer — and the home of the full-screen runtime | Adapter works; runtime is not implemented |
@@ -129,6 +130,20 @@ Redirected output is an unbounded plain dump. A non-empty `NO_COLOR` removes
 colors while retaining other supported features. Code writing an arbitrary
 `std::io::Write` target uses `urushi_terminal::detect`, `resolve`, and `render`
 directly and can select different `RenderSettings` from the detected maximum.
+
+For opinionated command summaries and warnings, derive the separate CLI theme
+from the same core theme:
+
+```rust
+use urushi_cli::{CliTheme, Summary, Warning};
+
+let cli = CliTheme::from_theme(&theme);
+let result = cli.summary(&Summary::new("Done").field("Output", "report.json"));
+let caution = cli.warning(&Warning::new("Overwrite", "The old file will be replaced"));
+```
+
+`urushi-cli` owns this visual language. It does not define logging levels or
+delivery, live progress, prompts, or a full-screen runtime.
 
 ### The same Theme in ratatui
 
@@ -232,7 +247,7 @@ new size; expect all other visible primary-buffer content to be erased.
 - [x] Target-specific terminal detection and feature-granular rendering settings
 - [ ] Adaptive colors (light/dark terminal backgrounds)
 - [x] Nested styles as a view tree (`View::text` / `block` / `row` / `column`) resolved in one layout pass, rather than re-styling already-rendered text
-- [x] Theme layer: per-component style sets derived from a small set of semantic tokens
+- [x] Theme layers: reusable core components plus CLI-specific presentations derived from shared semantic tokens
 - [x] `urushi-tui`: box-model Widget and loss-aware Ratatui style conversion
 - [ ] `urushi-tui`: TEA-style full-screen runtime owning event delivery, frame scheduling, and terminal lifecycle
 - [x] `urushi-prompt`: themed `Form` / `Group` with `Input`, `Select`, `Confirm`, and synchronous validation
