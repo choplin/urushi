@@ -1,7 +1,7 @@
 //! Titled warning messages with a rail-aligned body.
 
 use crate::text::{PrintableLines, wrap_text};
-use crate::{Align, ComponentRole, ComponentStyles, VerticalAlign, View};
+use crate::{Align, ComponentRole, ComponentTheme, VerticalAlign, View};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Warning {
@@ -18,7 +18,7 @@ impl Warning {
     /// already-rendered output with
     /// [`RenderedBlock::from_ansi`](crate::RenderedBlock::from_ansi) instead.
     ///
-    /// Style the component through its [`ComponentStyles`](crate::ComponentStyles)
+    /// Style the component through its [`ComponentTheme`](crate::ComponentTheme)
     /// rather than by pre-rendering its content.
     pub fn new(title: impl Into<String>, message: impl Into<String>) -> Self {
         Self {
@@ -27,7 +27,7 @@ impl Warning {
         }
     }
 
-    pub fn view(&self, styles: &ComponentStyles, width: usize) -> View {
+    pub fn view(&self, styles: &ComponentTheme, width: usize) -> View {
         let muted = styles.text_style(ComponentRole::Muted).clone();
         let warning = styles.text_style(ComponentRole::Warning).clone();
         let body = styles.text_style(ComponentRole::Body).clone();

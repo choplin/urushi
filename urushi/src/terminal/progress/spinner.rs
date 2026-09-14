@@ -2,7 +2,7 @@
 
 use std::io;
 
-use crate::{ComponentRole, ComponentStyles, View};
+use crate::{ComponentRole, ComponentTheme, View};
 
 use super::{
     StderrTerminal,
@@ -17,7 +17,7 @@ use crate::OutputMode;
 pub struct Spinner {
     live: Option<LiveRegion>,
     terminal: StderrTerminal,
-    styles: ComponentStyles,
+    styles: ComponentTheme,
     message: String,
     finished: bool,
 }
@@ -25,7 +25,7 @@ pub struct Spinner {
 impl Spinner {
     pub(crate) fn new(
         terminal: StderrTerminal,
-        styles: ComponentStyles,
+        styles: ComponentTheme,
         message: String,
     ) -> io::Result<Self> {
         let live = match terminal.mode() {

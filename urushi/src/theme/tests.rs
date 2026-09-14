@@ -16,8 +16,8 @@ const TOKENS: SemanticTokens = SemanticTokens {
 };
 
 #[test]
-fn component_styles_follow_the_token_mapping() {
-    let components = ComponentStyles::from_tokens(&TOKENS);
+fn component_theme_follows_the_token_mapping() {
+    let components = ComponentTheme::from_tokens(&TOKENS);
     let expected = [
         (ComponentRole::Body, "\x1b[31mx\x1b[0m"),
         (ComponentRole::Muted, "\x1b[2;32mx\x1b[0m"),
@@ -86,7 +86,7 @@ fn component_styles_follow_the_token_mapping() {
 
 #[test]
 fn custom_component_style_replaces_the_default() {
-    let components = ComponentStyles::from_tokens(&TOKENS)
+    let components = ComponentTheme::from_tokens(&TOKENS)
         .with_text_style(ComponentRole::Warning, TextStyle::new().underline());
     assert_eq!(
         components.text_style(ComponentRole::Warning).paint("note"),
@@ -96,7 +96,7 @@ fn custom_component_style_replaces_the_default() {
 
 #[test]
 fn custom_tree_style_replaces_the_default() {
-    let components = ComponentStyles::from_tokens(&TOKENS)
+    let components = ComponentTheme::from_tokens(&TOKENS)
         .with_tree_style(TreeRole::Connector, TextStyle::new().underline());
     assert_eq!(
         components.tree_style(TreeRole::Connector).paint("branch"),
@@ -106,7 +106,7 @@ fn custom_tree_style_replaces_the_default() {
 
 #[test]
 fn list_roles_are_independent_from_tree_roles() {
-    let components = ComponentStyles::from_tokens(&TOKENS)
+    let components = ComponentTheme::from_tokens(&TOKENS)
         .with_list_style(ListRole::Enumerator, TextStyle::new().underline());
 
     assert_eq!(
@@ -156,8 +156,16 @@ fn theme_tree_shortcut_delegates_to_the_canonical_presentation() {
 }
 
 #[test]
+fn theme_and_component_theme_keep_value_equality_after_cloning() {
+    let theme = Theme::from_tokens(TOKENS);
+
+    assert_eq!(theme.clone(), theme);
+    assert_eq!(theme.components().clone(), *theme.components());
+}
+
+#[test]
 fn custom_table_style_replaces_the_default() {
-    let components = ComponentStyles::from_tokens(&TOKENS)
+    let components = ComponentTheme::from_tokens(&TOKENS)
         .with_table_style(TableRole::Header, BlockStyle::new().underline());
 
     assert_eq!(
@@ -202,7 +210,7 @@ fn panel_roles_resolve_through_the_theme_contract() {
 
 #[test]
 fn replacing_the_table_policy_keeps_the_other_component_defaults() {
-    let replaced = ComponentStyles::from_tokens(&TOKENS).with_table(TablePresentation::new(
+    let replaced = ComponentTheme::from_tokens(&TOKENS).with_table(TablePresentation::new(
         BlockStyle::new().underline(),
         BlockStyle::new(),
         TextStyle::new(),
@@ -270,7 +278,7 @@ fn application_roles_resolve_from_a_token_and_a_built_in_role() {
 
 #[test]
 fn application_roles_follow_an_overridden_built_in_role() {
-    let components = ComponentStyles::from_tokens(&TOKENS)
+    let components = ComponentTheme::from_tokens(&TOKENS)
         .with_text_style(ComponentRole::Body, TextStyle::new().italic());
     let theme = Theme::new(TOKENS, components);
 

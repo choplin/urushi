@@ -108,7 +108,7 @@ pub use terminal::{AnsiPolicy, ColorProfile, TerminalProfile};
 pub use terminal::{OutputMode, ProgressBar, Spinner, StderrTerminal};
 pub use text::{Grapheme, PrintableLines, PrintableText, StyledText, StyledTextError, TextSpan};
 pub use theme::{
-    BlockThemeRole, ColorScheme, ComponentRole, ComponentStyles, ListRole, PanelRole,
+    BlockThemeRole, ColorScheme, ComponentRole, ComponentTheme, ListRole, PanelRole,
     SemanticTokens, TableRole, TextThemeRole, Theme, ThemeSet, TreeRole,
 };
 pub use view::{

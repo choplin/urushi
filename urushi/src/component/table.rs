@@ -1162,12 +1162,12 @@ mod tests {
     use super::*;
     use crate::test_support::{plain_exact as plain, plain_rows, style_at};
     use crate::{
-        Align, Available, Border, Color, ComponentStyles, Overflow, PrintableText, SemanticTokens,
+        Align, Available, Border, Color, ComponentTheme, Overflow, PrintableText, SemanticTokens,
         StyledGrapheme, VerticalAlign, measure, resolve,
     };
 
-    fn styles() -> ComponentStyles {
-        ComponentStyles::from_tokens(&SemanticTokens {
+    fn styles() -> ComponentTheme {
+        ComponentTheme::from_tokens(&SemanticTokens {
             text: Color::WHITE,
             text_muted: Color::BRIGHT_BLACK,
             background: Color::BLACK,

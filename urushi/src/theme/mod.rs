@@ -59,12 +59,12 @@
 //! `urushi-prompt`'s renderer does exactly this. Built-in styles are also
 //! reachable as borrows through [`Theme::components`].
 
-mod component_styles;
+mod component_theme;
 mod definition;
 mod role;
 mod tokens;
 
-pub use component_styles::ComponentStyles;
+pub use component_theme::ComponentTheme;
 pub use definition::{ColorScheme, Theme, ThemeSet};
 pub use role::{
     BlockThemeRole, ComponentRole, ListRole, PanelRole, TableRole, TextThemeRole, TreeRole,

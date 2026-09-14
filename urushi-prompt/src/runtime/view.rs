@@ -434,7 +434,7 @@ pub(crate) mod tests {
     };
     use crate::{Confirm, FieldKey, Group, Input, Select, SelectOption};
     use urushi::{
-        AnsiPolicy, Color, ColorProfile, ComponentRole, ComponentStyles, SemanticTokens,
+        AnsiPolicy, Color, ColorProfile, ComponentRole, ComponentTheme, SemanticTokens,
         TerminalProfile, TextStyle, Theme,
     };
     pub(crate) fn lay_out(columns: u16, rows: u16, view: &PromptView) -> frame::FramedView {
@@ -454,7 +454,7 @@ pub(crate) mod tests {
             error: Color::Rgb(25, 26, 27),
             border: Color::Rgb(28, 29, 30),
         };
-        let components = ComponentStyles::from_tokens(&tokens)
+        let components = ComponentTheme::from_tokens(&tokens)
             .with_text_style(ComponentRole::PromptQuestion, TextStyle::new().bold())
             .with_text_style(ComponentRole::PromptCursor, TextStyle::new().underline());
         Theme::new(tokens, components)

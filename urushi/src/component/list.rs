@@ -556,11 +556,11 @@ mod tests {
     use super::*;
     use crate::test_support::{plain, style_at};
     use crate::{
-        Available, Color, ComponentStyles, SemanticTokens, StyledGrapheme, measure, resolve,
+        Available, Color, ComponentTheme, SemanticTokens, StyledGrapheme, measure, resolve,
     };
 
-    fn styles() -> ComponentStyles {
-        ComponentStyles::from_tokens(&SemanticTokens {
+    fn styles() -> ComponentTheme {
+        ComponentTheme::from_tokens(&SemanticTokens {
             text: Color::WHITE,
             text_muted: Color::BRIGHT_BLACK,
             background: Color::BLACK,

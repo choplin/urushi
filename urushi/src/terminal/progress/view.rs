@@ -1,6 +1,6 @@
 //! Stable renderer-neutral views for progress state.
 
-use crate::{ComponentRole, ComponentStyles, TextStyle, VerticalAlign, View};
+use crate::{ComponentRole, ComponentTheme, TextStyle, VerticalAlign, View};
 
 #[derive(Debug, Clone, Copy)]
 pub(super) enum FinishKind {
@@ -9,7 +9,7 @@ pub(super) enum FinishKind {
     Error,
 }
 
-pub(super) fn work(styles: &ComponentStyles, marker: &str, message: &str) -> View {
+pub(super) fn work(styles: &ComponentTheme, marker: &str, message: &str) -> View {
     View::row(
         VerticalAlign::Top,
         [
@@ -20,7 +20,7 @@ pub(super) fn work(styles: &ComponentStyles, marker: &str, message: &str) -> Vie
     )
 }
 
-pub(super) fn progress(styles: &ComponentStyles, position: u64, total: u64, message: &str) -> View {
+pub(super) fn progress(styles: &ComponentTheme, position: u64, total: u64, message: &str) -> View {
     View::row(
         VerticalAlign::Top,
         [
@@ -32,7 +32,7 @@ pub(super) fn progress(styles: &ComponentStyles, position: u64, total: u64, mess
     )
 }
 
-pub(super) fn finished(styles: &ComponentStyles, kind: FinishKind, message: &str) -> View {
+pub(super) fn finished(styles: &ComponentTheme, kind: FinishKind, message: &str) -> View {
     let (marker, role) = match kind {
         FinishKind::Success => ("✓", ComponentRole::Success),
         FinishKind::Neutral => ("◇", ComponentRole::Muted),

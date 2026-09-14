@@ -5,7 +5,7 @@ use std::{
     io::{self, IsTerminal, Write},
 };
 
-use crate::{AnsiRenderer, Available, ComponentStyles, RenderedBlock, TerminalProfile, View};
+use crate::{AnsiRenderer, Available, ComponentTheme, RenderedBlock, TerminalProfile, View};
 
 use super::{ProgressBar, Spinner};
 
@@ -82,7 +82,7 @@ impl StderrTerminal {
 
     pub fn spinner(
         &self,
-        styles: &ComponentStyles,
+        styles: &ComponentTheme,
         message: impl Into<String>,
     ) -> io::Result<Spinner> {
         Spinner::new(self.clone(), styles.clone(), message.into())
@@ -90,7 +90,7 @@ impl StderrTerminal {
 
     pub fn progress(
         &self,
-        styles: &ComponentStyles,
+        styles: &ComponentTheme,
         total: u64,
         message: impl Into<String>,
     ) -> io::Result<ProgressBar> {

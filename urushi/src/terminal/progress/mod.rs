@@ -8,11 +8,11 @@ mod view;
 pub use bar::ProgressBar;
 pub use spinner::Spinner;
 
-use crate::{ComponentRole, ComponentStyles};
+use crate::{ComponentRole, ComponentTheme};
 
 use super::StderrTerminal;
 
-fn themed_message(terminal: &StderrTerminal, styles: &ComponentStyles, message: &str) -> String {
+fn themed_message(terminal: &StderrTerminal, styles: &ComponentTheme, message: &str) -> String {
     terminal
         .renderer
         .render(&crate::View::text(

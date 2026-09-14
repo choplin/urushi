@@ -1,4 +1,4 @@
-//! Standard style mapping for reusable component roles.
+//! Canonical presentations and shared role styles for reusable components.
 
 use crate::{BlockStyle, Border, ListPresentation, TablePresentation, TextStyle, TreePresentation};
 
@@ -6,9 +6,9 @@ use super::{ComponentRole, ListRole, SemanticTokens, TableRole, TreeRole};
 
 const COMPONENT_ROLE_COUNT: usize = 16;
 
-/// Styles for common components, indexed by [`ComponentRole`].
+/// Theme-derived presentations and shared role styles for common components.
 #[derive(Debug, Clone, PartialEq)]
-pub struct ComponentStyles {
+pub struct ComponentTheme {
     styles: [TextStyle; COMPONENT_ROLE_COUNT],
     panel: BlockStyle,
     panel_focused: BlockStyle,
@@ -17,8 +17,8 @@ pub struct ComponentStyles {
     table: TablePresentation,
 }
 
-impl ComponentStyles {
-    /// Builds the standard component styles from semantic tokens.
+impl ComponentTheme {
+    /// Builds the canonical component theme from semantic tokens.
     pub fn from_tokens(tokens: &SemanticTokens) -> Self {
         let panel = BlockStyle::new()
             .foreground(tokens.text)

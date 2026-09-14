@@ -33,7 +33,7 @@ impl TreeNode {
     /// already-rendered output with
     /// [`RenderedBlock::from_ansi`](crate::RenderedBlock::from_ansi) instead.
     ///
-    /// Style the component through its [`ComponentStyles`](crate::ComponentStyles)
+    /// Style the component through its [`ComponentTheme`](crate::ComponentTheme)
     /// rather than by pre-rendering its content.
     pub fn new(value: impl Into<String>) -> Self {
         Self {
@@ -507,10 +507,10 @@ fn visible_children(children: &[TreeNode], offset: ChildOffset) -> Vec<&TreeNode
 mod tests {
     use super::*;
     use crate::test_support::{plain, plain_rows, style_at};
-    use crate::{Color, ComponentStyles, SemanticTokens, measure};
+    use crate::{Color, ComponentTheme, SemanticTokens, measure};
 
-    fn styles() -> ComponentStyles {
-        ComponentStyles::from_tokens(&SemanticTokens {
+    fn styles() -> ComponentTheme {
+        ComponentTheme::from_tokens(&SemanticTokens {
             text: Color::WHITE,
             text_muted: Color::BRIGHT_BLACK,
             background: Color::BLACK,

@@ -1,7 +1,7 @@
 //! Titled, aligned result summaries.
 
 use crate::{
-    Align, ComponentRole, ComponentStyles, VerticalAlign, View,
+    Align, ComponentRole, ComponentTheme, VerticalAlign, View,
     text::{PrintableLines, PrintableText, wrap_text},
 };
 
@@ -20,7 +20,7 @@ impl SummaryField {
     /// already-rendered output with
     /// [`RenderedBlock::from_ansi`](crate::RenderedBlock::from_ansi) instead.
     ///
-    /// Style the component through its [`ComponentStyles`](crate::ComponentStyles)
+    /// Style the component through its [`ComponentTheme`](crate::ComponentTheme)
     /// rather than by pre-rendering its content.
     pub fn new(label: impl Into<String>, value: impl Into<String>) -> Self {
         Self {
@@ -67,7 +67,7 @@ impl Summary {
         &self.fields
     }
 
-    pub fn view(&self, styles: &ComponentStyles, width: usize) -> View {
+    pub fn view(&self, styles: &ComponentTheme, width: usize) -> View {
         let width = width.max(10);
         let natural_label_width = self
             .fields

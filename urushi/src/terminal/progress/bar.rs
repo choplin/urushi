@@ -2,7 +2,7 @@
 
 use std::io;
 
-use crate::{ComponentRole, ComponentStyles, OutputMode, View};
+use crate::{ComponentRole, ComponentTheme, OutputMode, View};
 
 use super::{
     StderrTerminal,
@@ -16,7 +16,7 @@ use super::{
 pub struct ProgressBar {
     live: Option<LiveRegion>,
     terminal: StderrTerminal,
-    styles: ComponentStyles,
+    styles: ComponentTheme,
     total: u64,
     position: u64,
     message: String,
@@ -26,7 +26,7 @@ pub struct ProgressBar {
 impl ProgressBar {
     pub(crate) fn new(
         terminal: StderrTerminal,
-        styles: ComponentStyles,
+        styles: ComponentTheme,
         total: u64,
         message: String,
     ) -> io::Result<Self> {

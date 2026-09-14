@@ -2,7 +2,7 @@
 
 use crate::{BlockStyle, List, Table, TextStyle, Tree, View};
 
-use super::{BlockThemeRole, ComponentStyles, SemanticTokens, TextThemeRole};
+use super::{BlockThemeRole, ComponentTheme, SemanticTokens, TextThemeRole};
 
 /// An explicit choice between a light and dark theme.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -11,7 +11,7 @@ pub enum ColorScheme {
     Dark,
 }
 
-/// A theme with common semantic tokens and component styles.
+/// A theme with common semantic tokens and canonical component presentations.
 ///
 /// A theme carries no application-specific slot. Applications extend it by
 /// implementing [`TextThemeRole`] for their own role type and deriving the style
@@ -20,16 +20,16 @@ pub enum ColorScheme {
 #[derive(Debug, Clone, PartialEq)]
 pub struct Theme {
     tokens: SemanticTokens,
-    components: ComponentStyles,
+    components: ComponentTheme,
 }
 
 impl Theme {
     pub fn from_tokens(tokens: SemanticTokens) -> Self {
-        let components = ComponentStyles::from_tokens(&tokens);
+        let components = ComponentTheme::from_tokens(&tokens);
         Self::new(tokens, components)
     }
 
-    pub fn new(tokens: SemanticTokens, components: ComponentStyles) -> Self {
+    pub fn new(tokens: SemanticTokens, components: ComponentTheme) -> Self {
         Self { tokens, components }
     }
 
@@ -37,7 +37,7 @@ impl Theme {
         &self.tokens
     }
 
-    pub fn components(&self) -> &ComponentStyles {
+    pub fn components(&self) -> &ComponentTheme {
         &self.components
     }
 

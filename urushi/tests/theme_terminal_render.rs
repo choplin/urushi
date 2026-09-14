@@ -2,7 +2,7 @@ use std::fs::File;
 
 use urushi::{
     Align, AnsiPolicy, BlockStyle, Border, Color, ColorProfile, ColorScheme, ComponentRole,
-    ComponentStyles, PanelRole, RenderedBlock, SemanticTokens, TerminalProfile, Theme, ThemeSet,
+    ComponentTheme, PanelRole, RenderedBlock, SemanticTokens, TerminalProfile, Theme, ThemeSet,
 };
 
 fn light_tokens() -> SemanticTokens {
@@ -36,7 +36,7 @@ fn dark_tokens() -> SemanticTokens {
 }
 
 fn theme(tokens: SemanticTokens) -> Theme {
-    let components = ComponentStyles::from_tokens(&tokens).with_panel_focused(
+    let components = ComponentTheme::from_tokens(&tokens).with_panel_focused(
         BlockStyle::new()
             .foreground(tokens.text)
             .background(tokens.surface)
