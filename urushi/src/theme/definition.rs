@@ -1,6 +1,6 @@
 //! Theme construction and light/dark selection.
 
-use crate::{BlockStyle, List, Table, TextStyle, Tree, View};
+use crate::{BlockStyle, List, Summary, Table, TextStyle, Tree, View};
 
 use super::{BlockThemeRole, ComponentTheme, SemanticTokens, TextThemeRole};
 
@@ -54,6 +54,11 @@ impl Theme {
     /// Composes a table with this theme's canonical presentation.
     pub fn table(&self, table: &Table) -> View {
         self.components.table().compose(table)
+    }
+
+    /// Composes a summary with this theme's canonical presentation.
+    pub fn summary(&self, summary: &Summary) -> View {
+        self.components.summary().compose(summary)
     }
 
     /// Resolves one role against this theme.

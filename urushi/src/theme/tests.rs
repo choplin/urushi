@@ -1,5 +1,5 @@
 use crate::test_support::render_block;
-use crate::{BlockStyle, Color, TablePresentation, TextStyle};
+use crate::{BlockStyle, Color, SummaryPresentation, TablePresentation, TextStyle};
 
 use super::*;
 
@@ -154,6 +154,17 @@ fn theme_tree_shortcut_delegates_to_the_canonical_presentation() {
 }
 
 #[test]
+fn theme_summary_shortcut_delegates_to_the_canonical_presentation() {
+    let theme = Theme::from_tokens(TOKENS);
+    let summary = crate::Summary::new("Result").field("Name", "urushi");
+
+    assert_eq!(
+        theme.summary(&summary),
+        theme.components().summary().compose(&summary)
+    );
+}
+
+#[test]
 fn theme_and_component_theme_keep_value_equality_after_cloning() {
     let theme = Theme::from_tokens(TOKENS);
 
@@ -212,6 +223,22 @@ fn replacing_the_table_policy_keeps_the_other_component_defaults() {
         render_block(replaced.table_style(TableRole::Header), "head"),
         "\x1b[4mhead\x1b[0m"
     );
+    assert_eq!(
+        replaced.list_style(ListRole::Item).paint("item"),
+        "\x1b[31mitem\x1b[0m"
+    );
+}
+
+#[test]
+fn replacing_the_summary_policy_keeps_the_other_component_defaults() {
+    let summary = SummaryPresentation::new(
+        TextStyle::new().underline(),
+        TextStyle::new(),
+        TextStyle::new(),
+    );
+    let replaced = ComponentTheme::from_tokens(&TOKENS).with_summary(summary.clone());
+
+    assert_eq!(replaced.summary(), &summary);
     assert_eq!(
         replaced.list_style(ListRole::Item).paint("item"),
         "\x1b[31mitem\x1b[0m"

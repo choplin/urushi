@@ -1,6 +1,9 @@
 //! Canonical presentations and shared role styles for reusable components.
 
-use crate::{BlockStyle, Border, ListPresentation, TablePresentation, TextStyle, TreePresentation};
+use crate::{
+    BlockStyle, Border, ListPresentation, SummaryPresentation, TablePresentation, TextStyle,
+    TreePresentation,
+};
 
 use super::{ComponentRole, ListRole, SemanticTokens, TableRole, TreeRole};
 
@@ -15,6 +18,7 @@ pub struct ComponentTheme {
     list: ListPresentation,
     tree: TreePresentation,
     table: TablePresentation,
+    summary: SummaryPresentation,
 }
 
 impl ComponentTheme {
@@ -27,33 +31,40 @@ impl ComponentTheme {
             .border_foreground(tokens.border)
             .padding((0, 1));
 
+        let styles = [
+            TextStyle::new().foreground(tokens.text),
+            TextStyle::new().foreground(tokens.text_muted).dim(),
+            TextStyle::new().foreground(tokens.accent).bold(),
+            TextStyle::new().foreground(tokens.success),
+            TextStyle::new().foreground(tokens.warning),
+            TextStyle::new().foreground(tokens.error).bold(),
+            TextStyle::new().foreground(tokens.accent).bold(),
+            TextStyle::new().foreground(tokens.text),
+            TextStyle::new().foreground(tokens.text_muted).italic(),
+            TextStyle::new().foreground(tokens.accent).bold(),
+            TextStyle::new().foreground(tokens.text),
+            TextStyle::new()
+                .foreground(tokens.accent_text)
+                .background(tokens.accent)
+                .bold(),
+            TextStyle::new()
+                .foreground(tokens.text)
+                .background(tokens.surface),
+            TextStyle::new()
+                .foreground(tokens.accent_text)
+                .background(tokens.accent)
+                .bold(),
+            TextStyle::new().foreground(tokens.text_muted).dim(),
+            TextStyle::new().foreground(tokens.error),
+        ];
+        let summary = SummaryPresentation::new(
+            styles[ComponentRole::Muted.index()].clone(),
+            styles[ComponentRole::Accent.index()].clone(),
+            styles[ComponentRole::Body.index()].clone(),
+        );
+
         Self {
-            styles: [
-                TextStyle::new().foreground(tokens.text),
-                TextStyle::new().foreground(tokens.text_muted).dim(),
-                TextStyle::new().foreground(tokens.accent).bold(),
-                TextStyle::new().foreground(tokens.success),
-                TextStyle::new().foreground(tokens.warning),
-                TextStyle::new().foreground(tokens.error).bold(),
-                TextStyle::new().foreground(tokens.accent).bold(),
-                TextStyle::new().foreground(tokens.text),
-                TextStyle::new().foreground(tokens.text_muted).italic(),
-                TextStyle::new().foreground(tokens.accent).bold(),
-                TextStyle::new().foreground(tokens.text),
-                TextStyle::new()
-                    .foreground(tokens.accent_text)
-                    .background(tokens.accent)
-                    .bold(),
-                TextStyle::new()
-                    .foreground(tokens.text)
-                    .background(tokens.surface),
-                TextStyle::new()
-                    .foreground(tokens.accent_text)
-                    .background(tokens.accent)
-                    .bold(),
-                TextStyle::new().foreground(tokens.text_muted).dim(),
-                TextStyle::new().foreground(tokens.error),
-            ],
+            styles,
             panel: panel.clone(),
             panel_focused: panel.border_foreground(tokens.accent),
             list: ListPresentation::new(
@@ -70,6 +81,7 @@ impl ComponentTheme {
                 BlockStyle::new().foreground(tokens.text),
                 TextStyle::new().foreground(tokens.border),
             ),
+            summary,
         }
     }
 
@@ -117,9 +129,15 @@ impl ComponentTheme {
         &self.table
     }
 
+    /// Returns the default presentation policy for summaries.
+    pub fn summary(&self) -> &SummaryPresentation {
+        &self.summary
+    }
+
     #[must_use]
     pub fn with_text_style(mut self, role: ComponentRole, style: TextStyle) -> Self {
-        self.styles[role.index()] = style;
+        self.styles[role.index()] = style.clone();
+        self.summary.set_component_style(role, style);
         self
     }
 
@@ -176,6 +194,13 @@ impl ComponentTheme {
     #[must_use]
     pub fn with_table(mut self, table: TablePresentation) -> Self {
         self.table = table;
+        self
+    }
+
+    /// Replaces the complete default summary presentation policy.
+    #[must_use]
+    pub fn with_summary(mut self, summary: SummaryPresentation) -> Self {
+        self.summary = summary;
         self
     }
 }
