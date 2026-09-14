@@ -27,7 +27,6 @@ mod key;
 mod output;
 mod render;
 mod style;
-mod terminal;
 #[cfg(test)]
 mod test_support;
 mod text;
@@ -49,8 +48,6 @@ pub use style::{
     Overflow, Sides, TextStyle, TextStyleProperty, TextStylePropertyKey, Underline, UnderlineStyle,
     UnderlineStyleSet, VerticalAlign,
 };
-#[cfg(feature = "terminal")]
-pub use terminal::{ProgressBar, Spinner};
 pub use text::{Grapheme, PrintableLines, PrintableText, StyledText, StyledTextError, TextSpan};
 pub use theme::{
     BlockThemeRole, ColorScheme, ComponentRole, ComponentTheme, ListRole, PanelRole,

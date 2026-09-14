@@ -79,11 +79,9 @@ Composition happens in `View` before layout. Rendered strings do not re-enter
 the layout model. The reasoning behind the view/block boundary is recorded in
 [`design/view-block-model.md`](design/view-block-model.md).
 
-Terminal and Ratatui integrations sit outside these semantic types:
+Ratatui integration sits outside these semantic types:
 
 ```text
-Progress state --> Urushi progress lifecycle --> private Indicatif adapter
-
 Resolved TextStyle   --> RatatuiStyle
 View + Rect          --> ViewWidget    --> caller-owned Ratatui Buffer
 BlockStyle + text    --> RatatuiWidget --> ViewWidget's path
@@ -184,7 +182,7 @@ a role are documented with the extension point itself, in
 | Crate | Responsibility | Dependencies within the workspace |
 | --- | --- | --- |
 | [`urushi-terminal`](../urushi-terminal/) | Inspection of one output handle: terminal/non-terminal classification, visible size, and feature-granular capabilities. | None within the workspace |
-| [`urushi`](../urushi/) | Logical styles, themes, renderer-neutral views and components, layout, ANSI serialization, standard-stream output convenience, and the progress lifecycle. | `urushi-terminal` |
+| [`urushi`](../urushi/) | Logical styles, themes, renderer-neutral views and components, layout, ANSI serialization, and standard-stream output convenience. | `urushi-terminal` |
 | [`urushi-prompt`](../urushi-prompt/) | Typed input, select, and confirm forms; prompt state transitions; inline and alternate-screen presentations; terminal session setup and cleanup. | `urushi`, `urushi-terminal` |
 | [`urushi-tui`](../urushi-tui/) | The Ratatui backend adapter in [`ratatui`](../urushi-tui/src/ratatui/) — style conversion, widgets, and the cell-writing path they share with the renderer — and the full-screen TUI runtime behind the default-on `runtime` Cargo feature. | `urushi` |
 
@@ -203,7 +201,6 @@ to share styling.
 | [`component`](../urushi/src/component/) | Reusable semantic data and the independent concrete presentations that compose it into primitive `View` trees. | `theme`, `view`, `text` |
 | [`render`](../urushi/src/render/) | Feature selection and translation of a `ResolvedView` to ANSI text. | `style`, `view`, `urushi-terminal` |
 | [`output`](../urushi/src/output.rs) | Standard-stream convenience: detection, width selection, rendering policy, and one static write. | `view`, `render`, `urushi-terminal` |
-| [`terminal`](../urushi/src/terminal/) | Optional progress lifecycle and its private stderr/live-region adapters. It exposes no general terminal-output wrapper. | `component`, `view`, `render`, `urushi-terminal` |
 
 The dependency direction runs from I/O and adapters toward semantic modules:
 
@@ -213,8 +210,8 @@ The dependency direction runs from I/O and adapters toward semantic modules:
 - `view` does not choose a renderer or own terminal state;
 - renderers translate Urushi values into a backend representation and do not
   own application workflows;
-- `terminal` owns physical output and live-region lifecycle, not application
-  labels such as command introductions or final outcomes;
+- `output` owns one static standard-stream write, while prompt and TUI runtimes
+  own the interactive terminal resources and redraw lifecycles they acquire;
 - prompt and application code compose these capabilities at their own entry
   points.
 
@@ -262,13 +259,18 @@ describing the current frame. It either constructs built-in nodes or binds an
 owned frame into a Canvas item and supplies one Canvas-wide intrinsic sizing
 value. The application owns the frame input's transitions, and `resolve` alone
 decides area-dependent geometry before asking Canvas items to draw. Neither
-layer may write to stderr, choose live mode, construct an Indicatif object, or
-depend on Ratatui. The boundary and sizing invariants are defined in
+layer may write to a terminal, choose a live-output mode, own execution state,
+or depend on Ratatui. The boundary and sizing invariants are defined in
 [`design/canvas.md`](design/canvas.md).
 
 Application-specific workflow chrome remains in the application: an application
 composes its own command start and finish lines rather than Urushi growing
 generic `Intro` and `Outro` components.
+
+Execution-linked indicators follow the same ownership rule. The host that owns
+the running operation also owns its progress state, animation timing, redraw
+scheduling, and terminal cleanup. The core crate does not create a progress
+thread, timer, or live terminal region of its own.
 
 ### Output resources have explicit owners
 
@@ -278,7 +280,7 @@ query failure is an error. `print` and `eprint` inspect their own target and use
 the detected width. Redirected output uses unbounded layout and dumb settings.
 
 Non-TTY output and `TERM=dumb` use append-only plain output. Machine-readable
-stdout remains separate from human-facing progress on stderr.
+stdout remains separate from human-facing diagnostics on stderr.
 
 ### A prompt chooses its terminal surface
 
@@ -298,13 +300,10 @@ the exact resize and ownership rules.
 
 ### External backends stay behind adapters
 
-Ratatui types stay in `urushi-tui`; Indicatif types stay in the private core
-adapter. Public `urushi` surfaces use Urushi-owned concepts: progress types
-expose messages, positions, and semantic completion operations, not Indicatif
-templates, draw targets, or tick configuration. `RenderSettings` selects output
-features before data reaches a backend. This keeps backend
-replacement local and prevents backend lifecycle rules from becoming core
-application contracts.
+Ratatui types stay in `urushi-tui`, and Crossterm types stay behind the prompt
+and TUI terminal adapters that use them. `RenderSettings` selects output
+features before data reaches an adapter. Backend replacement therefore remains
+local, and backend lifecycle rules do not become core application contracts.
 
 Replacement is not hypothetical. Urushi is built toward owning the layer that
 writes to and reads from the terminal, because a rule this documentation states
@@ -336,10 +335,8 @@ changed deliberately and this document is updated in the same change:
 5. Display width and wrapping use the shared `text` implementation; rendered
    strings are not a layout input.
 6. Terminal inspection is target-specific and centralized in `urushi-terminal`.
-7. Public progress APIs do not expose Indicatif representations or controls.
-8. Live and plain progress use the same semantic theme roles.
-9. `urushi-tui` widgets write only to the buffer supplied by the caller;
+7. `urushi-tui` widgets write only to the buffer supplied by the caller;
    terminal lifecycle, event delivery, and frame scheduling belong to the
    runtime, never to a widget.
-10. Prompt-specific state, cursor behavior, and terminal cleanup remain in
+8. Prompt-specific state, cursor behavior, and terminal cleanup remain in
     `urushi-prompt`, not the core component model.

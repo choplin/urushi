@@ -3,7 +3,7 @@
 use crate::{Modifier, TextStyle, Underline, UnderlineStyleSet};
 use urushi_terminal::{ColorLevel, TerminalCapabilities, TextAttributes, UnderlineStyles};
 
-use crate::terminal::palette::{quantize_to_ansi16, quantize_to_ansi256};
+use super::palette::{quantize_to_ansi16, quantize_to_ansi256};
 
 /// The output features selected for one render operation.
 ///
