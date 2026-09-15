@@ -134,7 +134,7 @@ fn dashboard(rows_of_body: usize) -> View {
 
 /// A wide-enough table to exercise per-cell wrapping and Canvas assembly.
 fn table(rows: usize) -> View {
-    let table = (0..rows).fold(Table::new(), |table, row| {
+    let table = (0..rows).fold(Table::text(), |table, row| {
         table.row(
             (0..10)
                 .map(|column| format!("cell {row}:{column} with content that wraps"))

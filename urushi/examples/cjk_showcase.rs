@@ -89,7 +89,7 @@ fn border_card(label: &str, border: TableBorder, color: Color) -> View {
         .border(border)
         .padding(0)
         .width(9)
-        .compose(&Table::new().headers(["甲", "乙"]).row(["丙", "丁"]));
+        .compose(&Table::text().headers(["甲", "乙"]).row(["丙", "丁"]));
 
     View::column(Align::Left, [label, grid])
 }
@@ -266,7 +266,7 @@ fn list_sample() -> View {
 }
 
 fn table_sample() -> View {
-    let table = Table::new()
+    let table = Table::text()
         .headers(["項目", "値"])
         .row(["表示", "有効"])
         .row(["色数", "16"]);

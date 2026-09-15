@@ -90,7 +90,7 @@ fn typed_list_and_item_presentation_are_usable_through_crate_root_exports() {
     let selected_enumerator = TextStyle::new().foreground(Color::BLUE);
     let item_style = selected_item.clone();
     let enumerator_style = selected_enumerator.clone();
-    let items = ListItemPresentation::<Task>::display().per_item_style(move |task, _, role| {
+    let items = ListItemPresentation::<Task>::display().item_style(move |task, _, role| {
         task.selected.then(|| match role {
             ListRole::Item => item_style.clone(),
             ListRole::Enumerator => enumerator_style.clone(),

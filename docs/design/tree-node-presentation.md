@@ -57,7 +57,7 @@ let nodes = TreeNodePresentation::<Entry>::new(|entry, position| match position 
     TreePosition::Root => format!("{} (root)", entry.label),
     TreePosition::Child { depth, .. } => format!("{} @ {depth}", entry.label),
 })
-.per_node_style(|entry, _position| entry.selected.then(|| selected.clone()));
+.node_style(|entry, _position| entry.selected.then(|| selected.clone()));
 
 let view = theme
     .components()

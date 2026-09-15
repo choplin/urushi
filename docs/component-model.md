@@ -112,6 +112,14 @@ decisions are recorded separately for
 [connector lowering](design/tree-lowering.md), and
 [width resolution](design/tree-width-resolution.md).
 
+A Table retains one typed body-row value while keeping headers as explicit
+plain text. Its canonical row contract derives several display cells from the
+row's heterogeneous fields; a separate typed row presentation supports custom
+formatting and complete per-cell style replacement. Direct-text rows remain a
+separate convenience mode. The exact boundary and table/column/cell style
+fallback are defined in
+[Table Row Presentation](design/table-row-presentation.md).
+
 ## Styles and presentations are different values
 
 The `...Style` suffix is reserved for declarative values that do not interpret

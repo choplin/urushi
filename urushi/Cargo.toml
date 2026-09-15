@@ -8,6 +8,7 @@ keywords = ["cli", "terminal", "style", "ansi", "tui"]
 categories = ["command-line-interface"]
 
 [dependencies]
+urushi-derive = { path = "../urushi-derive", version = "=0.1.0" }
 urushi-terminal = { path = "../urushi-terminal", version = "=0.1.0" }
 unicode-segmentation.workspace = true
 unicode-width.workspace = true

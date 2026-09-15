@@ -247,7 +247,7 @@ impl<'a, T: 'a> ListItemPresentation<'a, T> {
     /// `None` keeps the [`ListPresentation`] role default. `Some(style)`
     /// replaces that complete style rather than layering over it.
     #[must_use]
-    pub fn per_item_style<S>(mut self, style: S) -> Self
+    pub fn item_style<S>(mut self, style: S) -> Self
     where
         S: Fn(&T, ListPosition, ListRole) -> Option<TextStyle> + 'a,
     {
@@ -791,7 +791,7 @@ mod tests {
                 position.depth()
             )
         })
-        .per_item_style(move |task, _, role| {
+        .item_style(move |task, _, role| {
             task.selected.then(|| match role {
                 ListRole::Item => item_style.clone(),
                 ListRole::Enumerator => enumerator_style.clone(),
@@ -1068,7 +1068,7 @@ mod tests {
         ITEM_STYLE_CALLS.store(0, Ordering::Relaxed);
         ENUMERATOR_STYLE_CALLS.store(0, Ordering::Relaxed);
         let presentation = styles().list().clone().enumerator(counted_enumerator);
-        let items = ListItemPresentation::new(counted_text).per_item_style(counted_style);
+        let items = ListItemPresentation::new(counted_text).item_style(counted_style);
         let view = presentation.compose_with(&List::new().items(["one", "two"]), &items);
         assert_eq!(ENUMERATOR_CALLS.load(Ordering::Relaxed), 2);
         assert_eq!(TEXT_CALLS.load(Ordering::Relaxed), 2);

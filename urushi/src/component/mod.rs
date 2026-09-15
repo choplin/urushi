@@ -10,5 +10,8 @@ pub use list::{
     alphabet_enumerator, arabic_enumerator, asterisk_enumerator, bullet_enumerator,
     dash_enumerator, roman_enumerator,
 };
-pub use table::{Table, TableBorder, TableCell, TableCellStyler, TablePresentation};
+pub use table::{
+    Table, TableBorder, TableCell, TablePresentation, TableRow, TableRowCells, TableRowPosition,
+    TableRowPresentation, TextTable, TextTableRow,
+};
 pub use tree::{Tree, TreeNode, TreeNodePresentation, TreePosition, TreePresentation};

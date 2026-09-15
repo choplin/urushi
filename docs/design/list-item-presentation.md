@@ -42,7 +42,7 @@ and its visible position to text and optional role-style replacements:
 let items = ListItemPresentation::<Task>::new(|task, position| {
     format!("{} ({}/{})", task.title, position.index() + 1, position.len())
 })
-.per_item_style(|task, _position, role| {
+.item_style(|task, _position, role| {
     task.selected.then(|| match role {
         ListRole::Item => selected_item.clone(),
         ListRole::Enumerator => selected_marker.clone(),

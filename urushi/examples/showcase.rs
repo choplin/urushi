@@ -1,7 +1,7 @@
 use urushi::{
     Align, Available, BlockStyle, Border, Color, ColorLevel, List, ListItem, Modifier,
-    RenderSettings, SemanticTokens, Table, TableBorder, TableCell, TableCellStyler,
-    TablePresentation, TextStyle, Theme, Tree, TreeNode, UnderlineStyleSet, VerticalAlign, View,
+    RenderSettings, SemanticTokens, Table, TableBorder, TablePresentation, TableRowPresentation,
+    TextStyle, TextTableRow, Theme, Tree, TreeNode, UnderlineStyleSet, VerticalAlign, View,
     arabic_enumerator, measure, render, resolve,
 };
 
@@ -142,7 +142,7 @@ fn border_card(label: &str, border: TableBorder, color: Color) -> View {
     let grid = TablePresentation::new(cell_style.clone(), cell_style, border_style)
         .border(border)
         .width(9)
-        .compose(&Table::new().headers(["A", "B"]).row(["C", "D"]));
+        .compose(&Table::text().headers(["A", "B"]).row(["C", "D"]));
 
     View::column(Align::Left, [label, grid])
 }
@@ -324,7 +324,7 @@ fn list_sample() -> View {
 }
 
 fn table_sample() -> View {
-    let table = Table::new()
+    let table = Table::text()
         .headers(["Key", "Value"])
         .row(["mode", "plain"])
         .row(["theme", "dark"]);
@@ -337,51 +337,40 @@ fn table_sample() -> View {
 ///
 /// A style the strategy returns replaces the role default rather than layering
 /// over it, so it restates the foreground it wants.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-struct Checkerboard;
+fn checkerboard_style(row: Option<usize>, column: usize) -> BlockStyle {
+    let parity = row.map_or(1, |row| row) + column;
+    // Both shades must differ from the surrounding backdrop, or the board reads
+    // as detached blocks instead of alternating squares.
+    let shade = if parity.is_multiple_of(2) {
+        Color::BRIGHT_BLACK
+    } else {
+        Color::BLUE
+    };
+    let align = if column == 0 {
+        Align::Left
+    } else {
+        Align::Right
+    };
 
-impl TableCellStyler for Checkerboard {
-    fn style(&self, cell: TableCell<'_>) -> Option<BlockStyle> {
-        // The header sits one row above the first body row, so it continues the
-        // same board instead of starting a new one.
-        let parity = match cell.row() {
-            Some(row) => row + cell.column(),
-            None => cell.column() + 1,
-        };
-        // Both shades must differ from the surrounding backdrop, or the board reads
-        // as detached blocks instead of alternating squares.
-        let shade = if parity % 2 == 0 {
-            Color::BRIGHT_BLACK
-        } else {
-            Color::BLUE
-        };
-        let align = if cell.column() == 0 {
-            Align::Left
-        } else {
-            Align::Right
-        };
-
-        let square = BlockStyle::new()
-            .foreground(Color::WHITE)
-            .background(shade)
-            .align(align);
-        Some(if cell.is_header() {
-            square.bold()
-        } else {
-            square
-        })
-    }
+    let square = BlockStyle::new()
+        .foreground(Color::WHITE)
+        .background(shade)
+        .align(align);
+    if row.is_none() { square.bold() } else { square }
 }
 
 /// Shows the presentation policy a caller can vary: every border edge off, a
 /// total width, and a per-cell strategy driven by row and column.
 fn table_style_sample() -> View {
-    let table = Table::new()
+    let table = Table::text()
         .headers(["Cmd", "Ok", "Err"])
         .row(["build", "12", "0"])
         .row(["test", "340", "2"])
         .row(["lint", "97", "1"]);
     let theme = sample_theme();
+    let header_styles = (0..3).map(|column| Some(checkerboard_style(None, column)));
+    let rows = TableRowPresentation::<TextTableRow>::display()
+        .cell_style(|_, cell, _| Some(checkerboard_style(Some(cell.row()), cell.column())));
     let table_style = theme
         .components()
         .table()
@@ -393,9 +382,9 @@ fn table_style_sample() -> View {
         .border_header(false)
         .border_column(false)
         .width(20)
-        .cell_styler(Checkerboard);
+        .header_styles(header_styles);
 
-    table_style.compose(&table)
+    table_style.compose_with(&table, &rows)
 }
 
 fn section(title: &str, rows: Vec<View>) -> View {

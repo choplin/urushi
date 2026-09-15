@@ -38,9 +38,10 @@ mod view;
 
 pub use component::{
     List, ListEnumerator, ListItem, ListItemPresentation, ListPosition, ListPresentation, Table,
-    TableBorder, TableCell, TableCellStyler, TablePresentation, Tree, TreeNode,
-    TreeNodePresentation, TreePosition, TreePresentation, alphabet_enumerator, arabic_enumerator,
-    asterisk_enumerator, bullet_enumerator, dash_enumerator, roman_enumerator,
+    TableBorder, TableCell, TablePresentation, TableRow, TableRowCells, TableRowPosition,
+    TableRowPresentation, TextTable, TextTableRow, Tree, TreeNode, TreeNodePresentation,
+    TreePosition, TreePresentation, alphabet_enumerator, arabic_enumerator, asterisk_enumerator,
+    bullet_enumerator, dash_enumerator, roman_enumerator,
 };
 pub use key::Key;
 pub use output::{
@@ -59,6 +60,7 @@ pub use theme::{
     BlockThemeRole, ColorScheme, ComponentRole, ComponentTheme, ListRole, PanelRole,
     SemanticTokens, TableRole, TextThemeRole, Theme, ThemeSet, TreeRole,
 };
+pub use urushi_derive::TableRow;
 pub use urushi_terminal::ColorLevel;
 pub use view::{
     AnchoredRect, Available, Axis, BlockTitle, Canvas, CanvasCell, CanvasContext, CanvasItem,

@@ -151,7 +151,7 @@ impl<'a, T: 'a> TreeNodePresentation<'a, T> {
     /// `None` keeps the [`TreePresentation`] root or item default.
     /// `Some(style)` replaces that complete style rather than layering over it.
     #[must_use]
-    pub fn per_node_style<S>(mut self, style: S) -> Self
+    pub fn node_style<S>(mut self, style: S) -> Self
     where
         S: Fn(&T, TreePosition) -> Option<TextStyle> + 'a,
     {

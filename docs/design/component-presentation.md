@@ -181,15 +181,14 @@ selection. Its Markdown and booktabs forms are semantic straight-rule presets.
 Block's `Border` remains a distinct box-frame value whose top, bottom, left,
 and right glyphs may differ; it contains no Table separator or junction fields.
 
-A per-cell style strategy is executable presentation policy, so
-`TablePresentation` stores it as an owned, type-erased, comparable value rather
-than a function address. Equality first requires the same concrete strategy
-type and then delegates to that concrete value's `PartialEq`. A user-defined
-strategy may implement that equality manually, but it must compare every value
-that can change measurement, text, style, or placement. Allocation identity,
-function addresses, generated Canvas commands, and resolved output are not
-valid equality mechanisms. Canonical presets hide this machinery from ordinary
-callers.
+`Table<Row>` retains typed body values while `TableRow` supplies their canonical
+multi-cell formatting. Application-specific formatting and cell styles live in
+a separate `TableRowPresentation<Row>`, so the Theme-owned
+`TablePresentation` remains non-generic and comparable. Composition snapshots
+that executable policy before the bound Canvas frame is measured or drawn.
+Complete table, positional column, and typed-cell styles resolve by fallback;
+the detailed data and style contract is in
+[`table-row-presentation.md`](table-row-presentation.md).
 
 ## Rejected designs
 

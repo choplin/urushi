@@ -112,10 +112,10 @@ fn typed_tree_and_node_presentation_are_usable_through_crate_root_exports() {
             format!("{}:{}:{index}/{len}@{depth}", entry.id, entry.label)
         }
     })
-    .per_node_style(move |entry, _| entry.selected.then(|| selected_style.clone()));
+    .node_style(move |entry, _| entry.selected.then(|| selected_style.clone()));
     let theme = theme();
     let style_only = TreeNodePresentation::<Entry>::display()
-        .per_node_style(|entry, _| entry.selected.then(TextStyle::new));
+        .node_style(|entry, _| entry.selected.then(TextStyle::new));
     assert_eq!(
         plain(&theme.components().tree().compose_with(&tree, &style_only)),
         "root\n└── parent\n    └── child"
@@ -161,7 +161,7 @@ fn custom_policy_borrows_non_display_state_and_is_snapshotted_during_composition
         };
         format!("{}:{}:{suffix}", prefix.as_ref(), entry.label)
     })
-    .per_node_style(move |_, _| {
+    .node_style(move |_, _| {
         counted_styles.set(counted_styles.get() + 1);
         None
     });

@@ -60,7 +60,10 @@ impl Theme {
     }
 
     /// Composes a table with this theme's canonical presentation.
-    pub fn table(&self, table: &Table) -> View {
+    pub fn table<T>(&self, table: &Table<T>) -> View
+    where
+        T: crate::TableRow,
+    {
         self.components.table().compose(table)
     }
 
