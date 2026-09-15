@@ -70,6 +70,10 @@ terminal.draw(|frame| {
 })?;
 ```
 
+These widgets merge their styles with earlier writes to the same ratatui cells
+by default. Select `CellWriteMode::Replace` when the resolved view should reset
+and fully own only the cells it draws.
+
 The target `Rect` is the area the view resolves under, so the box fits inside
 it rather than overflowing it, and wide graphemes are never split. An
 application that needs the resolution itself — to measure it, or to draw it

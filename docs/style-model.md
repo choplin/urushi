@@ -216,9 +216,12 @@ Renderers consume the values present in one `TextStyle`.
   hyperlink as an OSC 8 scope around the styled run and closes the scope before
   a line boundary.
 - The `urushi-tui` adapter maps the active modifier set to Ratatui's
-  `add_modifier`; it does not populate `sub_modifier`. Ratatui's cell model has
-  no hyperlink target or parameter field, so the adapter intentionally discards
-  hyperlinks while retaining every representable text property.
+  `add_modifier`; it does not populate `sub_modifier`. Its default cell-writing
+  mode therefore follows Ratatui's patch semantics, while the explicit
+  `CellWriteMode::Replace` resets each cell the view writes before applying its
+  complete logical style. Ratatui's cell model has no hyperlink target or
+  parameter field, so the adapter intentionally discards hyperlinks while
+  retaining every representable text property.
 - `RenderSettings::resolve_text_style` independently selects color fidelity,
   modifiers, underline shapes, underline color, and hyperlinks, then returns a
   canonical effective style.

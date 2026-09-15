@@ -3,7 +3,7 @@ use ratatui::{
     backend::TestBackend,
     buffer::Buffer,
     layout::Rect,
-    style::{Color as RatatuiColor, Modifier},
+    style::{Color as RatatuiColor, Modifier, Style as InnerStyle},
     widgets::Widget as _,
 };
 use urushi::{
@@ -12,7 +12,68 @@ use urushi::{
     TabPolicy, TextSpan, TextStyle, Theme, UnderlineStyleSet, VerticalAlign, View, measure, render,
     resolve,
 };
-use urushi_tui::ratatui::{RatatuiStyle, RatatuiStyleExt as _, ViewWidget};
+use urushi_tui::ratatui::{
+    CellWriteMode, RatatuiStyle, RatatuiStyleExt as _, ViewWidget, available,
+    draw_resolved_with_mode,
+};
+
+#[test]
+fn cell_write_modes_control_composition_with_existing_buffer_content() {
+    let area = Rect::new(0, 0, 2, 1);
+    let view = View::text("x", TextStyle::new());
+    let resolved = resolve(&view, available(area)).unwrap();
+
+    let mut merged = prefilled_buffer(area);
+    ViewWidget::new(&view).render(area, &mut merged);
+    let merged_cell = merged.cell((0, 0)).expect("merged cell");
+    assert_eq!(merged_cell.symbol(), "x");
+    assert_eq!(merged_cell.fg, RatatuiColor::Red);
+    assert_eq!(merged_cell.bg, RatatuiColor::Blue);
+    assert_eq!(merged_cell.modifier, Modifier::BOLD);
+
+    let mut through_widget = prefilled_buffer(area);
+    ViewWidget::new(&view)
+        .cell_write_mode(CellWriteMode::Replace)
+        .render(area, &mut through_widget);
+
+    let mut through_resolved = prefilled_buffer(area);
+    draw_resolved_with_mode(
+        &resolved,
+        area,
+        &mut through_resolved,
+        CellWriteMode::Replace,
+    );
+
+    assert_eq!(through_resolved, through_widget);
+    let replaced_cell = through_widget.cell((0, 0)).expect("replaced cell");
+    assert_eq!(replaced_cell.symbol(), "x");
+    assert_eq!(replaced_cell.fg, RatatuiColor::Reset);
+    assert_eq!(replaced_cell.bg, RatatuiColor::Reset);
+    assert!(replaced_cell.modifier.is_empty());
+
+    let untouched_cell = through_widget.cell((1, 0)).expect("untouched cell");
+    assert_eq!(untouched_cell.symbol(), "#");
+    assert_eq!(untouched_cell.fg, RatatuiColor::Red);
+    assert_eq!(untouched_cell.bg, RatatuiColor::Blue);
+    assert_eq!(untouched_cell.modifier, Modifier::BOLD);
+}
+
+fn prefilled_buffer(area: Rect) -> Buffer {
+    let mut buffer = Buffer::empty(area);
+    for x in area.left()..area.right() {
+        buffer
+            .cell_mut((x, area.top()))
+            .expect("prefilled cell")
+            .set_symbol("#")
+            .set_style(
+                InnerStyle::new()
+                    .fg(RatatuiColor::Red)
+                    .bg(RatatuiColor::Blue)
+                    .add_modifier(Modifier::BOLD),
+            );
+    }
+    buffer
+}
 
 #[test]
 fn one_theme_component_renders_to_plain_cli_and_ratatui() {

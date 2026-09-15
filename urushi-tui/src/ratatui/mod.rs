@@ -15,4 +15,7 @@ mod style;
 mod widget;
 
 pub use style::RatatuiStyle;
-pub use widget::{RatatuiStyleExt, RatatuiWidget, ViewWidget, available, draw_resolved};
+pub use widget::{
+    CellWriteMode, RatatuiStyleExt, RatatuiWidget, ViewWidget, available, draw_resolved,
+    draw_resolved_with_mode,
+};

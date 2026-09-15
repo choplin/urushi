@@ -12,6 +12,16 @@ use ::ratatui::{buffer::Buffer, layout::Rect, widgets::Widget};
 use super::RatatuiStyle;
 use urushi::{Available, BlockStyle, ResolvedView, StyledGrapheme, View, resolve};
 
+/// How an Urushi cell combines with content already present in a Ratatui buffer.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub enum CellWriteMode {
+    /// Applies the Urushi style as a Ratatui patch, preserving unspecified cell properties.
+    #[default]
+    Merge,
+    /// Resets each cell Urushi writes before applying its resolved symbol and style.
+    Replace,
+}
+
 /// A stateless Ratatui widget that draws an Urushi [`View`].
 ///
 /// The widget draws into the buffer passed to [`Widget::render`]. It does not
@@ -33,24 +43,34 @@ use urushi::{Available, BlockStyle, ResolvedView, StyledGrapheme, View, resolve}
 #[derive(Debug, Clone, Copy)]
 pub struct ViewWidget<'a> {
     view: &'a View,
+    cell_write_mode: CellWriteMode,
 }
 
 impl<'a> ViewWidget<'a> {
     /// Creates a widget that draws `view`.
     pub const fn new(view: &'a View) -> Self {
-        Self { view }
+        Self {
+            view,
+            cell_write_mode: CellWriteMode::Merge,
+        }
+    }
+
+    /// Selects how drawn cells combine with content already in the buffer.
+    pub const fn cell_write_mode(mut self, mode: CellWriteMode) -> Self {
+        self.cell_write_mode = mode;
+        self
     }
 }
 
 impl Widget for ViewWidget<'_> {
     fn render(self, area: Rect, buffer: &mut Buffer) {
-        draw(self.view, area, buffer);
+        draw(self.view, area, buffer, self.cell_write_mode);
     }
 }
 
 impl Widget for &ViewWidget<'_> {
     fn render(self, area: Rect, buffer: &mut Buffer) {
-        draw(self.view, area, buffer);
+        draw(self.view, area, buffer, self.cell_write_mode);
     }
 }
 
@@ -63,12 +83,23 @@ impl Widget for &ViewWidget<'_> {
 pub struct RatatuiWidget<'a> {
     content: &'a str,
     style: &'a BlockStyle,
+    cell_write_mode: CellWriteMode,
 }
 
 impl<'a> RatatuiWidget<'a> {
     /// Creates a widget that renders `content` with `style`.
     pub const fn new(content: &'a str, style: &'a BlockStyle) -> Self {
-        Self { content, style }
+        Self {
+            content,
+            style,
+            cell_write_mode: CellWriteMode::Merge,
+        }
+    }
+
+    /// Selects how drawn cells combine with content already in the buffer.
+    pub const fn cell_write_mode(mut self, mode: CellWriteMode) -> Self {
+        self.cell_write_mode = mode;
+        self
     }
 
     /// Builds the view this widget draws.
@@ -94,22 +125,23 @@ impl RatatuiStyleExt for BlockStyle {
 
 impl Widget for RatatuiWidget<'_> {
     fn render(self, area: Rect, buffer: &mut Buffer) {
-        draw(&self.view(), area, buffer);
+        draw(&self.view(), area, buffer, self.cell_write_mode);
     }
 }
 
 impl Widget for &RatatuiWidget<'_> {
     fn render(self, area: Rect, buffer: &mut Buffer) {
-        draw(&self.view(), area, buffer);
+        draw(&self.view(), area, buffer, self.cell_write_mode);
     }
 }
 
 /// Resolves `view` for `area` and writes the resulting rectangle.
-fn draw(view: &View, area: Rect, buffer: &mut Buffer) {
-    draw_resolved(
+fn draw(view: &View, area: Rect, buffer: &mut Buffer, mode: CellWriteMode) {
+    draw_resolved_with_mode(
         &resolve(view, available(area)).expect("a ratatui area supplies finite view geometry"),
         area,
         buffer,
+        mode,
     );
 }
 
@@ -124,11 +156,25 @@ fn draw(view: &View, area: Rect, buffer: &mut Buffer) {
 /// moves the rectangle. A grapheme that would straddle the mask is dropped
 /// rather than split, matching how the layout pass crops.
 pub fn draw_resolved(resolved: &ResolvedView, area: Rect, buffer: &mut Buffer) {
+    draw_resolved_with_mode(resolved, area, buffer, CellWriteMode::Merge);
+}
+
+/// Writes an already resolved view with the selected cell composition behavior.
+///
+/// [`CellWriteMode::Merge`] matches Ratatui's native style composition.
+/// [`CellWriteMode::Replace`] resets only cells occupied by the resolved view;
+/// it does not clear the rest of `area`.
+pub fn draw_resolved_with_mode(
+    resolved: &ResolvedView,
+    area: Rect,
+    buffer: &mut Buffer,
+    mode: CellWriteMode,
+) {
     let clip = area.intersection(buffer.area);
     if clip.is_empty() {
         return;
     }
-    write_cells(resolved, area, clip, buffer);
+    write_cells(resolved, area, clip, buffer, mode);
 }
 
 /// Translates a target rectangle into the area the layout pass resolves under.
@@ -137,7 +183,13 @@ pub fn available(area: Rect) -> Available {
 }
 
 /// Writes a resolved rectangle, anchored at `area`'s origin, under `clip`.
-fn write_cells(resolved: &ResolvedView, area: Rect, clip: Rect, buffer: &mut Buffer) {
+fn write_cells(
+    resolved: &ResolvedView,
+    area: Rect,
+    clip: Rect,
+    buffer: &mut Buffer,
+    mode: CellWriteMode,
+) {
     for (row, graphemes) in resolved.rows().iter().enumerate() {
         let Some(y) = offset(area.y, row) else {
             return;
@@ -155,13 +207,20 @@ fn write_cells(resolved: &ResolvedView, area: Rect, clip: Rect, buffer: &mut Buf
                 break;
             };
             column += grapheme.width();
-            write_grapheme(grapheme, x, y, clip, buffer);
+            write_grapheme(grapheme, x, y, clip, buffer, mode);
         }
     }
 }
 
 /// Writes one grapheme, leaving the cells a wide grapheme hides reset.
-fn write_grapheme(grapheme: &StyledGrapheme, x: u16, y: u16, clip: Rect, buffer: &mut Buffer) {
+fn write_grapheme(
+    grapheme: &StyledGrapheme,
+    x: u16,
+    y: u16,
+    clip: Rect,
+    buffer: &mut Buffer,
+    mode: CellWriteMode,
+) {
     // Zero-width graphemes have no cell of their own, and a grapheme is never
     // split across the clip boundary.
     let Ok(width) = u16::try_from(grapheme.width()) else {
@@ -177,6 +236,9 @@ fn write_grapheme(grapheme: &StyledGrapheme, x: u16, y: u16, clip: Rect, buffer:
 
     let style = RatatuiStyle::from(grapheme.style()).into_inner();
     if let Some(cell) = buffer.cell_mut((x, y)) {
+        if mode == CellWriteMode::Replace {
+            cell.reset();
+        }
         cell.set_symbol(grapheme.symbol()).set_style(style);
     }
     for hidden in x.saturating_add(1)..end {
