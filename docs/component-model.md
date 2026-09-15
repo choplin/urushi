@@ -103,6 +103,15 @@ separately for
 [width resolution](design/list-width-resolution.md), and
 [primitive lowering](design/list-lowering.md).
 
+A Tree applies the same typed-value boundary to its optional root and recursive
+nodes, while keeping connected-line topology in its canonical presentation.
+Its typed node presentation derives plain text and node styles before the
+existing Canvas frame resolves wrapping and connectors. The exact Tree
+decisions are recorded separately for
+[typed node presentation](design/tree-node-presentation.md),
+[connector lowering](design/tree-lowering.md), and
+[width resolution](design/tree-width-resolution.md).
+
 ## Styles and presentations are different values
 
 The `...Style` suffix is reserved for declarative values that do not interpret

@@ -7,13 +7,16 @@ to the primitive `View` vocabulary.
 
 ## Decision
 
-`TreePresentation::compose(&Tree)` applies visibility and child offsets, then
-binds the remaining hierarchy, its root/item/connector styles, one `LineGlyphs`
-repertoire, and its indentation width into a comparable owned Canvas item.
-`Tree` and `TreeNode` contain no connector glyph, callback, style, or resolved
-coordinate. The Canvas item and its intrinsic sizing value share the same
-bound frame, so equal values produce equal measurement and drawing independent
-of allocation identity.
+`TreePresentation::compose(&Tree)` applies visibility and child offsets, derives
+plain text and root/item styles from each typed value, then binds those
+snapshots, the remaining hierarchy, the connector style, one `LineGlyphs`
+repertoire, and its indentation width into a comparable owned Canvas item. The
+typed policy and its position contract are defined in
+[Tree Node Presentation](tree-node-presentation.md). `Tree` and `TreeNode`
+contain no connector glyph, callback, style, or resolved coordinate. The Canvas
+item and its intrinsic sizing value share the same bound frame, so equal bound
+values produce equal measurement and drawing independent of allocation
+identity.
 
 The default indentation width is four terminal cells, producing `├── ` and
 `└── ` with `LineGlyphs::NORMAL`. A custom width must be at least three cells:
@@ -46,9 +49,10 @@ No segment occupies the row above a sibling group, no later command masks a
 connector cell, and separate Canvas commands are never expected to union line
 incidence. An implementation may collect independently complete groups into
 one Tree-wide network, but that grouping is not a public Tree invariant. The
-connector has one `TreeRole::Connector` style because topology does not
-distinguish an enumerator string from an indenter string. Custom one-cell
-connector repertoires use `LineGlyphs`.
+connector has one Tree-wide `TreeRole::Connector` style because topology does
+not distinguish an enumerator string from an indenter string, and shared
+junction or continuation cells do not have unique node ownership. Custom
+one-cell connector repertoires use `LineGlyphs`.
 
 ## Reasoning
 
@@ -56,8 +60,10 @@ Canvas postpones both coordinates and drawing until the component's local size
 is known, while keeping the resolver unaware of Tree semantics. A single line
 network owns every incidence needed to choose each junction glyph, so the
 result follows the generic network contract instead of relying on draw order
-or cell repair. Binding visibility and offsets first also gives sizing and
-drawing the same hierarchy.
+or cell repair. Binding visibility and offsets first also gives typed node
+policy, sizing, and drawing the same hierarchy. Formatting and node-style
+callbacks run only while binding; width-dependent measurement and drawing
+consume their snapshots.
 
 One connector role matches the retained meaning: style varies by semantic
 connector, while junction shape varies by topology. `LineGlyphs` preserves

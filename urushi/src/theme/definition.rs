@@ -52,7 +52,10 @@ impl Theme {
     }
 
     /// Composes a tree with this theme's canonical presentation.
-    pub fn tree(&self, tree: &Tree) -> View {
+    pub fn tree<T>(&self, tree: &Tree<T>) -> View
+    where
+        T: fmt::Display,
+    {
         self.components.tree().compose(tree)
     }
 

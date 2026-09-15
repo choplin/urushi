@@ -7,7 +7,8 @@ height after its parent selects a local width.
 
 ## Decision
 
-Each visible node has a presentation-owned content origin, defined by its
+Each visible typed value is formatted into plain text during composition. Each
+visible child node then has a presentation-owned content origin, defined by its
 depth and indentation geometry in
 [`tree-lowering.md`](tree-lowering.md). The complete prefix before that origin
 is protected from content wrapping.
@@ -18,7 +19,8 @@ content grapheme, or the origin alone when the content is empty. Root text has
 origin zero. The Canvas sizing value reports the maximum demand and floor over
 the bound hierarchy.
 
-After the parent selects a local width, root lines wrap within that full width.
+After the parent selects a local width, the snapshotted root text wraps within
+that full width.
 Node lines wrap only within `width - content_x`; the indentation and connector
 prefix never participates in the wrapping flow. Explicit line boundaries stay
 distinct, including a trailing empty line.

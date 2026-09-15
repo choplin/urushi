@@ -11,4 +11,4 @@ pub use list::{
     dash_enumerator, roman_enumerator,
 };
 pub use table::{Table, TableBorder, TableCell, TableCellStyler, TablePresentation};
-pub use tree::{Tree, TreeNode, TreePresentation};
+pub use tree::{Tree, TreeNode, TreeNodePresentation, TreePosition, TreePresentation};

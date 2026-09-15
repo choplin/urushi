@@ -1,6 +1,6 @@
 //! Renderer-neutral trees with reusable owned nodes.
 
-use std::sync::Arc;
+use std::{fmt, sync::Arc};
 
 use crate::text::{PrintableLines, PrintableText, wrap_text};
 use crate::view::{CanvasMeasure, CanvasRequirements};
@@ -15,27 +15,40 @@ struct ChildOffset {
     end: usize,
 }
 
+/// A visible value's position in a Tree.
+///
+/// The optional root has no sibling group. Child positions are assigned after
+/// offsets and hidden nodes are removed, and top-level children have depth
+/// zero.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TreePosition {
+    /// The Tree's optional root value.
+    Root,
+    /// One node among its visible siblings.
+    Child {
+        /// The zero-based visible sibling index.
+        index: usize,
+        /// The number of visible siblings in this group.
+        len: usize,
+        /// The zero-based nesting depth used by the canonical connectors.
+        depth: usize,
+    },
+}
+
 /// One owned value and its recursive child nodes.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct TreeNode {
-    value: String,
+pub struct TreeNode<T> {
+    value: T,
     children: Vec<Self>,
     hidden: bool,
     child_offset: ChildOffset,
 }
 
-impl TreeNode {
-    /// Creates a visible leaf node from plain text.
-    ///
-    /// `value` is plain text. Escape sequences and cursor movement in it break that contract:
-    /// debug builds panic, and release builds measure them as ordinary
-    /// characters and may split them when wrapping or truncating. Raw ANSI is not accepted as component text.
-    ///
-    /// Style the component through its [`ComponentTheme`](crate::ComponentTheme)
-    /// rather than by pre-rendering its content.
-    pub fn new(value: impl Into<String>) -> Self {
+impl<T> TreeNode<T> {
+    /// Creates a visible leaf node from a typed value.
+    pub fn new(value: T) -> Self {
         Self {
-            value: value.into(),
+            value,
             children: Vec::new(),
             hidden: false,
             child_offset: ChildOffset::default(),
@@ -74,8 +87,8 @@ impl TreeNode {
         self
     }
 
-    /// Returns this node's text.
-    pub fn value(&self) -> &str {
+    /// Returns this node's value.
+    pub const fn value(&self) -> &T {
         &self.value
     }
 
@@ -94,16 +107,78 @@ impl TreeNode {
     }
 }
 
-impl From<String> for TreeNode {
-    fn from(value: String) -> Self {
+impl<T> From<T> for TreeNode<T> {
+    fn from(value: T) -> Self {
         Self::new(value)
     }
 }
 
-impl From<&str> for TreeNode {
-    fn from(value: &str) -> Self {
-        Self::new(value)
+type NodeFormatter<'a, T> = dyn Fn(&T, TreePosition) -> String + 'a;
+type NodeStyler<'a, T> = dyn Fn(&T, TreePosition) -> Option<TextStyle> + 'a;
+
+/// Typed formatting and optional text-style overrides for Tree values.
+///
+/// This policy covers both the optional root and child nodes. It is separate
+/// from [`TreePresentation`], which remains the type-independent Tree-wide
+/// presentation stored by a Theme. Composition snapshots callback results;
+/// measurement and drawing do not evaluate application policy.
+#[derive(Clone)]
+pub struct TreeNodePresentation<'a, T> {
+    format: Arc<NodeFormatter<'a, T>>,
+    style: Arc<NodeStyler<'a, T>>,
+}
+
+impl<T> fmt::Debug for TreeNodePresentation<'_, T> {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str("TreeNodePresentation { .. }")
     }
+}
+
+impl<'a, T: 'a> TreeNodePresentation<'a, T> {
+    /// Creates a node presentation with a custom formatter and no style overrides.
+    pub fn new<F>(format: F) -> Self
+    where
+        F: Fn(&T, TreePosition) -> String + 'a,
+    {
+        Self {
+            format: Arc::new(format),
+            style: Arc::new(no_node_style::<T>),
+        }
+    }
+
+    /// Replaces the per-node text-style policy.
+    ///
+    /// `None` keeps the [`TreePresentation`] root or item default.
+    /// `Some(style)` replaces that complete style rather than layering over it.
+    #[must_use]
+    pub fn per_node_style<S>(mut self, style: S) -> Self
+    where
+        S: Fn(&T, TreePosition) -> Option<TextStyle> + 'a,
+    {
+        self.style = Arc::new(style);
+        self
+    }
+}
+
+impl<'a, T> TreeNodePresentation<'a, T>
+where
+    T: fmt::Display + 'a,
+{
+    /// Uses the value's canonical [`fmt::Display`] representation.
+    pub fn display() -> Self {
+        Self::new(display_node::<T>)
+    }
+}
+
+fn display_node<T>(value: &T, _: TreePosition) -> String
+where
+    T: fmt::Display,
+{
+    value.to_string()
+}
+
+fn no_node_style<T>(_: &T, _: TreePosition) -> Option<TextStyle> {
+    None
 }
 
 /// Presentation policy used to compose a [`Tree`] into a [`View`].
@@ -191,8 +266,24 @@ impl TreePresentation {
         self
     }
 
-    /// Composes tree data into an intrinsically sized, renderer-neutral Canvas.
-    pub fn compose(&self, tree: &Tree) -> View {
+    /// Composes displayable tree data into an intrinsically sized Canvas.
+    pub fn compose<T>(&self, tree: &Tree<T>) -> View
+    where
+        T: fmt::Display,
+    {
+        self.compose_using(tree, &display_node::<T>, &no_node_style::<T>)
+    }
+
+    /// Composes tree data with typed node formatting and text-style overrides.
+    pub fn compose_with<T>(&self, tree: &Tree<T>, nodes: &TreeNodePresentation<'_, T>) -> View {
+        self.compose_using(tree, &*nodes.format, &*nodes.style)
+    }
+
+    fn compose_using<T, F, S>(&self, tree: &Tree<T>, format: &F, style: &S) -> View
+    where
+        F: Fn(&T, TreePosition) -> String + ?Sized,
+        S: Fn(&T, TreePosition) -> Option<TextStyle> + ?Sized,
+    {
         if tree.hidden {
             return View::empty();
         }
@@ -204,13 +295,18 @@ impl TreePresentation {
 
         let mut nodes = Vec::new();
         let mut groups = Vec::new();
-        bind_group(&mut nodes, &mut groups, &children, 0, self.indent_width);
+        let root = tree.root.as_ref().map(|value| {
+            let position = TreePosition::Root;
+            BoundTreeRoot {
+                value: format(value, position),
+                style: style(value, position).unwrap_or_else(|| self.root.clone()),
+            }
+        });
+        bind_group(&mut nodes, &mut groups, &children, 0, self, format, style);
         let item = TreeCanvasItem(Arc::new(TreeFrame {
-            root: tree.root.clone(),
+            root,
             nodes,
             groups,
-            root_style: self.root.clone(),
-            item_style: self.item.clone(),
             connector_style: self.connector.clone(),
             line_glyphs: self.line_glyphs,
             indent_width: self.indent_width,
@@ -219,9 +315,16 @@ impl TreePresentation {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
+struct BoundTreeRoot {
+    value: String,
+    style: TextStyle,
+}
+
+#[derive(Debug, Clone, PartialEq)]
 struct BoundTreeNode {
     value: String,
+    style: TextStyle,
     connector_x: usize,
     content_x: usize,
 }
@@ -232,29 +335,40 @@ struct BoundSiblingGroup {
     nodes: Vec<usize>,
 }
 
-fn bind_group(
+fn bind_group<T, F, S>(
     bound: &mut Vec<BoundTreeNode>,
     groups: &mut Vec<BoundSiblingGroup>,
-    nodes: &[&TreeNode],
+    nodes: &[&TreeNode<T>],
     depth: usize,
-    indent_width: usize,
-) {
+    presentation: &TreePresentation,
+    format: &F,
+    style: &S,
+) where
+    F: Fn(&T, TreePosition) -> String + ?Sized,
+    S: Fn(&T, TreePosition) -> Option<TextStyle> + ?Sized,
+{
     if nodes.is_empty() {
         return;
     }
 
-    let connector_x = depth.saturating_mul(indent_width);
-    let content_x = connector_x.saturating_add(indent_width);
+    let connector_x = depth.saturating_mul(presentation.indent_width);
+    let content_x = connector_x.saturating_add(presentation.indent_width);
     let group_index = groups.len();
     groups.push(BoundSiblingGroup {
         connector_x,
         nodes: Vec::with_capacity(nodes.len()),
     });
 
-    for node in nodes {
+    for (index, node) in nodes.iter().enumerate() {
+        let position = TreePosition::Child {
+            index,
+            len: nodes.len(),
+            depth,
+        };
         let node_index = bound.len();
         bound.push(BoundTreeNode {
-            value: node.value.clone(),
+            value: format(&node.value, position),
+            style: style(&node.value, position).unwrap_or_else(|| presentation.item.clone()),
             connector_x,
             content_x,
         });
@@ -266,18 +380,18 @@ fn bind_group(
             groups,
             &children,
             depth.saturating_add(1),
-            indent_width,
+            presentation,
+            format,
+            style,
         );
     }
 }
 
 #[derive(Debug, Clone, PartialEq)]
 struct TreeFrame {
-    root: Option<String>,
+    root: Option<BoundTreeRoot>,
     nodes: Vec<BoundTreeNode>,
     groups: Vec<BoundSiblingGroup>,
-    root_style: TextStyle,
-    item_style: TextStyle,
     connector_style: TextStyle,
     line_glyphs: LineGlyphs,
     indent_width: usize,
@@ -288,7 +402,7 @@ impl TreeFrame {
         let mut demand = 0;
         let mut floor = 0;
         if let Some(root) = &self.root {
-            let widths = text_widths(root);
+            let widths = text_widths(&root.value);
             demand = widths.0;
             floor = widths.1;
         }
@@ -303,7 +417,11 @@ impl TreeFrame {
     fn rows(&self, width: usize) -> TreeRows {
         let mut rows = Vec::new();
         if let Some(root) = &self.root {
-            rows.extend(wrapped_rows(root, width).into_iter().map(TreeRow::Root));
+            rows.extend(
+                wrapped_rows(&root.value, width)
+                    .into_iter()
+                    .map(TreeRow::Root),
+            );
         }
 
         let mut node_y = Vec::with_capacity(self.nodes.len());
@@ -345,11 +463,19 @@ impl TreeFrame {
 
         for (y, row) in plan.rows.into_iter().enumerate() {
             let (x, text, style) = match row {
-                TreeRow::Root(text) => (0, text, self.root_style.clone()),
+                TreeRow::Root(text) => (
+                    0,
+                    text,
+                    self.root
+                        .as_ref()
+                        .expect("a root row has a bound root")
+                        .style
+                        .clone(),
+                ),
                 TreeRow::Node { node_index, text } => (
                     self.nodes[node_index].content_x,
                     text,
-                    self.item_style.clone(),
+                    self.nodes[node_index].style.clone(),
                 ),
             };
             context.text_with(
@@ -424,32 +550,41 @@ fn position(value: usize) -> i64 {
 ///
 /// Nodes remain data-only so the model can be reused independently of one
 /// component's presentation policy.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct Tree {
-    root: Option<String>,
-    children: Vec<TreeNode>,
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Tree<T> {
+    root: Option<T>,
+    children: Vec<TreeNode<T>>,
     hidden: bool,
     child_offset: ChildOffset,
 }
 
-impl Tree {
+impl<T> Default for Tree<T> {
+    fn default() -> Self {
+        Self {
+            root: None,
+            children: Vec::new(),
+            hidden: false,
+            child_offset: ChildOffset::default(),
+        }
+    }
+}
+
+impl<T> Tree<T> {
     /// Creates an empty, rootless tree.
     pub fn new() -> Self {
         Self::default()
     }
 
-    /// Sets the optional root text.
-    /// `root` is plain text: escape sequences and cursor movement in it break
-    /// that contract, and debug builds panic on them.
+    /// Sets the optional typed root value.
     #[must_use]
-    pub fn root(mut self, root: impl Into<String>) -> Self {
-        self.root = Some(root.into());
+    pub fn root(mut self, root: T) -> Self {
+        self.root = Some(root);
         self
     }
 
     /// Appends one top-level node.
     #[must_use]
-    pub fn child(mut self, child: impl Into<TreeNode>) -> Self {
+    pub fn child(mut self, child: impl Into<TreeNode<T>>) -> Self {
         self.children.push(child.into());
         self
     }
@@ -459,7 +594,7 @@ impl Tree {
     pub fn children<I, N>(mut self, children: I) -> Self
     where
         I: IntoIterator<Item = N>,
-        N: Into<TreeNode>,
+        N: Into<TreeNode<T>>,
     {
         self.children.extend(children.into_iter().map(Into::into));
         self
@@ -479,18 +614,18 @@ impl Tree {
         self
     }
 
-    /// Returns the optional root text.
-    pub fn root_value(&self) -> Option<&str> {
-        self.root.as_deref()
+    /// Returns the optional root value.
+    pub const fn root_value(&self) -> Option<&T> {
+        self.root.as_ref()
     }
 
     /// Returns all owned top-level nodes before visibility and offset are applied.
-    pub fn child_nodes(&self) -> &[TreeNode] {
+    pub fn child_nodes(&self) -> &[TreeNode<T>] {
         &self.children
     }
 }
 
-fn visible_children(children: &[TreeNode], offset: ChildOffset) -> Vec<&TreeNode> {
+fn visible_children<T>(children: &[TreeNode<T>], offset: ChildOffset) -> Vec<&TreeNode<T>> {
     let end = children.len().saturating_sub(offset.end);
     if offset.start >= end {
         return Vec::new();
@@ -524,7 +659,7 @@ mod tests {
 
     #[test]
     fn renders_empty_and_root_only_trees() {
-        assert!(measure(&styles().tree().compose(&Tree::new())).is_empty());
+        assert!(measure(&styles().tree().compose(&Tree::<String>::new())).is_empty());
         assert_eq!(
             plain(&styles().tree().compose(&Tree::new().root("root"))),
             "root"
@@ -571,7 +706,7 @@ mod tests {
         let tree = Tree::new()
             .children(["skip", "one", "two", "drop"])
             .child_offset(1, 1);
-        let nested = Tree::new().child(
+        let nested = Tree::<&str>::new().child(
             TreeNode::new("parent")
                 .children(["skip", "kept", "drop"])
                 .child_offset(1, 1),
@@ -586,7 +721,7 @@ mod tests {
 
     #[test]
     fn aligns_multiline_values_at_the_node_body() {
-        let tree = Tree::new().child(
+        let tree = Tree::<&str>::new().child(
             TreeNode::new("親")
                 .child("日本語\nsecond")
                 .child("終端\n続き"),
@@ -630,7 +765,7 @@ mod tests {
 
     #[test]
     fn protects_deep_prefixes_and_wraps_cjk_and_emoji_content() {
-        let tree = Tree::new().child(
+        let tree = Tree::<&str>::new().child(
             TreeNode::new("親").child(TreeNode::new("branch").children(["日本語", "👩‍💻 end"])),
         );
         let view = styles().tree().compose(&tree);
@@ -724,13 +859,24 @@ mod tests {
         let children = visible_children(&tree.children, tree.child_offset);
         let mut nodes = Vec::new();
         let mut groups = Vec::new();
-        bind_group(&mut nodes, &mut groups, &children, 0, 4);
+        let presentation =
+            TreePresentation::new(TextStyle::new(), TextStyle::new(), TextStyle::new());
+        bind_group(
+            &mut nodes,
+            &mut groups,
+            &children,
+            0,
+            &presentation,
+            &display_node::<&str>,
+            &no_node_style::<&str>,
+        );
         let requirements = TreeFrame {
-            root: tree.root,
+            root: tree.root.map(|value| BoundTreeRoot {
+                value: value.to_owned(),
+                style: TextStyle::new(),
+            }),
             nodes,
             groups,
-            root_style: TextStyle::new(),
-            item_style: TextStyle::new(),
             connector_style: TextStyle::new(),
             line_glyphs: LineGlyphs::NORMAL,
             indent_width: 4,
@@ -752,9 +898,9 @@ mod tests {
         let node = TreeNode::new("parent").children(["one", "two"]);
         let tree = Tree::new().root("root").child(node.clone());
 
-        assert_eq!(node.value(), "parent");
+        assert_eq!(*node.value(), "parent");
         assert_eq!(node.child_nodes().len(), 2);
-        assert_eq!(tree.root_value(), Some("root"));
+        assert_eq!(tree.root_value().copied(), Some("root"));
         assert_eq!(tree.child_nodes(), &[node]);
     }
 }
