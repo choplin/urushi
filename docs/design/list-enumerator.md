@@ -47,6 +47,13 @@ item and stores the result in the bound frame. Intrinsic measurement and Canvas
 drawing may run more than once, so neither phase evaluates application
 callbacks again.
 
+The same composition pass evaluates the typed item presentation. Its formatter
+and its Item and Enumerator role-style decisions receive the same
+`ListPosition` as the marker and are also stored in the bound frame. The
+item-presentation contract and its relationship to the position-only
+enumerator are defined in
+[List Item Presentation](list-item-presentation.md).
+
 Each callback result is normalized to one semantic line before it is stored.
 CRLF, CR, LF, U+2028, and U+2029 become one space so a marker cannot introduce
 rows outside the List row algorithm. Spaces supplied by the callback remain

@@ -91,11 +91,14 @@ presentation may normalize a marker to one line or choose a primitive from a
 semantic role. It may not compute the final geometry that only sibling sharing
 or the available area can determine.
 
-Recursion does not change this boundary. A List retains its items and nesting
-as semantic data while its presentation decides how that structure becomes a
-marked flow; the presentation can bind its area-independent choices before
-resolution supplies the local width needed to form rows. The exact List
-decisions are recorded separately for [enumerators](design/list-enumerator.md),
+Recursion does not change this boundary. A List retains typed application
+values and nesting as semantic data while its presentation derives their text
+and styles and decides how that structure becomes a marked flow; the
+presentation can bind its area-independent choices before resolution supplies
+the local width needed to form rows. The exact List decisions are recorded
+separately for
+[typed item presentation](design/list-item-presentation.md),
+[enumerators](design/list-enumerator.md),
 [marker geometry](design/list-marker-layout.md),
 [width resolution](design/list-width-resolution.md), and
 [primitive lowering](design/list-lowering.md).

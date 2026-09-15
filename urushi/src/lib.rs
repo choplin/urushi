@@ -34,9 +34,10 @@ mod theme;
 mod view;
 
 pub use component::{
-    List, ListEnumerator, ListItem, ListPosition, ListPresentation, Table, TableBorder, TableCell,
-    TableCellStyler, TablePresentation, Tree, TreeNode, TreePresentation, alphabet_enumerator,
-    arabic_enumerator, asterisk_enumerator, bullet_enumerator, dash_enumerator, roman_enumerator,
+    List, ListEnumerator, ListItem, ListItemPresentation, ListPosition, ListPresentation, Table,
+    TableBorder, TableCell, TableCellStyler, TablePresentation, Tree, TreeNode, TreePresentation,
+    alphabet_enumerator, arabic_enumerator, asterisk_enumerator, bullet_enumerator,
+    dash_enumerator, roman_enumerator,
 };
 pub use key::Key;
 pub use output::{eprint, eprintln, print, println};

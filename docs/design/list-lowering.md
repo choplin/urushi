@@ -8,10 +8,13 @@ and row algorithms are specified separately in
 
 ## One intrinsically sized Canvas item
 
-`ListPresentation::compose` binds one area-independent List frame. It installs
-an intrinsic sizing value derived from that frame on a Canvas and adds one item
-that records the resolved rows as generic Canvas text or cell contributions.
-The frame imports the [enumerator](list-enumerator.md) and
+`ListPresentation::compose` binds one area-independent List frame. The binding
+snapshots each visible typed value into presentation text and role styles,
+installs an intrinsic sizing value derived from that frame on a Canvas, and
+adds one item that records the resolved rows as generic Canvas text or cell
+contributions. The frame imports the
+[item-presentation](list-item-presentation.md),
+[enumerator](list-enumerator.md), and
 [marker-placement](list-marker-layout.md) contracts rather than redefining
 them.
 

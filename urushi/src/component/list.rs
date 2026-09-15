@@ -1,6 +1,6 @@
 //! Renderer-neutral lists with an independent public model.
 
-use std::sync::Arc;
+use std::{fmt, sync::Arc};
 
 use crate::text::{PrintableLines, PrintableText, wrap_text};
 use crate::view::{CanvasMeasure, CanvasRequirements};
@@ -127,25 +127,23 @@ struct ItemOffset {
     end: usize,
 }
 
-/// One owned value and its recursive nested list items.
+/// One owned typed value and its recursive nested list items.
 ///
 /// `ListItem` is deliberately independent of the Tree component's public node
 /// model, so either public API can evolve without changing the other.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ListItem {
-    value: String,
+pub struct ListItem<T> {
+    value: T,
     items: Vec<Self>,
     hidden: bool,
     offset: ItemOffset,
 }
 
-impl ListItem {
-    /// Creates a visible leaf item.
-    /// `value` is plain text: escape sequences and cursor movement in it break
-    /// that contract, and debug builds panic on them.
-    pub fn new(value: impl Into<String>) -> Self {
+impl<T> ListItem<T> {
+    /// Creates a visible leaf item from a typed value.
+    pub fn new(value: T) -> Self {
         Self {
-            value: value.into(),
+            value,
             items: Vec::new(),
             hidden: false,
             offset: ItemOffset::default(),
@@ -184,8 +182,8 @@ impl ListItem {
         self
     }
 
-    /// Returns this item's text.
-    pub fn value(&self) -> &str {
+    /// Returns this item's value.
+    pub const fn value(&self) -> &T {
         &self.value
     }
 
@@ -204,19 +202,86 @@ impl ListItem {
     }
 }
 
-impl From<String> for ListItem {
-    fn from(value: String) -> Self {
+impl<T> From<T> for ListItem<T> {
+    fn from(value: T) -> Self {
         Self::new(value)
     }
 }
 
-impl From<&str> for ListItem {
-    fn from(value: &str) -> Self {
-        Self::new(value)
+type ItemFormatter<'a, T> = dyn Fn(&T, ListPosition) -> String + 'a;
+type ItemStyler<'a, T> = dyn Fn(&T, ListPosition, ListRole) -> Option<TextStyle> + 'a;
+
+/// Typed formatting and optional role-style overrides for List items.
+///
+/// This policy is separate from [`ListPresentation`], which remains the
+/// type-independent List-wide presentation stored by a Theme. During
+/// composition, the formatter is evaluated once per visible item and the style
+/// callback once for each List role. The composed frame retains only their text
+/// and style results.
+#[derive(Clone)]
+pub struct ListItemPresentation<'a, T> {
+    format: Arc<ItemFormatter<'a, T>>,
+    style: Arc<ItemStyler<'a, T>>,
+}
+
+impl<T> fmt::Debug for ListItemPresentation<'_, T> {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str("ListItemPresentation { .. }")
     }
+}
+
+impl<'a, T: 'a> ListItemPresentation<'a, T> {
+    /// Creates an item presentation with a custom formatter and no style overrides.
+    pub fn new<F>(format: F) -> Self
+    where
+        F: Fn(&T, ListPosition) -> String + 'a,
+    {
+        Self {
+            format: Arc::new(format),
+            style: Arc::new(no_item_style::<T>),
+        }
+    }
+
+    /// Replaces the per-item role-style policy.
+    ///
+    /// `None` keeps the [`ListPresentation`] role default. `Some(style)`
+    /// replaces that complete style rather than layering over it.
+    #[must_use]
+    pub fn per_item_style<S>(mut self, style: S) -> Self
+    where
+        S: Fn(&T, ListPosition, ListRole) -> Option<TextStyle> + 'a,
+    {
+        self.style = Arc::new(style);
+        self
+    }
+}
+
+impl<'a, T> ListItemPresentation<'a, T>
+where
+    T: fmt::Display + 'a,
+{
+    /// Uses the value's canonical [`fmt::Display`] representation.
+    pub fn display() -> Self {
+        Self::new(display_item::<T>)
+    }
+}
+
+fn display_item<T>(value: &T, _: ListPosition) -> String
+where
+    T: fmt::Display,
+{
+    value.to_string()
+}
+
+fn no_item_style<T>(_: &T, _: ListPosition, _: ListRole) -> Option<TextStyle> {
+    None
 }
 
 /// Presentation policy used to compose a [`List`] into a [`View`].
+///
+/// [`ListPresentation::compose`] formats values with [`fmt::Display`]. Use
+/// [`ListPresentation::compose_with`] with a [`ListItemPresentation<T>`] when
+/// values need List-specific formatting or per-item role-style overrides.
 #[derive(Debug, Clone)]
 pub struct ListPresentation {
     item: TextStyle,
@@ -244,7 +309,9 @@ impl ListPresentation {
             nesting_indent: 2,
         }
     }
+}
 
+impl ListPresentation {
     /// Returns the style assigned to one logical list role.
     pub fn style(&self, role: ListRole) -> &TextStyle {
         match role {
@@ -289,8 +356,24 @@ impl ListPresentation {
         self
     }
 
-    /// Composes list data into an intrinsically sized, renderer-neutral Canvas.
-    pub fn compose(&self, list: &List) -> View {
+    /// Composes displayable list data into an intrinsically sized Canvas.
+    pub fn compose<T>(&self, list: &List<T>) -> View
+    where
+        T: fmt::Display,
+    {
+        self.compose_using(list, &display_item::<T>, &no_item_style::<T>)
+    }
+
+    /// Composes list data with typed item formatting and style overrides.
+    pub fn compose_with<T>(&self, list: &List<T>, items: &ListItemPresentation<'_, T>) -> View {
+        self.compose_using(list, &*items.format, &*items.style)
+    }
+
+    fn compose_using<T, F, S>(&self, list: &List<T>, format: &F, style: &S) -> View
+    where
+        F: Fn(&T, ListPosition) -> String + ?Sized,
+        S: Fn(&T, ListPosition, ListRole) -> Option<TextStyle> + ?Sized,
+    {
         if list.hidden {
             return View::empty();
         }
@@ -301,12 +384,8 @@ impl ListPresentation {
         }
 
         let mut bound = Vec::new();
-        bind_items(&mut bound, &items, 0, self);
-        let item = ListCanvasItem(Arc::new(ListFrame {
-            items: bound,
-            item_style: self.item.clone(),
-            enumerator_style: self.enumerator_style.clone(),
-        }));
+        bind_items(&mut bound, &items, 0, self, format, style);
+        let item = ListCanvasItem(Arc::new(ListFrame { items: bound }));
         View::canvas(Canvas::new().sizing(item.sizing()).item(item))
     }
 }
@@ -315,18 +394,25 @@ impl ListPresentation {
 struct BoundListItem {
     value: String,
     marker: String,
+    item_style: TextStyle,
+    enumerator_style: TextStyle,
     track_x: usize,
     marker_x: usize,
     content_x: usize,
     track_width: usize,
 }
 
-fn bind_items(
+fn bind_items<T, F, S>(
     bound: &mut Vec<BoundListItem>,
-    items: &[&ListItem],
+    items: &[&ListItem<T>],
     depth: usize,
     presentation: &ListPresentation,
-) {
+    format: &F,
+    style: &S,
+) where
+    F: Fn(&T, ListPosition) -> String + ?Sized,
+    S: Fn(&T, ListPosition, ListRole) -> Option<TextStyle> + ?Sized,
+{
     let markers = (0..items.len())
         .map(|index| {
             normalize_marker((presentation.enumerator)(ListPosition::new(
@@ -344,11 +430,16 @@ fn bind_items(
     let track_x = depth.saturating_mul(presentation.nesting_indent);
     let content_x = track_x.saturating_add(track_width);
 
-    for (item, marker) in items.iter().zip(markers) {
+    for (index, (item, marker)) in items.iter().zip(markers).enumerate() {
+        let position = ListPosition::new(index, items.len(), depth);
         let marker_width = PrintableText::new(&marker).width();
         bound.push(BoundListItem {
-            value: item.value.clone(),
+            value: format(&item.value, position),
             marker,
+            item_style: style(&item.value, position, ListRole::Item)
+                .unwrap_or_else(|| presentation.item.clone()),
+            enumerator_style: style(&item.value, position, ListRole::Enumerator)
+                .unwrap_or_else(|| presentation.enumerator_style.clone()),
             track_x,
             marker_x: track_x.saturating_add(track_width - marker_width),
             content_x,
@@ -356,7 +447,14 @@ fn bind_items(
         });
         let children = item.visible_items();
         if !children.is_empty() {
-            bind_items(bound, &children, depth.saturating_add(1), presentation);
+            bind_items(
+                bound,
+                &children,
+                depth.saturating_add(1),
+                presentation,
+                format,
+                style,
+            );
         }
     }
 }
@@ -364,8 +462,6 @@ fn bind_items(
 #[derive(Debug, Clone, PartialEq)]
 struct ListFrame {
     items: Vec<BoundListItem>,
-    item_style: TextStyle,
-    enumerator_style: TextStyle,
 }
 
 impl ListFrame {
@@ -421,21 +517,21 @@ impl ListFrame {
                     context.text_with(
                         Position::new(position(item.track_x), position(y)),
                         " ".repeat(visible_track),
-                        self.enumerator_style.clone(),
+                        item.enumerator_style.clone(),
                         Composition::Replace,
                     );
                 }
                 context.text_with(
                     Position::new(position(item.marker_x), position(y)),
                     item.marker.clone(),
-                    self.enumerator_style.clone(),
+                    item.enumerator_style.clone(),
                     Composition::Replace,
                 );
             }
             context.text_with(
                 Position::new(position(item.content_x), position(y)),
                 row.text,
-                self.item_style.clone(),
+                item.item_style.clone(),
                 Composition::Replace,
             );
         }
@@ -478,7 +574,7 @@ fn position(value: usize) -> i64 {
     i64::try_from(value).unwrap_or(i64::MAX)
 }
 
-/// Owned list data independent of presentation policy.
+/// Owned typed list data independent of presentation policy.
 ///
 /// List owns its public model independently from Tree. Its presentation binds
 /// this recursive data without coupling either public data API to the other
@@ -487,22 +583,36 @@ fn position(value: usize) -> i64 {
 /// Offsets are supported with [`List::offset`] and [`ListItem::offset`]. A
 /// filter callback is intentionally not part of this API: omit items before
 /// construction or mark individual [`ListItem`] values hidden instead.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct List {
-    items: Vec<ListItem>,
+///
+/// [`List::new`] creates the same empty container for every value type. Calls
+/// that append an item infer `T` from that value; an empty List states its type
+/// explicitly or through its surrounding context.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct List<T> {
+    items: Vec<ListItem<T>>,
     hidden: bool,
     offset: ItemOffset,
 }
 
-impl List {
-    /// Creates an empty list.
+impl<T> Default for List<T> {
+    fn default() -> Self {
+        Self {
+            items: Vec::new(),
+            hidden: false,
+            offset: ItemOffset::default(),
+        }
+    }
+}
+
+impl<T> List<T> {
+    /// Creates an empty typed list.
     pub fn new() -> Self {
         Self::default()
     }
 
     /// Appends one top-level item.
     #[must_use]
-    pub fn item(mut self, item: impl Into<ListItem>) -> Self {
+    pub fn item(mut self, item: impl Into<ListItem<T>>) -> Self {
         self.items.push(item.into());
         self
     }
@@ -512,7 +622,7 @@ impl List {
     pub fn items<I, N>(mut self, items: I) -> Self
     where
         I: IntoIterator<Item = N>,
-        N: Into<ListItem>,
+        N: Into<ListItem<T>>,
     {
         self.items.extend(items.into_iter().map(Into::into));
         self
@@ -533,12 +643,12 @@ impl List {
     }
 
     /// Returns all owned top-level items before visibility and offset are applied.
-    pub fn item_nodes(&self) -> &[ListItem] {
+    pub fn item_nodes(&self) -> &[ListItem<T>] {
         &self.items
     }
 }
 
-fn visible_items(items: &[ListItem], offset: ItemOffset) -> Vec<&ListItem> {
+fn visible_items<T>(items: &[ListItem<T>], offset: ItemOffset) -> Vec<&ListItem<T>> {
     let end = items.len().saturating_sub(offset.end);
     if offset.start >= end {
         return Vec::new();
@@ -592,9 +702,9 @@ mod tests {
 
     #[test]
     fn renders_empty_flat_and_nested_lists() {
-        assert!(measure(&styles().list().compose(&List::new())).is_empty());
+        assert!(measure(&styles().list().compose(&List::<String>::new())).is_empty());
 
-        let list = List::new()
+        let list = List::<&str>::new()
             .item("alpha")
             .item(ListItem::new("beta").items(["nested", "last"]))
             .item("omega");
@@ -607,10 +717,10 @@ mod tests {
 
     #[test]
     fn list_items_are_independent_from_tree_nodes() {
-        fn accepts_list_item(_: ListItem) {}
+        fn accepts_list_item(_: ListItem<&str>) {}
         accepts_list_item(ListItem::new("list").item("nested"));
 
-        assert_eq!(ListItem::new("item").value(), "item");
+        assert_eq!(*ListItem::new("item").value(), "item");
         assert_eq!(
             ListItem::new("item")
                 .items(["one", "two"])
@@ -618,6 +728,102 @@ mod tests {
                 .len(),
             2
         );
+    }
+
+    #[derive(Debug, Clone, PartialEq, Eq)]
+    struct Task {
+        id: usize,
+        label: &'static str,
+        selected: bool,
+    }
+
+    impl fmt::Display for Task {
+        fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+            formatter.write_str(self.label)
+        }
+    }
+
+    #[test]
+    fn typed_values_reach_item_presentation_after_visibility_and_offsets() {
+        let selected_item = TextStyle::new().foreground(Color::GREEN);
+        let selected_enumerator = TextStyle::new().foreground(Color::BLUE);
+        let list = List::<Task>::new()
+            .item(Task {
+                id: 0,
+                label: "skip",
+                selected: false,
+            })
+            .item(
+                ListItem::new(Task {
+                    id: 7,
+                    label: "parent",
+                    selected: true,
+                })
+                .items([
+                    ListItem::new(Task {
+                        id: 8,
+                        label: "hidden",
+                        selected: false,
+                    })
+                    .hidden(true),
+                    ListItem::new(Task {
+                        id: 9,
+                        label: "child",
+                        selected: false,
+                    }),
+                ]),
+            )
+            .item(Task {
+                id: 10,
+                label: "drop",
+                selected: false,
+            })
+            .offset(1, 1);
+        let item_style = selected_item.clone();
+        let enumerator_style = selected_enumerator.clone();
+        let items = ListItemPresentation::new(|task: &Task, position| {
+            format!(
+                "{}:{}:{}/{}@{}",
+                task.id,
+                task.label,
+                position.index(),
+                position.len(),
+                position.depth()
+            )
+        })
+        .per_item_style(move |task, _, role| {
+            task.selected.then(|| match role {
+                ListRole::Item => item_style.clone(),
+                ListRole::Enumerator => enumerator_style.clone(),
+            })
+        });
+        let component_styles = styles();
+        let presentation = component_styles.list();
+        let view = presentation.compose_with(&list, &items);
+
+        assert_eq!(list.item_nodes()[1].value().id, 7);
+        assert_eq!(plain(&view), "• 7:parent:0/1@0\n  • 9:child:0/1@1");
+        assert_eq!(style_at(&view, 0, 0), selected_enumerator);
+        assert_eq!(style_at(&view, 0, 2), selected_item);
+        assert_eq!(view, presentation.compose_with(&list, &items.clone()));
+    }
+
+    #[test]
+    fn default_presentation_formats_typed_display_values() {
+        let list = List::new().items([
+            Task {
+                id: 1,
+                label: "first",
+                selected: false,
+            },
+            Task {
+                id: 2,
+                label: "second",
+                selected: true,
+            },
+        ]);
+
+        assert_eq!(plain(&styles().list().compose(&list)), "• first\n• second");
     }
 
     #[test]
@@ -689,7 +895,7 @@ mod tests {
     fn supports_custom_markers_styles_visibility_and_offsets() {
         let item = TextStyle::new().foreground(Color::GREEN);
         let enumerator = TextStyle::new().foreground(Color::BLUE);
-        let list = List::new()
+        let list = List::<&str>::new()
             .items([
                 ListItem::new("skip"),
                 ListItem::new("parent")
@@ -714,12 +920,12 @@ mod tests {
 
     #[test]
     fn nested_offsets_apply_before_hidden_items() {
-        let list = List::new().item(
+        let list = List::<&str>::new().item(
             ListItem::new("parent")
                 .items(["skip", "hidden", "kept", "drop"])
                 .offset(1, 1),
         );
-        let hidden_list = List::new().item(ListItem::new("parent").items([
+        let hidden_list = List::<&str>::new().item(ListItem::new("parent").items([
             ListItem::new("visible"),
             ListItem::new("hidden").hidden(true),
         ]));
@@ -817,48 +1023,81 @@ mod tests {
         let items = visible_items(&list.items, list.offset);
         let presentation = styles().list().clone();
         let mut bound = Vec::new();
-        bind_items(&mut bound, &items, 0, &presentation);
-        let requirements = ListFrame {
-            items: bound,
-            item_style: TextStyle::new(),
-            enumerator_style: TextStyle::new(),
-        }
-        .width_requirements();
+        bind_items(
+            &mut bound,
+            &items,
+            0,
+            &presentation,
+            &display_item::<&str>,
+            &no_item_style::<&str>,
+        );
+        let requirements = ListFrame { items: bound }.width_requirements();
 
         assert_eq!(requirements.demand(), 9);
         assert_eq!(requirements.floor(), 4);
     }
 
     static ENUMERATOR_CALLS: AtomicUsize = AtomicUsize::new(0);
+    static TEXT_CALLS: AtomicUsize = AtomicUsize::new(0);
+    static ITEM_STYLE_CALLS: AtomicUsize = AtomicUsize::new(0);
+    static ENUMERATOR_STYLE_CALLS: AtomicUsize = AtomicUsize::new(0);
 
     fn counted_enumerator(_: ListPosition) -> String {
         ENUMERATOR_CALLS.fetch_add(1, Ordering::Relaxed);
         "• ".to_owned()
     }
 
+    fn counted_text(value: &&str, _: ListPosition) -> String {
+        TEXT_CALLS.fetch_add(1, Ordering::Relaxed);
+        (*value).to_owned()
+    }
+
+    fn counted_style(_: &&str, _: ListPosition, role: ListRole) -> Option<TextStyle> {
+        match role {
+            ListRole::Item => &ITEM_STYLE_CALLS,
+            ListRole::Enumerator => &ENUMERATOR_STYLE_CALLS,
+        }
+        .fetch_add(1, Ordering::Relaxed);
+        None
+    }
+
     #[test]
     fn evaluates_enumerators_only_while_composing() {
         ENUMERATOR_CALLS.store(0, Ordering::Relaxed);
-        let view = styles()
-            .list()
-            .clone()
-            .enumerator(counted_enumerator)
-            .compose(&List::new().items(["one", "two"]));
+        TEXT_CALLS.store(0, Ordering::Relaxed);
+        ITEM_STYLE_CALLS.store(0, Ordering::Relaxed);
+        ENUMERATOR_STYLE_CALLS.store(0, Ordering::Relaxed);
+        let presentation = styles().list().clone().enumerator(counted_enumerator);
+        let items = ListItemPresentation::new(counted_text).per_item_style(counted_style);
+        let view = presentation.compose_with(&List::new().items(["one", "two"]), &items);
         assert_eq!(ENUMERATOR_CALLS.load(Ordering::Relaxed), 2);
+        assert_eq!(TEXT_CALLS.load(Ordering::Relaxed), 2);
+        assert_eq!(ITEM_STYLE_CALLS.load(Ordering::Relaxed), 2);
+        assert_eq!(ENUMERATOR_STYLE_CALLS.load(Ordering::Relaxed), 2);
 
         let _ = resolve(&view, Available::columns(8));
         let _ = resolve(&view, Available::columns(4));
         assert_eq!(ENUMERATOR_CALLS.load(Ordering::Relaxed), 2);
+        assert_eq!(TEXT_CALLS.load(Ordering::Relaxed), 2);
+        assert_eq!(ITEM_STYLE_CALLS.load(Ordering::Relaxed), 2);
+        assert_eq!(ENUMERATOR_STYLE_CALLS.load(Ordering::Relaxed), 2);
     }
 
     #[test]
     fn extreme_nesting_arithmetic_saturates() {
-        let list = List::new().item(ListItem::new("parent").item("child"));
+        let list = List::<&str>::new().item(ListItem::new("parent").item("child"));
         let items = visible_items(&list.items, list.offset);
         let presentation = styles().list().clone().nesting_indent(usize::MAX);
         let mut bound = Vec::new();
 
-        bind_items(&mut bound, &items, 0, &presentation);
+        bind_items(
+            &mut bound,
+            &items,
+            0,
+            &presentation,
+            &display_item::<&str>,
+            &no_item_style::<&str>,
+        );
 
         assert_eq!(bound[1].track_x, usize::MAX);
         assert_eq!(bound[1].content_x, usize::MAX);

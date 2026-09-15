@@ -1,5 +1,7 @@
 //! Theme construction and light/dark selection.
 
+use std::fmt;
+
 use crate::{BlockStyle, List, Table, TextStyle, Tree, View};
 
 use super::{BlockThemeRole, ComponentTheme, SemanticTokens, TextThemeRole};
@@ -42,7 +44,10 @@ impl Theme {
     }
 
     /// Composes a list with this theme's canonical presentation.
-    pub fn list(&self, list: &List) -> View {
+    pub fn list<T>(&self, list: &List<T>) -> View
+    where
+        T: fmt::Display,
+    {
         self.components.list().compose(list)
     }
 
