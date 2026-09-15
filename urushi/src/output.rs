@@ -4,41 +4,69 @@ use std::io::{self, Write};
 
 use urushi_terminal::{ColorLevel, TerminalDetection};
 
-use crate::{Available, RenderSettings, View, render, resolve};
+use crate::{Available, RenderSettings, StyledText, View, render, render_text, resolve};
 
-/// Renders `view` for stdout and writes it without a trailing newline.
-pub fn print(view: &View) -> io::Result<()> {
+/// Resolves `view` for stdout and writes it without a trailing newline.
+pub fn print_view(view: &View) -> io::Result<()> {
     let stdout = io::stdout();
     let detection = urushi_terminal::detect(&stdout)?;
-    write_detected(stdout.lock(), view, detection, false, no_color())
+    write_view_detected(stdout.lock(), view, detection, false, no_color())
 }
 
-/// Renders `view` for stdout and writes it with a trailing newline.
-pub fn println(view: &View) -> io::Result<()> {
+/// Resolves `view` for stdout and writes it with a trailing newline.
+pub fn println_view(view: &View) -> io::Result<()> {
     let stdout = io::stdout();
     let detection = urushi_terminal::detect(&stdout)?;
-    write_detected(stdout.lock(), view, detection, true, no_color())
+    write_view_detected(stdout.lock(), view, detection, true, no_color())
 }
 
-/// Renders `view` for stderr and writes it without a trailing newline.
-pub fn eprint(view: &View) -> io::Result<()> {
+/// Resolves `view` for stderr and writes it without a trailing newline.
+pub fn eprint_view(view: &View) -> io::Result<()> {
     let stderr = io::stderr();
     let detection = urushi_terminal::detect(&stderr)?;
-    write_detected(stderr.lock(), view, detection, false, no_color())
+    write_view_detected(stderr.lock(), view, detection, false, no_color())
 }
 
-/// Renders `view` for stderr and writes it with a trailing newline.
-pub fn eprintln(view: &View) -> io::Result<()> {
+/// Resolves `view` for stderr and writes it with a trailing newline.
+pub fn eprintln_view(view: &View) -> io::Result<()> {
     let stderr = io::stderr();
     let detection = urushi_terminal::detect(&stderr)?;
-    write_detected(stderr.lock(), view, detection, true, no_color())
+    write_view_detected(stderr.lock(), view, detection, true, no_color())
+}
+
+/// Writes styled text to stdout without resolving layout or adding a newline.
+pub fn print(text: &StyledText) -> io::Result<()> {
+    let stdout = io::stdout();
+    let detection = urushi_terminal::detect(&stdout)?;
+    write_text_detected(stdout.lock(), text, detection, false, no_color())
+}
+
+/// Writes styled text to stdout without resolving layout, then adds a newline.
+pub fn println(text: &StyledText) -> io::Result<()> {
+    let stdout = io::stdout();
+    let detection = urushi_terminal::detect(&stdout)?;
+    write_text_detected(stdout.lock(), text, detection, true, no_color())
+}
+
+/// Writes styled text to stderr without resolving layout or adding a newline.
+pub fn eprint(text: &StyledText) -> io::Result<()> {
+    let stderr = io::stderr();
+    let detection = urushi_terminal::detect(&stderr)?;
+    write_text_detected(stderr.lock(), text, detection, false, no_color())
+}
+
+/// Writes styled text to stderr without resolving layout, then adds a newline.
+pub fn eprintln(text: &StyledText) -> io::Result<()> {
+    let stderr = io::stderr();
+    let detection = urushi_terminal::detect(&stderr)?;
+    write_text_detected(stderr.lock(), text, detection, true, no_color())
 }
 
 fn no_color() -> bool {
     std::env::var_os("NO_COLOR").is_some_and(|value| !value.is_empty())
 }
 
-fn write_detected(
+fn write_view_detected(
     writer: impl Write,
     view: &View,
     detection: TerminalDetection,
@@ -47,6 +75,21 @@ fn write_detected(
 ) -> io::Result<()> {
     let (available, settings) = output_configuration(detection, no_color);
     write_configured(writer, view, available, settings, newline)
+}
+
+fn write_text_detected(
+    mut writer: impl Write,
+    text: &StyledText,
+    detection: TerminalDetection,
+    newline: bool,
+    no_color: bool,
+) -> io::Result<()> {
+    let (_, settings) = output_configuration(detection, no_color);
+    writer.write_all(render_text(text, &settings).as_bytes())?;
+    if newline {
+        writer.write_all(b"\n")?;
+    }
+    Ok(())
 }
 
 fn write_configured(
@@ -135,7 +178,7 @@ mod tests {
         let mut output = Vec::new();
         let view = View::text("abcdef", TextStyle::new().foreground(Color::RED));
 
-        write_detected(
+        write_view_detected(
             &mut output,
             &view,
             TerminalDetection::NonTerminal,
@@ -145,5 +188,22 @@ mod tests {
         .unwrap();
 
         assert_eq!(String::from_utf8(output).unwrap(), "abcdef\n");
+    }
+
+    #[test]
+    fn redirected_direct_text_preserves_tabs_without_layout() {
+        let mut output = Vec::new();
+        let text = StyledText::new("name\tvalue", TextStyle::new().bold());
+
+        write_text_detected(
+            &mut output,
+            &text,
+            TerminalDetection::NonTerminal,
+            true,
+            false,
+        )
+        .unwrap();
+
+        assert_eq!(String::from_utf8(output).unwrap(), "name\tvalue\n");
     }
 }

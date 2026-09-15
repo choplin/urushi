@@ -3,8 +3,10 @@
 //! `urushi` separates logical [`View`] construction, layout resolution, ANSI
 //! serialization, and output. [`resolve`] turns a view into a [`ResolvedView`]
 //! under an [`Available`] area. [`render`] then serializes that rectangle using
-//! explicit [`RenderSettings`]. [`print()`], [`println()`], [`eprint()`], and
-//! [`eprintln()`] are the convenient path for the process standard streams.
+//! explicit [`RenderSettings`]. [`render_text`] bypasses layout for a
+//! [`StyledText`], preserving source tabs and line boundaries. [`print()`],
+//! [`println()`], [`eprint()`], and [`eprintln()`] are the convenient text path
+//! for the process standard streams; their `*_view` peers resolve layout first.
 //!
 //! # Example
 //!
@@ -41,13 +43,18 @@ pub use component::{
     asterisk_enumerator, bullet_enumerator, dash_enumerator, roman_enumerator,
 };
 pub use key::Key;
-pub use output::{eprint, eprintln, print, println};
-pub use render::{RenderSettings, render};
+pub use output::{
+    eprint, eprint_view, eprintln, eprintln_view, print, print_view, println, println_view,
+};
+pub use render::{RenderSettings, render, render_text};
 pub use style::{
     Align, BlockStyle, Border, Color, GridStyle, Hyperlink, InvalidFillWeight, Length, Modifier,
     Overflow, Sides, TextStyle, Underline, UnderlineStyle, UnderlineStyleSet, VerticalAlign,
 };
-pub use text::{Grapheme, PrintableLines, PrintableText, StyledText, StyledTextError, TextSpan};
+pub use text::{
+    Grapheme, InvalidTabMarker, PrintableLines, PrintableText, StyledText, StyledTextError,
+    TabPolicy, TextSpan,
+};
 pub use theme::{
     BlockThemeRole, ColorScheme, ComponentRole, ComponentTheme, ListRole, PanelRole,
     SemanticTokens, TableRole, TextThemeRole, Theme, ThemeSet, TreeRole,

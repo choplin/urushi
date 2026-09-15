@@ -78,6 +78,16 @@ View + Available --> resolve --> ResolvedView
 ResolvedView + RenderSettings --> render --> String --> std::io::Write
 ```
 
+Source-preserving styled text has a deliberately separate path:
+
+```text
+StyledText + RenderSettings --> render_text --> String --> std::io::Write
+```
+
+This path performs no layout. Tabs and line boundaries reach the output as
+authored; callers that need computable geometry compose a `View` and use the
+resolved path above.
+
 Composition happens in `View` before layout. Rendered strings do not re-enter
 the layout model. The reasoning behind the view/block boundary is recorded in
 [`design/view-block-model.md`](design/view-block-model.md).
@@ -288,8 +298,9 @@ thread, timer, or live terminal region of its own.
 `urushi-terminal::detect` is the observation part of the lower terminal layer.
 It observes one supplied handle and distinguishes a
 non-terminal from a terminal whose capability set is empty; a terminal size
-query failure is an error. `print` and `eprint` inspect their own target and use
-the detected width. Redirected output uses unbounded layout and dumb settings.
+query failure is an error. `print_view` and `eprint_view` inspect their own
+target and use the detected width. Redirected View output uses unbounded layout
+and dumb settings; `print` and `eprint` write `StyledText` without layout.
 
 Non-TTY output and `TERM=dumb` use append-only plain output. Machine-readable
 stdout remains separate from human-facing diagnostics on stderr.
@@ -346,7 +357,8 @@ changed deliberately and this document is updated in the same change:
 3. A reusable component owns semantic data; only a concrete presentation
    composes that data and any borrowed current-frame input into a primitive
    `View`, and neither performs output or owns state transitions.
-4. `render` consumes only a `ResolvedView` and explicit `RenderSettings`.
+4. `render` consumes only a `ResolvedView`, `render_text` consumes only a
+   `StyledText`, and both require explicit `RenderSettings`.
 5. Display width and wrapping use the shared `text` implementation; rendered
    strings are not a layout input.
 6. Workspace-independent terminal contracts and target-specific inspection are

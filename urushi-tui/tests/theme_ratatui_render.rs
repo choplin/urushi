@@ -8,8 +8,9 @@ use ratatui::{
 };
 use urushi::{
     Align, Available, BlockStyle, Border, Color, ColorLevel, Length, Modifier as UrushiModifier,
-    Overflow, PanelRole, PrintableText, RenderSettings, SemanticTokens, Size, StyledText, TextSpan,
-    TextStyle, Theme, UnderlineStyleSet, VerticalAlign, View, measure, render, resolve,
+    Overflow, PanelRole, PrintableText, RenderSettings, SemanticTokens, Size, StyledText,
+    TabPolicy, TextSpan, TextStyle, Theme, UnderlineStyleSet, VerticalAlign, View, measure, render,
+    resolve,
 };
 use urushi_tui::ratatui::{RatatuiStyle, RatatuiStyleExt as _, ViewWidget};
 
@@ -159,6 +160,17 @@ fn corpus() -> Vec<(&'static str, View, Rect)> {
     ])
     .expect("whole grapheme boundaries");
     vec![
+        (
+            "visible tabs resolve identically in both backends",
+            View::block(
+                BlockStyle::new().max_width(6),
+                View::styled_text(
+                    StyledText::new("a\t日本\tb", TextStyle::new().foreground(Color::GREEN))
+                        .with_tab_policy(TabPolicy::with_marker(3, "→").unwrap()),
+                ),
+            ),
+            Rect::new(0, 0, 6, 3),
+        ),
         (
             "styled text wraps as one flow",
             View::block(

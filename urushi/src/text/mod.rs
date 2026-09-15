@@ -6,10 +6,12 @@
 
 mod printable;
 mod styled;
+mod tab;
 pub(crate) mod width;
 mod wrap;
 
 pub use printable::{Grapheme, PrintableLines, PrintableText};
 pub(crate) use styled::StyledTextGrapheme;
 pub use styled::{StyledText, StyledTextError, TextSpan};
+pub use tab::{InvalidTabMarker, TabPolicy};
 pub(crate) use wrap::{wrap_styled_lines, wrap_text, wrapped_line_count};

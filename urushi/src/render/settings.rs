@@ -20,6 +20,21 @@ pub struct RenderSettings {
 }
 
 impl RenderSettings {
+    /// Selects every rendering feature without degrading logical styles.
+    ///
+    /// This is intended for serializers whose styles have already been
+    /// narrowed to the output's capabilities. Ordinary terminal output should
+    /// detect capabilities and convert them with [`From`].
+    pub const fn all() -> Self {
+        Self {
+            colors: ColorLevel::TrueColor,
+            modifiers: Modifier::all(),
+            underline_styles: UnderlineStyleSet::all(),
+            underline_colors: true,
+            hyperlinks: true,
+        }
+    }
+
     pub const fn colors(self) -> ColorLevel {
         self.colors
     }
@@ -182,5 +197,19 @@ mod tests {
             Some(Underline::new(UnderlineStyle::Curly))
         );
         assert_eq!(resolved.hyperlink_value(), None);
+    }
+
+    #[test]
+    fn all_preserves_every_style_feature() {
+        let style = TextStyle::new()
+            .foreground(Color::Rgb(1, 2, 3))
+            .background(Color::Rgb(4, 5, 6))
+            .bold()
+            .italic()
+            .underline_style(UnderlineStyle::Curly)
+            .underline_color(Color::BLUE)
+            .hyperlink("https://example.com");
+
+        assert_eq!(RenderSettings::all().resolve_text_style(&style), style);
     }
 }

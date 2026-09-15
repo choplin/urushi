@@ -46,19 +46,29 @@ Layout and rendering are pure, stateless functions:
 ```rust
 resolve(&view, available) -> Result<ResolvedView, LayoutError>
 render(&resolved, &settings) -> String
+render_text(&styled_text, &settings) -> String
 ```
 
 `Available` is only layout input. `RenderSettings` is only serialization input.
-Neither function detects a terminal or writes bytes, and rendering never
-recomputes geometry.
+None of these functions detects a terminal or writes bytes, and rendering never
+recomputes geometry. `render_text` deliberately bypasses geometry: it preserves
+tabs and line boundaries in the source, while `render` accepts only a rectangle
+whose tabs have already been replaced during resolution.
 
 ## Standard-stream convenience
 
 `print`, `println`, `eprint`, and `eprintln` inspect the exact standard stream
-they write. A terminal supplies a width-only `Available` and settings derived
-from its capabilities; `NO_COLOR` narrows only the color level. A non-terminal
-uses `Available::NONE` and dumb settings, producing an unbounded plain dump.
-The functions do not flush static output automatically.
+they write and serialize `StyledText` without resolving layout. Tabs and source
+line boundaries therefore retain their ordinary terminal-owned behavior.
+
+`print_view`, `println_view`, `eprint_view`, and `eprintln_view` perform the
+same exact-stream detection and feature selection for `View`, then resolve it.
+A terminal supplies a width-only `Available`; a non-terminal uses
+`Available::NONE`, producing an unbounded plain dump. Naming the layout-bearing
+operation keeps width-dependent resolution visible at the call site instead of
+hiding the semantic difference behind an argument type. `NO_COLOR` narrows only
+the color level in both paths. The functions do not flush static output
+automatically.
 
 An arbitrary writer does not require a terminal-named wrapper. The caller uses
 `urushi_terminal::detect` when the writer is inspectable, chooses `Available`

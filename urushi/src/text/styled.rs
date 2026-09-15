@@ -5,7 +5,8 @@ use std::ops::Range;
 
 use unicode_segmentation::UnicodeSegmentation;
 
-use super::{Grapheme, PrintableLines};
+use super::tab::DEFAULT_TAB_POLICY;
+use super::{Grapheme, TabPolicy};
 use crate::TextStyle;
 
 /// One caller-authored piece of text carrying one complete style.
@@ -87,23 +88,31 @@ struct SpanRange {
     style: TextStyle,
 }
 
-/// One plain-text flow carrying any number of styles.
+/// One text flow carrying any number of styles.
 ///
 /// The source is stored once. Its private ranges are canonical: they are
 /// non-empty, cover the source in order, end only at whole-string grapheme
-/// boundaries, and never place equal styles beside each other.
+/// boundaries, and never place equal styles beside each other. Newline and
+/// horizontal tab are admitted source controls; layout replaces tabs under
+/// this value's policy, while direct text rendering preserves them.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StyledText {
     text: String,
     spans: Vec<SpanRange>,
+    tab_policy: Option<TabPolicy>,
 }
 
 impl StyledText {
     /// Creates one uniformly styled text flow.
+    ///
+    /// # Panics
+    ///
+    /// Panics when `text` contains a control character other than newline or
+    /// horizontal tab. Rendered ANSI belongs to the output domain, not this
+    /// source-text domain.
     pub fn new(text: impl Into<String>, style: TextStyle) -> Self {
         let text = text.into();
-        // Keep the existing plain-text declaration at the construction edge.
-        PrintableLines::new(&text);
+        validate_source(&text);
         let spans = (!text.is_empty())
             .then_some(SpanRange {
                 range: 0..text.len(),
@@ -111,10 +120,19 @@ impl StyledText {
             })
             .into_iter()
             .collect();
-        Self { text, spans }
+        Self {
+            text,
+            spans,
+            tab_policy: None,
+        }
     }
 
     /// Joins input segments into one validated, canonical text flow.
+    ///
+    /// # Panics
+    ///
+    /// Panics when any segment contains a control character other than newline
+    /// or horizontal tab.
     pub fn try_from_spans<I, S>(spans: I) -> Result<Self, StyledTextError>
     where
         I: IntoIterator<Item = S>,
@@ -129,7 +147,7 @@ impl StyledText {
                 boundaries.push((index, text.len()));
             }
         }
-        PrintableLines::new(&text);
+        validate_source(&text);
 
         let grapheme_boundaries: Vec<usize> = text
             .grapheme_indices(true)
@@ -165,6 +183,7 @@ impl StyledText {
         Ok(Self {
             text,
             spans: ranges,
+            tab_policy: None,
         })
     }
 
@@ -180,8 +199,29 @@ impl StyledText {
             .map(|span| (&self.text[span.range.clone()], &span.style))
     }
 
+    /// Sets the policy used when this text participates in layout.
+    ///
+    /// Direct text rendering preserves the source tab characters and ignores
+    /// this layout-only property.
+    pub fn with_tab_policy(mut self, policy: TabPolicy) -> Self {
+        self.tab_policy = Some(policy);
+        self
+    }
+
+    /// Restores the default layout policy of four spaces per tab.
+    pub fn without_tab_policy(mut self) -> Self {
+        self.tab_policy = None;
+        self
+    }
+
+    /// Returns the explicitly configured layout policy, if any.
+    pub const fn tab_policy(&self) -> Option<&TabPolicy> {
+        self.tab_policy.as_ref()
+    }
+
     /// Splits the whole text into rows of styled graphemes.
     pub(crate) fn lines(&self) -> Vec<Vec<StyledTextGrapheme<'_>>> {
+        let policy = self.tab_policy.as_ref().unwrap_or(&DEFAULT_TAB_POLICY);
         let mut lines = Vec::new();
         let mut line = Vec::new();
         let mut span = 0;
@@ -192,6 +232,10 @@ impl StyledText {
             }
             while self.spans[span].range.end <= offset {
                 span += 1;
+            }
+            if symbol == "\t" {
+                append_tab(&mut line, policy, &self.spans[span].style);
+                continue;
             }
             line.push(StyledTextGrapheme {
                 grapheme: Grapheme::new(symbol),
@@ -209,6 +253,36 @@ impl StyledText {
 
     pub(crate) fn uniform_style(&self) -> Option<&TextStyle> {
         (self.spans.len() == 1).then(|| &self.spans[0].style)
+    }
+}
+
+fn validate_source(text: &str) {
+    assert!(
+        !text
+            .chars()
+            .any(|character| character.is_control() && character != '\n' && character != '\t'),
+        "styled text must not carry terminal control characters other than newline and tab: {text:?}"
+    );
+}
+
+fn append_tab<'a>(
+    line: &mut Vec<StyledTextGrapheme<'a>>,
+    policy: &'a TabPolicy,
+    style: &'a TextStyle,
+) {
+    let mut occupied = 0;
+    if let Some(marker) = policy.marker() {
+        for symbol in marker.graphemes(true) {
+            let grapheme = Grapheme::new(symbol);
+            occupied += grapheme.width();
+            line.push(StyledTextGrapheme { grapheme, style });
+        }
+    }
+    for _ in occupied..usize::from(policy.width()) {
+        line.push(StyledTextGrapheme {
+            grapheme: Grapheme::space(),
+            style,
+        });
     }
 }
 

@@ -15,7 +15,7 @@ prompt libraries, but no shared styling substrate that works across plain CLI
 output, interactive prompts, and full TUIs. `urushi` aims to fill that gap:
 
 - **Standalone first.** A `View` resolves independently from output and renders
-  to a `String`; `urushi::print` and `urushi::println` handle ordinary terminal
+  to a `String`; `urushi::print_view` and `urushi::println_view` handle ordinary terminal
   output without raw mode or an event loop.
 - **Ride the ratatui ecosystem via an adapter.** The `urushi-tui` crate draws
   urushi styles and view trees into a ratatui `Buffer`, mapping the
@@ -117,7 +117,7 @@ cargo run --example cjk_showcase
 ### Theme-aware plain CLI output
 
 Define one light theme and one dark theme, choose `ColorScheme` explicitly,
-compose a `View`, then pass it to `urushi::println`. The convenience function
+compose a `View`, then pass it to `urushi::println_view`. The convenience function
 inspects stdout, resolves with the terminal width, selects supported rendering
 features, and writes the result:
 
@@ -125,7 +125,9 @@ features, and writes the result:
 cargo run -p urushi --example themed_output
 ```
 
-`print` and `println` target stdout; `eprint` and `eprintln` target stderr.
+`print_view` and `println_view` target stdout; `eprint_view` and `eprintln_view`
+target stderr. The corresponding names without `_view` write `StyledText`
+without resolving layout.
 Redirected output is an unbounded plain dump. A non-empty `NO_COLOR` removes
 colors while retaining other supported features. Code writing an arbitrary
 `std::io::Write` target uses `urushi_terminal::detect`, `resolve`, and `render`

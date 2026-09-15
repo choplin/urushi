@@ -20,7 +20,7 @@
 //!    in [`crate::RenderSettings`] at the output boundary.
 //!
 //! ```
-//! use urushi::{Color, ComponentRole, SemanticTokens, TextStyle, Theme, TextThemeRole};
+//! use urushi::{Color, ComponentRole, SemanticTokens, StyledText, TextStyle, Theme, TextThemeRole};
 //!
 //! #[derive(Clone, Copy)]
 //! struct ReportTitle;
@@ -47,7 +47,9 @@
 //! #     border: Color::BRIGHT_BLACK,
 //! # };
 //! let theme = Theme::from_tokens(tokens);
-//! println!("{}", theme.text_style(ReportTitle).paint("report"));
+//! let report = StyledText::new("report", theme.text_style(ReportTitle));
+//! urushi::println(&report)?;
+//! # Ok::<(), std::io::Error>(())
 //! ```
 //!
 //! # Resolving in a draw loop

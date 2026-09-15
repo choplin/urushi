@@ -443,6 +443,10 @@ pub(crate) mod tests {
         settings(ColorLevel::TrueColor, true)
     }
 
+    fn rendered(style: &TextStyle) -> String {
+        urushi::render_text(&StyledText::new("x", style.clone()), &ansi_settings())
+    }
+
     fn settings(colors: ColorLevel, enabled: bool) -> RenderSettings {
         if !enabled {
             return RenderSettings::default();
@@ -525,7 +529,7 @@ pub(crate) mod tests {
                     for (right_name, right) in roles {
                         assert_eq!(
                             left == right,
-                            left.paint("x") == right.paint("x"),
+                            rendered(left) == rendered(right),
                             "{left_name} vs {right_name} under {color:?}/{enabled:?}"
                         );
                     }

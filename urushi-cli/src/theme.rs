@@ -112,7 +112,12 @@ impl CliTheme {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use urushi::{Color, SemanticTokens};
+    use urushi::{Color, RenderSettings, SemanticTokens, StyledText, render_text};
+
+    fn render_style(style: &TextStyle, text: &str) -> String {
+        let settings = RenderSettings::all();
+        render_text(&StyledText::new(text, style.clone()), &settings)
+    }
 
     fn theme() -> Theme {
         Theme::from_tokens(SemanticTokens {
@@ -133,10 +138,22 @@ mod tests {
     fn derives_cli_roles_from_the_core_theme() {
         let cli = CliTheme::from_theme(&theme());
 
-        assert_eq!(cli.style(CliRole::Body).paint("x"), "\x1b[31mx\x1b[0m");
-        assert_eq!(cli.style(CliRole::Muted).paint("x"), "\x1b[2;32mx\x1b[0m");
-        assert_eq!(cli.style(CliRole::Accent).paint("x"), "\x1b[1;35mx\x1b[0m");
-        assert_eq!(cli.style(CliRole::Warning).paint("x"), "\x1b[90mx\x1b[0m");
+        assert_eq!(
+            render_style(cli.style(CliRole::Body), "x"),
+            "\x1b[31mx\x1b[0m"
+        );
+        assert_eq!(
+            render_style(cli.style(CliRole::Muted), "x"),
+            "\x1b[2;32mx\x1b[0m"
+        );
+        assert_eq!(
+            render_style(cli.style(CliRole::Accent), "x"),
+            "\x1b[1;35mx\x1b[0m"
+        );
+        assert_eq!(
+            render_style(cli.style(CliRole::Warning), "x"),
+            "\x1b[90mx\x1b[0m"
+        );
     }
 
     #[test]

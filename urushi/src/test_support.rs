@@ -1,6 +1,14 @@
 //! Shared helpers for unit tests that inspect resolved views.
 
-use crate::{Available, StyledGrapheme, View, resolve};
+use crate::{Available, StyledGrapheme, StyledText, TextStyle, View, render_text, resolve};
+
+/// Renders one style through the public non-layout text boundary.
+pub(crate) fn render_style(style: &TextStyle, text: &str) -> String {
+    render_text(
+        &StyledText::new(text, style.clone()),
+        &crate::RenderSettings::all(),
+    )
+}
 
 /// Resolves `view` and returns its rows, exactly as laid out.
 pub(crate) fn plain_rows(view: &View) -> Vec<String> {
@@ -38,13 +46,5 @@ pub(crate) fn style_at(view: &View, row: usize, column: usize) -> crate::TextSty
 pub(crate) fn render_block(style: &crate::BlockStyle, content: &str) -> String {
     let view = View::block(style.clone(), View::text(content, style.text().clone()));
     let resolved = resolve(&view, Available::NONE).unwrap();
-    crate::render(
-        &resolved,
-        &crate::RenderSettings::default()
-            .with_colors(crate::ColorLevel::TrueColor)
-            .with_modifiers(crate::Modifier::all())
-            .with_underline_styles(crate::UnderlineStyleSet::all())
-            .with_underline_colors(true)
-            .with_hyperlinks(true),
-    )
+    crate::render(&resolved, &crate::RenderSettings::all())
 }

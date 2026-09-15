@@ -86,12 +86,14 @@ edge. The precise sizing, alignment, padding, and clipping rules are defined
 in [`design/block-title.md`](design/block-title.md).
 
 `TextSpan` is caller input: a string fragment and one complete `TextStyle`.
-`StyledText` joins those fragments into one source string and keeps private,
-canonical style ranges on grapheme boundaries. The style ranges do not create
-line, word, wrap, or clip boundaries. A `String` or string literal converts to
-a default-style `TextSpan`, so only styled fragments need an explicit
-constructor. The exact construction and normalization rules are defined in
-[`design/styled-text.md`](design/styled-text.md).
+`StyledText` joins those fragments into one source string, keeps private,
+canonical style ranges on grapheme boundaries, and owns the policy that turns
+source tabs into fixed-width printable cells before layout. The style ranges do
+not create line, word, wrap, or clip boundaries. A `String` or string literal
+converts to a default-style `TextSpan`, so only styled fragments need an
+explicit constructor. Direct text rendering preserves source tabs instead of
+applying the layout policy. The exact construction, tab, and normalization
+rules are defined in [`design/styled-text.md`](design/styled-text.md).
 
 Those nodes state layout and drawing intent only. There is no `View::List`,
 `View::Table`, `View::Tree`, or `View::Graph`: a concrete presentation either
@@ -317,9 +319,10 @@ are recorded in [`design/layout-resolution.md`](design/layout-resolution.md).
 ## Plain text and rendered output
 
 The layout pass accepts model values, not rendered strings. A `Text` node holds
-one `StyledText`; its width is the display width of the joined source's
-graphemes, and segment boundaries do not affect it. `PrintableLines` and
-`PrintableText` carry the plain-text contract used by this path.
+one `StyledText`; tabs are replaced under its fixed-width policy before its
+graphemes are measured, and segment boundaries do not affect the result.
+`PrintableLines` and `PrintableText` carry the printable-text contract after
+that replacement.
 
 Passing escape sequences to a `Text` node is a contract violation. Content that
 participates in layout is composed as a `View` before `resolve`; `render`
@@ -329,6 +332,9 @@ returns a final `String`, and that string does not re-enter the view tree.
 
 - `render` serializes an already-resolved view under explicit `RenderSettings`,
   coalescing adjacent graphemes of equal effective style into one SGR scope.
+- `render_text` serializes a `StyledText` directly under explicit
+  `RenderSettings`; it performs no layout and preserves source tabs and line
+  boundaries.
 - `urushi-tui`'s `ViewWidget` derives `Available` from the target `Rect`,
   resolves the view, converts each grapheme's logical `TextStyle` through
   `RatatuiStyle`, and writes cells. `RatatuiWidget` draws a single `BlockStyle`

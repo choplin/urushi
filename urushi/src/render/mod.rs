@@ -4,5 +4,5 @@ mod ansi;
 mod palette;
 mod settings;
 
-pub use ansi::render;
+pub use ansi::{render, render_text};
 pub use settings::RenderSettings;

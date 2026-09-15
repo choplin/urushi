@@ -122,9 +122,9 @@ impl From<StyledText> for BlockTitle {
 /// ```
 #[derive(Debug, Clone, PartialEq)]
 pub enum View {
-    /// One plain-text flow whose grapheme-aligned segments carry complete
-    /// styles. Never holds escape sequences or cursor movement: the layout
-    /// pass measures its graphemes without scanning for them.
+    /// One text flow whose grapheme-aligned segments carry complete styles.
+    /// Source tabs are replaced under its layout policy before measurement;
+    /// escape sequences and cursor movement remain invalid.
     Text(StyledText),
     /// One [`BlockStyle`] and optional [`BlockTitle`] around exactly one child.
     Block(BlockStyle, Option<BlockTitle>, Box<View>),
@@ -159,10 +159,11 @@ impl Default for View {
 impl View {
     /// Creates a text leaf.
     ///
-    /// The text is plain. Escape sequences and cursor movement in it break that contract:
-    /// debug builds panic, and release builds measure them as ordinary
-    /// characters and may split them when wrapping or truncating. Raw ANSI is
-    /// not a valid `Text` payload.
+    /// The text may contain newline and horizontal tab. Tabs use the default
+    /// four-space layout policy; construct a [`StyledText`] to select another
+    /// policy. Escape sequences and cursor movement break the contract and
+    /// panic during construction in every build profile. Raw ANSI is not a
+    /// valid `Text` payload.
     pub fn text(text: impl Into<String>, style: TextStyle) -> Self {
         Self::Text(StyledText::new(text, style))
     }

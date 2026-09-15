@@ -3,8 +3,6 @@
 
 use crate::{Color, Hyperlink, Modifier, Underline, UnderlineStyle};
 
-pub(crate) const RESET: &str = "\x1b[0m";
-
 /// A reusable set of text styling rules.
 ///
 /// A `TextStyle` carries no geometry. A position that renders inline text cannot
@@ -21,7 +19,8 @@ pub(crate) const RESET: &str = "\x1b[0m";
 /// let base = TextStyle::new().foreground(Color::CYAN);
 /// let emphasized = base.clone().bold();
 ///
-/// println!("{}", emphasized.paint("hello"));
+/// let text = urushi::StyledText::new("hello", emphasized);
+/// let _ = text;
 /// ```
 ///
 /// Geometry is not merely discouraged here, it is unrepresentable:
@@ -246,47 +245,6 @@ impl TextStyle {
         self
     }
 
-    /// Wraps plain `text` in this style's SGR scope.
-    ///
-    /// A style that emits no sequence returns `text` unchanged. This produces
-    /// no rectangle: padding, borders, and dimensions belong to
-    /// [`BlockStyle`](crate::BlockStyle).
-    ///
-    /// `text` is plain. Painting already-rendered output nests SGR scopes, and
-    /// the inner scope's reset ends this one early.
-    pub fn paint(&self, text: &str) -> String {
-        if text.is_empty() {
-            return String::new();
-        }
-        let sgr = self.sgr_prefix();
-        let Some(hyperlink) = &self.hyperlink else {
-            if sgr.is_empty() {
-                return text.to_owned();
-            }
-            return format!("{sgr}{text}{RESET}");
-        };
-        let open = hyperlink.open_sequence();
-        if !text.contains('\n') {
-            return paint_hyperlink_line(text, &open, &sgr);
-        }
-
-        let mut output = String::with_capacity(text.len() + open.len());
-        for segment in text.split_inclusive('\n') {
-            let line = segment.strip_suffix('\n').unwrap_or(segment);
-            let (line, carriage_return) = line
-                .strip_suffix('\r')
-                .map_or((line, false), |line| (line, true));
-            output.push_str(&paint_hyperlink_line(line, &open, &sgr));
-            if carriage_return {
-                output.push('\r');
-            }
-            if segment.ends_with('\n') {
-                output.push('\n');
-            }
-        }
-        output
-    }
-
     /// Replaces every color property while preserving the rest of the style.
     pub(crate) fn map_colors(mut self, map: impl Fn(Color) -> Color) -> Self {
         self.fg = self.fg.map(&map);
@@ -355,19 +313,10 @@ impl TextStyle {
     }
 }
 
-fn paint_hyperlink_line(text: &str, open: &str, sgr: &str) -> String {
-    if text.is_empty() {
-        return String::new();
-    }
-    if sgr.is_empty() {
-        return format!("{open}{text}\x1b]8;;\x1b\\");
-    }
-    format!("{open}{sgr}{text}{RESET}\x1b]8;;\x1b\\")
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_support::render_style;
 
     #[test]
     fn named_operations_preserve_effective_value_semantics() {
@@ -392,16 +341,18 @@ mod tests {
             style.hyperlink_value(),
             Some(&Hyperlink::new("https://second.example").with_parameter("id", "docs"))
         );
-        assert_eq!(style.without_hyperlink().paint("link"), "link");
+        assert_eq!(render_style(&style.without_hyperlink(), "link"), "link");
     }
 
     #[test]
     fn hyperlink_scope_contains_sgr_and_closes_after_its_reset() {
         assert_eq!(
-            TextStyle::new()
-                .hyperlink(Hyperlink::new("https://example.com").with_parameter("id", "docs"))
-                .bold()
-                .paint("link"),
+            render_style(
+                &TextStyle::new()
+                    .hyperlink(Hyperlink::new("https://example.com").with_parameter("id", "docs"))
+                    .bold(),
+                "link",
+            ),
             "\x1b]8;id=docs;https://example.com\x1b\\\x1b[1mlink\x1b[0m\x1b]8;;\x1b\\"
         );
     }
@@ -409,20 +360,20 @@ mod tests {
     #[test]
     fn hyperlink_on_empty_text_emits_nothing() {
         assert_eq!(
-            TextStyle::new().hyperlink("https://example.com").paint(""),
+            render_style(&TextStyle::new().hyperlink("https://example.com"), ""),
             ""
         );
     }
 
     #[test]
-    fn multiline_hyperlink_closes_before_each_line_boundary() {
+    fn multiline_hyperlink_closes_before_each_newline() {
         let style = TextStyle::new().hyperlink("https://example.com");
         let open = "\x1b]8;;https://example.com\x1b\\";
         let close = "\x1b]8;;\x1b\\";
 
         assert_eq!(
-            style.paint("first\n\nsecond\r\nthird\n"),
-            format!("{open}first{close}\n\n{open}second{close}\r\n{open}third{close}\n")
+            render_style(&style, "first\n\nsecond\nthird\n"),
+            format!("{open}first{close}\n\n{open}second{close}\n{open}third{close}\n")
         );
     }
 
@@ -433,11 +384,9 @@ mod tests {
             .dim()
             .remove_modifier(Modifier::BOLD);
 
-        assert_eq!(style.paint("text"), "\x1b[2mtext\x1b[0m");
+        assert_eq!(render_style(&style, "text"), "\x1b[2mtext\x1b[0m");
         assert_eq!(
-            TextStyle::new()
-                .remove_modifier(Modifier::all())
-                .paint("text"),
+            render_style(&TextStyle::new().remove_modifier(Modifier::all()), "text",),
             "text"
         );
     }
@@ -463,7 +412,7 @@ mod tests {
             UnderlineStyle::Dotted,
             UnderlineStyle::Dashed,
         ]
-        .map(|style| TextStyle::new().underline_style(style).paint("t"));
+        .map(|style| render_style(&TextStyle::new().underline_style(style), "t"));
 
         assert_eq!(
             painted,
@@ -480,33 +429,35 @@ mod tests {
     #[test]
     fn an_underline_color_paints_sgr_fifty_eight_in_its_indexed_or_rgb_form() {
         assert_eq!(
-            TextStyle::new().underline_color(Color::RED).paint("t"),
+            render_style(&TextStyle::new().underline_color(Color::RED), "t"),
             "\x1b[4;58;5;1mt\x1b[0m"
         );
         assert_eq!(
-            TextStyle::new()
-                .underline_color(Color::Ansi256(212))
-                .paint("t"),
+            render_style(&TextStyle::new().underline_color(Color::Ansi256(212)), "t",),
             "\x1b[4;58;5;212mt\x1b[0m"
         );
         assert_eq!(
-            TextStyle::new()
-                .underline_style(UnderlineStyle::Curly)
-                .underline_color(Color::Rgb(1, 2, 3))
-                .paint("t"),
+            render_style(
+                &TextStyle::new()
+                    .underline_style(UnderlineStyle::Curly)
+                    .underline_color(Color::Rgb(1, 2, 3)),
+                "t",
+            ),
             "\x1b[4:3;58;2;1;2;3mt\x1b[0m"
         );
     }
 
     #[test]
     fn an_absent_underline_color_paints_no_underline_color_parameter() {
-        // A style holds effective values and `paint` closes with a reset, so
+        // A style holds effective values and text rendering closes with a reset, so
         // the terminal default is expressed by emitting nothing — there is no
         // SGR 59 to restore it, and no color to spell it with.
-        let painted = TextStyle::new()
-            .foreground(Color::RED)
-            .underline_style(UnderlineStyle::Double)
-            .paint("t");
+        let painted = render_style(
+            &TextStyle::new()
+                .foreground(Color::RED)
+                .underline_style(UnderlineStyle::Double),
+            "t",
+        );
 
         assert_eq!(painted, "\x1b[4:2;31mt\x1b[0m");
         assert!(!painted.contains("58"));
@@ -515,12 +466,15 @@ mod tests {
 
     #[test]
     fn hidden_paints_sgr_eight() {
-        assert_eq!(TextStyle::new().hide().paint("t"), "\x1b[8mt\x1b[0m");
         assert_eq!(
-            TextStyle::new()
-                .hide()
-                .add_modifier(Modifier::REVERSED)
-                .paint("t"),
+            render_style(&TextStyle::new().hide(), "t"),
+            "\x1b[8mt\x1b[0m"
+        );
+        assert_eq!(
+            render_style(
+                &TextStyle::new().hide().add_modifier(Modifier::REVERSED),
+                "t",
+            ),
             "\x1b[7;8mt\x1b[0m"
         );
     }
@@ -539,10 +493,12 @@ mod tests {
             })
         );
         assert_eq!(
-            TextStyle::new()
-                .underline_color(Color::RED)
-                .without_underline()
-                .paint("t"),
+            render_style(
+                &TextStyle::new()
+                    .underline_color(Color::RED)
+                    .without_underline(),
+                "t",
+            ),
             "t"
         );
     }
@@ -591,7 +547,7 @@ mod tests {
                 .foreground(Color::RED)
                 .underline_style(UnderlineStyle::Curly)
         );
-        assert_eq!(folded.paint("t"), "\x1b[4:3;31mt\x1b[0m");
+        assert_eq!(render_style(&folded, "t"), "\x1b[4:3;31mt\x1b[0m");
     }
 
     #[test]

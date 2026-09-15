@@ -13,8 +13,9 @@ default-style span, keeping the ordinary unstyled case concise. A span by itself
 does not claim that either end is a grapheme boundary.
 
 `StyledText` is the invariant carrier and the sole payload of `View::Text`. It
-stores the concatenated source once and private ranges that assign styles to
-it. Those ranges are canonical:
+stores the concatenated source once, private ranges that assign styles to it,
+and an optional tab policy used only when the value participates in layout.
+Those ranges are canonical:
 
 - every range is non-empty and ranges cover the source in order;
 - every range endpoint is a grapheme boundary of the complete source;
@@ -42,6 +43,40 @@ fragment in isolation.
 The constructor does not normalize Unicode code points. Canonically equivalent
 source strings remain distinct source strings. Grapheme segmentation establishes
 cell-safe boundaries; it does not rewrite caller data.
+
+Horizontal tab and newline are the two source controls admitted by
+`StyledText`. Other controls remain invalid: unlike a tab whose two supported
+paths are explicit, an escape sequence or cursor movement would make both
+style scoping and layout indeterminate. Construction checks this contract in
+all build profiles, so direct rendering cannot become a raw ANSI escape hatch.
+
+## Tabs split at the layout boundary
+
+One tab has a fixed-width layout replacement. `TabPolicy` holds that width and
+an optional printable marker string. With no marker the complete replacement
+is spaces. With a marker, the marker inherits the tab's `TextStyle` and its
+right side is padded with spaces until the configured width is reached. A
+zero-width policy without a marker removes the tab.
+
+The marker may contain several graphemes, including wide ones, but no control
+characters. Every marker grapheme must occupy at least one cell, and the
+marker's total display width cannot exceed the replacement width. Empty markers
+canonicalize to no marker. These checks happen when the policy is constructed,
+so layout never has to repair an invalid value. Removing an explicit policy
+restores the default replacement of four spaces.
+
+Replacement happens before intrinsic width, wrapping, clipping, and alignment.
+It is a fixed substitution per tab, independent of the current column; Urushi
+does not inspect or modify terminal tab stops. Every replacement is ordinary
+styled graphemes, so a `ResolvedView` never contains a tab and both renderers
+consume the same cell geometry.
+
+Direct text rendering has a different contract. `render_text` serializes the
+source spans with explicit `RenderSettings`, without resolving layout, and
+therefore writes tabs and newlines as authored. The `print`, `println`, `eprint`,
+and `eprintln` helpers choose those settings from the exact standard stream.
+Layout-bearing output is named separately as `print_view`, `println_view`,
+`eprint_view`, and `eprintln_view`.
 
 ## Layout sees one flow
 
@@ -78,3 +113,11 @@ repeat segmentation, width measurement, wrapping, or clipping.
   scalar or grapheme and allow later mutation to invalidate an already checked
   value. Range-oriented editing can be added through checked operations if a
   concrete caller needs it; it is not part of the construction API.
+- **Literal tabs in `ResolvedView`.** A terminal tab advances from the current
+  cursor position to a terminal-owned stop, so it has no backend-independent
+  cell width. Preserving it is instead the direct text renderer's explicit
+  non-layout contract.
+- **Tab policy on `TextStyle` or `BlockStyle`.** A tab belongs to the source
+  text flow. Putting its replacement on a style would make output behavior a
+  property of decoration; putting it on a surrounding block would introduce
+  inheritance and leave bare text without an owner.

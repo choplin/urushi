@@ -230,6 +230,12 @@ Renderers consume the values present in one `TextStyle`.
   modifiers, underline shapes, underline color, and hyperlinks, then returns a
   canonical effective style.
 
+A style value does not serialize an arbitrary string itself. `render_text`
+serializes the styled spans of a `StyledText` without layout, while `render`
+serializes the styled graphemes of a `ResolvedView`. This keeps output feature
+selection at the rendering boundary instead of making it a natural-looking
+escape hatch on `TextStyle`.
+
 How each backend spells and degrades the underline is recorded in
 [`design/underline.md`](design/underline.md).
 

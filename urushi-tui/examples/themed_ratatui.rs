@@ -8,7 +8,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     let theme = Theme::from_tokens(tokens());
     let panel = theme.block_style(PanelRole::PanelFocused);
     std::println!("plain CLI:");
-    urushi::println(&View::block(
+    urushi::println_view(&View::block(
         panel.clone(),
         View::text("保存しました", panel.text().clone()),
     ))?;

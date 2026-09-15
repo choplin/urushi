@@ -1,12 +1,16 @@
 //! Public styled-text construction and layout contracts.
 
 use urushi::{
-    Available, BlockStyle, Color, Overflow, ResolvedView, StyledGrapheme, StyledText, TextSpan,
-    TextStyle, View, resolve,
+    Available, BlockStyle, Color, Overflow, RenderSettings, ResolvedView, StyledGrapheme,
+    StyledText, TabPolicy, TextSpan, TextStyle, View, render, render_text, resolve,
 };
 
 fn resolve_ok(view: &View, available: Available) -> ResolvedView {
     resolve(view, available).unwrap()
+}
+
+fn ansi_settings() -> RenderSettings {
+    RenderSettings::all()
 }
 
 fn row_text(row: &[StyledGrapheme]) -> String {
@@ -38,6 +42,16 @@ fn strings_become_default_styled_segments() {
         strings.spans().collect::<Vec<_>>(),
         [("owned text", &TextStyle::new())]
     );
+}
+
+#[test]
+fn raw_ansi_cannot_enter_direct_text_rendering() {
+    let attempted = std::panic::catch_unwind(|| {
+        let text = StyledText::new("\x1b[31mred\x1b[0m", TextStyle::new());
+        render_text(&text, &RenderSettings::all())
+    });
+
+    assert!(attempted.is_err());
 }
 
 #[test]
@@ -117,4 +131,97 @@ fn multiline_cjk_and_emoji_keep_segment_styles() {
     assert_eq!(resolved.rows()[0][0].style(), &first);
     assert_eq!(resolved.rows()[1][0].width(), 2);
     assert_eq!(resolved.rows()[1][0].style(), &second);
+}
+
+#[test]
+fn tabs_expand_before_measurement_wrapping_and_rendering() {
+    let style = TextStyle::new().foreground(Color::GREEN);
+    let text = StyledText::new("a\t日\tb", style.clone()).with_tab_policy(TabPolicy::spaces(2));
+    let view = View::block(BlockStyle::new().max_width(5), View::styled_text(text));
+    let resolved = resolve_ok(&view, Available::NONE);
+
+    assert_eq!(resolved.size(), urushi::Size::new(5, 2));
+    assert_eq!(
+        resolved
+            .rows()
+            .iter()
+            .map(|row| row_text(row))
+            .collect::<Vec<_>>(),
+        ["a  日", "b    "]
+    );
+    assert!(
+        resolved
+            .rows()
+            .iter()
+            .flatten()
+            .all(|cell| cell.symbol() != "\t")
+    );
+    assert!(
+        resolved
+            .rows()
+            .iter()
+            .flatten()
+            .filter(|cell| cell.symbol() != " ")
+            .all(|cell| cell.style() == &style)
+    );
+    assert!(!render(&resolved, &ansi_settings()).contains('\t'));
+
+    let fixed = View::block(
+        BlockStyle::new().width(8).align(urushi::Align::Right),
+        View::styled_text(
+            StyledText::new("a\tb", TextStyle::new()).with_tab_policy(TabPolicy::spaces(2)),
+        ),
+    );
+    assert_eq!(
+        row_text(&resolve_ok(&fixed, Available::NONE).rows()[0]),
+        "    a  b"
+    );
+}
+
+#[test]
+fn visible_tab_marker_inherits_style_and_pads_to_the_fixed_width() {
+    let tab_style = TextStyle::new().bold();
+    let text = StyledText::try_from_spans([
+        TextSpan::new("左", TextStyle::new()),
+        TextSpan::new("\t", tab_style.clone()),
+        TextSpan::new("right", TextStyle::new()),
+    ])
+    .unwrap()
+    .with_tab_policy(TabPolicy::with_marker(4, "→").unwrap());
+    let resolved = resolve_ok(&View::styled_text(text), Available::NONE);
+
+    assert_eq!(row_text(&resolved.rows()[0]), "左→   right");
+    assert_eq!(resolved.rows()[0][1].style(), &tab_style);
+    assert_eq!(resolved.rows()[0][2].style(), &tab_style);
+    assert_eq!(resolved.rows()[0][3].style(), &tab_style);
+    assert_eq!(resolved.rows()[0][4].style(), &tab_style);
+}
+
+#[test]
+fn zero_width_removes_tabs_and_removing_the_property_restores_default_spaces() {
+    let removed = StyledText::new("a\tb", TextStyle::new()).with_tab_policy(TabPolicy::spaces(0));
+    assert_eq!(
+        row_text(&resolve_ok(&View::styled_text(removed), Available::NONE).rows()[0]),
+        "ab"
+    );
+
+    let defaulted = StyledText::new("a\tb", TextStyle::new())
+        .with_tab_policy(TabPolicy::spaces(1))
+        .without_tab_policy();
+    assert_eq!(defaulted.tab_policy(), None);
+    assert_eq!(
+        row_text(&resolve_ok(&View::styled_text(defaulted), Available::NONE).rows()[0]),
+        "a    b"
+    );
+}
+
+#[test]
+fn direct_text_rendering_preserves_literal_tabs_without_applying_layout_policy() {
+    let text = StyledText::new("name\t値", TextStyle::new().bold())
+        .with_tab_policy(TabPolicy::with_marker(4, "[T]").unwrap());
+
+    assert_eq!(
+        render_text(&text, &ansi_settings()),
+        "\x1b[1mname\t値\x1b[0m"
+    );
 }

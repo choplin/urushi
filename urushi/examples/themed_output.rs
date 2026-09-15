@@ -42,5 +42,5 @@ fn main() {
         panel.clone(),
         View::text("保存しました", panel.text().clone()),
     );
-    urushi::println(&view).unwrap();
+    urushi::println_view(&view).unwrap();
 }

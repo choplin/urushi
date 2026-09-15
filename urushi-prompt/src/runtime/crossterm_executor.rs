@@ -10,6 +10,7 @@ use crossterm::{
     cursor, queue,
     terminal::{Clear, ClearType},
 };
+use urushi::{RenderSettings, StyledText, render_text};
 
 use super::{
     inline_plan::{InlineCommand, InlineRenderPlan, RenderState, step},
@@ -80,9 +81,17 @@ fn write_command<W: Write>(writer: &mut W, command: &InlineCommand) -> io::Resul
         InlineCommand::CarriageReturnLineFeed => writer.write_all(b"\r\n"),
         InlineCommand::Write(row) => {
             for run in &row.runs {
-                writer.write_all(run.style.paint(&run.text).as_bytes())?;
+                let text = StyledText::new(run.text.clone(), run.style.clone());
+                writer.write_all(render_text(&text, &resolved_style_settings()).as_bytes())?;
             }
             Ok(())
         }
     }
+}
+
+/// Prompt styles have already been narrowed to terminal capabilities before
+/// planning. This selection serializes those effective values without a
+/// second degradation pass.
+fn resolved_style_settings() -> RenderSettings {
+    RenderSettings::all()
 }
