@@ -107,7 +107,7 @@ pub(super) fn assemble(sized: &Sized<'_>) -> Result<Rect, LayoutError> {
 /// The style filling padding a parent introduces around a node.
 fn fill_style(sized: &Sized<'_>) -> TextStyle {
     match &sized.node {
-        SizedNode::Block { style, .. } => style.text().clone(),
+        SizedNode::Block { style, .. } => style.text_style().clone(),
         _ => TextStyle::new(),
     }
 }
@@ -128,7 +128,7 @@ fn block(sized: &Sized<'_>) -> Result<Rect, LayoutError> {
         unreachable!("a block")
     };
     let (content_width, content_height) = (*content_width, *content_height);
-    let fill = style.text().clone();
+    let fill = style.text_style().clone();
     let (pl, pr, pt, pb) = (
         usize::from(padding.left),
         usize::from(padding.right),
@@ -150,14 +150,14 @@ fn block(sized: &Sized<'_>) -> Result<Rect, LayoutError> {
         content.anchors,
         align_offset(
             content_width.saturating_sub(content.width),
-            style.horizontal_alignment(),
+            style.get_align(),
         ),
         0,
     );
     let mut content_rows: Vec<Vec<StyledGrapheme>> = content
         .rows
         .into_iter()
-        .map(|row| align_row(row, content_width, style.horizontal_alignment(), &fill))
+        .map(|row| align_row(row, content_width, style.get_align(), &fill))
         .collect();
 
     // 2. The rows the box keeps, which the height phase decided; the vertical
@@ -165,7 +165,7 @@ fn block(sized: &Sized<'_>) -> Result<Rect, LayoutError> {
     //    there is none.
     content_rows.truncate(content_height);
     let gap = content_height - content_rows.len();
-    let (above, below) = match style.vertical_alignment() {
+    let (above, below) = match style.get_vertical_align() {
         VerticalAlign::Top => (0, gap),
         // The odd extra row goes below, the opposite of a Row's Center bias.
         VerticalAlign::Center => (gap / 2, gap - gap / 2),
@@ -209,20 +209,20 @@ fn block(sized: &Sized<'_>) -> Result<Rect, LayoutError> {
     }
 
     // 4. Border, drawn at the used size.
-    if let Some(border) = style.border_kind() {
+    if let Some(border) = style.get_border() {
         let border_style = style.border_style();
-        let left = style.is_border_left_enabled();
-        let right = style.is_border_right_enabled();
+        let left = style.get_border_left();
+        let right = style.get_border_right();
         let mut bordered = Rect {
             width: rect.width + usize::from(left) + usize::from(right),
             rows: Vec::with_capacity(rect.rows.len() + 2),
             anchors: shift(
                 std::mem::take(&mut rect.anchors),
                 usize::from(left),
-                usize::from(style.is_border_top_enabled()),
+                usize::from(style.get_border_top()),
             ),
         };
-        if style.is_border_top_enabled() {
+        if style.get_border_top() {
             bordered.rows.push(edge_row(
                 border.top_left,
                 border.top,
@@ -244,7 +244,7 @@ fn block(sized: &Sized<'_>) -> Result<Rect, LayoutError> {
             }
             bordered.rows.push(edged);
         }
-        if style.is_border_bottom_enabled() {
+        if style.get_border_bottom() {
             bordered.rows.push(edge_row(
                 border.bottom_left,
                 border.bottom,
@@ -256,13 +256,13 @@ fn block(sized: &Sized<'_>) -> Result<Rect, LayoutError> {
             ));
         }
         if let Some(title) = title
-            && style.is_border_top_enabled()
+            && style.get_border_top()
         {
             embed_title(
                 &mut bordered.rows[0],
                 title,
-                style.is_border_left_enabled(),
-                style.is_border_right_enabled(),
+                style.get_border_left(),
+                style.get_border_right(),
                 &border_style,
             );
         }

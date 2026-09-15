@@ -11,7 +11,7 @@ fn gap(width: usize) -> View {
 
 /// Wraps plain text in a block filled with that block's own style.
 fn boxed(style: BlockStyle, text: &str) -> View {
-    let content = View::text(text, style.text().clone());
+    let content = View::text(text, style.text_style().clone());
     View::block(style, content)
 }
 
@@ -46,11 +46,11 @@ fn vertical_alignment_sample(top: &str, center: &str, bottom: &str) -> View {
     View::row(
         VerticalAlign::Top,
         [
-            boxed(cell.clone().align_vertical(VerticalAlign::Top), top),
+            boxed(cell.clone().vertical_align(VerticalAlign::Top), top),
             gap(1),
-            boxed(cell.clone().align_vertical(VerticalAlign::Center), center),
+            boxed(cell.clone().vertical_align(VerticalAlign::Center), center),
             gap(1),
-            boxed(cell.align_vertical(VerticalAlign::Bottom), bottom),
+            boxed(cell.vertical_align(VerticalAlign::Bottom), bottom),
         ],
     )
 }
@@ -326,7 +326,7 @@ pub fn cjk_showcase_view() -> View {
         row("太字", View::text("太い文字", TextStyle::new().bold())),
         row(
             "下線",
-            View::text("下線付き文字", TextStyle::new().underline()),
+            View::text("下線付き文字", TextStyle::new().underlined()),
         ),
         // 描画済みの文字列を入れ子にするのではなく、テキストを並べて合成する。
         row(
@@ -419,11 +419,11 @@ pub fn render_cjk_showcase() -> String {
     render(
         &resolved,
         &RenderSettings::default()
-            .with_colors(ColorLevel::Ansi16)
-            .with_modifiers(Modifier::all())
-            .with_underline_styles(UnderlineStyleSet::all())
-            .with_underline_colors(true)
-            .with_hyperlinks(true),
+            .color_level(ColorLevel::Ansi16)
+            .modifiers(Modifier::all())
+            .underline_styles(UnderlineStyleSet::all())
+            .underline_colors(true)
+            .hyperlinks(true),
     )
 }
 

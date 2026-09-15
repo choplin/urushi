@@ -178,8 +178,8 @@ fn requires_allocation(view: &View, axis: Axis) -> bool {
         },
         View::Block(style, _, child) | View::AnchorBlock(_, style, _, child) => {
             let (length, maximum) = match axis {
-                Axis::Width => (style.width_length(), style.maximum_width()),
-                Axis::Height => (style.height_length(), style.maximum_height()),
+                Axis::Width => (style.get_width(), style.get_max_width()),
+                Axis::Height => (style.get_height(), style.get_max_height()),
             };
             match length {
                 Some(Length::Fill(_)) => true,
@@ -196,15 +196,13 @@ fn requires_allocation(view: &View, axis: Axis) -> bool {
                 .iter()
                 .flatten()
                 .any(|child| requires_allocation(child, axis)),
-            Axis::Width => {
-                (0..grid::columns(rows)).any(|column| match style.column_length(column) {
-                    Some(Length::Fill(_)) => true,
-                    Some(Length::Cells(_)) => false,
-                    None => (0..rows.len())
-                        .map(|row| grid::cell(rows, row, column))
-                        .any(|child| requires_allocation(child, axis)),
-                })
-            }
+            Axis::Width => (0..grid::columns(rows)).any(|column| match style.get_column(column) {
+                Some(Length::Fill(_)) => true,
+                Some(Length::Cells(_)) => false,
+                None => (0..rows.len())
+                    .map(|row| grid::cell(rows, row, column))
+                    .any(|child| requires_allocation(child, axis)),
+            }),
         },
     }
 }

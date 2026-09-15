@@ -49,6 +49,12 @@ impl GridStyle {
         self
     }
 
+    /// Restores all column length claims to their default value.
+    pub fn reset_columns(mut self) -> Self {
+        self.columns.clear();
+        self
+    }
+
     /// Sets the padding every cell that states none of its own takes.
     ///
     /// A cell that states its own padding replaces this value rather than
@@ -59,13 +65,19 @@ impl GridStyle {
         self
     }
 
+    /// Restores the default cell padding.
+    pub fn reset_cell_padding(mut self) -> Self {
+        self.cell_padding = Sides::default();
+        self
+    }
+
     /// Returns the stated length of column `index`, if it states one.
-    pub fn column_length(&self, index: usize) -> Option<Length> {
+    pub fn get_column(&self, index: usize) -> Option<Length> {
         self.columns.get(index).copied().flatten()
     }
 
     /// Returns the padding a cell that states none of its own takes.
-    pub const fn cell_padding_sides(&self) -> Sides {
+    pub const fn get_cell_padding(&self) -> Sides {
         self.cell_padding
     }
 }
@@ -78,9 +90,9 @@ mod tests {
     fn a_column_past_the_stated_list_is_auto() {
         let style = GridStyle::new().columns([Some(Length::Cells(4)), None]);
 
-        assert_eq!(style.column_length(0), Some(Length::Cells(4)));
-        assert_eq!(style.column_length(1), None, "stated as absent");
-        assert_eq!(style.column_length(9), None, "past the end");
+        assert_eq!(style.get_column(0), Some(Length::Cells(4)));
+        assert_eq!(style.get_column(1), None, "stated as absent");
+        assert_eq!(style.get_column(9), None, "past the end");
     }
 
     #[test]
@@ -90,7 +102,7 @@ mod tests {
             .cell_padding((0, 1));
 
         assert_eq!(
-            stated.clone().columns([]).cell_padding(Sides::default()),
+            stated.clone().reset_columns().reset_cell_padding(),
             GridStyle::new()
         );
         assert_ne!(stated, GridStyle::new(), "the removals did the work");
@@ -99,7 +111,7 @@ mod tests {
     #[test]
     fn cell_padding_accepts_the_same_shorthands_a_block_takes() {
         assert_eq!(
-            GridStyle::new().cell_padding((0, 1)).cell_padding_sides(),
+            GridStyle::new().cell_padding((0, 1)).get_cell_padding(),
             Sides {
                 top: 0,
                 right: 1,

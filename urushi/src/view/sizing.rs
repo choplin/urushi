@@ -262,12 +262,10 @@ pub(super) fn degrade(
 
 /// The cells the enabled border edges contribute, per axis.
 pub(super) fn border_extent(style: &BlockStyle) -> Size {
-    match style.border_kind() {
+    match style.get_border() {
         Some(_) => Size::new(
-            usize::from(style.is_border_left_enabled())
-                + usize::from(style.is_border_right_enabled()),
-            usize::from(style.is_border_top_enabled())
-                + usize::from(style.is_border_bottom_enabled()),
+            usize::from(style.get_border_left()) + usize::from(style.get_border_right()),
+            usize::from(style.get_border_top()) + usize::from(style.get_border_bottom()),
         ),
         None => Size::ZERO,
     }
@@ -285,9 +283,9 @@ pub(super) const fn vertical(sides: Sides) -> usize {
 pub(super) fn width_axis(style: &BlockStyle, frame: usize) -> Axis {
     Axis {
         frame,
-        length: style.width_length(),
-        min: style.minimum_width(),
-        max: style.maximum_width(),
+        length: style.get_width(),
+        min: style.get_min_width(),
+        max: style.get_max_width(),
     }
 }
 
@@ -295,9 +293,9 @@ pub(super) fn width_axis(style: &BlockStyle, frame: usize) -> Axis {
 pub(super) fn height_axis(style: &BlockStyle, frame: usize) -> Axis {
     Axis {
         frame,
-        length: style.height_length(),
-        min: style.minimum_height(),
-        max: style.maximum_height(),
+        length: style.get_height(),
+        min: style.get_min_height(),
+        max: style.get_max_height(),
     }
 }
 

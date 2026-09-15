@@ -35,7 +35,7 @@ fn dark_tokens() -> SemanticTokens {
 }
 
 fn theme(tokens: SemanticTokens) -> Theme {
-    let components = ComponentTheme::from_tokens(&tokens).with_panel_focused(
+    let components = ComponentTheme::from_tokens(&tokens).panel_focused(
         BlockStyle::new()
             .foreground(tokens.text)
             .background(tokens.surface)
@@ -53,13 +53,13 @@ fn themes() -> ThemeSet {
     ThemeSet::new(theme(light_tokens()), theme(dark_tokens()))
 }
 
-fn settings(colors: ColorLevel) -> RenderSettings {
+fn settings(color_level: ColorLevel) -> RenderSettings {
     RenderSettings::default()
-        .with_colors(colors)
-        .with_modifiers(Modifier::all())
-        .with_underline_styles(UnderlineStyleSet::all())
-        .with_underline_colors(true)
-        .with_hyperlinks(true)
+        .color_level(color_level)
+        .modifiers(Modifier::all())
+        .underline_styles(UnderlineStyleSet::all())
+        .underline_colors(true)
+        .hyperlinks(true)
 }
 
 fn render_text(view: View, settings: &RenderSettings) -> String {
@@ -67,7 +67,7 @@ fn render_text(view: View, settings: &RenderSettings) -> String {
 }
 
 fn panel_view(style: BlockStyle, content: &str) -> View {
-    let text = style.text().clone();
+    let text = style.text_style().clone();
     View::block(style, View::text(content, text))
 }
 

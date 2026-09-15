@@ -125,7 +125,7 @@ type NodeStyler<'a, T> = dyn Fn(&T, TreePosition) -> Option<TextStyle> + 'a;
 #[derive(Clone)]
 pub struct TreeNodePresentation<'a, T> {
     format: Arc<NodeFormatter<'a, T>>,
-    style: Arc<NodeStyler<'a, T>>,
+    node_style: Arc<NodeStyler<'a, T>>,
 }
 
 impl<T> fmt::Debug for TreeNodePresentation<'_, T> {
@@ -142,7 +142,7 @@ impl<'a, T: 'a> TreeNodePresentation<'a, T> {
     {
         Self {
             format: Arc::new(format),
-            style: Arc::new(no_node_style::<T>),
+            node_style: Arc::new(no_node_style::<T>),
         }
     }
 
@@ -151,11 +151,11 @@ impl<'a, T: 'a> TreeNodePresentation<'a, T> {
     /// `None` keeps the [`TreePresentation`] root or item default.
     /// `Some(style)` replaces that complete style rather than layering over it.
     #[must_use]
-    pub fn node_style<S>(mut self, style: S) -> Self
+    pub fn node_style<S>(mut self, node_style: S) -> Self
     where
         S: Fn(&T, TreePosition) -> Option<TextStyle> + 'a,
     {
-        self.style = Arc::new(style);
+        self.node_style = Arc::new(node_style);
         self
     }
 }
@@ -184,41 +184,41 @@ fn no_node_style<T>(_: &T, _: TreePosition) -> Option<TextStyle> {
 /// Presentation policy used to compose a [`Tree`] into a [`View`].
 #[derive(Debug, Clone, PartialEq)]
 pub struct TreePresentation {
-    root: TextStyle,
-    item: TextStyle,
-    connector: TextStyle,
+    root_style: TextStyle,
+    item_style: TextStyle,
+    connector_style: TextStyle,
     line_glyphs: LineGlyphs,
     indent_width: usize,
 }
 
 impl TreePresentation {
     /// Creates the canonical tree presentation with square line glyphs.
-    pub fn new(root: TextStyle, item: TextStyle, connector: TextStyle) -> Self {
+    pub fn new(root_style: TextStyle, item_style: TextStyle, connector_style: TextStyle) -> Self {
         Self {
-            root,
-            item,
-            connector,
+            root_style,
+            item_style,
+            connector_style,
             line_glyphs: LineGlyphs::NORMAL,
             indent_width: 4,
         }
     }
 
     /// Returns the style assigned to one logical tree role.
-    pub fn style(&self, role: TreeRole) -> &TextStyle {
+    pub fn get_style(&self, role: TreeRole) -> &TextStyle {
         match role {
-            TreeRole::Root => &self.root,
-            TreeRole::Item => &self.item,
-            TreeRole::Connector => &self.connector,
+            TreeRole::Root => &self.root_style,
+            TreeRole::Item => &self.item_style,
+            TreeRole::Connector => &self.connector_style,
         }
     }
 
     /// Replaces the style assigned to one logical tree role.
     #[must_use]
-    pub fn with_style(mut self, role: TreeRole, style: TextStyle) -> Self {
+    pub fn style(mut self, role: TreeRole, style: TextStyle) -> Self {
         match role {
-            TreeRole::Root => self.root = style,
-            TreeRole::Item => self.item = style,
-            TreeRole::Connector => self.connector = style,
+            TreeRole::Root => self.root_style = style,
+            TreeRole::Item => self.item_style = style,
+            TreeRole::Connector => self.connector_style = style,
         }
         self
     }
@@ -226,19 +226,19 @@ impl TreePresentation {
     /// Replaces the root style.
     #[must_use]
     pub fn root_style(self, style: TextStyle) -> Self {
-        self.with_style(TreeRole::Root, style)
+        self.style(TreeRole::Root, style)
     }
 
     /// Replaces the item style.
     #[must_use]
     pub fn item_style(self, style: TextStyle) -> Self {
-        self.with_style(TreeRole::Item, style)
+        self.style(TreeRole::Item, style)
     }
 
     /// Replaces the connector style.
     #[must_use]
     pub fn connector_style(self, style: TextStyle) -> Self {
-        self.with_style(TreeRole::Connector, style)
+        self.style(TreeRole::Connector, style)
     }
 
     /// Replaces the complete one-cell connector glyph repertoire.
@@ -276,7 +276,7 @@ impl TreePresentation {
 
     /// Composes tree data with typed node formatting and text-style overrides.
     pub fn compose_with<T>(&self, tree: &Tree<T>, nodes: &TreeNodePresentation<'_, T>) -> View {
-        self.compose_using(tree, &*nodes.format, &*nodes.style)
+        self.compose_using(tree, &*nodes.format, &*nodes.node_style)
     }
 
     fn compose_using<T, F, S>(&self, tree: &Tree<T>, format: &F, style: &S) -> View
@@ -299,7 +299,7 @@ impl TreePresentation {
             let position = TreePosition::Root;
             BoundTreeRoot {
                 value: format(value, position),
-                style: style(value, position).unwrap_or_else(|| self.root.clone()),
+                style: style(value, position).unwrap_or_else(|| self.root_style.clone()),
             }
         });
         bind_group(&mut nodes, &mut groups, &children, 0, self, format, style);
@@ -307,7 +307,7 @@ impl TreePresentation {
             root,
             nodes,
             groups,
-            connector_style: self.connector.clone(),
+            connector_style: self.connector_style.clone(),
             line_glyphs: self.line_glyphs,
             indent_width: self.indent_width,
         }));
@@ -368,7 +368,7 @@ fn bind_group<T, F, S>(
         let node_index = bound.len();
         bound.push(BoundTreeNode {
             value: format(&node.value, position),
-            style: style(&node.value, position).unwrap_or_else(|| presentation.item.clone()),
+            style: style(&node.value, position).unwrap_or_else(|| presentation.item_style.clone()),
             connector_x,
             content_x,
         });

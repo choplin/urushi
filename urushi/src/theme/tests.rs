@@ -1,5 +1,5 @@
 use crate::test_support::{render_block, render_style};
-use crate::{BlockStyle, Color, TablePresentation, TextStyle};
+use crate::{BlockStyle, Color, TextStyle};
 
 use super::*;
 
@@ -37,46 +37,46 @@ fn component_theme_follows_the_token_mapping() {
         (ComponentRole::PromptError, "\x1b[91mx\x1b[0m"),
     ];
     for (role, painted) in expected {
-        assert_eq!(render_style(components.text_style(role), "x"), painted);
+        assert_eq!(render_style(components.get_text_style(role), "x"), painted);
     }
     assert_eq!(
-        render_block(components.panel(), "x"),
+        render_block(components.get_panel(), "x"),
         "\x1b[92m╭───╮\x1b[0m\n\x1b[92m│\x1b[0m\x1b[31;44m x \x1b[0m\x1b[92m│\x1b[0m\n\x1b[92m╰───╯\x1b[0m"
     );
     assert_eq!(
-        render_block(components.panel_focused(), "x"),
+        render_block(components.get_panel_focused(), "x"),
         "\x1b[35m╭───╮\x1b[0m\n\x1b[35m│\x1b[0m\x1b[31;44m x \x1b[0m\x1b[35m│\x1b[0m\n\x1b[35m╰───╯\x1b[0m"
     );
     assert_eq!(
-        render_style(components.list_style(ListRole::Item), "x"),
+        render_style(components.get_list_style(ListRole::Item), "x"),
         "\x1b[31mx\x1b[0m"
     );
     assert_eq!(
-        render_style(components.list_style(ListRole::Enumerator), "x"),
+        render_style(components.get_list_style(ListRole::Enumerator), "x"),
         "\x1b[32mx\x1b[0m"
     );
     assert_eq!(
-        render_style(components.tree_style(TreeRole::Root), "x"),
+        render_style(components.get_tree_style(TreeRole::Root), "x"),
         "\x1b[1;31mx\x1b[0m"
     );
     assert_eq!(
-        render_style(components.tree_style(TreeRole::Item), "x"),
+        render_style(components.get_tree_style(TreeRole::Item), "x"),
         "\x1b[31mx\x1b[0m"
     );
     assert_eq!(
-        render_style(components.tree_style(TreeRole::Connector), "x"),
+        render_style(components.get_tree_style(TreeRole::Connector), "x"),
         "\x1b[32mx\x1b[0m"
     );
     assert_eq!(
-        render_block(components.table_style(TableRole::Header), "x"),
+        render_block(components.get_table_style(TableRole::Header), "x"),
         "\x1b[1;31mx\x1b[0m"
     );
     assert_eq!(
-        render_block(components.table_style(TableRole::Cell), "x"),
+        render_block(components.get_table_style(TableRole::Cell), "x"),
         "\x1b[31mx\x1b[0m"
     );
     assert_eq!(
-        render_style(components.table().border_glyph_style(), "x"),
+        render_style(components.table().get_border_style(), "x"),
         "\x1b[92mx\x1b[0m"
     );
 }
@@ -84,9 +84,9 @@ fn component_theme_follows_the_token_mapping() {
 #[test]
 fn custom_tree_style_replaces_the_default() {
     let components = ComponentTheme::from_tokens(&TOKENS)
-        .with_tree_style(TreeRole::Connector, TextStyle::new().underline());
+        .tree_style(TreeRole::Connector, TextStyle::new().underlined());
     assert_eq!(
-        render_style(components.tree_style(TreeRole::Connector), "branch"),
+        render_style(components.get_tree_style(TreeRole::Connector), "branch"),
         "\x1b[4mbranch\x1b[0m"
     );
 }
@@ -94,14 +94,14 @@ fn custom_tree_style_replaces_the_default() {
 #[test]
 fn list_roles_are_independent_from_tree_roles() {
     let components = ComponentTheme::from_tokens(&TOKENS)
-        .with_list_style(ListRole::Enumerator, TextStyle::new().underline());
+        .list_style(ListRole::Enumerator, TextStyle::new().underlined());
 
     assert_eq!(
-        render_style(components.list_style(ListRole::Enumerator), "marker"),
+        render_style(components.get_list_style(ListRole::Enumerator), "marker"),
         "\x1b[4mmarker\x1b[0m"
     );
     assert_eq!(
-        render_style(components.tree_style(TreeRole::Connector), "branch"),
+        render_style(components.get_tree_style(TreeRole::Connector), "branch"),
         "\x1b[32mbranch\x1b[0m"
     );
 }
@@ -112,7 +112,7 @@ fn list_roles_resolve_through_the_theme_contract() {
 
     assert_eq!(
         &theme.text_style(ListRole::Item),
-        theme.components().list_style(ListRole::Item)
+        theme.components().get_list_style(ListRole::Item)
     );
 }
 
@@ -130,7 +130,7 @@ fn tree_roles_resolve_through_the_theme_contract() {
 
     assert_eq!(
         &theme.text_style(TreeRole::Root),
-        theme.components().tree_style(TreeRole::Root)
+        theme.components().get_tree_style(TreeRole::Root)
     );
 }
 
@@ -153,14 +153,14 @@ fn theme_and_component_theme_keep_value_equality_after_cloning() {
 #[test]
 fn custom_table_style_replaces_the_default() {
     let components = ComponentTheme::from_tokens(&TOKENS)
-        .with_table_style(TableRole::Header, BlockStyle::new().underline());
+        .table_style(TableRole::Header, BlockStyle::new().underlined());
 
     assert_eq!(
-        render_block(components.table_style(TableRole::Header), "head"),
+        render_block(components.get_table_style(TableRole::Header), "head"),
         "\x1b[4mhead\x1b[0m"
     );
     assert_eq!(
-        render_block(components.table_style(TableRole::Cell), "cell"),
+        render_block(components.get_table_style(TableRole::Cell), "cell"),
         "\x1b[31mcell\x1b[0m"
     );
 }
@@ -171,7 +171,7 @@ fn table_roles_resolve_through_the_theme_contract() {
 
     assert_eq!(
         &theme.block_style(TableRole::Header),
-        theme.components().table_style(TableRole::Header)
+        theme.components().get_table_style(TableRole::Header)
     );
 }
 
@@ -181,29 +181,11 @@ fn panel_roles_resolve_through_the_theme_contract() {
 
     assert_eq!(
         &theme.block_style(PanelRole::Panel),
-        theme.components().panel()
+        theme.components().get_panel()
     );
     assert_eq!(
         &theme.block_style(PanelRole::PanelFocused),
-        theme.components().panel_focused()
-    );
-}
-
-#[test]
-fn replacing_the_table_policy_keeps_the_other_component_defaults() {
-    let replaced = ComponentTheme::from_tokens(&TOKENS).with_table(TablePresentation::new(
-        BlockStyle::new().underline(),
-        BlockStyle::new(),
-        TextStyle::new(),
-    ));
-
-    assert_eq!(
-        render_block(replaced.table_style(TableRole::Header), "head"),
-        "\x1b[4mhead\x1b[0m"
-    );
-    assert_eq!(
-        render_style(replaced.list_style(ListRole::Item), "item"),
-        "\x1b[31mitem\x1b[0m"
+        theme.components().get_panel_focused()
     );
 }
 
@@ -257,7 +239,7 @@ fn application_roles_resolve_from_a_token_and_a_built_in_role() {
 #[test]
 fn application_roles_follow_an_overridden_built_in_role() {
     let components = ComponentTheme::from_tokens(&TOKENS)
-        .with_text_style(ComponentRole::Body, TextStyle::new().italic());
+        .text_style(ComponentRole::Body, TextStyle::new().italic());
     let theme = Theme::new(TOKENS, components);
 
     // The override drops the token foreground the built-in Body style carried,

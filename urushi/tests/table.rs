@@ -77,17 +77,17 @@ fn typed_cell_styles_receive_the_column_or_table_fallback() {
     let resolved = resolve(&presentation.compose_with(&table, &rows), Available::NONE).unwrap();
     assert_eq!(calls.get(), 2, "policy is snapshotted once per body cell");
     assert_eq!(
-        resolved.rows()[1][2].style().foreground_color(),
+        resolved.rows()[1][2].style().get_foreground(),
         Some(Color::WHITE)
     );
     assert_eq!(
-        resolved.rows()[1][11].style().foreground_color(),
+        resolved.rows()[1][11].style().get_foreground(),
         Some(Color::YELLOW)
     );
     assert!(
         resolved.rows()[1][11]
             .style()
-            .modifiers()
+            .get_modifiers()
             .contains(urushi::Modifier::BOLD)
     );
 }
@@ -113,10 +113,10 @@ fn positional_and_cell_styles_are_complete_replacements_in_precedence_order() {
     let resolved = resolve(&presentation.compose_with(&table, &rows), Available::NONE).unwrap();
     let header = resolved.rows()[1][2].style();
     let body = resolved.rows()[3][2].style();
-    assert_eq!(header.foreground_color(), Some(Color::CYAN));
-    assert!(!header.modifiers().contains(urushi::Modifier::BOLD));
-    assert_eq!(body.foreground_color(), Some(Color::YELLOW));
-    assert!(!body.modifiers().contains(urushi::Modifier::BOLD));
+    assert_eq!(header.get_foreground(), Some(Color::CYAN));
+    assert!(!header.get_modifiers().contains(urushi::Modifier::BOLD));
+    assert_eq!(body.get_foreground(), Some(Color::YELLOW));
+    assert!(!body.get_modifiers().contains(urushi::Modifier::BOLD));
 }
 
 #[test]

@@ -43,22 +43,22 @@ impl CanvasCell {
         }
     }
 
-    pub fn symbol(&self) -> &str {
+    pub fn get_symbol(&self) -> &str {
         &self.symbol
     }
 
-    pub const fn style(&self) -> &TextStyle {
+    pub const fn get_style(&self) -> &TextStyle {
         &self.style
     }
 
     /// Replaces the symbol, validating it even in release builds.
-    pub fn with_symbol(mut self, symbol: &Grapheme) -> Self {
+    pub fn symbol(mut self, symbol: &Grapheme) -> Self {
         validate_symbol(symbol.as_str());
         self.symbol = symbol.as_str().to_owned();
         self
     }
 
-    pub fn with_style(mut self, style: TextStyle) -> Self {
+    pub fn style(mut self, style: TextStyle) -> Self {
         self.style = style;
         self
     }
@@ -88,11 +88,11 @@ impl CellContribution {
         self
     }
 
-    pub fn symbol_value(&self) -> Option<&str> {
+    pub fn get_symbol(&self) -> Option<&str> {
         self.symbol.as_deref()
     }
 
-    pub fn style_value(&self) -> Option<&TextStyle> {
+    pub fn get_style(&self) -> Option<&TextStyle> {
         self.style.as_ref()
     }
 }

@@ -43,18 +43,18 @@ fn vertical_alignment_sample(top: &str, center: &str, bottom: &str) -> View {
         .height(5)
         .align(Align::Center);
     let filled = |style: BlockStyle, text: &str| {
-        let content = View::text(text, style.text().clone());
+        let content = View::text(text, style.text_style().clone());
         View::block(style, content)
     };
 
     View::row(
         VerticalAlign::Top,
         [
-            filled(cell.clone().align_vertical(VerticalAlign::Top), top),
+            filled(cell.clone().vertical_align(VerticalAlign::Top), top),
             gap(1),
-            filled(cell.clone().align_vertical(VerticalAlign::Center), center),
+            filled(cell.clone().vertical_align(VerticalAlign::Center), center),
             gap(1),
-            filled(cell.align_vertical(VerticalAlign::Bottom), bottom),
+            filled(cell.vertical_align(VerticalAlign::Bottom), bottom),
         ],
     )
 }
@@ -62,7 +62,7 @@ fn vertical_alignment_sample(top: &str, center: &str, bottom: &str) -> View {
 fn horizontal_alignment_sample(left: &str, center: &str, right: &str) -> View {
     let cell = BlockStyle::new().background(Color::BRIGHT_BLACK).width(20);
     let filled = |style: BlockStyle, text: &str| {
-        let content = View::text(text, style.text().clone());
+        let content = View::text(text, style.text_style().clone());
         View::block(style, content)
     };
 
@@ -427,7 +427,7 @@ pub fn showcase_view() -> View {
         ),
     );
     let boxed = |style: BlockStyle, text: &str| {
-        let content = View::text(text, style.text().clone());
+        let content = View::text(text, style.text_style().clone());
         View::block(style, content)
     };
     let sections = [
@@ -445,7 +445,7 @@ pub fn showcase_view() -> View {
                 row("BOLD", View::text("bold text", TextStyle::new().bold())),
                 row(
                     "UNDERLINE",
-                    View::text("underlined text", TextStyle::new().underline()),
+                    View::text("underlined text", TextStyle::new().underlined()),
                 ),
                 row(
                     "HYPERLINK",
@@ -606,11 +606,11 @@ pub fn render_showcase() -> String {
     render(
         &resolved,
         &RenderSettings::default()
-            .with_colors(ColorLevel::TrueColor)
-            .with_modifiers(Modifier::all())
-            .with_underline_styles(UnderlineStyleSet::all())
-            .with_underline_colors(true)
-            .with_hyperlinks(true),
+            .color_level(ColorLevel::TrueColor)
+            .modifiers(Modifier::all())
+            .underline_styles(UnderlineStyleSet::all())
+            .underline_colors(true)
+            .hyperlinks(true),
     )
 }
 

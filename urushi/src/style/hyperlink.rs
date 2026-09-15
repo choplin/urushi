@@ -14,11 +14,11 @@ use std::sync::Arc;
 ///
 /// let plain = TextStyle::new().hyperlink("https://example.com");
 /// let identified = TextStyle::new().hyperlink(
-///     Hyperlink::new("https://example.com").with_parameter("id", "documentation"),
+///     Hyperlink::new("https://example.com").parameter("id", "documentation"),
 /// );
 ///
-/// assert_eq!(plain.hyperlink_value().unwrap().uri(), "https://example.com");
-/// assert_eq!(identified.hyperlink_value().unwrap().parameters().len(), 1);
+/// assert_eq!(plain.get_hyperlink().unwrap().uri(), "https://example.com");
+/// assert_eq!(identified.get_hyperlink().unwrap().parameters().len(), 1);
 /// ```
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Hyperlink {
@@ -43,7 +43,7 @@ impl Hyperlink {
     /// OSC 8 separates parameters with `:` and the key from its value with
     /// `=`. Those delimiters, `;`, and control characters are percent-encoded in
     /// both parts, so arbitrary caller input remains one inert parameter.
-    pub fn with_parameter(mut self, name: impl AsRef<str>, value: impl AsRef<str>) -> Self {
+    pub fn parameter(mut self, name: impl AsRef<str>, value: impl AsRef<str>) -> Self {
         let mut parameters = self.parameters.to_vec();
         parameters.push((encode(name.as_ref(), true), encode(value.as_ref(), true)));
         self.parameters = parameters.into();
@@ -115,7 +115,7 @@ mod tests {
     #[test]
     fn construction_encodes_every_osc_delimiter_the_value_owns() {
         let hyperlink = Hyperlink::new("https://example.com/a\u{1b}\\b\u{7}\u{9c}")
-            .with_parameter("i:d=;\u{9d}", "v:a=l;ue\n\u{9b}");
+            .parameter("i:d=;\u{9d}", "v:a=l;ue\n\u{9b}");
 
         assert_eq!(hyperlink.uri(), "https://example.com/a%1B\\b%07%C2%9C");
         assert_eq!(

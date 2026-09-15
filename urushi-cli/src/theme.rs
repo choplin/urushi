@@ -30,8 +30,8 @@ impl CliRole {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CliTheme {
     styles: [TextStyle; CLI_ROLE_COUNT],
-    summary: SummaryPresentation,
-    warning: WarningPresentation,
+    summary_presentation: SummaryPresentation,
+    warning_presentation: WarningPresentation,
 }
 
 impl CliTheme {
@@ -43,68 +43,54 @@ impl CliTheme {
             theme.text_style(ComponentRole::Accent),
             TextStyle::new().foreground(theme.tokens().warning),
         ];
-        let summary = SummaryPresentation::new(
+        let summary_presentation = SummaryPresentation::new(
             styles[CliRole::Muted.index()].clone(),
             styles[CliRole::Accent.index()].clone(),
             styles[CliRole::Body.index()].clone(),
         );
-        let warning = WarningPresentation::new(
+        let warning_presentation = WarningPresentation::new(
             styles[CliRole::Muted.index()].clone(),
             styles[CliRole::Warning.index()].clone(),
             styles[CliRole::Body.index()].clone(),
         );
         Self {
             styles,
-            summary,
-            warning,
+            summary_presentation,
+            warning_presentation,
         }
     }
 
     /// Returns the style assigned to one CLI role.
-    pub fn style(&self, role: CliRole) -> &TextStyle {
+    pub fn get_style(&self, role: CliRole) -> &TextStyle {
         &self.styles[role.index()]
     }
 
     /// Returns the canonical summary presentation.
     pub fn summary_presentation(&self) -> &SummaryPresentation {
-        &self.summary
+        &self.summary_presentation
     }
 
     /// Returns the canonical warning presentation.
     pub fn warning_presentation(&self) -> &WarningPresentation {
-        &self.warning
+        &self.warning_presentation
     }
 
     /// Composes a summary with the canonical presentation.
     pub fn summary(&self, summary: &Summary) -> View {
-        self.summary.compose(summary)
+        self.summary_presentation.compose(summary)
     }
 
     /// Composes a warning with the canonical presentation.
     pub fn warning(&self, warning: &Warning) -> View {
-        self.warning.compose(warning)
+        self.warning_presentation.compose(warning)
     }
 
     /// Replaces one CLI role and updates the canonical presentations that use it.
     #[must_use]
-    pub fn with_style(mut self, role: CliRole, style: TextStyle) -> Self {
+    pub fn style(mut self, role: CliRole, style: TextStyle) -> Self {
         self.styles[role.index()] = style.clone();
-        self.summary.set_style(role, style.clone());
-        self.warning.set_style(role, style);
-        self
-    }
-
-    /// Replaces the complete canonical summary presentation.
-    #[must_use]
-    pub fn with_summary(mut self, summary: SummaryPresentation) -> Self {
-        self.summary = summary;
-        self
-    }
-
-    /// Replaces the complete canonical warning presentation.
-    #[must_use]
-    pub fn with_warning(mut self, warning: WarningPresentation) -> Self {
-        self.warning = warning;
+        self.summary_presentation.set_style(role, style.clone());
+        self.warning_presentation.set_style(role, style);
         self
     }
 }
@@ -139,25 +125,25 @@ mod tests {
         let cli = CliTheme::from_theme(&theme());
 
         assert_eq!(
-            render_style(cli.style(CliRole::Body), "x"),
+            render_style(cli.get_style(CliRole::Body), "x"),
             "\x1b[31mx\x1b[0m"
         );
         assert_eq!(
-            render_style(cli.style(CliRole::Muted), "x"),
+            render_style(cli.get_style(CliRole::Muted), "x"),
             "\x1b[2;32mx\x1b[0m"
         );
         assert_eq!(
-            render_style(cli.style(CliRole::Accent), "x"),
+            render_style(cli.get_style(CliRole::Accent), "x"),
             "\x1b[1;35mx\x1b[0m"
         );
         assert_eq!(
-            render_style(cli.style(CliRole::Warning), "x"),
+            render_style(cli.get_style(CliRole::Warning), "x"),
             "\x1b[90mx\x1b[0m"
         );
     }
 
     #[test]
-    fn shortcuts_delegate_to_replaceable_presentations() {
+    fn shortcuts_delegate_to_the_canonical_presentations() {
         let theme = theme();
         let cli = CliTheme::from_theme(&theme);
         let summary = Summary::new("Done");
@@ -174,30 +160,19 @@ mod tests {
     }
 
     #[test]
-    fn roles_and_complete_presentations_are_replaceable() {
+    fn role_styles_are_replaceable() {
         let theme = theme();
         let base = CliTheme::from_theme(&theme);
         let changed_role = base
             .clone()
-            .with_style(CliRole::Muted, TextStyle::new().underline());
+            .style(CliRole::Muted, TextStyle::new().underlined());
         assert_eq!(
-            changed_role.style(CliRole::Muted),
-            &TextStyle::new().underline()
+            changed_role.get_style(CliRole::Muted),
+            &TextStyle::new().underlined()
         );
         assert_ne!(
             changed_role.summary(&Summary::new("Done")),
             base.summary(&Summary::new("Done"))
         );
-
-        let summary =
-            SummaryPresentation::new(TextStyle::new().bold(), TextStyle::new(), TextStyle::new());
-        let warning =
-            WarningPresentation::new(TextStyle::new(), TextStyle::new().bold(), TextStyle::new());
-        let replaced = base
-            .with_summary(summary.clone())
-            .with_warning(warning.clone());
-
-        assert_eq!(replaced.summary_presentation(), &summary);
-        assert_eq!(replaced.warning_presentation(), &warning);
     }
 }

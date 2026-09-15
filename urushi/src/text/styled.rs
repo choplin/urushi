@@ -95,7 +95,7 @@ struct SpanRange {
 /// boundaries, and never place equal styles beside each other. Newline and
 /// horizontal tab are admitted source controls; layout replaces tabs under
 /// this value's policy, while direct text rendering preserves them.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct StyledText {
     text: String,
     spans: Vec<SpanRange>,
@@ -203,19 +203,19 @@ impl StyledText {
     ///
     /// Direct text rendering preserves the source tab characters and ignores
     /// this layout-only property.
-    pub fn with_tab_policy(mut self, policy: TabPolicy) -> Self {
-        self.tab_policy = Some(policy);
+    pub fn tab_policy(mut self, tab_policy: TabPolicy) -> Self {
+        self.tab_policy = Some(tab_policy);
         self
     }
 
     /// Restores the default layout policy of four spaces per tab.
-    pub fn without_tab_policy(mut self) -> Self {
+    pub fn reset_tab_policy(mut self) -> Self {
         self.tab_policy = None;
         self
     }
 
     /// Returns the explicitly configured layout policy, if any.
-    pub const fn tab_policy(&self) -> Option<&TabPolicy> {
+    pub const fn get_tab_policy(&self) -> Option<&TabPolicy> {
         self.tab_policy.as_ref()
     }
 

@@ -29,10 +29,10 @@ impl RatatuiStyle {
 impl From<&TextStyle> for RatatuiStyle {
     fn from(value: &TextStyle) -> Self {
         let mut style = InnerStyle::new();
-        if let Some(color) = value.foreground_color() {
+        if let Some(color) = value.get_foreground() {
             style = style.fg(convert_color(color));
         }
-        if let Some(color) = value.background_color() {
+        if let Some(color) = value.get_background() {
             style = style.bg(convert_color(color));
         }
         // Ratatui has no underline shape, and its underline color lives behind
@@ -40,11 +40,11 @@ impl From<&TextStyle> for RatatuiStyle {
         // every underline degrades to the plain `UNDERLINED` modifier. The
         // degradation is deterministic: two styles differing only in underline
         // shape or color reach Ratatui as the same style.
-        if value.underline_value().is_some() {
+        if value.get_underline().is_some() {
             style = style.add_modifier(RatatuiModifier::UNDERLINED);
         }
         Self {
-            content: style.add_modifier(convert_modifier(value.modifiers())),
+            content: style.add_modifier(convert_modifier(value.get_modifiers())),
         }
     }
 }
@@ -129,7 +129,7 @@ mod tests {
         // color arrive as one modifier. Fixing the degradation here is what
         // keeps it from silently becoming something else.
         let styles = [
-            TextStyle::new().underline(),
+            TextStyle::new().underlined(),
             TextStyle::new().underline_style(UnderlineStyle::Double),
             TextStyle::new().underline_style(UnderlineStyle::Curly),
             TextStyle::new().underline_style(UnderlineStyle::Dotted),

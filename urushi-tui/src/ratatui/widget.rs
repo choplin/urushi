@@ -75,7 +75,7 @@ impl<'a> RatatuiWidget<'a> {
     fn view(&self) -> View {
         View::block(
             self.style.clone(),
-            View::text(self.content, self.style.text().clone()),
+            View::text(self.content, self.style.text_style().clone()),
         )
     }
 }
@@ -208,7 +208,7 @@ mod tests {
                 .bold()
                 .dim()
                 .italic()
-                .underline()
+                .underlined()
                 .blink()
                 .reverse()
                 .hide()
@@ -475,7 +475,7 @@ mod tests {
                     .height(7)
                     .padding((1, 1))
                     .align(horizontal)
-                    .align_vertical(vertical);
+                    .vertical_align(vertical);
                 assert_widget_matches_direct(
                     &style,
                     "日\nx",
@@ -532,7 +532,7 @@ mod tests {
             (VerticalAlign::Center, Some(1)),
             (VerticalAlign::Bottom, Some(3)),
         ] {
-            let style = style.clone().align_vertical(align);
+            let style = style.clone().vertical_align(align);
             let mut buffer = Buffer::empty(area);
 
             style.widget("x").render(area, &mut buffer);
@@ -654,7 +654,10 @@ mod tests {
 
     /// Asserts the widget reproduces the resolved block in a `Rect` sized to it.
     fn assert_widget_matches_direct(style: &BlockStyle, content: &str, case: &str) {
-        let view = View::block(style.clone(), View::text(content, style.text().clone()));
+        let view = View::block(
+            style.clone(),
+            View::text(content, style.text_style().clone()),
+        );
         let direct = resolve(&view, Available::NONE).unwrap();
         let expected: Vec<String> = direct
             .rows()

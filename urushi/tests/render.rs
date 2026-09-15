@@ -28,15 +28,15 @@ trait RenderBlockForTest {
 
 impl RenderBlockForTest for BlockStyle {
     fn render(&self, content: &str) -> TestRender {
-        let text_style = self.text().clone();
+        let text_style = self.text_style().clone();
         let view = View::block(self.clone(), View::text(content, text_style));
         let resolved = resolve(&view, Available::NONE).unwrap();
         let settings = RenderSettings::default()
-            .with_colors(ColorLevel::TrueColor)
-            .with_modifiers(Modifier::all())
-            .with_underline_styles(UnderlineStyleSet::all())
-            .with_underline_colors(true)
-            .with_hyperlinks(true);
+            .color_level(ColorLevel::TrueColor)
+            .modifiers(Modifier::all())
+            .underline_styles(UnderlineStyleSet::all())
+            .underline_colors(true)
+            .hyperlinks(true);
         TestRender {
             text: render(&resolved, &settings),
             size: resolved.size(),
@@ -189,20 +189,20 @@ fn fixed_height_aligns_content_vertically_inside_padding() {
 
     assert_eq!(
         base.clone()
-            .align_vertical(VerticalAlign::Top)
+            .vertical_align(VerticalAlign::Top)
             .render("x")
             .into_string(),
         "    \nx   \n    \n    \n    \n    "
     );
     assert_eq!(
         base.clone()
-            .align_vertical(VerticalAlign::Center)
+            .vertical_align(VerticalAlign::Center)
             .render("x")
             .into_string(),
         "    \n    \nx   \n    \n    \n    "
     );
     assert_eq!(
-        base.align_vertical(VerticalAlign::Bottom)
+        base.vertical_align(VerticalAlign::Bottom)
             .render("x")
             .into_string(),
         "    \n    \n    \n    \nx   \n    "
@@ -216,7 +216,7 @@ fn centered_vertical_alignment_puts_an_odd_extra_row_below_like_lip_gloss() {
         .height(7)
         .padding((1, 1))
         .align(Align::Center)
-        .align_vertical(VerticalAlign::Center)
+        .vertical_align(VerticalAlign::Center)
         .render("日\nx")
         .into_string();
 
@@ -233,7 +233,7 @@ fn right_and_center_alignment_combine_for_cjk_content() {
         .height(7)
         .padding((1, 1))
         .align(Align::Right)
-        .align_vertical(VerticalAlign::Center)
+        .vertical_align(VerticalAlign::Center)
         .render("日\nx")
         .into_string();
 
@@ -322,7 +322,7 @@ fn a_maximum_height_bounds_the_box_before_vertical_alignment_places_content() {
     let out = BlockStyle::new()
         .width(3)
         .height(5)
-        .align_vertical(VerticalAlign::Bottom)
+        .vertical_align(VerticalAlign::Bottom)
         .max_height(3)
         .render("x")
         .into_string();
@@ -409,7 +409,7 @@ fn width_only_rendering_is_unchanged_by_the_height_default() {
         BlockStyle::new().width(4).render("a\nb").into_string(),
         BlockStyle::new()
             .width(4)
-            .auto_height()
+            .reset_height()
             .render("a\nb")
             .into_string()
     );

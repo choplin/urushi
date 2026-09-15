@@ -270,7 +270,7 @@ mod tests {
         let cli_theme = crate::CliTheme::from_theme(&theme);
         let base = cli_theme.summary_presentation().clone();
         let changed = SummaryPresentation::new(
-            TextStyle::new().underline(),
+            TextStyle::new().underlined(),
             TextStyle::new(),
             TextStyle::new(),
         );

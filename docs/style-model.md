@@ -65,7 +65,7 @@ those two properties.
 
 Geometry methods exist only on `BlockStyle`, so a geometry property cannot be
 applied to a `TextStyle`. Shared text operations use the same names on both
-types: `foreground`, `add_modifier`, `without_underline`, and their peers.
+types: `foreground`, `add_modifier`, `reset_underline`, and their peers.
 
 The values are chosen so that one appearance has one value: an underline is
 one optional value carrying its shape and its color, not a modifier flag beside
@@ -96,7 +96,7 @@ The public API names the operation a consumer intends:
 let style = TextStyle::new()
     .foreground(Color::CYAN)
     .add_modifier(Modifier::BOLD)
-    .without_foreground()
+    .reset_foreground()
     .remove_modifier(Modifier::BOLD);
 
 let documentation = TextStyle::new().hyperlink("https://example.com/docs");
@@ -116,23 +116,16 @@ let style = BlockStyle::new()
     .max_width(60)
     .overflow(Overflow::ellipsis())
     .align(Align::Center)
-    .align_vertical(VerticalAlign::Center);
+    .vertical_align(VerticalAlign::Center);
 ```
 
-An operation that removes an optional value names the resulting domain state:
-`without_border` removes the glyph set, `auto_width` restores automatic width,
-and `without_max_width` removes that bound. Values whose defaults are ordinary
-arguments use their existing builder: zero padding is
-`padding(Sides::default())`, the default left alignment is
-`align(Align::default())`, and a disabled border edge is re-enabled with
-`border_left(true)`. `GridStyle` similarly restores its defaults with
-`columns([])` and `cell_padding(Sides::default())`.
-
-Complete underline values use `with_underline`; the shorter `underline`,
-`underline_style`, and `underline_color` builders cover ordinary construction.
-Runtime-selected modifier sets use `add_modifier` and `remove_modifier`, which
-accept any `Modifier` set; `bold`, `italic`, and the other common single flags
-are the short construction path.
+Style setters keep the bare property name, resets use `reset_*`, and paired
+getters use `get_*`; read-only accessors are not mechanically prefixed. Complete
+underline values use `underline`, while `underlined`, `underline_style`, and
+`underline_color` shorten common construction. Modifier sets retain explicit
+`add_modifier` and `remove_modifier` operations. The exact naming rule, its
+scope, and the rejected alternatives are recorded in
+[`design/style-api-naming.md`](design/style-api-naming.md).
 
 ## Composition
 
@@ -165,15 +158,15 @@ style. There is no separate patch data type; the reasoning is recorded in
 
 - `width` and `height` take a `Length` — `Cells` or `Fill` — and their absence
   means auto; `min_width`, `min_height`, `max_width`, and `max_height` are
-  bounds in cells, absent by default and removed with `without_min_width`,
-  `without_max_width`, and their height peers, not a zero value. `auto_width`
-  and `auto_height` remove a stated dimension. A dimension is a preferred
+  bounds in cells, absent by default and removed with `reset_min_width`,
+  `reset_max_width`, and their height peers, not a zero value. `reset_width`
+  and `reset_height` remove a stated dimension. A dimension is a preferred
   size, resolved under the available
   area: shorter content is padded out to it, longer content is absorbed by the
   overflow rule, and the frame closes at the resolved size either way.
 - `overflow` is the policy for content that does not fit — `Overflow::Wrap`
   (the default) or `Overflow::Clip` with an application-chosen marker.
-- `align` and `align_vertical` place shorter content inside the resolved box.
+- `align` and `vertical_align` place shorter content inside the resolved box.
 - `border` sets a glyph set; the four `border_*` sides, `true` by default, say
   which edges are drawn; `border_foreground` and `border_background` color
   every enabled edge uniformly.
@@ -199,8 +192,8 @@ for roles whose value is a rectangle, such as `PanelRole` and the cell roles of
 the built-in table component. An application role of either kind builds its
 value with the ordinary consuming builders.
 
-`ComponentTheme::with_text_style` replaces a text role's style,
-`ComponentTheme::with_panel` and `with_panel_focused` replace the panel blocks,
+`ComponentTheme::text_style` replaces a text role's style,
+`ComponentTheme::panel` and `panel_focused` replace the panel blocks,
 and `Theme::components` exposes the stored built-in styles and canonical
 presentations as borrows for consumers that want to avoid the copy. Component
 presentations are not style values: their separate role and naming are defined

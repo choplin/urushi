@@ -447,16 +447,16 @@ pub(crate) mod tests {
         urushi::render_text(&StyledText::new("x", style.clone()), &ansi_settings())
     }
 
-    fn settings(colors: ColorLevel, enabled: bool) -> RenderSettings {
+    fn settings(color_level: ColorLevel, enabled: bool) -> RenderSettings {
         if !enabled {
             return RenderSettings::default();
         }
         RenderSettings::default()
-            .with_colors(colors)
-            .with_modifiers(Modifier::all())
-            .with_underline_styles(UnderlineStyleSet::all())
-            .with_underline_colors(true)
-            .with_hyperlinks(true)
+            .color_level(color_level)
+            .modifiers(Modifier::all())
+            .underline_styles(UnderlineStyleSet::all())
+            .underline_colors(true)
+            .hyperlinks(true)
     }
     pub(crate) fn lay_out(columns: u16, rows: u16, view: &PromptView) -> frame::FramedView {
         frame::frame(&resolve::resolve_prompt(columns, view), rows)
@@ -476,8 +476,8 @@ pub(crate) mod tests {
             border: Color::Rgb(28, 29, 30),
         };
         let components = ComponentTheme::from_tokens(&tokens)
-            .with_text_style(ComponentRole::PromptQuestion, TextStyle::new().bold())
-            .with_text_style(ComponentRole::PromptCursor, TextStyle::new().underline());
+            .text_style(ComponentRole::PromptQuestion, TextStyle::new().bold())
+            .text_style(ComponentRole::PromptCursor, TextStyle::new().underlined());
         Theme::new(tokens, components)
     }
 

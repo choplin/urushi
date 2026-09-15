@@ -44,7 +44,10 @@ pub(crate) fn style_at(view: &View, row: usize, column: usize) -> crate::TextSty
 
 /// Resolves one styled block and renders every output feature.
 pub(crate) fn render_block(style: &crate::BlockStyle, content: &str) -> String {
-    let view = View::block(style.clone(), View::text(content, style.text().clone()));
+    let view = View::block(
+        style.clone(),
+        View::text(content, style.text_style().clone()),
+    );
     let resolved = resolve(&view, Available::NONE).unwrap();
     crate::render(&resolved, &crate::RenderSettings::all())
 }

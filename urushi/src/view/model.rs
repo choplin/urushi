@@ -314,7 +314,7 @@ impl View {
 
 fn assert_title_edge(style: &BlockStyle) {
     assert!(
-        style.border_kind().is_some() && style.is_border_top_enabled(),
+        style.get_border().is_some() && style.get_border_top(),
         "a titled block requires an enabled top border"
     );
 }

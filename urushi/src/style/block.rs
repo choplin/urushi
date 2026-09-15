@@ -23,7 +23,7 @@ use crate::{
 /// ```
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BlockStyle {
-    text: TextStyle,
+    text_style: TextStyle,
     padding: Sides,
     margin: Sides,
     border: Option<Border>,
@@ -31,9 +31,9 @@ pub struct BlockStyle {
     border_right: bool,
     border_bottom: bool,
     border_left: bool,
-    border_text: TextStyle,
-    border_fg: Option<Color>,
-    border_bg: Option<Color>,
+    border_text_style: TextStyle,
+    border_foreground: Option<Color>,
+    border_background: Option<Color>,
     width: Option<Length>,
     height: Option<Length>,
     min_width: Option<u16>,
@@ -48,7 +48,7 @@ pub struct BlockStyle {
 impl Default for BlockStyle {
     fn default() -> Self {
         Self {
-            text: TextStyle::new(),
+            text_style: TextStyle::new(),
             padding: Sides::default(),
             margin: Sides::default(),
             border: None,
@@ -56,9 +56,9 @@ impl Default for BlockStyle {
             border_right: true,
             border_bottom: true,
             border_left: true,
-            border_text: TextStyle::new(),
-            border_fg: None,
-            border_bg: None,
+            border_text_style: TextStyle::new(),
+            border_foreground: None,
+            border_background: None,
             width: None,
             height: None,
             min_width: None,
@@ -78,57 +78,57 @@ impl BlockStyle {
     }
 
     /// Creates a block style filled with `text`.
-    pub fn from_text_style(text: TextStyle) -> Self {
+    pub fn from_text_style(text_style: TextStyle) -> Self {
         Self {
-            text,
+            text_style,
             ..Self::default()
         }
     }
 
-    /// Replaces the style filling this block.
-    pub fn text_style(mut self, text: TextStyle) -> Self {
-        self.text = text;
-        self
-    }
-
     /// Returns the style filling this block.
-    pub const fn text(&self) -> &TextStyle {
-        &self.text
+    pub const fn text_style(&self) -> &TextStyle {
+        &self.text_style
     }
 
     /// Sets the fill (and text) foreground color.
     pub fn foreground(mut self, color: impl Into<Color>) -> Self {
-        self.text = self.text.foreground(color);
+        self.text_style = self.text_style.foreground(color);
         self
     }
 
     /// Returns the fill foreground color to the terminal default.
-    pub fn without_foreground(mut self) -> Self {
-        self.text = self.text.without_foreground();
+    pub fn reset_foreground(mut self) -> Self {
+        self.text_style = self.text_style.reset_foreground();
         self
     }
 
     /// Sets the fill (and text) background color.
     pub fn background(mut self, color: impl Into<Color>) -> Self {
-        self.text = self.text.background(color);
+        self.text_style = self.text_style.background(color);
         self
     }
 
     /// Returns the fill background color to the terminal default.
-    pub fn without_background(mut self) -> Self {
-        self.text = self.text.without_background();
+    pub fn reset_background(mut self) -> Self {
+        self.text_style = self.text_style.reset_background();
         self
     }
 
     /// Adds every flag in `modifier` to the active fill text modifiers.
     pub fn add_modifier(mut self, modifier: Modifier) -> Self {
-        self.text = self.text.add_modifier(modifier);
+        self.text_style = self.text_style.add_modifier(modifier);
         self
     }
 
     /// Removes every flag in `modifier` from the active fill text modifiers.
     pub fn remove_modifier(mut self, modifier: Modifier) -> Self {
-        self.text = self.text.remove_modifier(modifier);
+        self.text_style = self.text_style.remove_modifier(modifier);
+        self
+    }
+
+    /// Restores the active fill text modifiers to their default value.
+    pub fn reset_modifiers(mut self) -> Self {
+        self.text_style = self.text_style.reset_modifiers();
         self
     }
 
@@ -145,46 +145,46 @@ impl BlockStyle {
     }
 
     /// Underlines the fill text with a single line in the foreground color.
-    pub fn underline(mut self) -> Self {
-        self.text = self.text.underline();
+    pub fn underlined(mut self) -> Self {
+        self.text_style = self.text_style.underlined();
         self
     }
 
     /// Sets the shape the fill text's underline is drawn with, adding an
     /// underline in the foreground color when the style has none.
     pub fn underline_style(mut self, style: UnderlineStyle) -> Self {
-        self.text = self.text.underline_style(style);
+        self.text_style = self.text_style.underline_style(style);
         self
     }
 
     /// Sets the color the fill text's underline is drawn in, adding a single
     /// underline when the style has none.
     pub fn underline_color(mut self, color: impl Into<Color>) -> Self {
-        self.text = self.text.underline_color(color);
+        self.text_style = self.text_style.underline_color(color);
         self
     }
 
     /// Replaces the complete fill text underline value.
-    pub fn with_underline(mut self, underline: Underline) -> Self {
-        self.text = self.text.with_underline(underline);
+    pub fn underline(mut self, underline: Underline) -> Self {
+        self.text_style = self.text_style.underline(underline);
         self
     }
 
     /// Removes the fill text underline, including its color.
-    pub fn without_underline(mut self) -> Self {
-        self.text = self.text.without_underline();
+    pub fn reset_underline(mut self) -> Self {
+        self.text_style = self.text_style.reset_underline();
         self
     }
 
     /// Attaches an OSC 8 hyperlink to the fill text.
     pub fn hyperlink(mut self, hyperlink: impl Into<Hyperlink>) -> Self {
-        self.text = self.text.hyperlink(hyperlink);
+        self.text_style = self.text_style.hyperlink(hyperlink);
         self
     }
 
     /// Removes the OSC 8 hyperlink from the fill text.
-    pub fn without_hyperlink(mut self) -> Self {
-        self.text = self.text.without_hyperlink();
+    pub fn reset_hyperlink(mut self) -> Self {
+        self.text_style = self.text_style.reset_hyperlink();
         self
     }
 
@@ -210,9 +210,21 @@ impl BlockStyle {
         self
     }
 
+    /// Restores the block padding to its default value.
+    pub fn reset_padding(mut self) -> Self {
+        self.padding = Sides::default();
+        self
+    }
+
     /// Sets unstyled spacing outside the border.
     pub fn margin(mut self, sides: impl Into<Sides>) -> Self {
         self.margin = sides.into();
+        self
+    }
+
+    /// Restores the block margin to its default value.
+    pub fn reset_margin(mut self) -> Self {
+        self.margin = Sides::default();
         self
     }
 
@@ -226,7 +238,7 @@ impl BlockStyle {
     }
 
     /// Removes the border glyph set. Edge configuration is retained.
-    pub fn without_border(mut self) -> Self {
+    pub fn reset_border(mut self) -> Self {
         self.border = None;
         self
     }
@@ -237,9 +249,21 @@ impl BlockStyle {
         self
     }
 
+    /// Restores top-edge visibility to its default value.
+    pub fn reset_border_top(mut self) -> Self {
+        self.border_top = true;
+        self
+    }
+
     /// Enables or disables the right border edge.
     pub fn border_right(mut self, enabled: bool) -> Self {
         self.border_right = enabled;
+        self
+    }
+
+    /// Restores right-edge visibility to its default value.
+    pub fn reset_border_right(mut self) -> Self {
+        self.border_right = true;
         self
     }
 
@@ -249,9 +273,21 @@ impl BlockStyle {
         self
     }
 
+    /// Restores bottom-edge visibility to its default value.
+    pub fn reset_border_bottom(mut self) -> Self {
+        self.border_bottom = true;
+        self
+    }
+
     /// Enables or disables the left border edge.
     pub fn border_left(mut self, enabled: bool) -> Self {
         self.border_left = enabled;
+        self
+    }
+
+    /// Restores left-edge visibility to its default value.
+    pub fn reset_border_left(mut self) -> Self {
+        self.border_left = true;
         self
     }
 
@@ -260,31 +296,37 @@ impl BlockStyle {
     /// A subsequently applied border foreground or background overrides the
     /// corresponding property in this style.
     pub fn border_text_style(mut self, style: TextStyle) -> Self {
-        self.border_text = style;
+        self.border_text_style = style;
+        self
+    }
+
+    /// Restores the complete logical border-glyph style to its default value.
+    pub fn reset_border_text_style(mut self) -> Self {
+        self.border_text_style = TextStyle::default();
         self
     }
 
     /// Sets the border foreground color.
     pub fn border_foreground(mut self, color: impl Into<Color>) -> Self {
-        self.border_fg = Some(color.into());
+        self.border_foreground = Some(color.into());
         self
     }
 
     /// Removes the border foreground override.
-    pub fn without_border_foreground(mut self) -> Self {
-        self.border_fg = None;
+    pub fn reset_border_foreground(mut self) -> Self {
+        self.border_foreground = None;
         self
     }
 
     /// Sets the border background color.
     pub fn border_background(mut self, color: impl Into<Color>) -> Self {
-        self.border_bg = Some(color.into());
+        self.border_background = Some(color.into());
         self
     }
 
     /// Removes the border background override.
-    pub fn without_border_background(mut self) -> Self {
-        self.border_bg = None;
+    pub fn reset_border_background(mut self) -> Self {
+        self.border_background = None;
         self
     }
 
@@ -300,7 +342,7 @@ impl BlockStyle {
     }
 
     /// Returns the width to auto sizing.
-    pub fn auto_width(mut self) -> Self {
+    pub fn reset_width(mut self) -> Self {
         self.width = None;
         self
     }
@@ -316,7 +358,7 @@ impl BlockStyle {
     }
 
     /// Returns the height to auto sizing.
-    pub fn auto_height(mut self) -> Self {
+    pub fn reset_height(mut self) -> Self {
         self.height = None;
         self
     }
@@ -328,7 +370,7 @@ impl BlockStyle {
     }
 
     /// Removes the minimum width.
-    pub fn without_min_width(mut self) -> Self {
+    pub fn reset_min_width(mut self) -> Self {
         self.min_width = None;
         self
     }
@@ -340,7 +382,7 @@ impl BlockStyle {
     }
 
     /// Removes the minimum height.
-    pub fn without_min_height(mut self) -> Self {
+    pub fn reset_min_height(mut self) -> Self {
         self.min_height = None;
         self
     }
@@ -353,7 +395,7 @@ impl BlockStyle {
     }
 
     /// Removes the maximum width.
-    pub fn without_max_width(mut self) -> Self {
+    pub fn reset_max_width(mut self) -> Self {
         self.max_width = None;
         self
     }
@@ -366,7 +408,7 @@ impl BlockStyle {
     }
 
     /// Removes the maximum height.
-    pub fn without_max_height(mut self) -> Self {
+    pub fn reset_max_height(mut self) -> Self {
         self.max_height = None;
         self
     }
@@ -377,120 +419,138 @@ impl BlockStyle {
         self
     }
 
+    /// Restores the overflow policy to its default value.
+    pub fn reset_overflow(mut self) -> Self {
+        self.overflow = Overflow::default();
+        self
+    }
+
     /// Sets the horizontal alignment of content within the box.
     pub fn align(mut self, align: Align) -> Self {
         self.align = align;
         self
     }
 
+    /// Restores horizontal alignment to its default value.
+    pub fn reset_align(mut self) -> Self {
+        self.align = Align::default();
+        self
+    }
+
     /// Sets the vertical alignment of content within a fixed-height box.
-    pub fn align_vertical(mut self, align: VerticalAlign) -> Self {
+    pub fn vertical_align(mut self, align: VerticalAlign) -> Self {
         self.vertical_align = align;
         self
     }
 
+    /// Restores vertical alignment to its default value.
+    pub fn reset_vertical_align(mut self) -> Self {
+        self.vertical_align = VerticalAlign::default();
+        self
+    }
+
     /// Returns the fill foreground color instruction, if one is set.
-    pub const fn foreground_color(&self) -> Option<Color> {
-        self.text.foreground_color()
+    pub const fn get_foreground(&self) -> Option<Color> {
+        self.text_style.get_foreground()
     }
 
     /// Returns the fill background color instruction, if one is set.
-    pub const fn background_color(&self) -> Option<Color> {
-        self.text.background_color()
+    pub const fn get_background(&self) -> Option<Color> {
+        self.text_style.get_background()
     }
 
     /// Returns the fill text's underline instruction, if one is set.
-    pub const fn underline_value(&self) -> Option<Underline> {
-        self.text.underline_value()
+    pub const fn get_underline(&self) -> Option<Underline> {
+        self.text_style.get_underline()
     }
 
     /// Returns the active fill text modifiers.
-    pub const fn modifiers(&self) -> Modifier {
-        self.text.modifiers()
+    pub const fn get_modifiers(&self) -> Modifier {
+        self.text_style.get_modifiers()
     }
 
     /// Returns the padding applied inside the border.
-    pub const fn padding_sides(&self) -> Sides {
+    pub const fn get_padding(&self) -> Sides {
         self.padding
     }
 
     /// Returns the unstyled margin applied outside the border.
-    pub const fn margin_sides(&self) -> Sides {
+    pub const fn get_margin(&self) -> Sides {
         self.margin
     }
 
     /// Returns the border glyph set, if a border is enabled.
-    pub const fn border_kind(&self) -> Option<Border> {
+    pub const fn get_border(&self) -> Option<Border> {
         self.border
     }
 
     /// Returns whether the top border edge is enabled.
-    pub const fn is_border_top_enabled(&self) -> bool {
+    pub const fn get_border_top(&self) -> bool {
         self.border_top
     }
 
     /// Returns whether the right border edge is enabled.
-    pub const fn is_border_right_enabled(&self) -> bool {
+    pub const fn get_border_right(&self) -> bool {
         self.border_right
     }
 
     /// Returns whether the bottom border edge is enabled.
-    pub const fn is_border_bottom_enabled(&self) -> bool {
+    pub const fn get_border_bottom(&self) -> bool {
         self.border_bottom
     }
 
     /// Returns whether the left border edge is enabled.
-    pub const fn is_border_left_enabled(&self) -> bool {
+    pub const fn get_border_left(&self) -> bool {
         self.border_left
     }
 
     /// Returns the complete logical style used as the border-style base.
-    pub const fn border_text(&self) -> &TextStyle {
-        &self.border_text
+    pub const fn get_border_text_style(&self) -> &TextStyle {
+        &self.border_text_style
     }
 
     /// Returns the border foreground color instruction.
-    pub const fn border_foreground_color(&self) -> Option<Color> {
-        self.border_fg
+    pub const fn get_border_foreground(&self) -> Option<Color> {
+        self.border_foreground
     }
 
     /// Returns the border background color instruction.
-    pub const fn border_background_color(&self) -> Option<Color> {
-        self.border_bg
+    pub const fn get_border_background(&self) -> Option<Color> {
+        self.border_background
     }
 
     /// Returns the box's width, if one is set.
-    pub const fn width_length(&self) -> Option<Length> {
+    pub const fn get_width(&self) -> Option<Length> {
         self.width
     }
 
     /// Returns the box's height, if one is set.
-    pub const fn height_length(&self) -> Option<Length> {
+    pub const fn get_height(&self) -> Option<Length> {
         self.height
     }
 
     /// Returns the box's minimum width, if one is set.
-    pub const fn minimum_width(&self) -> Option<u16> {
+    pub const fn get_min_width(&self) -> Option<u16> {
         self.min_width
     }
 
     /// Returns the box's minimum height, if one is set.
-    pub const fn minimum_height(&self) -> Option<u16> {
+    pub const fn get_min_height(&self) -> Option<u16> {
         self.min_height
     }
 
     /// Returns the box's maximum width, if one is set.
-    pub const fn maximum_width(&self) -> Option<u16> {
+    pub const fn get_max_width(&self) -> Option<u16> {
         self.max_width
     }
 
     /// Returns the box's maximum height, if one is set.
-    pub const fn maximum_height(&self) -> Option<u16> {
+    pub const fn get_max_height(&self) -> Option<u16> {
         self.max_height
     }
 
     /// Returns how content wider than the box is absorbed.
-    pub const fn overflow_policy(&self) -> &Overflow {
+    pub const fn get_overflow(&self) -> &Overflow {
         &self.overflow
     }
 
@@ -498,7 +558,7 @@ impl BlockStyle {
     ///
     /// This is the conversion between the box a dimension measures and the
     /// content area inside it: outer minus `frame_size()` is the content area.
-    /// Margin lies outside the box and keeps [`BlockStyle::margin_sides`].
+    /// Margin lies outside the box and keeps [`BlockStyle::get_margin`].
     pub fn frame_size(&self) -> Size {
         let padding = self.padding;
         let (left, right, top, bottom) = match self.border {
@@ -517,22 +577,22 @@ impl BlockStyle {
     }
 
     /// Returns the horizontal alignment within the content box.
-    pub const fn horizontal_alignment(&self) -> Align {
+    pub const fn get_align(&self) -> Align {
         self.align
     }
 
     /// Returns the vertical alignment within the content box.
-    pub const fn vertical_alignment(&self) -> VerticalAlign {
+    pub const fn get_vertical_align(&self) -> VerticalAlign {
         self.vertical_align
     }
 
     /// The style drawn on this block's border glyphs.
     pub(crate) fn border_style(&self) -> TextStyle {
-        let mut style = self.border_text.clone();
-        if let Some(color) = self.border_fg {
+        let mut style = self.border_text_style.clone();
+        if let Some(color) = self.border_foreground {
             style = style.foreground(color);
         }
-        if let Some(color) = self.border_bg {
+        if let Some(color) = self.border_background {
             style = style.background(color);
         }
         style
@@ -544,13 +604,21 @@ mod tests {
     use super::*;
 
     #[test]
-    fn named_operations_remove_optional_values() {
+    fn reset_builders_restore_every_property_default() {
         let style = BlockStyle::new()
             .foreground(Color::RED)
             .background(Color::BLUE)
+            .add_modifier(Modifier::ITALIC)
             .underline_color(Color::GREEN)
             .hyperlink("https://example.com")
+            .padding(1)
+            .margin(2)
             .border(Border::ROUNDED)
+            .border_top(false)
+            .border_right(false)
+            .border_bottom(false)
+            .border_left(false)
+            .border_text_style(TextStyle::new().bold())
             .border_foreground(Color::CYAN)
             .border_background(Color::BLACK)
             .width(20)
@@ -559,19 +627,33 @@ mod tests {
             .min_height(2)
             .max_width(30)
             .max_height(6)
-            .without_foreground()
-            .without_background()
-            .without_underline()
-            .without_hyperlink()
-            .without_border()
-            .without_border_foreground()
-            .without_border_background()
-            .auto_width()
-            .auto_height()
-            .without_min_width()
-            .without_min_height()
-            .without_max_width()
-            .without_max_height();
+            .overflow(Overflow::ellipsis())
+            .align(Align::Center)
+            .vertical_align(VerticalAlign::Bottom)
+            .reset_foreground()
+            .reset_background()
+            .reset_modifiers()
+            .reset_underline()
+            .reset_hyperlink()
+            .reset_padding()
+            .reset_margin()
+            .reset_border()
+            .reset_border_top()
+            .reset_border_right()
+            .reset_border_bottom()
+            .reset_border_left()
+            .reset_border_text_style()
+            .reset_border_foreground()
+            .reset_border_background()
+            .reset_width()
+            .reset_height()
+            .reset_min_width()
+            .reset_min_height()
+            .reset_max_width()
+            .reset_max_height()
+            .reset_overflow()
+            .reset_align()
+            .reset_vertical_align();
 
         assert_eq!(style, BlockStyle::new());
     }
@@ -583,6 +665,6 @@ mod tests {
             .add_modifier(modifiers)
             .remove_modifier(Modifier::ITALIC);
 
-        assert_eq!(style.modifiers(), Modifier::BOLD);
+        assert_eq!(style.get_modifiers(), Modifier::BOLD);
     }
 }

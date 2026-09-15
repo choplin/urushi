@@ -136,7 +136,7 @@ fn multiline_cjk_and_emoji_keep_segment_styles() {
 #[test]
 fn tabs_expand_before_measurement_wrapping_and_rendering() {
     let style = TextStyle::new().foreground(Color::GREEN);
-    let text = StyledText::new("a\t日\tb", style.clone()).with_tab_policy(TabPolicy::spaces(2));
+    let text = StyledText::new("a\t日\tb", style.clone()).tab_policy(TabPolicy::spaces(2));
     let view = View::block(BlockStyle::new().max_width(5), View::styled_text(text));
     let resolved = resolve_ok(&view, Available::NONE);
 
@@ -169,7 +169,7 @@ fn tabs_expand_before_measurement_wrapping_and_rendering() {
     let fixed = View::block(
         BlockStyle::new().width(8).align(urushi::Align::Right),
         View::styled_text(
-            StyledText::new("a\tb", TextStyle::new()).with_tab_policy(TabPolicy::spaces(2)),
+            StyledText::new("a\tb", TextStyle::new()).tab_policy(TabPolicy::spaces(2)),
         ),
     );
     assert_eq!(
@@ -187,7 +187,7 @@ fn visible_tab_marker_inherits_style_and_pads_to_the_fixed_width() {
         TextSpan::new("right", TextStyle::new()),
     ])
     .unwrap()
-    .with_tab_policy(TabPolicy::with_marker(4, "→").unwrap());
+    .tab_policy(TabPolicy::with_marker(4, "→").unwrap());
     let resolved = resolve_ok(&View::styled_text(text), Available::NONE);
 
     assert_eq!(row_text(&resolved.rows()[0]), "左→   right");
@@ -199,16 +199,16 @@ fn visible_tab_marker_inherits_style_and_pads_to_the_fixed_width() {
 
 #[test]
 fn zero_width_removes_tabs_and_removing_the_property_restores_default_spaces() {
-    let removed = StyledText::new("a\tb", TextStyle::new()).with_tab_policy(TabPolicy::spaces(0));
+    let removed = StyledText::new("a\tb", TextStyle::new()).tab_policy(TabPolicy::spaces(0));
     assert_eq!(
         row_text(&resolve_ok(&View::styled_text(removed), Available::NONE).rows()[0]),
         "ab"
     );
 
     let defaulted = StyledText::new("a\tb", TextStyle::new())
-        .with_tab_policy(TabPolicy::spaces(1))
-        .without_tab_policy();
-    assert_eq!(defaulted.tab_policy(), None);
+        .tab_policy(TabPolicy::spaces(1))
+        .reset_tab_policy();
+    assert_eq!(defaulted.get_tab_policy(), None);
     assert_eq!(
         row_text(&resolve_ok(&View::styled_text(defaulted), Available::NONE).rows()[0]),
         "a    b"
@@ -218,7 +218,7 @@ fn zero_width_removes_tabs_and_removing_the_property_restores_default_spaces() {
 #[test]
 fn direct_text_rendering_preserves_literal_tabs_without_applying_layout_policy() {
     let text = StyledText::new("name\t値", TextStyle::new().bold())
-        .with_tab_policy(TabPolicy::with_marker(4, "[T]").unwrap());
+        .tab_policy(TabPolicy::with_marker(4, "[T]").unwrap());
 
     assert_eq!(
         render_text(&text, &ansi_settings()),

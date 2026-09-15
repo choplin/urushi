@@ -40,7 +40,7 @@ fn main() {
     let panel = theme.block_style(PanelRole::PanelFocused);
     let view = View::block(
         panel.clone(),
-        View::text("保存しました", panel.text().clone()),
+        View::text("保存しました", panel.text_style().clone()),
     );
     urushi::println_view(&view).unwrap();
 }

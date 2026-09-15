@@ -27,7 +27,7 @@ and geometry belongs to only one of them:
 
 ```rust
 /// Everything a terminal can express about a run of text.
-pub struct TextStyle { fg, bg, underline, modifiers }
+pub struct TextStyle { foreground, background, underline, modifiers }
 
 /// A rectangle, and the style filling the geometry it creates.
 pub struct BlockStyle {
@@ -37,7 +37,7 @@ pub struct BlockStyle {
     width, height, min_width, min_height, max_width, max_height,
     overflow,
     align, vertical_align,
-    text: TextStyle,
+    text_style: TextStyle,
 }
 ```
 

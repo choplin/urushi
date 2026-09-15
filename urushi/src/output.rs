@@ -123,7 +123,7 @@ fn output_configuration(
 
 fn apply_no_color(settings: RenderSettings, no_color: bool) -> RenderSettings {
     if no_color {
-        settings.with_colors(ColorLevel::None)
+        settings.color_level(ColorLevel::None)
     } else {
         settings
     }
@@ -148,8 +148,8 @@ mod tests {
             &view,
             Available::columns(3),
             RenderSettings::default()
-                .with_colors(ColorLevel::Ansi16)
-                .with_modifiers(Modifier::BOLD),
+                .color_level(ColorLevel::Ansi16)
+                .modifiers(Modifier::BOLD),
             false,
         )
         .unwrap();
@@ -163,13 +163,13 @@ mod tests {
     #[test]
     fn no_color_narrows_settings_without_disabling_other_features() {
         let settings = RenderSettings::default()
-            .with_colors(ColorLevel::Ansi16)
-            .with_modifiers(Modifier::BOLD);
+            .color_level(ColorLevel::Ansi16)
+            .modifiers(Modifier::BOLD);
 
         let narrowed = apply_no_color(settings, true);
 
-        assert_eq!(narrowed.colors(), ColorLevel::None);
-        assert_eq!(narrowed.modifiers(), Modifier::BOLD);
+        assert_eq!(narrowed.get_color_level(), ColorLevel::None);
+        assert_eq!(narrowed.get_modifiers(), Modifier::BOLD);
         assert_eq!(apply_no_color(settings, false), settings);
     }
 

@@ -60,8 +60,8 @@ pub enum PanelRole {
 impl BlockThemeRole for PanelRole {
     fn resolve(self, theme: &Theme) -> BlockStyle {
         match self {
-            Self::Panel => theme.components().panel().clone(),
-            Self::PanelFocused => theme.components().panel_focused().clone(),
+            Self::Panel => theme.components().get_panel().clone(),
+            Self::PanelFocused => theme.components().get_panel_focused().clone(),
         }
     }
 }
@@ -75,7 +75,7 @@ pub enum ListRole {
 
 impl TextThemeRole for ListRole {
     fn resolve(self, theme: &Theme) -> TextStyle {
-        theme.components().list_style(self).clone()
+        theme.components().get_list_style(self).clone()
     }
 }
 
@@ -89,7 +89,7 @@ pub enum TreeRole {
 
 impl TextThemeRole for TreeRole {
     fn resolve(self, theme: &Theme) -> TextStyle {
-        theme.components().tree_style(self).clone()
+        theme.components().get_tree_style(self).clone()
     }
 }
 
@@ -98,7 +98,7 @@ impl TextThemeRole for TreeRole {
 /// A table cell is a block: it aligns its content inside a column width, which
 /// is geometry. The glyph style of the table's rules is a plain [`TextStyle`],
 /// reachable through
-/// [`TablePresentation::border_glyph_style`](crate::TablePresentation::border_glyph_style).
+/// [`TablePresentation::get_border_style`](crate::TablePresentation::get_border_style).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TableRole {
     Header,
@@ -107,7 +107,7 @@ pub enum TableRole {
 
 impl BlockThemeRole for TableRole {
     fn resolve(self, theme: &Theme) -> BlockStyle {
-        theme.components().table_style(self).clone()
+        theme.components().get_table_style(self).clone()
     }
 }
 
@@ -132,6 +132,6 @@ pub trait BlockThemeRole: Copy {
 
 impl TextThemeRole for ComponentRole {
     fn resolve(self, theme: &Theme) -> TextStyle {
-        theme.components().text_style(self).clone()
+        theme.components().get_text_style(self).clone()
     }
 }

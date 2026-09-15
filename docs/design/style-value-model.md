@@ -17,7 +17,7 @@ stores one `TextStyle` for its fill plus the geometry of a rectangle:
 
 ```rust
 struct BlockStyle {
-    text: TextStyle,
+    text_style: TextStyle,
     padding: Sides,
     margin: Sides,
     border: Option<Border>,
@@ -25,7 +25,7 @@ struct BlockStyle {
     border_right: bool,
     border_bottom: bool,
     border_left: bool,
-    border_text: TextStyle,
+    border_text_style: TextStyle,
     border_foreground: Option<Color>,
     border_background: Option<Color>,
     width: Option<Length>,
@@ -72,17 +72,10 @@ generic `add`, even though both immediately wrote the same field. The enum also
 invited exhaustive matching, so adding a property to a pre-alpha style
 unnecessarily broke generic consumer code.
 
-The public API instead names the consumer's intent. `without_foreground`
-returns a color to the terminal default, `auto_width` removes a stated width,
-and `without_max_width` removes a bound. A value whose default is already an
-ordinary argument uses its existing builder: `padding(Sides::default())`,
-`align(Align::default())`, or `border_left(true)`. This avoids pretending that
-all typed fields share one key-removal operation, especially where "remove the
-border-left property" means enabling the left edge.
-
-Modifiers are the one set-valued field and retain set-valued operations:
-`add_modifier` unions a caller-selected set and `remove_modifier` subtracts
-one. The named single-flag builders remain conveniences over that behavior.
+The public API therefore exposes named operations rather than a second generic
+property vocabulary. Their setter, reset, getter, set-operation, and convenience
+names follow the single rule recorded in
+[`style-api-naming.md`](style-api-naming.md).
 
 ## Why rapid blink is not in the vocabulary
 

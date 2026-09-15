@@ -9,10 +9,10 @@ use super::palette::{quantize_to_ansi16, quantize_to_ansi256};
 ///
 /// The default is deliberately dumb: no escape-sequence-producing feature is
 /// selected. A terminal's detected maximum can be adopted with `From` and then
-/// narrowed with the `with_*` methods.
+/// narrowed with the named setters.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct RenderSettings {
-    colors: ColorLevel,
+    color_level: ColorLevel,
     modifiers: Modifier,
     underline_styles: UnderlineStyleSet,
     underline_colors: bool,
@@ -27,7 +27,7 @@ impl RenderSettings {
     /// detect capabilities and convert them with [`From`].
     pub const fn all() -> Self {
         Self {
-            colors: ColorLevel::TrueColor,
+            color_level: ColorLevel::TrueColor,
             modifiers: Modifier::all(),
             underline_styles: UnderlineStyleSet::all(),
             underline_colors: true,
@@ -35,48 +35,73 @@ impl RenderSettings {
         }
     }
 
-    pub const fn colors(self) -> ColorLevel {
-        self.colors
+    pub const fn get_color_level(self) -> ColorLevel {
+        self.color_level
     }
 
-    pub const fn modifiers(self) -> Modifier {
+    pub const fn get_modifiers(self) -> Modifier {
         self.modifiers
     }
 
-    pub const fn underline_styles(self) -> UnderlineStyleSet {
+    pub const fn get_underline_styles(self) -> UnderlineStyleSet {
         self.underline_styles
     }
 
-    pub const fn underline_colors(self) -> bool {
+    pub const fn get_underline_colors(self) -> bool {
         self.underline_colors
     }
 
-    pub const fn hyperlinks(self) -> bool {
+    pub const fn get_hyperlinks(self) -> bool {
         self.hyperlinks
     }
 
-    pub const fn with_colors(mut self, colors: ColorLevel) -> Self {
-        self.colors = colors;
+    pub const fn color_level(mut self, color_level: ColorLevel) -> Self {
+        self.color_level = color_level;
         self
     }
 
-    pub const fn with_modifiers(mut self, modifiers: Modifier) -> Self {
+    pub const fn modifiers(mut self, modifiers: Modifier) -> Self {
         self.modifiers = modifiers;
         self
     }
 
-    pub const fn with_underline_styles(mut self, styles: UnderlineStyleSet) -> Self {
+    pub const fn underline_styles(mut self, styles: UnderlineStyleSet) -> Self {
         self.underline_styles = styles;
         self
     }
 
-    pub const fn with_underline_colors(mut self, enabled: bool) -> Self {
+    pub const fn underline_colors(mut self, enabled: bool) -> Self {
         self.underline_colors = enabled;
         self
     }
 
-    pub const fn with_hyperlinks(mut self, enabled: bool) -> Self {
+    pub const fn hyperlinks(mut self, enabled: bool) -> Self {
         self.hyperlinks = enabled;
+        self
+    }
+
+    pub const fn reset_color_level(mut self) -> Self {
+        self.color_level = ColorLevel::None;
+        self
+    }
+
+    pub const fn reset_modifiers(mut self) -> Self {
+        self.modifiers = Modifier::empty();
+        self
+    }
+
+    pub const fn reset_underline_styles(mut self) -> Self {
+        self.underline_styles = UnderlineStyleSet::empty();
+        self
+    }
+
+    pub const fn reset_underline_colors(mut self) -> Self {
+        self.underline_colors = false;
+        self
+    }
+
+    pub const fn reset_hyperlinks(mut self) -> Self {
+        self.hyperlinks = false;
         self
     }
 
@@ -86,7 +111,7 @@ impl RenderSettings {
     /// as an interactive prompt renderer. Ordinary static output should call
     /// [`render`](crate::render) for the whole resolved view.
     pub fn resolve_text_style(self, style: &TextStyle) -> TextStyle {
-        let mut resolved = match self.colors {
+        let mut resolved = match self.color_level {
             ColorLevel::None => style.clone().without_colors(),
             ColorLevel::Ansi16 => style.clone().map_colors(quantize_to_ansi16),
             ColorLevel::Ansi256 => style.clone().map_colors(quantize_to_ansi256),
@@ -111,11 +136,11 @@ impl RenderSettings {
 impl From<TerminalCapabilities> for RenderSettings {
     fn from(capabilities: TerminalCapabilities) -> Self {
         Self::default()
-            .with_colors(capabilities.colors())
-            .with_modifiers(modifiers_from(capabilities.attributes()))
-            .with_underline_styles(underline_styles_from(capabilities.underline_styles()))
-            .with_underline_colors(capabilities.underline_colors())
-            .with_hyperlinks(capabilities.hyperlinks())
+            .color_level(capabilities.color_level())
+            .modifiers(modifiers_from(capabilities.attributes()))
+            .underline_styles(underline_styles_from(capabilities.underline_styles()))
+            .underline_colors(capabilities.underline_colors())
+            .hyperlinks(capabilities.hyperlinks())
     }
 }
 
@@ -183,20 +208,20 @@ mod tests {
             .underline_color(Color::BLUE)
             .hyperlink("https://example.com");
         let settings = RenderSettings::default()
-            .with_colors(ColorLevel::Ansi16)
-            .with_modifiers(Modifier::ITALIC)
-            .with_underline_styles(UnderlineStyleSet::CURLY)
-            .with_underline_colors(false)
-            .with_hyperlinks(false);
+            .color_level(ColorLevel::Ansi16)
+            .modifiers(Modifier::ITALIC)
+            .underline_styles(UnderlineStyleSet::CURLY)
+            .underline_colors(false)
+            .hyperlinks(false);
         let resolved = settings.resolve_text_style(&style);
 
-        assert_eq!(resolved.foreground_color(), Some(Color::BRIGHT_RED));
-        assert_eq!(resolved.modifiers(), Modifier::ITALIC);
+        assert_eq!(resolved.get_foreground(), Some(Color::BRIGHT_RED));
+        assert_eq!(resolved.get_modifiers(), Modifier::ITALIC);
         assert_eq!(
-            resolved.underline_value(),
+            resolved.get_underline(),
             Some(Underline::new(UnderlineStyle::Curly))
         );
-        assert_eq!(resolved.hyperlink_value(), None);
+        assert_eq!(resolved.get_hyperlink(), None);
     }
 
     #[test]
@@ -211,5 +236,22 @@ mod tests {
             .hyperlink("https://example.com");
 
         assert_eq!(RenderSettings::all().resolve_text_style(&style), style);
+    }
+
+    #[test]
+    fn reset_builders_restore_every_setting_default() {
+        let settings = RenderSettings::default()
+            .color_level(ColorLevel::TrueColor)
+            .modifiers(Modifier::all())
+            .underline_styles(UnderlineStyleSet::all())
+            .underline_colors(true)
+            .hyperlinks(true)
+            .reset_color_level()
+            .reset_modifiers()
+            .reset_underline_styles()
+            .reset_underline_colors()
+            .reset_hyperlinks();
+
+        assert_eq!(settings, RenderSettings::default());
     }
 }

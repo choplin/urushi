@@ -89,8 +89,8 @@ top edge are defined in [`block-title.md`](block-title.md).
 A minimum states the size below which the application's layout stops making
 sense; the implicit floor below it — the widest grapheme the box cannot
 split — is not exposed as a query. Bounds are absent by default; use
-`without_min_width`, `without_min_height`, `without_max_width`, or
-`without_max_height` to restore that absence, not a zero value.
+`reset_min_width`, `reset_min_height`, `reset_max_width`, or
+`reset_max_height` to restore that absence, not a zero value.
 
 There is no property that sizes the content box from inside a frame. A box
 with no size takes its content's size plus frame; an exact content dimension
@@ -108,7 +108,7 @@ computing an application's layout breakpoints — go through
 `BlockStyle::frame_size`, defined in [`style-model.md`](../style-model.md).
 
 Resolving a dimension can leave spare rows. Shorter content is top-aligned by
-default; `align_vertical` places the padded content block at the top, center,
+default; `vertical_align` places the padded content block at the top, center,
 or bottom of the resolved content box. As in the Lip Gloss layout library,
 centered content puts an odd extra row below the padded block: a three-row gap
 is split as one row above and two below. Background color covers both padding

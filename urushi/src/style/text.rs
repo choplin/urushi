@@ -32,8 +32,8 @@ use crate::{Color, Hyperlink, Modifier, Underline, UnderlineStyle};
 /// ```
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct TextStyle {
-    pub(crate) fg: Option<Color>,
-    pub(crate) bg: Option<Color>,
+    pub(crate) foreground: Option<Color>,
+    pub(crate) background: Option<Color>,
     pub(crate) underline: Option<Underline>,
     pub(crate) hyperlink: Option<Hyperlink>,
     pub(crate) modifiers: Modifier,
@@ -46,25 +46,25 @@ impl TextStyle {
 
     /// Sets the text foreground color.
     pub fn foreground(mut self, color: impl Into<Color>) -> Self {
-        self.fg = Some(color.into());
+        self.foreground = Some(color.into());
         self
     }
 
     /// Returns the text foreground color to the terminal default.
-    pub fn without_foreground(mut self) -> Self {
-        self.fg = None;
+    pub fn reset_foreground(mut self) -> Self {
+        self.foreground = None;
         self
     }
 
     /// Sets the text background color.
     pub fn background(mut self, color: impl Into<Color>) -> Self {
-        self.bg = Some(color.into());
+        self.background = Some(color.into());
         self
     }
 
     /// Returns the text background color to the terminal default.
-    pub fn without_background(mut self) -> Self {
-        self.bg = None;
+    pub fn reset_background(mut self) -> Self {
+        self.background = None;
         self
     }
 
@@ -77,6 +77,12 @@ impl TextStyle {
     /// Removes every flag in `modifier` from the active text modifiers.
     pub fn remove_modifier(mut self, modifier: Modifier) -> Self {
         self.modifiers = self.modifiers.difference(modifier);
+        self
+    }
+
+    /// Removes every active text modifier.
+    pub fn reset_modifiers(mut self) -> Self {
+        self.modifiers = Modifier::empty();
         self
     }
 
@@ -96,8 +102,8 @@ impl TextStyle {
     ///
     /// This sets the complete default underline value; the other two builders
     /// below refine an underline that may already be set.
-    pub fn underline(self) -> Self {
-        self.with_underline(Underline::default())
+    pub fn underlined(self) -> Self {
+        self.underline(Underline::default())
     }
 
     /// Sets the shape the underline is drawn with, adding an underline in the
@@ -107,7 +113,7 @@ impl TextStyle {
             style,
             color: self.underline.and_then(|underline| underline.color),
         };
-        self.with_underline(underline)
+        self.underline(underline)
     }
 
     /// Sets the color the underline is drawn in, adding a single underline when
@@ -116,18 +122,18 @@ impl TextStyle {
     /// A color is only reachable through an underline, so a style cannot carry
     /// an underline color that nothing draws.
     pub fn underline_color(self, color: impl Into<Color>) -> Self {
-        let underline = self.underline.unwrap_or_default().with_color(color.into());
-        self.with_underline(underline)
+        let underline = self.underline.unwrap_or_default().color(color.into());
+        self.underline(underline)
     }
 
     /// Replaces the complete underline value.
-    pub fn with_underline(mut self, underline: Underline) -> Self {
+    pub fn underline(mut self, underline: Underline) -> Self {
         self.underline = Some(underline);
         self
     }
 
     /// Removes the underline, including its color.
-    pub fn without_underline(mut self) -> Self {
+    pub fn reset_underline(mut self) -> Self {
         self.underline = None;
         self
     }
@@ -142,7 +148,7 @@ impl TextStyle {
     }
 
     /// Removes the OSC 8 hyperlink from this text.
-    pub fn without_hyperlink(mut self) -> Self {
+    pub fn reset_hyperlink(mut self) -> Self {
         self.hyperlink = None;
         self
     }
@@ -164,43 +170,43 @@ impl TextStyle {
     }
 
     /// Returns the foreground color instruction, if this style sets one.
-    pub const fn foreground_color(&self) -> Option<Color> {
-        self.fg
+    pub const fn get_foreground(&self) -> Option<Color> {
+        self.foreground
     }
 
     /// Returns the background color instruction, if this style sets one.
-    pub const fn background_color(&self) -> Option<Color> {
-        self.bg
+    pub const fn get_background(&self) -> Option<Color> {
+        self.background
     }
 
     /// Returns the underline instruction, if this style sets one.
-    pub const fn underline_value(&self) -> Option<Underline> {
+    pub const fn get_underline(&self) -> Option<Underline> {
         self.underline
     }
 
     /// Returns the hyperlink attached to this text, if any.
-    pub fn hyperlink_value(&self) -> Option<&Hyperlink> {
+    pub fn get_hyperlink(&self) -> Option<&Hyperlink> {
         self.hyperlink.as_ref()
     }
 
     /// Returns the active text modifiers.
-    pub const fn modifiers(&self) -> Modifier {
+    pub const fn get_modifiers(&self) -> Modifier {
         self.modifiers
     }
 
     pub(crate) fn overlay(mut self, contribution: &Self) -> Self {
         let Self {
-            fg,
-            bg,
+            foreground,
+            background,
             underline,
             hyperlink,
             modifiers,
         } = contribution;
-        if let Some(color) = fg {
-            self.fg = Some(*color);
+        if let Some(color) = foreground {
+            self.foreground = Some(*color);
         }
-        if let Some(color) = bg {
-            self.bg = Some(*color);
+        if let Some(color) = background {
+            self.background = Some(*color);
         }
         if let Some(underline) = underline {
             self.underline = Some(*underline);
@@ -235,7 +241,7 @@ impl TextStyle {
     pub(crate) fn canonical(mut self) -> Self {
         if let Some(underline) = self.underline
             && underline.color.is_some()
-            && underline.color == self.fg
+            && underline.color == self.foreground
         {
             self.underline = Some(Underline {
                 color: None,
@@ -247,8 +253,8 @@ impl TextStyle {
 
     /// Replaces every color property while preserving the rest of the style.
     pub(crate) fn map_colors(mut self, map: impl Fn(Color) -> Color) -> Self {
-        self.fg = self.fg.map(&map);
-        self.bg = self.bg.map(&map);
+        self.foreground = self.foreground.map(&map);
+        self.background = self.background.map(&map);
         self.underline = self.underline.map(|underline| Underline {
             color: underline.color.map(&map),
             ..underline
@@ -261,8 +267,8 @@ impl TextStyle {
     /// An underline survives colorless render settings — it is a shape, not a
     /// color — but its color does not, exactly as a foreground does not.
     pub(crate) fn without_colors(mut self) -> Self {
-        self.fg = None;
-        self.bg = None;
+        self.foreground = None;
+        self.background = None;
         self.underline = self.underline.map(|underline| Underline {
             color: None,
             ..underline
@@ -293,10 +299,10 @@ impl TextStyle {
                 params.push(code.to_string());
             }
         }
-        if let Some(c) = self.fg {
+        if let Some(c) = self.foreground {
             params.push(c.sgr_params(false));
         }
-        if let Some(c) = self.bg {
+        if let Some(c) = self.background {
             params.push(c.sgr_params(true));
         }
         // An absent underline color is the terminal's default, which a style of
@@ -325,23 +331,40 @@ mod tests {
             .add_modifier(Modifier::ITALIC)
             .foreground(Color::CYAN)
             .remove_modifier(Modifier::ITALIC)
-            .without_foreground();
+            .reset_foreground();
 
-        assert_eq!(style.modifiers(), Modifier::BOLD);
-        assert_eq!(style.foreground_color(), None);
+        assert_eq!(style.get_modifiers(), Modifier::BOLD);
+        assert_eq!(style.get_foreground(), None);
+    }
+
+    #[test]
+    fn reset_builders_restore_every_property_default() {
+        let style = TextStyle::new()
+            .foreground(Color::RED)
+            .background(Color::BLUE)
+            .add_modifier(Modifier::BOLD | Modifier::ITALIC)
+            .underline_color(Color::GREEN)
+            .hyperlink("https://example.com")
+            .reset_foreground()
+            .reset_background()
+            .reset_modifiers()
+            .reset_underline()
+            .reset_hyperlink();
+
+        assert_eq!(style, TextStyle::new());
     }
 
     #[test]
     fn hyperlink_is_one_replaceable_and_removable_property() {
         let style = TextStyle::new()
             .hyperlink("https://first.example")
-            .hyperlink(Hyperlink::new("https://second.example").with_parameter("id", "docs"));
+            .hyperlink(Hyperlink::new("https://second.example").parameter("id", "docs"));
 
         assert_eq!(
-            style.hyperlink_value(),
-            Some(&Hyperlink::new("https://second.example").with_parameter("id", "docs"))
+            style.get_hyperlink(),
+            Some(&Hyperlink::new("https://second.example").parameter("id", "docs"))
         );
-        assert_eq!(render_style(&style.without_hyperlink(), "link"), "link");
+        assert_eq!(render_style(&style.reset_hyperlink(), "link"), "link");
     }
 
     #[test]
@@ -349,7 +372,7 @@ mod tests {
         assert_eq!(
             render_style(
                 &TextStyle::new()
-                    .hyperlink(Hyperlink::new("https://example.com").with_parameter("id", "docs"))
+                    .hyperlink(Hyperlink::new("https://example.com").parameter("id", "docs"))
                     .bold(),
                 "link",
             ),
@@ -397,10 +420,10 @@ mod tests {
             .foreground(Color::RED)
             .foreground(Color::BLUE)
             .background(Color::GREEN)
-            .without_background();
+            .reset_background();
 
-        assert_eq!(style.foreground_color(), Some(Color::BLUE));
-        assert_eq!(style.background_color(), None);
+        assert_eq!(style.get_foreground(), Some(Color::BLUE));
+        assert_eq!(style.get_background(), None);
     }
 
     #[test]
@@ -486,7 +509,7 @@ mod tests {
         let style = TextStyle::new().underline_color(Color::RED);
 
         assert_eq!(
-            style.underline_value(),
+            style.get_underline(),
             Some(Underline {
                 style: UnderlineStyle::Single,
                 color: Some(Color::RED),
@@ -496,7 +519,7 @@ mod tests {
             render_style(
                 &TextStyle::new()
                     .underline_color(Color::RED)
-                    .without_underline(),
+                    .reset_underline(),
                 "t",
             ),
             "t"
@@ -514,21 +537,21 @@ mod tests {
             TextStyle::new()
                 .underline_color(Color::GREEN)
                 .underline_style(UnderlineStyle::Dotted)
-                .underline_value(),
+                .get_underline(),
             expected
         );
         assert_eq!(
             TextStyle::new()
                 .underline_style(UnderlineStyle::Dotted)
                 .underline_color(Color::GREEN)
-                .underline_value(),
+                .get_underline(),
             expected
         );
         assert_eq!(
             TextStyle::new()
                 .underline_color(Color::RED)
-                .with_underline(Underline::new(UnderlineStyle::Double))
-                .underline_value(),
+                .underline(Underline::new(UnderlineStyle::Double))
+                .get_underline(),
             Some(Underline::new(UnderlineStyle::Double))
         );
     }

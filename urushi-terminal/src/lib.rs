@@ -113,7 +113,7 @@ impl std::ops::BitOr for UnderlineStyles {
 /// Rendering features conservatively detected for a terminal.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct TerminalCapabilities {
-    colors: ColorLevel,
+    color_level: ColorLevel,
     attributes: TextAttributes,
     underline_styles: UnderlineStyles,
     underline_colors: bool,
@@ -124,7 +124,7 @@ impl TerminalCapabilities {
     /// Returns capabilities with every output feature disabled.
     const fn none() -> Self {
         Self {
-            colors: ColorLevel::None,
+            color_level: ColorLevel::None,
             attributes: TextAttributes::empty(),
             underline_styles: UnderlineStyles::empty(),
             underline_colors: false,
@@ -132,8 +132,8 @@ impl TerminalCapabilities {
         }
     }
 
-    pub const fn colors(self) -> ColorLevel {
-        self.colors
+    pub const fn color_level(self) -> ColorLevel {
+        self.color_level
     }
 
     pub const fn attributes(self) -> TextAttributes {
@@ -152,8 +152,8 @@ impl TerminalCapabilities {
         self.hyperlinks
     }
 
-    const fn with_colors(mut self, colors: ColorLevel) -> Self {
-        self.colors = colors;
+    const fn with_color_level(mut self, color_level: ColorLevel) -> Self {
+        self.color_level = color_level;
         self
     }
 
@@ -281,7 +281,7 @@ fn detect_capabilities(term: Option<&str>, color_term: Option<&str>) -> Terminal
 
     let term = term.map(str::to_ascii_lowercase);
     let term = term.as_deref().unwrap_or_default();
-    let colors = if is_modern_terminal(term)
+    let color_level = if is_modern_terminal(term)
         || color_term.is_some_and(|value| {
             value.eq_ignore_ascii_case("truecolor") || value.eq_ignore_ascii_case("24bit")
         }) {
@@ -295,7 +295,7 @@ fn detect_capabilities(term: Option<&str>, color_term: Option<&str>) -> Terminal
     };
 
     let mut capabilities = TerminalCapabilities::none()
-        .with_colors(colors)
+        .with_color_level(color_level)
         .with_attributes(basic_attributes(term))
         .with_underline_styles(if supports_basic_sgr(term) {
             UnderlineStyles::SINGLE
@@ -392,21 +392,24 @@ mod tests {
     #[test]
     fn color_detection_uses_the_highest_advertised_level() {
         assert_eq!(
-            detect_capabilities(Some("xterm-256color"), None).colors(),
+            detect_capabilities(Some("xterm-256color"), None).color_level(),
             ColorLevel::Ansi256
         );
         assert_eq!(
-            detect_capabilities(Some("xterm-256color"), Some("truecolor")).colors(),
+            detect_capabilities(Some("xterm-256color"), Some("truecolor")).color_level(),
             ColorLevel::TrueColor
         );
-        assert_eq!(detect_capabilities(None, None).colors(), ColorLevel::None);
+        assert_eq!(
+            detect_capabilities(None, None).color_level(),
+            ColorLevel::None
+        );
     }
 
     #[test]
     fn limited_terminals_do_not_advertise_extended_features() {
         let linux = detect_capabilities(Some("linux"), None);
 
-        assert_eq!(linux.colors(), ColorLevel::Ansi16);
+        assert_eq!(linux.color_level(), ColorLevel::Ansi16);
         assert_eq!(
             linux.attributes(),
             TextAttributes::BOLD
@@ -419,7 +422,7 @@ mod tests {
         assert!(!linux.hyperlinks());
 
         let vt100 = detect_capabilities(Some("vt100"), None);
-        assert_eq!(vt100.colors(), ColorLevel::None);
+        assert_eq!(vt100.color_level(), ColorLevel::None);
         assert_eq!(vt100.underline_styles(), UnderlineStyles::SINGLE);
         assert!(!vt100.underline_colors());
         assert!(!vt100.hyperlinks());
@@ -442,7 +445,7 @@ mod tests {
         assert!(!xterm.hyperlinks());
 
         let kitty = detect_capabilities(Some("xterm-kitty"), None);
-        assert_eq!(kitty.colors(), ColorLevel::TrueColor);
+        assert_eq!(kitty.color_level(), ColorLevel::TrueColor);
         assert_eq!(kitty.underline_styles(), UnderlineStyles::all());
         assert!(kitty.underline_colors());
         assert!(kitty.hyperlinks());
@@ -454,7 +457,7 @@ mod tests {
         assert!(!tmux.hyperlinks());
 
         let screen = detect_capabilities(Some("screen.xterm-kitty-256color"), None);
-        assert_eq!(screen.colors(), ColorLevel::Ansi256);
+        assert_eq!(screen.color_level(), ColorLevel::Ansi256);
         assert_eq!(screen.underline_styles(), UnderlineStyles::SINGLE);
         assert!(!screen.underline_colors());
         assert!(!screen.hyperlinks());

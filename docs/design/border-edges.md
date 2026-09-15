@@ -20,7 +20,7 @@ let separator = BlockStyle::new()
     .border_bottom(true)
     .border_left(false);
 
-assert!(separator.is_border_bottom_enabled());
+assert!(separator.get_border_bottom());
 ```
 
 `border(Border)` sets the glyph set and nothing else. Which sides are drawn is
@@ -28,7 +28,7 @@ four independent effective values, all `true` by default, so a style that has
 never touched them draws all four sides once a glyph set is present; calling
 `border` does not rewrite them, and `border_left(false).border(Border::ROUNDED)`
 still has no left edge. Re-enable an edge explicitly with its builder, such as
-`border_left(true)`. `without_border` removes only the glyph set; it does not
+`border_left(true)`. `reset_border` removes only the glyph set; it does not
 rewrite the four side values, which remain inactive until a border is added
 again.
 

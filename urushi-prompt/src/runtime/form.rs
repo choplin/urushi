@@ -544,7 +544,7 @@ impl Form {
 
 fn apply_no_color(settings: RenderSettings, no_color: bool) -> RenderSettings {
     if no_color {
-        settings.with_colors(ColorLevel::None)
+        settings.color_level(ColorLevel::None)
     } else {
         settings
     }
@@ -643,13 +643,13 @@ mod tests {
     #[test]
     fn no_color_only_narrows_the_prompt_color_level() {
         let settings = RenderSettings::default()
-            .with_colors(ColorLevel::TrueColor)
-            .with_hyperlinks(true);
+            .color_level(ColorLevel::TrueColor)
+            .hyperlinks(true);
 
         let narrowed = apply_no_color(settings, true);
 
-        assert_eq!(narrowed.colors(), ColorLevel::None);
-        assert!(narrowed.hyperlinks());
+        assert_eq!(narrowed.get_color_level(), ColorLevel::None);
+        assert!(narrowed.get_hyperlinks());
         assert_eq!(apply_no_color(settings, false), settings);
     }
 

@@ -166,7 +166,7 @@ fn corpus() -> Vec<(&'static str, View, Rect)> {
                 BlockStyle::new().max_width(6),
                 View::styled_text(
                     StyledText::new("a\t日本\tb", TextStyle::new().foreground(Color::GREEN))
-                        .with_tab_policy(TabPolicy::with_marker(3, "→").unwrap()),
+                        .tab_policy(TabPolicy::with_marker(3, "→").unwrap()),
                 ),
             ),
             Rect::new(0, 0, 6, 3),
@@ -233,7 +233,7 @@ fn corpus() -> Vec<(&'static str, View, Rect)> {
                     .width(6)
                     .height(4)
                     .align(Align::Right)
-                    .align_vertical(VerticalAlign::Center),
+                    .vertical_align(VerticalAlign::Center),
                 View::text("x", plain.clone()),
             ),
             Rect::new(0, 0, 6, 4),
@@ -396,17 +396,17 @@ fn render_plain(view: &View, available: Available) -> (String, Size) {
 }
 
 fn panel_view(style: BlockStyle, content: &str) -> View {
-    let text = style.text().clone();
+    let text = style.text_style().clone();
     View::block(style, View::text(content, text))
 }
 
 fn ansi_settings() -> RenderSettings {
     RenderSettings::default()
-        .with_colors(ColorLevel::TrueColor)
-        .with_modifiers(UrushiModifier::all())
-        .with_underline_styles(UnderlineStyleSet::all())
-        .with_underline_colors(true)
-        .with_hyperlinks(true)
+        .color_level(ColorLevel::TrueColor)
+        .modifiers(UrushiModifier::all())
+        .underline_styles(UnderlineStyleSet::all())
+        .underline_colors(true)
+        .hyperlinks(true)
 }
 
 #[test]

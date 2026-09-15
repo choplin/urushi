@@ -221,7 +221,7 @@ type ItemStyler<'a, T> = dyn Fn(&T, ListPosition, ListRole) -> Option<TextStyle>
 #[derive(Clone)]
 pub struct ListItemPresentation<'a, T> {
     format: Arc<ItemFormatter<'a, T>>,
-    style: Arc<ItemStyler<'a, T>>,
+    item_style: Arc<ItemStyler<'a, T>>,
 }
 
 impl<T> fmt::Debug for ListItemPresentation<'_, T> {
@@ -238,7 +238,7 @@ impl<'a, T: 'a> ListItemPresentation<'a, T> {
     {
         Self {
             format: Arc::new(format),
-            style: Arc::new(no_item_style::<T>),
+            item_style: Arc::new(no_item_style::<T>),
         }
     }
 
@@ -247,11 +247,11 @@ impl<'a, T: 'a> ListItemPresentation<'a, T> {
     /// `None` keeps the [`ListPresentation`] role default. `Some(style)`
     /// replaces that complete style rather than layering over it.
     #[must_use]
-    pub fn item_style<S>(mut self, style: S) -> Self
+    pub fn item_style<S>(mut self, item_style: S) -> Self
     where
         S: Fn(&T, ListPosition, ListRole) -> Option<TextStyle> + 'a,
     {
-        self.style = Arc::new(style);
+        self.item_style = Arc::new(item_style);
         self
     }
 }
@@ -284,7 +284,7 @@ fn no_item_style<T>(_: &T, _: ListPosition, _: ListRole) -> Option<TextStyle> {
 /// values need List-specific formatting or per-item role-style overrides.
 #[derive(Debug, Clone)]
 pub struct ListPresentation {
-    item: TextStyle,
+    item_style: TextStyle,
     enumerator_style: TextStyle,
     enumerator: ListEnumerator,
     nesting_indent: usize,
@@ -292,7 +292,7 @@ pub struct ListPresentation {
 
 impl PartialEq for ListPresentation {
     fn eq(&self, other: &Self) -> bool {
-        self.item == other.item
+        self.item_style == other.item_style
             && self.enumerator_style == other.enumerator_style
             && std::ptr::fn_addr_eq(self.enumerator, other.enumerator)
             && self.nesting_indent == other.nesting_indent
@@ -301,10 +301,10 @@ impl PartialEq for ListPresentation {
 
 impl ListPresentation {
     /// Creates the canonical list presentation with bullet markers.
-    pub fn new(item: TextStyle, enumerator: TextStyle) -> Self {
+    pub fn new(item_style: TextStyle, enumerator_style: TextStyle) -> Self {
         Self {
-            item,
-            enumerator_style: enumerator,
+            item_style,
+            enumerator_style,
             enumerator: bullet_enumerator,
             nesting_indent: 2,
         }
@@ -313,18 +313,18 @@ impl ListPresentation {
 
 impl ListPresentation {
     /// Returns the style assigned to one logical list role.
-    pub fn style(&self, role: ListRole) -> &TextStyle {
+    pub fn get_style(&self, role: ListRole) -> &TextStyle {
         match role {
-            ListRole::Item => &self.item,
+            ListRole::Item => &self.item_style,
             ListRole::Enumerator => &self.enumerator_style,
         }
     }
 
     /// Replaces the style assigned to one logical list role.
     #[must_use]
-    pub fn with_style(mut self, role: ListRole, style: TextStyle) -> Self {
+    pub fn style(mut self, role: ListRole, style: TextStyle) -> Self {
         match role {
-            ListRole::Item => self.item = style,
+            ListRole::Item => self.item_style = style,
             ListRole::Enumerator => self.enumerator_style = style,
         }
         self
@@ -333,13 +333,13 @@ impl ListPresentation {
     /// Replaces the item style.
     #[must_use]
     pub fn item_style(self, style: TextStyle) -> Self {
-        self.with_style(ListRole::Item, style)
+        self.style(ListRole::Item, style)
     }
 
     /// Replaces the marker style.
     #[must_use]
     pub fn enumerator_style(self, style: TextStyle) -> Self {
-        self.with_style(ListRole::Enumerator, style)
+        self.style(ListRole::Enumerator, style)
     }
 
     /// Replaces the item-marker policy.
@@ -366,7 +366,7 @@ impl ListPresentation {
 
     /// Composes list data with typed item formatting and style overrides.
     pub fn compose_with<T>(&self, list: &List<T>, items: &ListItemPresentation<'_, T>) -> View {
-        self.compose_using(list, &*items.format, &*items.style)
+        self.compose_using(list, &*items.format, &*items.item_style)
     }
 
     fn compose_using<T, F, S>(&self, list: &List<T>, format: &F, style: &S) -> View
@@ -437,7 +437,7 @@ fn bind_items<T, F, S>(
             value: format(&item.value, position),
             marker,
             item_style: style(&item.value, position, ListRole::Item)
-                .unwrap_or_else(|| presentation.item.clone()),
+                .unwrap_or_else(|| presentation.item_style.clone()),
             enumerator_style: style(&item.value, position, ListRole::Enumerator)
                 .unwrap_or_else(|| presentation.enumerator_style.clone()),
             track_x,

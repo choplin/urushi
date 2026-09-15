@@ -160,7 +160,7 @@ fn a_row_is_as_tall_as_its_tallest_cell() {
 fn a_cell_shorter_or_narrower_than_its_place_uses_its_own_alignment() {
     let cell = |align, vertical| {
         View::block(
-            BlockStyle::new().align(align).align_vertical(vertical),
+            BlockStyle::new().align(align).vertical_align(vertical),
             text("x"),
         )
     };

@@ -75,15 +75,19 @@ impl Color {
 
     /// Returns the SGR parameter string selecting this color for the
     /// foreground or background layer (e.g. `"38;5;212"`).
-    pub(crate) fn sgr_params(self, bg: bool) -> String {
+    pub(crate) fn sgr_params(self, background: bool) -> String {
         match self {
-            Self::Ansi(n) if n < 8 => (u16::from(n) + if bg { 40 } else { 30 }).to_string(),
-            Self::Ansi(n) if n < 16 => (u16::from(n - 8) + if bg { 100 } else { 90 }).to_string(),
+            Self::Ansi(n) if n < 8 => (u16::from(n) + if background { 40 } else { 30 }).to_string(),
+            Self::Ansi(n) if n < 16 => {
+                (u16::from(n - 8) + if background { 100 } else { 90 }).to_string()
+            }
             // Out-of-range Ansi values fall back to the indexed form.
             Self::Ansi(n) | Self::Ansi256(n) => {
-                format!("{};5;{n}", if bg { 48 } else { 38 })
+                format!("{};5;{n}", if background { 48 } else { 38 })
             }
-            Self::Rgb(r, g, b) => format!("{};2;{r};{g};{b}", if bg { 48 } else { 38 }),
+            Self::Rgb(r, g, b) => {
+                format!("{};2;{r};{g};{b}", if background { 48 } else { 38 })
+            }
         }
     }
 

@@ -20,14 +20,14 @@ struct Underline {
 no `Modifier::UNDERLINED` flag and no free-standing underline color property.
 
 ```rust
-TextStyle::new().underline();                              // single, foreground color
+TextStyle::new().underlined();                              // single, foreground color
 TextStyle::new().underline_style(UnderlineStyle::Curly);   // keeps any color already set
 TextStyle::new().underline_color(Color::RED);              // adds a single underline if absent
-TextStyle::new().with_underline(underline);                 // replaces the complete value
+TextStyle::new().underline(underline);                      // replaces the complete value
 ```
 
-No builder produces a color nothing draws. `underline_value` returns the whole
-`Option<Underline>`, and `without_underline` removes the underline and its color
+No builder produces a color nothing draws. `get_underline` returns the whole
+`Option<Underline>`, and `reset_underline` removes the underline and its color
 together. `BlockStyle` mirrors all of these for its fill text.
 
 At the output boundary:

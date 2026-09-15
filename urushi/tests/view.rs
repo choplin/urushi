@@ -13,11 +13,11 @@ fn resolve_ok(view: &View, available: Available) -> ResolvedView {
 
 fn ansi_settings() -> RenderSettings {
     RenderSettings::default()
-        .with_colors(ColorLevel::TrueColor)
-        .with_modifiers(Modifier::all())
-        .with_underline_styles(UnderlineStyleSet::all())
-        .with_underline_colors(true)
-        .with_hyperlinks(true)
+        .color_level(ColorLevel::TrueColor)
+        .modifiers(Modifier::all())
+        .underline_styles(UnderlineStyleSet::all())
+        .underline_colors(true)
+        .hyperlinks(true)
 }
 
 fn plain_rows(view: &View) -> Vec<String> {
@@ -132,7 +132,7 @@ fn the_two_center_biases_are_separate_rules() {
     let block = View::block(
         BlockStyle::new()
             .height(4)
-            .align_vertical(VerticalAlign::Center),
+            .vertical_align(VerticalAlign::Center),
         View::text("s", TextStyle::new()),
     );
     assert_eq!(

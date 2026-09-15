@@ -74,7 +74,7 @@ fn compose_cell(
         Composition::Overlay => overlay_cell(existing, contribution),
         Composition::Custom(compose) => compose(&existing, contribution),
     };
-    let write_x = if contribution.symbol_value().is_none() {
+    let write_x = if contribution.get_symbol().is_none() {
         owner
     } else {
         x
@@ -84,25 +84,25 @@ fn compose_cell(
 
 fn replace_cell(contribution: &CellContribution) -> CanvasCell {
     CanvasCell::new(
-        Grapheme::new(contribution.symbol_value().unwrap_or(" ")),
-        contribution.style_value().cloned().unwrap_or_default(),
+        Grapheme::new(contribution.get_symbol().unwrap_or(" ")),
+        contribution.get_style().cloned().unwrap_or_default(),
     )
 }
 
 fn overlay_cell(existing: CanvasCell, contribution: &CellContribution) -> CanvasCell {
     let style = contribution
-        .style_value()
-        .map_or(existing.style().clone(), |style| {
-            existing.style().clone().overlay(style)
+        .get_style()
+        .map_or(existing.get_style().clone(), |style| {
+            existing.get_style().clone().overlay(style)
         });
-    let Some(symbol) = contribution.symbol_value() else {
-        return existing.with_style(style);
+    let Some(symbol) = contribution.get_symbol() else {
+        return existing.style(style);
     };
     CanvasCell::new(Grapheme::new(symbol), style)
 }
 
 fn write_cell(slots: &mut [Vec<Slot>], y: usize, owner: usize, write_x: usize, cell: CanvasCell) {
-    let styled = StyledGrapheme::new(Grapheme::new(cell.symbol()), cell.style().clone());
+    let styled = StyledGrapheme::new(Grapheme::new(cell.get_symbol()), cell.get_style().clone());
     let width = styled.width();
     if width == 0
         || write_x

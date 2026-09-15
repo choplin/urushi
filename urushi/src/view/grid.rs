@@ -42,8 +42,8 @@ pub(super) fn cell(rows: &[Vec<View>], row: usize, column: usize) -> &View {
 /// padding that cell carries — so a cell replacing it costs the grid nothing.
 pub(super) fn cell_padding(style: &GridStyle, cell: &View) -> Sides {
     match box_style(cell) {
-        Some(block) if block.padding_sides() != Sides::default() => Sides::default(),
-        _ => style.cell_padding_sides(),
+        Some(block) if block.get_padding() != Sides::default() => Sides::default(),
+        _ => style.get_cell_padding(),
     }
 }
 
@@ -54,7 +54,7 @@ pub(super) fn cell_padding(style: &GridStyle, cell: &View) -> Sides {
 /// box states no alignment, and takes the default.
 pub(super) fn cell_alignment(cell: &View) -> (Align, VerticalAlign) {
     match box_style(cell) {
-        Some(block) => (block.horizontal_alignment(), block.vertical_alignment()),
+        Some(block) => (block.get_align(), block.get_vertical_align()),
         None => (Align::default(), VerticalAlign::default()),
     }
 }
@@ -126,7 +126,7 @@ mod tests {
         let aligned = View::block(
             BlockStyle::new()
                 .align(Align::Right)
-                .align_vertical(VerticalAlign::Bottom),
+                .vertical_align(VerticalAlign::Bottom),
             text("a"),
         );
 
@@ -144,7 +144,7 @@ mod tests {
     fn a_stated_column_length_is_read_by_index() {
         let style = GridStyle::new().columns([Some(Length::fill(2))]);
 
-        assert_eq!(style.column_length(0), Some(Length::fill(2)));
-        assert_eq!(style.column_length(1), None);
+        assert_eq!(style.get_column(0), Some(Length::fill(2)));
+        assert_eq!(style.get_column(1), None);
     }
 }

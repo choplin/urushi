@@ -39,7 +39,7 @@ Environment preferences such as `NO_COLOR` are not capabilities.
 terminal capabilities, but it is a separate type because a caller may narrow a
 detected maximum. `RenderSettings::default()` selects no escape-sequence
 features. `RenderSettings::from(info.capabilities())` supports the common case,
-and consuming `with_*` methods let the caller narrow individual axes.
+and consuming property setters let the caller narrow individual axes.
 
 Layout and rendering are pure, stateless functions:
 

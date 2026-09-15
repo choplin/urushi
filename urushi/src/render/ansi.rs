@@ -49,7 +49,7 @@ fn serialize_run(text: &str, style: &TextStyle) -> String {
         return String::new();
     }
     let sgr = style.sgr_prefix();
-    let Some(hyperlink) = style.hyperlink_value() else {
+    let Some(hyperlink) = style.get_hyperlink() else {
         if sgr.is_empty() {
             return text.to_owned();
         }
@@ -98,12 +98,12 @@ mod tests {
     #[test]
     fn hyperlinks_are_selected_independently_from_sgr_features() {
         let style = TextStyle::new()
-            .hyperlink(Hyperlink::new("https://example.com").with_parameter("id", "docs"));
+            .hyperlink(Hyperlink::new("https://example.com").parameter("id", "docs"));
         let resolved = resolve(&View::text("link", style), Available::NONE).unwrap();
 
         assert_eq!(render(&resolved, &RenderSettings::default()), "link");
         assert_eq!(
-            render(&resolved, &RenderSettings::default().with_hyperlinks(true)),
+            render(&resolved, &RenderSettings::default().hyperlinks(true)),
             "\x1b]8;id=docs;https://example.com\x1b\\link\x1b]8;;\x1b\\"
         );
     }
@@ -116,8 +116,8 @@ mod tests {
         ])
         .unwrap();
         let settings = RenderSettings::default()
-            .with_colors(crate::ColorLevel::Ansi16)
-            .with_modifiers(crate::Modifier::BOLD);
+            .color_level(crate::ColorLevel::Ansi16)
+            .modifiers(crate::Modifier::BOLD);
 
         assert_eq!(
             render_text(&text, &settings),

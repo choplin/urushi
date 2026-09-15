@@ -10,7 +10,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     std::println!("plain CLI:");
     urushi::println_view(&View::block(
         panel.clone(),
-        View::text("保存しました", panel.text().clone()),
+        View::text("保存しました", panel.text_style().clone()),
     ))?;
 
     let backend = TestBackend::new(16, 3);

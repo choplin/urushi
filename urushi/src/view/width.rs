@@ -107,7 +107,7 @@ fn metrics(view: &View) -> Metrics {
         View::Block(style, title, child) | View::AnchorBlock(_, style, title, child) => {
             let inner = metrics(child);
             let frame = style.frame_size();
-            let margin = style.margin_sides();
+            let margin = style.get_margin();
             let intrinsic = inner
                 .natural
                 .max(title_width(style, title.as_ref()).saturating_sub(frame.width()));
@@ -116,12 +116,12 @@ fn metrics(view: &View) -> Metrics {
             let natural = width_axis(style, frame.width()).used(None, intrinsic, inner.floor)
                 + horizontal(margin);
             let floor = style
-                .minimum_width()
+                .get_min_width()
                 .map_or(0, usize::from)
                 .max(frame.width() + inner.floor)
                 + horizontal(margin);
             let height_floor = style
-                .minimum_height()
+                .get_min_height()
                 .map_or(0, usize::from)
                 .max(frame.height() + inner.height_floor)
                 + vertical(margin);
@@ -129,13 +129,13 @@ fn metrics(view: &View) -> Metrics {
                 natural,
                 floor,
                 height_floor,
-                fills: match style.width_length() {
+                fills: match style.get_width() {
                     Some(Length::Fill(_)) => true,
                     Some(Length::Cells(_)) => false,
                     None => inner.fills,
                 },
-                width_kind: kind_of(style.width_length()),
-                height_kind: kind_of(style.height_length()),
+                width_kind: kind_of(style.get_width()),
+                height_kind: kind_of(style.get_height()),
                 children: vec![inner],
             }
         }
@@ -188,7 +188,7 @@ fn metrics(view: &View) -> Metrics {
                     .sum(),
                 fills: cells.iter().any(|cell| cell.fills)
                     || (0..columns)
-                        .any(|column| matches!(style.column_length(column), Some(Length::Fill(_)))),
+                        .any(|column| matches!(style.get_column(column), Some(Length::Fill(_)))),
                 width_kind: Kind::Auto,
                 height_kind: Kind::Auto,
                 children: cells,
@@ -219,7 +219,7 @@ fn column_claims(
                 demand = demand.max(cell.natural + padding);
                 floor = floor.max(cell.floor + padding);
             }
-            let length = style.column_length(column);
+            let length = style.get_column(column);
             Claim {
                 kind: kind_of(length),
                 // A stated size is a demand of its own, and the floor still
@@ -398,8 +398,8 @@ fn place<'a>(
         View::Block(style, title, child) | View::AnchorBlock(_, style, title, child) => {
             let inner = &metrics.children[0];
             let border = border_extent(style);
-            let mut padding = style.padding_sides();
-            let mut margin = style.margin_sides();
+            let mut padding = style.get_padding();
+            let mut margin = style.get_margin();
 
             // 1. Degrade the frame to the area — the horizontal half of it.
             //    The axes degrade independently, so the height phase decides
@@ -449,9 +449,9 @@ fn place<'a>(
                 Some(content_width),
                 bounded || matches!(axis.length, Some(Length::Cells(_))) || axis.max.is_some(),
                 Some(TextFit {
-                    align: style.horizontal_alignment(),
-                    fill: style.text(),
-                    overflow: style.overflow_policy(),
+                    align: style.get_align(),
+                    fill: style.text_style(),
+                    overflow: style.get_overflow(),
                 }),
             );
             debug_assert!(
@@ -461,7 +461,7 @@ fn place<'a>(
                 child.width
             );
             let height_floor = style
-                .minimum_height()
+                .get_min_height()
                 .map_or(0, usize::from)
                 .max(border.height() + vertical(padding) + child.height_floor)
                 + vertical(margin);
@@ -619,10 +619,10 @@ fn title_width(style: &BlockStyle, title: Option<&BlockTitle>) -> usize {
         return 0;
     };
     debug_assert!(
-        style.border_kind().is_some() && style.is_border_top_enabled(),
+        style.get_border().is_some() && style.get_border_top(),
         "a titled block requires an enabled top border"
     );
-    if style.border_kind().is_none() || !style.is_border_top_enabled() {
+    if style.get_border().is_none() || !style.get_border_top() {
         return 0;
     }
 

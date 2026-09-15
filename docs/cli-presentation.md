@@ -72,10 +72,11 @@ let caution = cli.warning(
 );
 ```
 
-An application may replace one `CliRole` with `with_style`, or replace a whole
-canonical presentation with `with_summary` or `with_warning`. It may also hold
-a presentation directly and call `compose`. These paths change presentation
-policy; they do not change the semantic data or bypass the core `View` model.
+An application may replace one `CliRole` with `style`. When it needs a different
+presentation policy, it clones the canonical presentation or constructs one
+directly and calls `compose`; `CliTheme` does not accept that presentation back
+as a replacement. These paths change presentation policy without changing the
+semantic data or bypassing the core `View` model.
 
 ## Ownership boundary
 

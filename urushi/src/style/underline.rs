@@ -90,8 +90,8 @@ impl UnderlineStyle {
 /// is in `docs/design/underline.md`.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
 pub struct Underline {
-    pub style: UnderlineStyle,
-    pub color: Option<Color>,
+    pub(crate) style: UnderlineStyle,
+    pub(crate) color: Option<Color>,
 }
 
 impl Underline {
@@ -100,10 +100,38 @@ impl Underline {
         Self { style, color: None }
     }
 
+    /// Sets the shape this underline is drawn with.
+    pub const fn style(mut self, style: UnderlineStyle) -> Self {
+        self.style = style;
+        self
+    }
+
+    /// Restores the underline shape to its default value.
+    pub const fn reset_style(mut self) -> Self {
+        self.style = UnderlineStyle::Single;
+        self
+    }
+
     /// Returns this underline drawn in `color`.
-    pub fn with_color(mut self, color: impl Into<Color>) -> Self {
+    pub fn color(mut self, color: impl Into<Color>) -> Self {
         self.color = Some(color.into());
         self
+    }
+
+    /// Restores the underline color to the foreground color.
+    pub const fn reset_color(mut self) -> Self {
+        self.color = None;
+        self
+    }
+
+    /// Returns the shape this underline is drawn with.
+    pub const fn get_style(self) -> UnderlineStyle {
+        self.style
+    }
+
+    /// Returns the explicit underline color, if one is set.
+    pub const fn get_color(self) -> Option<Color> {
+        self.color
     }
 }
 
@@ -118,7 +146,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn defaults_to_a_single_underline_in_the_foreground_color() {
+    fn defaults_to_a_single_underline_in_the_foreground() {
         assert_eq!(
             Underline::default(),
             Underline {
@@ -127,11 +155,22 @@ mod tests {
             }
         );
         assert_eq!(
-            Underline::new(UnderlineStyle::Curly).with_color(Color::RED),
+            Underline::new(UnderlineStyle::Curly).color(Color::RED),
             Underline {
                 style: UnderlineStyle::Curly,
                 color: Some(Color::RED),
             }
+        );
+    }
+
+    #[test]
+    fn reset_builders_restore_every_property_default() {
+        assert_eq!(
+            Underline::new(UnderlineStyle::Curly)
+                .color(Color::RED)
+                .reset_style()
+                .reset_color(),
+            Underline::default()
         );
     }
 

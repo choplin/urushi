@@ -68,10 +68,10 @@ fn viewport_sizing_is_an_explicit_comparable_canvas_value() {
 struct Layered;
 
 fn union(existing: &CanvasCell, contribution: &CellContribution) -> CanvasCell {
-    if existing.symbol() == "a" && contribution.symbol_value() == Some("b") {
-        existing.clone().with_symbol(Grapheme::new("c"))
-    } else if let Some(symbol) = contribution.symbol_value() {
-        existing.clone().with_symbol(Grapheme::new(symbol))
+    if existing.get_symbol() == "a" && contribution.get_symbol() == Some("b") {
+        existing.clone().symbol(Grapheme::new("c"))
+    } else if let Some(symbol) = contribution.get_symbol() {
+        existing.clone().symbol(Grapheme::new(symbol))
     } else {
         existing.clone()
     }
@@ -141,8 +141,8 @@ fn a_full_row_text_replace_clears_prior_wide_content() {
         "abcd"
     );
     assert!(resolved.rows()[0].iter().all(|cell| {
-        cell.style().foreground_color() == Some(urushi::Color::RED)
-            && cell.style().modifiers().is_empty()
+        cell.style().get_foreground() == Some(urushi::Color::RED)
+            && cell.style().get_modifiers().is_empty()
     }));
 }
 
@@ -462,7 +462,7 @@ fn style_only_overlay_on_a_continuation_updates_the_wide_grapheme_in_place() {
     assert!(
         resolved.rows()[0][0]
             .style()
-            .modifiers()
+            .get_modifiers()
             .contains(urushi::Modifier::BOLD)
     );
 }
@@ -974,18 +974,15 @@ fn line_network_overlays_every_text_style_property() {
     let crossing = &resolved.rows()[1][1];
 
     assert_eq!(crossing.symbol(), "┼");
+    assert_eq!(crossing.style().get_background(), Some(urushi::Color::BLUE));
     assert_eq!(
-        crossing.style().background_color(),
-        Some(urushi::Color::BLUE)
-    );
-    assert_eq!(
-        crossing.style().hyperlink_value().unwrap().uri(),
+        crossing.style().get_hyperlink().unwrap().uri(),
         "https://example.com/path"
     );
     assert!(
         crossing
             .style()
-            .modifiers()
+            .get_modifiers()
             .contains(urushi::Modifier::BOLD)
     );
 }
@@ -994,7 +991,7 @@ fn line_network_overlays_every_text_style_property() {
 struct RepresentativeGraph;
 
 fn mark(existing: &CanvasCell, _: &CellContribution) -> CanvasCell {
-    existing.clone().with_symbol(Grapheme::new("#"))
+    existing.clone().symbol(Grapheme::new("#"))
 }
 
 impl CanvasItem for RepresentativeGraph {
