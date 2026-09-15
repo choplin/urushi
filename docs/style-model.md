@@ -15,11 +15,10 @@ underline ([`design/underline.md`](design/underline.md)), and border edges
 ([`design/border-edges.md`](design/border-edges.md)) — linked from the sections
 that summarize them.
 
-The value model governs both types identically: the same immutable builders,
-the same closed vocabulary, the same generic `add` and `remove`. Statements
-below written about `TextStyle` hold for `BlockStyle` too; sections that
-concern geometry apply to `BlockStyle` alone, since `TextStyle` has no
-geometry to describe.
+The value model governs both types identically: immutable named builders over
+typed effective values. Statements below written about `TextStyle` hold for
+`BlockStyle` too; sections that concern geometry apply to `BlockStyle` alone,
+since `TextStyle` has no geometry to describe.
 
 ## Immutability and replacement
 
@@ -41,41 +40,38 @@ individually.
 ```rust
 let style = TextStyle::new()
     .foreground(Color::CYAN)
-    .add(Modifier::BOLD | Modifier::ITALIC)
-    .remove(Modifier::ITALIC);
+    .add_modifier(Modifier::BOLD | Modifier::ITALIC)
+    .remove_modifier(Modifier::ITALIC);
 ```
 
 `TextStyle::new()` and `TextStyle::default()` are empty styles.
 
-Removing a property restores its ordinary default in the resulting value:
-no color, no border, zero spacing, automatic width and height, no minimum or
-maximum bounds, wrap overflow, left horizontal alignment, or top vertical
-alignment.
+Named operations restore ordinary defaults in the resulting value: no color,
+no border, zero spacing, automatic width and height, no minimum or maximum
+bounds, wrap overflow, left horizontal alignment, or top vertical alignment.
 
-## Closed property vocabulary
+## Typed property vocabulary
 
-The generic API uses one closed enum pair per type: a `…Property` carrying a
-value, and a `…PropertyKey` naming one without it. The text vocabulary is
-foreground, background, underline, hyperlink, and modifier. A hyperlink is one
-URI plus zero or more OSC 8 parameters; construction percent-encodes control
-and delimiter characters so caller input cannot escape its field. The block
-vocabulary is the geometry — padding, margin, the border glyph set, its four
-edge switches, complete logical text style, and color overrides, the six sizing
-properties, overflow, and the two alignments — plus, through a `Text` variant,
-every text property of the style filling it. The complete border style lets a
-semantic rail retain modifiers as well as colors; explicit border foreground
-and background values override those two properties.
+The text vocabulary is foreground, background, underline, hyperlink, and
+modifier. A hyperlink is one URI plus zero or more OSC 8 parameters;
+construction percent-encodes control and delimiter characters so caller input
+cannot escape its field. The block vocabulary is the geometry — padding,
+margin, the border glyph set, its four edge switches, complete logical text
+style, and color overrides, the six sizing properties, overflow, and the two
+alignments — together with named access to the text properties of the style
+filling it. The complete border style lets a semantic rail retain modifiers as
+well as colors; explicit border foreground and background values override
+those two properties.
 
-`TextStyleProperty` converts into `BlockStyleProperty`, so `BlockStyle::add`
-accepts a text property directly, and `BlockStyle::foreground` reads the same
-as `TextStyle::foreground`. There is no conversion in the other direction:
-geometry cannot reach a `TextStyle`.
+Geometry methods exist only on `BlockStyle`, so a geometry property cannot be
+applied to a `TextStyle`. Shared text operations use the same names on both
+types: `foreground`, `add_modifier`, `without_underline`, and their peers.
 
-The vocabulary is chosen so that one appearance has one value: an underline is
+The values are chosen so that one appearance has one value: an underline is
 one optional value carrying its shape and its color, not a modifier flag beside
 a color property, and Select Graphic Rendition (SGR) parameter 6 (rapid blink)
-is deliberately absent. The full enum listing, and why the vocabulary is
-closed and shaped this way, are recorded in
+is deliberately absent. The full value shape and the precise rules for its
+public operations are recorded in
 [`design/style-value-model.md`](design/style-value-model.md); the underline
 value and its builders in [`design/underline.md`](design/underline.md).
 
@@ -94,20 +90,19 @@ the reasoning are recorded in
 
 ## Public API
 
-`add` and `remove` are the complete generic operations:
+The public API names the operation a consumer intends:
 
 ```rust
 let style = TextStyle::new()
-    .add(TextStyleProperty::Foreground(Color::CYAN))
-    .add(Modifier::BOLD)
-    .remove(TextStylePropertyKey::Foreground)
-    .remove(Modifier::BOLD);
+    .foreground(Color::CYAN)
+    .add_modifier(Modifier::BOLD)
+    .without_foreground()
+    .remove_modifier(Modifier::BOLD);
 
 let documentation = TextStyle::new().hyperlink("https://example.com/docs");
 ```
 
-Common properties also have concise named builders for completion and
-readability:
+Construction uses concise named builders:
 
 ```rust
 let style = BlockStyle::new()
@@ -124,9 +119,20 @@ let style = BlockStyle::new()
     .align_vertical(VerticalAlign::Center);
 ```
 
-These builders are thin wrappers over `add`; they do not define a second
-behavior. Generic `remove` is the single way to delete a property; there are no
-`unset_*` methods.
+An operation that removes an optional value names the resulting domain state:
+`without_border` removes the glyph set, `auto_width` restores automatic width,
+and `without_max_width` removes that bound. Values whose defaults are ordinary
+arguments use their existing builder: zero padding is
+`padding(Sides::default())`, the default left alignment is
+`align(Align::default())`, and a disabled border edge is re-enabled with
+`border_left(true)`. `GridStyle` similarly restores its defaults with
+`columns([])` and `cell_padding(Sides::default())`.
+
+Complete underline values use `with_underline`; the shorter `underline`,
+`underline_style`, and `underline_color` builders cover ordinary construction.
+Runtime-selected modifier sets use `add_modifier` and `remove_modifier`, which
+accept any `Modifier` set; `bold`, `italic`, and the other common single flags
+are the short construction path.
 
 ## Composition
 
@@ -138,7 +144,7 @@ let focused = base
     .clone()
     .foreground(accent)
     .bold()
-    .remove(Modifier::DIM);
+    .remove_modifier(Modifier::DIM);
 ```
 
 Reusable sequences of changes are ordinary functions:
@@ -159,8 +165,10 @@ style. There is no separate patch data type; the reasoning is recorded in
 
 - `width` and `height` take a `Length` — `Cells` or `Fill` — and their absence
   means auto; `min_width`, `min_height`, `max_width`, and `max_height` are
-  bounds in cells, absent by default and deleted with generic `remove`, not a
-  zero value. A dimension is a preferred size, resolved under the available
+  bounds in cells, absent by default and removed with `without_min_width`,
+  `without_max_width`, and their height peers, not a zero value. `auto_width`
+  and `auto_height` remove a stated dimension. A dimension is a preferred
+  size, resolved under the available
   area: shorter content is padded out to it, longer content is absorbed by the
   overflow rule, and the frame closes at the resolved size either way.
 - `overflow` is the policy for content that does not fit — `Overflow::Wrap`

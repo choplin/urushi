@@ -42,10 +42,8 @@ pub use key::Key;
 pub use output::{eprint, eprintln, print, println};
 pub use render::{RenderSettings, render};
 pub use style::{
-    Align, BlockStyle, BlockStyleProperty, BlockStylePropertyKey, Border, Color, GridStyle,
-    GridStyleProperty, GridStylePropertyKey, Hyperlink, InvalidFillWeight, Length, Modifier,
-    Overflow, Sides, TextStyle, TextStyleProperty, TextStylePropertyKey, Underline, UnderlineStyle,
-    UnderlineStyleSet, VerticalAlign,
+    Align, BlockStyle, Border, Color, GridStyle, Hyperlink, InvalidFillWeight, Length, Modifier,
+    Overflow, Sides, TextStyle, Underline, UnderlineStyle, UnderlineStyleSet, VerticalAlign,
 };
 pub use text::{Grapheme, PrintableLines, PrintableText, StyledText, StyledTextError, TextSpan};
 pub use theme::{

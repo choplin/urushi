@@ -5,9 +5,9 @@ use std::{any::Any, fmt, sync::Arc};
 use crate::text::wrapped_line_count;
 use crate::view::{CanvasMeasure, CanvasRequirements, Claim, Kind, distribute, fit_text_lines};
 use crate::{
-    Align, BlockStyle, BlockStylePropertyKey, Canvas, CanvasContext, CanvasItem, CanvasSizing,
-    Composition, Grapheme, Length, LineGlyphs, LineNetwork, Overflow, Position, PrintableLines,
-    PrintableText, TableRole, TextStyle, VerticalAlign, View,
+    Align, BlockStyle, Canvas, CanvasContext, CanvasItem, CanvasSizing, Composition, Grapheme,
+    Length, LineGlyphs, LineNetwork, Overflow, Position, PrintableLines, PrintableText, Sides,
+    TableRole, TextStyle, VerticalAlign, View,
 };
 
 /// Which row of a table a cell belongs to.
@@ -973,14 +973,14 @@ impl TableFrameRow {
                 };
                 let mut style = presentation
                     .cell_style_at(cell)
-                    .remove(BlockStylePropertyKey::Border)
-                    .remove(BlockStylePropertyKey::Margin)
-                    .remove(BlockStylePropertyKey::Width)
-                    .remove(BlockStylePropertyKey::Height)
-                    .remove(BlockStylePropertyKey::MinWidth)
-                    .remove(BlockStylePropertyKey::MinHeight)
-                    .remove(BlockStylePropertyKey::MaxWidth)
-                    .remove(BlockStylePropertyKey::MaxHeight);
+                    .without_border()
+                    .margin(Sides::default())
+                    .auto_width()
+                    .auto_height()
+                    .without_min_width()
+                    .without_min_height()
+                    .without_max_width()
+                    .without_max_height();
                 if style.padding_sides() == Default::default() {
                     style = style.padding((0, presentation.padding));
                 }
@@ -1690,8 +1690,13 @@ mod tests {
                 Some(
                     BlockStyle::new()
                         .padding((0, 3))
+                        .margin(2)
                         .width(30)
                         .height(4)
+                        .min_width(24)
+                        .min_height(3)
+                        .max_width(28)
+                        .max_height(3)
                         .border(Border::DOUBLE),
                 )
             }

@@ -42,10 +42,9 @@ pub struct BlockStyle {
 ```
 
 `TextStyle` alone produces no rectangle. A `BlockStyle` contributes geometry
-when it is attached to a `View::block`. `TextStyleProperty` converts into
-`BlockStyleProperty`; there is no
-conversion in the other direction, so no geometry property can be applied to a
-`TextStyle`.
+when it is attached to a `View::block`. The two types share named text
+operations, while geometry operations exist only on `BlockStyle`, so no
+geometry property can be applied to a `TextStyle`.
 
 A view is a tree of six primitive nodes, and a keyed form of one of them:
 

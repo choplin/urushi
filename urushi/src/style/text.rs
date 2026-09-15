@@ -1,9 +1,7 @@
 //! The [`TextStyle`] builder: everything a terminal can express about a run of
 //! text.
 
-use crate::{
-    Color, Hyperlink, Modifier, TextStyleProperty, TextStylePropertyKey, Underline, UnderlineStyle,
-};
+use crate::{Color, Hyperlink, Modifier, Underline, UnderlineStyle};
 
 pub(crate) const RESET: &str = "\x1b[0m";
 
@@ -33,12 +31,6 @@ pub(crate) const RESET: &str = "\x1b[0m";
 ///
 /// let _ = TextStyle::new().border(Border::ROUNDED);
 /// ```
-///
-/// ```compile_fail
-/// use urushi::{TextStyle, TextStyleProperty};
-///
-/// let _ = TextStyle::new().add(TextStyleProperty::Width(10));
-/// ```
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct TextStyle {
     pub(crate) fg: Option<Color>,
@@ -53,64 +45,60 @@ impl TextStyle {
         Self::default()
     }
 
-    /// Adds or replaces a property in this style.
-    // This is the collection operation paired with `remove`, not arithmetic.
-    #[allow(clippy::should_implement_trait)]
-    pub fn add(mut self, property: impl Into<TextStyleProperty>) -> Self {
-        match property.into() {
-            TextStyleProperty::Foreground(color) => self.fg = Some(color),
-            TextStyleProperty::Background(color) => self.bg = Some(color),
-            TextStyleProperty::Underline(underline) => self.underline = Some(underline),
-            TextStyleProperty::Hyperlink(hyperlink) => self.hyperlink = Some(hyperlink),
-            TextStyleProperty::Modifier(modifier) => {
-                self.modifiers = self.modifiers.union(modifier);
-            }
-        }
-        self
-    }
-
-    /// Removes a property from this style, restoring its default value.
-    pub fn remove(mut self, property: impl Into<TextStylePropertyKey>) -> Self {
-        match property.into() {
-            TextStylePropertyKey::Foreground => self.fg = None,
-            TextStylePropertyKey::Background => self.bg = None,
-            TextStylePropertyKey::Underline => self.underline = None,
-            TextStylePropertyKey::Hyperlink => self.hyperlink = None,
-            TextStylePropertyKey::Modifier(modifier) => {
-                self.modifiers = self.modifiers.difference(modifier);
-            }
-        }
-        self
-    }
-
     /// Sets the text foreground color.
-    pub fn foreground(self, color: impl Into<Color>) -> Self {
-        self.add(TextStyleProperty::Foreground(color.into()))
+    pub fn foreground(mut self, color: impl Into<Color>) -> Self {
+        self.fg = Some(color.into());
+        self
+    }
+
+    /// Returns the text foreground color to the terminal default.
+    pub fn without_foreground(mut self) -> Self {
+        self.fg = None;
+        self
     }
 
     /// Sets the text background color.
-    pub fn background(self, color: impl Into<Color>) -> Self {
-        self.add(TextStyleProperty::Background(color.into()))
+    pub fn background(mut self, color: impl Into<Color>) -> Self {
+        self.bg = Some(color.into());
+        self
+    }
+
+    /// Returns the text background color to the terminal default.
+    pub fn without_background(mut self) -> Self {
+        self.bg = None;
+        self
+    }
+
+    /// Adds every flag in `modifier` to the active text modifiers.
+    pub fn add_modifier(mut self, modifier: Modifier) -> Self {
+        self.modifiers = self.modifiers.union(modifier);
+        self
+    }
+
+    /// Removes every flag in `modifier` from the active text modifiers.
+    pub fn remove_modifier(mut self, modifier: Modifier) -> Self {
+        self.modifiers = self.modifiers.difference(modifier);
+        self
     }
 
     pub fn bold(self) -> Self {
-        self.add(Modifier::BOLD)
+        self.add_modifier(Modifier::BOLD)
     }
 
     pub fn dim(self) -> Self {
-        self.add(Modifier::DIM)
+        self.add_modifier(Modifier::DIM)
     }
 
     pub fn italic(self) -> Self {
-        self.add(Modifier::ITALIC)
+        self.add_modifier(Modifier::ITALIC)
     }
 
     /// Underlines the text with a single line in the foreground color.
     ///
-    /// This is the shorthand for `add(Underline::default())`; the other two
-    /// builders below refine an underline that may already be set.
+    /// This sets the complete default underline value; the other two builders
+    /// below refine an underline that may already be set.
     pub fn underline(self) -> Self {
-        self.add(TextStyleProperty::Underline(Underline::default()))
+        self.with_underline(Underline::default())
     }
 
     /// Sets the shape the underline is drawn with, adding an underline in the
@@ -120,7 +108,7 @@ impl TextStyle {
             style,
             color: self.underline.and_then(|underline| underline.color),
         };
-        self.add(TextStyleProperty::Underline(underline))
+        self.with_underline(underline)
     }
 
     /// Sets the color the underline is drawn in, adding a single underline when
@@ -130,31 +118,50 @@ impl TextStyle {
     /// an underline color that nothing draws.
     pub fn underline_color(self, color: impl Into<Color>) -> Self {
         let underline = self.underline.unwrap_or_default().with_color(color.into());
-        self.add(TextStyleProperty::Underline(underline))
+        self.with_underline(underline)
+    }
+
+    /// Replaces the complete underline value.
+    pub fn with_underline(mut self, underline: Underline) -> Self {
+        self.underline = Some(underline);
+        self
+    }
+
+    /// Removes the underline, including its color.
+    pub fn without_underline(mut self) -> Self {
+        self.underline = None;
+        self
     }
 
     /// Attaches an OSC 8 hyperlink to this text.
     ///
     /// A URI converts directly for the ordinary case. Use [`Hyperlink`] when
     /// the link needs parameters such as `id`.
-    pub fn hyperlink(self, hyperlink: impl Into<Hyperlink>) -> Self {
-        self.add(TextStyleProperty::Hyperlink(hyperlink.into()))
+    pub fn hyperlink(mut self, hyperlink: impl Into<Hyperlink>) -> Self {
+        self.hyperlink = Some(hyperlink.into());
+        self
+    }
+
+    /// Removes the OSC 8 hyperlink from this text.
+    pub fn without_hyperlink(mut self) -> Self {
+        self.hyperlink = None;
+        self
     }
 
     pub fn blink(self) -> Self {
-        self.add(Modifier::SLOW_BLINK)
+        self.add_modifier(Modifier::SLOW_BLINK)
     }
 
     pub fn reverse(self) -> Self {
-        self.add(Modifier::REVERSED)
+        self.add_modifier(Modifier::REVERSED)
     }
 
     pub fn hide(self) -> Self {
-        self.add(Modifier::HIDDEN)
+        self.add_modifier(Modifier::HIDDEN)
     }
 
     pub fn strikethrough(self) -> Self {
-        self.add(Modifier::CROSSED_OUT)
+        self.add_modifier(Modifier::CROSSED_OUT)
     }
 
     /// Returns the foreground color instruction, if this style sets one.
@@ -363,13 +370,13 @@ mod tests {
     use super::*;
 
     #[test]
-    fn generic_and_named_operations_share_value_semantics() {
+    fn named_operations_preserve_effective_value_semantics() {
         let style = TextStyle::new()
             .bold()
-            .add(Modifier::ITALIC)
-            .add(TextStyleProperty::Foreground(Color::CYAN))
-            .remove(Modifier::ITALIC)
-            .remove(TextStylePropertyKey::Foreground);
+            .add_modifier(Modifier::ITALIC)
+            .foreground(Color::CYAN)
+            .remove_modifier(Modifier::ITALIC)
+            .without_foreground();
 
         assert_eq!(style.modifiers(), Modifier::BOLD);
         assert_eq!(style.foreground_color(), None);
@@ -379,16 +386,13 @@ mod tests {
     fn hyperlink_is_one_replaceable_and_removable_property() {
         let style = TextStyle::new()
             .hyperlink("https://first.example")
-            .add(Hyperlink::new("https://second.example").with_parameter("id", "docs"));
+            .hyperlink(Hyperlink::new("https://second.example").with_parameter("id", "docs"));
 
         assert_eq!(
             style.hyperlink_value(),
             Some(&Hyperlink::new("https://second.example").with_parameter("id", "docs"))
         );
-        assert_eq!(
-            style.remove(TextStylePropertyKey::Hyperlink).paint("link"),
-            "link"
-        );
+        assert_eq!(style.without_hyperlink().paint("link"), "link");
     }
 
     #[test]
@@ -424,11 +428,16 @@ mod tests {
 
     #[test]
     fn removing_a_modifier_removes_it_from_painted_value() {
-        let style = TextStyle::new().bold().dim().remove(Modifier::BOLD);
+        let style = TextStyle::new()
+            .bold()
+            .dim()
+            .remove_modifier(Modifier::BOLD);
 
         assert_eq!(style.paint("text"), "\x1b[2mtext\x1b[0m");
         assert_eq!(
-            TextStyle::new().remove(Modifier::all()).paint("text"),
+            TextStyle::new()
+                .remove_modifier(Modifier::all())
+                .paint("text"),
             "text"
         );
     }
@@ -436,10 +445,10 @@ mod tests {
     #[test]
     fn singleton_properties_replace_and_remove_to_defaults() {
         let style = TextStyle::new()
-            .add(TextStyleProperty::Foreground(Color::RED))
-            .add(TextStyleProperty::Foreground(Color::BLUE))
+            .foreground(Color::RED)
+            .foreground(Color::BLUE)
             .background(Color::GREEN)
-            .remove(TextStylePropertyKey::Background);
+            .without_background();
 
         assert_eq!(style.foreground_color(), Some(Color::BLUE));
         assert_eq!(style.background_color(), None);
@@ -508,7 +517,10 @@ mod tests {
     fn hidden_paints_sgr_eight() {
         assert_eq!(TextStyle::new().hide().paint("t"), "\x1b[8mt\x1b[0m");
         assert_eq!(
-            TextStyle::new().hide().add(Modifier::REVERSED).paint("t"),
+            TextStyle::new()
+                .hide()
+                .add_modifier(Modifier::REVERSED)
+                .paint("t"),
             "\x1b[7;8mt\x1b[0m"
         );
     }
@@ -529,7 +541,7 @@ mod tests {
         assert_eq!(
             TextStyle::new()
                 .underline_color(Color::RED)
-                .remove(TextStylePropertyKey::Underline)
+                .without_underline()
                 .paint("t"),
             "t"
         );
@@ -555,6 +567,13 @@ mod tests {
                 .underline_color(Color::GREEN)
                 .underline_value(),
             expected
+        );
+        assert_eq!(
+            TextStyle::new()
+                .underline_color(Color::RED)
+                .with_underline(Underline::new(UnderlineStyle::Double))
+                .underline_value(),
+            Some(Underline::new(UnderlineStyle::Double))
         );
     }
 

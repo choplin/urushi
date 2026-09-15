@@ -256,8 +256,7 @@ are compared for equality to decide whether to redraw — see
 [`design/style-canonical-form.md`](design/style-canonical-form.md). This does
 not relax the contract for `Theme` or `View`.
 
-The immutable value model, closed property vocabulary, and generic
-`add`/`remove` operations are specified in
+The immutable effective-value model and its typed, named operations are specified in
 [`style-model.md`](style-model.md).
 
 ### Presentations stop at View

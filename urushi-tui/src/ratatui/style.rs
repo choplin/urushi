@@ -114,8 +114,8 @@ mod tests {
     fn converts_active_modifiers() {
         let converted = RatatuiStyle::from(
             &TextStyle::new()
-                .add(Modifier::BOLD | Modifier::ITALIC)
-                .remove(Modifier::ITALIC),
+                .add_modifier(Modifier::BOLD | Modifier::ITALIC)
+                .remove_modifier(Modifier::ITALIC),
         )
         .into_inner();
 

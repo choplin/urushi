@@ -23,12 +23,12 @@ no `Modifier::UNDERLINED` flag and no free-standing underline color property.
 TextStyle::new().underline();                              // single, foreground color
 TextStyle::new().underline_style(UnderlineStyle::Curly);   // keeps any color already set
 TextStyle::new().underline_color(Color::RED);              // adds a single underline if absent
+TextStyle::new().with_underline(underline);                 // replaces the complete value
 ```
 
 No builder produces a color nothing draws. `underline_value` returns the whole
-`Option<Underline>`, and `remove(TextStylePropertyKey::Underline)` removes the
-underline and its color together. `BlockStyle` mirrors all of these for its fill
-text.
+`Option<Underline>`, and `without_underline` removes the underline and its color
+together. `BlockStyle` mirrors all of these for its fill text.
 
 At the output boundary:
 

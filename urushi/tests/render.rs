@@ -409,7 +409,7 @@ fn width_only_rendering_is_unchanged_by_the_height_default() {
         BlockStyle::new().width(4).render("a\nb").into_string(),
         BlockStyle::new()
             .width(4)
-            .remove(urushi::BlockStylePropertyKey::Height)
+            .auto_height()
             .render("a\nb")
             .into_string()
     );
@@ -429,7 +429,7 @@ fn colors_and_modifiers_emit_sgr() {
 fn modifiers_can_be_removed_from_a_style_value() {
     let out = BlockStyle::new()
         .bold()
-        .remove(Modifier::all())
+        .remove_modifier(Modifier::all())
         .render("plain")
         .into_string();
 

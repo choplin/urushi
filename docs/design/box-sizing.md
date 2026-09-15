@@ -88,8 +88,9 @@ top edge are defined in [`block-title.md`](block-title.md).
 
 A minimum states the size below which the application's layout stops making
 sense; the implicit floor below it — the widest grapheme the box cannot
-split — is not exposed as a query. Bounds are absent by default; use generic
-`remove` to delete one, not a zero value.
+split — is not exposed as a query. Bounds are absent by default; use
+`without_min_width`, `without_min_height`, `without_max_width`, or
+`without_max_height` to restore that absence, not a zero value.
 
 There is no property that sizes the content box from inside a frame. A box
 with no size takes its content's size plus frame; an exact content dimension

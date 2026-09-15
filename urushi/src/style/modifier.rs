@@ -5,8 +5,8 @@ use std::ops::BitOr;
 /// A set of terminal text modifiers.
 ///
 /// Modifiers are stored as a bitset so several flags can be passed to
-/// [`TextStyle::add`](crate::TextStyle::add) or [`TextStyle::remove`](crate::TextStyle::remove)
-/// at once.
+/// [`TextStyle::add_modifier`](crate::TextStyle::add_modifier) or
+/// [`TextStyle::remove_modifier`](crate::TextStyle::remove_modifier) at once.
 ///
 /// The underline is not among them: it carries a shape and a color, so it is
 /// the [`Underline`](crate::Underline) value on the style. A flag beside that

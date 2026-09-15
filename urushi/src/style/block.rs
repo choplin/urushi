@@ -3,8 +3,8 @@
 
 use crate::view::Size;
 use crate::{
-    Align, BlockStyleProperty, BlockStylePropertyKey, Border, Color, Length, Modifier, Overflow,
-    Sides, TextStyle, TextStyleProperty, Underline, UnderlineStyle, VerticalAlign,
+    Align, Border, Color, Hyperlink, Length, Modifier, Overflow, Sides, TextStyle, Underline,
+    UnderlineStyle, VerticalAlign,
 };
 
 /// A rectangle: padding, margin, border, dimensions, alignment, and the
@@ -85,62 +85,6 @@ impl BlockStyle {
         }
     }
 
-    /// Adds or replaces a property in this style.
-    // This is the collection operation paired with `remove`, not arithmetic.
-    #[allow(clippy::should_implement_trait)]
-    pub fn add(mut self, property: impl Into<BlockStyleProperty>) -> Self {
-        match property.into() {
-            BlockStyleProperty::Text(property) => self.text = self.text.add(property),
-            BlockStyleProperty::Padding(sides) => self.padding = sides,
-            BlockStyleProperty::Margin(sides) => self.margin = sides,
-            BlockStyleProperty::Border(border) => self.border = Some(border),
-            BlockStyleProperty::BorderTop(enabled) => self.border_top = enabled,
-            BlockStyleProperty::BorderRight(enabled) => self.border_right = enabled,
-            BlockStyleProperty::BorderBottom(enabled) => self.border_bottom = enabled,
-            BlockStyleProperty::BorderLeft(enabled) => self.border_left = enabled,
-            BlockStyleProperty::BorderTextStyle(style) => self.border_text = style,
-            BlockStyleProperty::BorderForeground(color) => self.border_fg = Some(color),
-            BlockStyleProperty::BorderBackground(color) => self.border_bg = Some(color),
-            BlockStyleProperty::Width(width) => self.width = Some(width),
-            BlockStyleProperty::Height(height) => self.height = Some(height),
-            BlockStyleProperty::MinWidth(width) => self.min_width = Some(width),
-            BlockStyleProperty::MinHeight(height) => self.min_height = Some(height),
-            BlockStyleProperty::MaxWidth(width) => self.max_width = Some(width),
-            BlockStyleProperty::MaxHeight(height) => self.max_height = Some(height),
-            BlockStyleProperty::Overflow(overflow) => self.overflow = overflow,
-            BlockStyleProperty::Align(align) => self.align = align,
-            BlockStyleProperty::VerticalAlign(align) => self.vertical_align = align,
-        }
-        self
-    }
-
-    /// Removes a property from this style, restoring its default value.
-    pub fn remove(mut self, property: impl Into<BlockStylePropertyKey>) -> Self {
-        match property.into() {
-            BlockStylePropertyKey::Text(property) => self.text = self.text.remove(property),
-            BlockStylePropertyKey::Padding => self.padding = Sides::default(),
-            BlockStylePropertyKey::Margin => self.margin = Sides::default(),
-            BlockStylePropertyKey::Border => self.border = None,
-            BlockStylePropertyKey::BorderTop => self.border_top = true,
-            BlockStylePropertyKey::BorderRight => self.border_right = true,
-            BlockStylePropertyKey::BorderBottom => self.border_bottom = true,
-            BlockStylePropertyKey::BorderLeft => self.border_left = true,
-            BlockStylePropertyKey::BorderTextStyle => self.border_text = TextStyle::new(),
-            BlockStylePropertyKey::BorderForeground => self.border_fg = None,
-            BlockStylePropertyKey::BorderBackground => self.border_bg = None,
-            BlockStylePropertyKey::Width => self.width = None,
-            BlockStylePropertyKey::Height => self.height = None,
-            BlockStylePropertyKey::MinWidth => self.min_width = None,
-            BlockStylePropertyKey::MinHeight => self.min_height = None,
-            BlockStylePropertyKey::MaxWidth => self.max_width = None,
-            BlockStylePropertyKey::MaxHeight => self.max_height = None,
-            BlockStylePropertyKey::Overflow => self.overflow = Overflow::default(),
-            BlockStylePropertyKey::Align => self.align = Align::default(),
-            BlockStylePropertyKey::VerticalAlign => self.vertical_align = VerticalAlign::default(),
-        }
-        self
-    }
-
     /// Replaces the style filling this block.
     pub fn text_style(mut self, text: TextStyle) -> Self {
         self.text = text;
@@ -153,30 +97,57 @@ impl BlockStyle {
     }
 
     /// Sets the fill (and text) foreground color.
-    pub fn foreground(self, color: impl Into<Color>) -> Self {
-        self.add(TextStyleProperty::Foreground(color.into()))
+    pub fn foreground(mut self, color: impl Into<Color>) -> Self {
+        self.text = self.text.foreground(color);
+        self
+    }
+
+    /// Returns the fill foreground color to the terminal default.
+    pub fn without_foreground(mut self) -> Self {
+        self.text = self.text.without_foreground();
+        self
     }
 
     /// Sets the fill (and text) background color.
-    pub fn background(self, color: impl Into<Color>) -> Self {
-        self.add(TextStyleProperty::Background(color.into()))
+    pub fn background(mut self, color: impl Into<Color>) -> Self {
+        self.text = self.text.background(color);
+        self
+    }
+
+    /// Returns the fill background color to the terminal default.
+    pub fn without_background(mut self) -> Self {
+        self.text = self.text.without_background();
+        self
+    }
+
+    /// Adds every flag in `modifier` to the active fill text modifiers.
+    pub fn add_modifier(mut self, modifier: Modifier) -> Self {
+        self.text = self.text.add_modifier(modifier);
+        self
+    }
+
+    /// Removes every flag in `modifier` from the active fill text modifiers.
+    pub fn remove_modifier(mut self, modifier: Modifier) -> Self {
+        self.text = self.text.remove_modifier(modifier);
+        self
     }
 
     pub fn bold(self) -> Self {
-        self.add(Modifier::BOLD)
+        self.add_modifier(Modifier::BOLD)
     }
 
     pub fn dim(self) -> Self {
-        self.add(Modifier::DIM)
+        self.add_modifier(Modifier::DIM)
     }
 
     pub fn italic(self) -> Self {
-        self.add(Modifier::ITALIC)
+        self.add_modifier(Modifier::ITALIC)
     }
 
     /// Underlines the fill text with a single line in the foreground color.
-    pub fn underline(self) -> Self {
-        self.add(TextStyleProperty::Underline(Underline::default()))
+    pub fn underline(mut self) -> Self {
+        self.text = self.text.underline();
+        self
     }
 
     /// Sets the shape the fill text's underline is drawn with, adding an
@@ -193,76 +164,128 @@ impl BlockStyle {
         self
     }
 
+    /// Replaces the complete fill text underline value.
+    pub fn with_underline(mut self, underline: Underline) -> Self {
+        self.text = self.text.with_underline(underline);
+        self
+    }
+
+    /// Removes the fill text underline, including its color.
+    pub fn without_underline(mut self) -> Self {
+        self.text = self.text.without_underline();
+        self
+    }
+
+    /// Attaches an OSC 8 hyperlink to the fill text.
+    pub fn hyperlink(mut self, hyperlink: impl Into<Hyperlink>) -> Self {
+        self.text = self.text.hyperlink(hyperlink);
+        self
+    }
+
+    /// Removes the OSC 8 hyperlink from the fill text.
+    pub fn without_hyperlink(mut self) -> Self {
+        self.text = self.text.without_hyperlink();
+        self
+    }
+
     pub fn blink(self) -> Self {
-        self.add(Modifier::SLOW_BLINK)
+        self.add_modifier(Modifier::SLOW_BLINK)
     }
 
     pub fn reverse(self) -> Self {
-        self.add(Modifier::REVERSED)
+        self.add_modifier(Modifier::REVERSED)
     }
 
     pub fn hide(self) -> Self {
-        self.add(Modifier::HIDDEN)
+        self.add_modifier(Modifier::HIDDEN)
     }
 
     pub fn strikethrough(self) -> Self {
-        self.add(Modifier::CROSSED_OUT)
+        self.add_modifier(Modifier::CROSSED_OUT)
     }
 
     /// Sets padding between the content and the border.
-    pub fn padding(self, sides: impl Into<Sides>) -> Self {
-        self.add(BlockStyleProperty::Padding(sides.into()))
+    pub fn padding(mut self, sides: impl Into<Sides>) -> Self {
+        self.padding = sides.into();
+        self
     }
 
     /// Sets unstyled spacing outside the border.
-    pub fn margin(self, sides: impl Into<Sides>) -> Self {
-        self.add(BlockStyleProperty::Margin(sides.into()))
+    pub fn margin(mut self, sides: impl Into<Sides>) -> Self {
+        self.margin = sides.into();
+        self
     }
 
     /// Sets the border glyphs around the padded content.
     ///
     /// A new style enables all four edges. Use the `border_*` builders to
     /// configure edge visibility independently.
-    pub fn border(self, border: Border) -> Self {
-        self.add(BlockStyleProperty::Border(border))
+    pub fn border(mut self, border: Border) -> Self {
+        self.border = Some(border);
+        self
+    }
+
+    /// Removes the border glyph set. Edge configuration is retained.
+    pub fn without_border(mut self) -> Self {
+        self.border = None;
+        self
     }
 
     /// Enables or disables the top border edge.
-    pub fn border_top(self, enabled: bool) -> Self {
-        self.add(BlockStyleProperty::BorderTop(enabled))
+    pub fn border_top(mut self, enabled: bool) -> Self {
+        self.border_top = enabled;
+        self
     }
 
     /// Enables or disables the right border edge.
-    pub fn border_right(self, enabled: bool) -> Self {
-        self.add(BlockStyleProperty::BorderRight(enabled))
+    pub fn border_right(mut self, enabled: bool) -> Self {
+        self.border_right = enabled;
+        self
     }
 
     /// Enables or disables the bottom border edge.
-    pub fn border_bottom(self, enabled: bool) -> Self {
-        self.add(BlockStyleProperty::BorderBottom(enabled))
+    pub fn border_bottom(mut self, enabled: bool) -> Self {
+        self.border_bottom = enabled;
+        self
     }
 
     /// Enables or disables the left border edge.
-    pub fn border_left(self, enabled: bool) -> Self {
-        self.add(BlockStyleProperty::BorderLeft(enabled))
+    pub fn border_left(mut self, enabled: bool) -> Self {
+        self.border_left = enabled;
+        self
     }
 
     /// Replaces the complete logical style used for border glyphs.
     ///
     /// A subsequently applied border foreground or background overrides the
     /// corresponding property in this style.
-    pub fn border_text_style(self, style: TextStyle) -> Self {
-        self.add(BlockStyleProperty::BorderTextStyle(style))
+    pub fn border_text_style(mut self, style: TextStyle) -> Self {
+        self.border_text = style;
+        self
     }
 
     /// Sets the border foreground color.
-    pub fn border_foreground(self, color: impl Into<Color>) -> Self {
-        self.add(BlockStyleProperty::BorderForeground(color.into()))
+    pub fn border_foreground(mut self, color: impl Into<Color>) -> Self {
+        self.border_fg = Some(color.into());
+        self
+    }
+
+    /// Removes the border foreground override.
+    pub fn without_border_foreground(mut self) -> Self {
+        self.border_fg = None;
+        self
     }
 
     /// Sets the border background color.
-    pub fn border_background(self, color: impl Into<Color>) -> Self {
-        self.add(BlockStyleProperty::BorderBackground(color.into()))
+    pub fn border_background(mut self, color: impl Into<Color>) -> Self {
+        self.border_bg = Some(color.into());
+        self
+    }
+
+    /// Removes the border background override.
+    pub fn without_border_background(mut self) -> Self {
+        self.border_bg = None;
+        self
     }
 
     /// Sets the width of the box: content plus padding plus enabled border
@@ -271,8 +294,15 @@ impl BlockStyle {
     /// The absence of a width means auto — the content's own width. Content
     /// wider than the resolved box is absorbed by [`BlockStyle::overflow`];
     /// the frame closes at the resolved width either way.
-    pub fn width(self, width: impl Into<Length>) -> Self {
-        self.add(BlockStyleProperty::Width(width.into()))
+    pub fn width(mut self, width: impl Into<Length>) -> Self {
+        self.width = Some(width.into());
+        self
+    }
+
+    /// Returns the width to auto sizing.
+    pub fn auto_width(mut self) -> Self {
+        self.width = None;
+        self
     }
 
     /// Sets the height of the box: content plus padding plus enabled border
@@ -280,45 +310,83 @@ impl BlockStyle {
     ///
     /// This is a size, not a minimum: taller content is clipped inside the
     /// frame rather than growing the box. The absence of a height means auto.
-    pub fn height(self, height: impl Into<Length>) -> Self {
-        self.add(BlockStyleProperty::Height(height.into()))
+    pub fn height(mut self, height: impl Into<Length>) -> Self {
+        self.height = Some(height.into());
+        self
+    }
+
+    /// Returns the height to auto sizing.
+    pub fn auto_height(mut self) -> Self {
+        self.height = None;
+        self
     }
 
     /// Sets the width below which the box does not shrink.
-    pub fn min_width(self, width: u16) -> Self {
-        self.add(BlockStyleProperty::MinWidth(width))
+    pub fn min_width(mut self, width: u16) -> Self {
+        self.min_width = Some(width);
+        self
+    }
+
+    /// Removes the minimum width.
+    pub fn without_min_width(mut self) -> Self {
+        self.min_width = None;
+        self
     }
 
     /// Sets the height below which the box does not shrink.
-    pub fn min_height(self, height: u16) -> Self {
-        self.add(BlockStyleProperty::MinHeight(height))
+    pub fn min_height(mut self, height: u16) -> Self {
+        self.min_height = Some(height);
+        self
+    }
+
+    /// Removes the minimum height.
+    pub fn without_min_height(mut self) -> Self {
+        self.min_height = None;
+        self
     }
 
     /// Bounds the box's width. The box shrinks to fit its content and never
     /// exceeds this bound; the bound never cuts the frame.
-    pub fn max_width(self, width: u16) -> Self {
-        self.add(BlockStyleProperty::MaxWidth(width))
+    pub fn max_width(mut self, width: u16) -> Self {
+        self.max_width = Some(width);
+        self
+    }
+
+    /// Removes the maximum width.
+    pub fn without_max_width(mut self) -> Self {
+        self.max_width = None;
+        self
     }
 
     /// Bounds the box's height. The box shrinks to fit its content and never
     /// exceeds this bound; the bound never cuts the frame.
-    pub fn max_height(self, height: u16) -> Self {
-        self.add(BlockStyleProperty::MaxHeight(height))
+    pub fn max_height(mut self, height: u16) -> Self {
+        self.max_height = Some(height);
+        self
+    }
+
+    /// Removes the maximum height.
+    pub fn without_max_height(mut self) -> Self {
+        self.max_height = None;
+        self
     }
 
     /// Sets how content wider than the box is absorbed.
-    pub fn overflow(self, overflow: Overflow) -> Self {
-        self.add(BlockStyleProperty::Overflow(overflow))
+    pub fn overflow(mut self, overflow: Overflow) -> Self {
+        self.overflow = overflow;
+        self
     }
 
     /// Sets the horizontal alignment of content within the box.
-    pub fn align(self, align: Align) -> Self {
-        self.add(BlockStyleProperty::Align(align))
+    pub fn align(mut self, align: Align) -> Self {
+        self.align = align;
+        self
     }
 
     /// Sets the vertical alignment of content within a fixed-height box.
-    pub fn align_vertical(self, align: VerticalAlign) -> Self {
-        self.add(BlockStyleProperty::VerticalAlign(align))
+    pub fn align_vertical(mut self, align: VerticalAlign) -> Self {
+        self.vertical_align = align;
+        self
     }
 
     /// Returns the fill foreground color instruction, if one is set.
@@ -468,5 +536,53 @@ impl BlockStyle {
             style = style.background(color);
         }
         style
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn named_operations_remove_optional_values() {
+        let style = BlockStyle::new()
+            .foreground(Color::RED)
+            .background(Color::BLUE)
+            .underline_color(Color::GREEN)
+            .hyperlink("https://example.com")
+            .border(Border::ROUNDED)
+            .border_foreground(Color::CYAN)
+            .border_background(Color::BLACK)
+            .width(20)
+            .height(4)
+            .min_width(8)
+            .min_height(2)
+            .max_width(30)
+            .max_height(6)
+            .without_foreground()
+            .without_background()
+            .without_underline()
+            .without_hyperlink()
+            .without_border()
+            .without_border_foreground()
+            .without_border_background()
+            .auto_width()
+            .auto_height()
+            .without_min_width()
+            .without_min_height()
+            .without_max_width()
+            .without_max_height();
+
+        assert_eq!(style, BlockStyle::new());
+    }
+
+    #[test]
+    fn modifier_operations_accept_sets() {
+        let modifiers = Modifier::BOLD | Modifier::ITALIC;
+        let style = BlockStyle::new()
+            .add_modifier(modifiers)
+            .remove_modifier(Modifier::ITALIC);
+
+        assert_eq!(style.modifiers(), Modifier::BOLD);
     }
 }

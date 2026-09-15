@@ -401,8 +401,8 @@ fn ansi_settings() -> RenderSettings {
 fn ratatui_converts_the_active_modifier_set() {
     let converted = RatatuiStyle::from(
         &TextStyle::new()
-            .add(UrushiModifier::BOLD | UrushiModifier::ITALIC)
-            .remove(UrushiModifier::ITALIC),
+            .add_modifier(UrushiModifier::BOLD | UrushiModifier::ITALIC)
+            .remove_modifier(UrushiModifier::ITALIC),
     )
     .into_inner();
 

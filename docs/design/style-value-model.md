@@ -1,105 +1,53 @@
 # Styles as Effective Values
 
 Urushi's style contract, defined in [`style-model.md`](../style-model.md),
-shapes a style as an immutable collection of effective presentation values with
-a closed property vocabulary, rather than a patch, an instruction list, or a
-completed ANSI state transition. This file holds the full vocabulary and the
-reasons for that shape. Two members of the vocabulary have files of their own:
+shapes a style as an immutable collection of typed effective presentation
+values, rather than a patch, an instruction list, or a completed ANSI state
+transition. This file holds the value shape and the reasons for its public API.
+Two members of the vocabulary have files of their own:
 the underline value ([`underline.md`](underline.md)) and the canonical fold that
 closes the one duplication the vocabulary cannot
 ([`style-canonical-form.md`](style-canonical-form.md)).
 
-## The vocabulary
+## The value shape
 
-The generic API uses one closed enum pair per style type. The text
-vocabulary:
+`TextStyle` stores foreground, background, underline, and hyperlink as
+independent optional typed values and stores modifiers as one set. `BlockStyle`
+stores one `TextStyle` for its fill plus the geometry of a rectangle:
 
 ```rust
-enum TextStyleProperty {
-    Foreground(Color),
-    Background(Color),
-    Underline(Underline),
-    Modifier(Modifier),
-}
-
-enum TextStylePropertyKey {
-    Foreground,
-    Background,
-    Underline,
-    Modifier(Modifier),
+struct BlockStyle {
+    text: TextStyle,
+    padding: Sides,
+    margin: Sides,
+    border: Option<Border>,
+    border_top: bool,
+    border_right: bool,
+    border_bottom: bool,
+    border_left: bool,
+    border_text: TextStyle,
+    border_foreground: Option<Color>,
+    border_background: Option<Color>,
+    width: Option<Length>,
+    height: Option<Length>,
+    min_width: Option<u16>,
+    min_height: Option<u16>,
+    max_width: Option<u16>,
+    max_height: Option<u16>,
+    overflow: Overflow,
+    align: Align,
+    vertical_align: VerticalAlign,
 }
 ```
 
-The block vocabulary is the geometry plus, through its `Text` variant, every
-text property of the style filling it:
+`GridStyle` stores only the optional length claimed by each column and the
+default cell padding. A grid carries no box geometry, fill style, or line
+network — a grid that needs a border, a margin, or a stated size is placed
+inside a block, while a presentation that draws internal rules uses Canvas.
 
-```rust
-enum BlockStyleProperty {
-    Text(TextStyleProperty),
-    Padding(Sides),
-    Margin(Sides),
-    Border(Border),
-    BorderTop(bool),
-    BorderRight(bool),
-    BorderBottom(bool),
-    BorderLeft(bool),
-    BorderForeground(Color),
-    BorderBackground(Color),
-    Width(Length),
-    Height(Length),
-    MinWidth(u16),
-    MinHeight(u16),
-    MaxWidth(u16),
-    MaxHeight(u16),
-    Overflow(Overflow),
-    Align(Align),
-    VerticalAlign(VerticalAlign),
-}
-
-enum BlockStylePropertyKey {
-    Text(TextStylePropertyKey),
-    Padding,
-    Margin,
-    Border,
-    BorderTop,
-    BorderRight,
-    BorderBottom,
-    BorderLeft,
-    BorderForeground,
-    BorderBackground,
-    Width,
-    Height,
-    MinWidth,
-    MinHeight,
-    MaxWidth,
-    MaxHeight,
-    Overflow,
-    Align,
-    VerticalAlign,
-}
-```
-
-The grid vocabulary is the width its columns claim and the default padding of
-its cells. A grid carries no box geometry, fill style, or line network — a grid
-that needs a border, a margin, or a stated size is placed inside a block, while
-a presentation that draws internal rules uses Canvas — so Grid has neither box
-nor text properties:
-
-```rust
-enum GridStyleProperty {
-    Columns(Vec<Option<Length>>),
-    CellPadding(Sides),
-}
-
-enum GridStylePropertyKey {
-    Columns,
-    CellPadding,
-}
-```
-
-Every type may store the values in typed fields rather than allocating an enum
-collection; all mutation still passes through the closed `add` and `remove`
-operations.
+Each immutable builder updates the corresponding typed field in the returned
+value. There is no separate property value that exists only long enough to be
+matched and discarded.
 
 ## Why effective values, not instructions
 
@@ -115,17 +63,26 @@ terminal state diffs the previous and next effective styles itself.
 ANSI rendering surrounds emitted styling with a final reset. No stored removal
 instruction is needed in an immutable style value.
 
-## Why a closed vocabulary and one generic `remove`
+## Why only named operations are public
 
-Urushi exposes a closed enum pair per style type and one generic `remove`,
-while retaining named builders for common construction. Lip Gloss, which likewise
-treats a style as an immutable value containing a set of rules, instead tracks
-property presence separately and exposes many property-specific `Unset*`
-methods. The enums make the complete property vocabulary discoverable and give
-generic code an exhaustive match, and one
-`remove` cannot drift from a parallel family of `Unset*` methods. The named
-builders are thin wrappers over `add` for the same reason: Urushi avoids two
-entry points that define two behaviors.
+A public property enum duplicated the builder vocabulary without representing
+stored state. A caller constructing an ordinary style had to choose between
+the named `foreground(Color::CYAN)` operation and wrapping the same value for
+generic `add`, even though both immediately wrote the same field. The enum also
+invited exhaustive matching, so adding a property to a pre-alpha style
+unnecessarily broke generic consumer code.
+
+The public API instead names the consumer's intent. `without_foreground`
+returns a color to the terminal default, `auto_width` removes a stated width,
+and `without_max_width` removes a bound. A value whose default is already an
+ordinary argument uses its existing builder: `padding(Sides::default())`,
+`align(Align::default())`, or `border_left(true)`. This avoids pretending that
+all typed fields share one key-removal operation, especially where "remove the
+border-left property" means enabling the left edge.
+
+Modifiers are the one set-valued field and retain set-valued operations:
+`add_modifier` unions a caller-selected set and `remove_modifier` subtracts
+one. The named single-flag builders remain conveniences over that behavior.
 
 ## Why rapid blink is not in the vocabulary
 

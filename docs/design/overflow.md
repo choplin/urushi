@@ -79,5 +79,5 @@ rather than a default.
   would have preserved the open-frame artifact — a bound cutting the frame —
   as an opt-in.
 - **A fixed ellipsis glyph, with `Clip` and `Ellipsis` as sibling policies.**
-  Argued above. The cost of carrying the marker is that `Overflow` and
-  `BlockStyleProperty` are no longer `Copy`.
+  Argued above. The cost of carrying the marker is that `Overflow` is not
+  `Copy`.
