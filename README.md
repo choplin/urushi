@@ -35,7 +35,7 @@ surface layers, including which parts are implemented today.
 |---|---|---|
 | [`urushi`](urushi/) | Style definitions: colors, modifiers, padding, margin, borders, alignment, wrapping | Core rendering works |
 | [`urushi-cli`](urushi-cli/) | Opinionated `Summary` and `Warning` presentation for human-facing, non-interactive CLI output | Core presentations work |
-| [`urushi-terminal`](urushi-terminal/) | Target-specific terminal size and output-capability inspection | Core detection works |
+| [`urushi-terminal`](urushi-terminal/) | Workspace-independent terminal contracts, size, and output-capability inspection | `Frame` / `Terminal` contracts and detection work |
 | [`urushi-prompt`](urushi-prompt/) | Theme-aware `Input`, `Select`, and `Confirm` fields with synchronous validation | Core prompt flow works |
 | [`urushi-tui`](urushi-tui/) | The `ratatui` adapter — style conversion, box-model widgets, and the cell-writing path they share with a renderer — and the home of the full-screen runtime | Adapter works; runtime is not implemented |
 
@@ -244,7 +244,7 @@ new size; expect all other visible primary-buffer content to be erased.
 - [x] `TextStyle` / `BlockStyle` builders: colors, modifiers, padding, margin, border, width, align
 - [x] ANSI-aware width measurement and CJK-aware word wrap
 - [x] View composition before layout and rendering
-- [x] Target-specific terminal detection and feature-granular rendering settings
+- [x] Workspace-independent terminal contracts, target-specific detection, and feature-granular rendering settings
 - [ ] Adaptive colors (light/dark terminal backgrounds)
 - [x] Nested styles as a view tree (`View::text` / `block` / `row` / `column`) resolved in one layout pass, rather than re-styling already-rendered text
 - [x] Theme layers: reusable core components plus CLI-specific presentations derived from shared semantic tokens

@@ -9,22 +9,24 @@ session can and cannot promise to restore.
 
 ## The rule
 
-The terminal layer is Urushi's. `Terminal`, `Frame`, `TerminalSession`, and
-`Clock` are traits this crate owns, stated in Urushi's vocabulary — sizes,
-rectangles, styled graphemes — and the runtime core, the application, and the
-renderer see nothing else. A backend such as Ratatui is one implementation of
-those traits, kept inside its own module; replacing it changes no runtime type
-and no application. [`architecture.md`](../architecture.md) records why
-replacement is the direction rather than a contingency.
+The terminal layer is Urushi's. The workspace-independent `urushi-terminal` crate
+owns `Terminal`, `Frame`, `TerminalSession`, and terminal geometry. A frame's
+cell value is an associated type, so this lower crate does not depend on
+`urushi` or any renderer. `urushi-tui` binds that cell to `StyledGrapheme` and
+owns the runtime's `Clock`. A backend such as Ratatui is one implementation of
+the terminal traits, kept inside its adapter module; replacing it changes no
+runtime type and no application. [`architecture.md`](../architecture.md)
+records why replacement is the direction rather than a contingency.
 
 ### Terminal
 
 ```rust
 pub trait Terminal {
-    type Frame<'a>: Frame where Self: 'a;
+    type Cell: ?Sized;
+    type Frame<'a>: Frame<Cell = Self::Cell> where Self: 'a;
 
-    fn size(&self) -> Size;
-    fn resize(&mut self, size: Size) -> io::Result<()>;
+    fn size(&self) -> TerminalSize;
+    fn resize(&mut self, size: TerminalSize) -> io::Result<()>;
     fn draw(&mut self, draw: impl FnOnce(&mut Self::Frame<'_>)) -> io::Result<()>;
 }
 ```
@@ -54,18 +56,22 @@ it is `Terminal`'s or `TerminalSession`'s obligation, never the application's.
 
 ```rust
 pub trait Frame {
+    type Cell: ?Sized;
+
     fn area(&self) -> Rect;
-    fn put(&mut self, x: u16, y: u16, grapheme: &StyledGrapheme);
+    fn put(&mut self, column: usize, row: usize, cell: &Self::Cell);
     fn set_cursor(&mut self, at: Option<Position>);
 }
 ```
 
 A `Frame` is a borrowed, draw-scoped handle to the terminal's working
-presentation state: its area, the cells, and the cursor request for that
-draw. `put` places one styled grapheme at a cell and claims the cells its
-width covers. It does not own the previous buffer, the diff, the output stream,
-or the flush; it cannot commit. A backend's frame may expose its own cell
-buffer beside this trait for a caller that holds the backend's types — the
+presentation state: its area, the cells, and the cursor request for that draw.
+Its associated `Cell` keeps the terminal contract independent of the
+presentation crate. The TUI runtime requires `Cell = StyledGrapheme`; `put`
+therefore places one styled grapheme at a cell and claims the cells its width
+covers. The frame does not own the previous buffer, the diff, the output
+stream, or the flush; it cannot commit. A backend's frame may expose its own
+cell buffer beside this trait for a caller that holds the backend's types — the
 Ratatui-backed frame exposes its `Buffer` — and nothing in the runtime reaches
 for it.
 
@@ -133,19 +139,21 @@ value it passes to the builder's `terminal`.
 ### Clock
 
 `Clock` is the runtime's one source of time — what `Subscription::interval`
-and `Effect::after` read, and what they wait on. It is a trait the runtime owns,
-backed by Tokio's time by default and by a clock the test advances by hand in
-the harness. An application never reads it directly.
+and `Effect::after` read, and what they wait on. It belongs to `urushi-tui`, not
+the terminal foundation: time is an execution boundary rather than a terminal
+contract. It is backed by Tokio's time by default and by a clock the test
+advances by hand in the harness. An application never reads it directly.
 
 ### Replaceable in tests
 
 The test harness of [`tui-delivery-ordering.md`](tui-delivery-ordering.md)
 replaces the terminal layer at two levels. The runtime core — delivery,
-scheduling, barriers — runs against an in-memory `Terminal` the runtime owns,
-which records every committed frame and cursor request and depends on no
-backend. The Ratatui-backed terminal is tested on its own, over
-`TestBackend`. A harness that needed the backend to test the runtime would
-bind the runtime's tests to the backend the runtime is built to outgrow.
+scheduling, barriers — runs against an in-memory implementation of the
+`urushi-terminal::Terminal` contract, which records every committed frame and
+cursor request and depends on no backend. The Ratatui-backed terminal is tested
+on its own, over `TestBackend`. A harness that needed the backend to test the
+runtime would bind the runtime's tests to the backend the runtime is built to
+outgrow.
 
 ### Cell output and terminal graphics
 
@@ -176,13 +184,13 @@ own over a backend's draw-and-flush holds the contract directly: it diffs, it
 writes, it flushes, and it commits last, in about the code the workarounds
 would have cost.
 
-That the trait is Urushi's rather than the backend's follows from
+That the trait is in `urushi-terminal` rather than the backend's crate follows from
 [`architecture.md`](../architecture.md): the runtime core should see no
 backend type, so that the backend can be replaced without touching the
-runtime or any application. A trait at the granularity of "place this styled
-grapheme here" is the level Urushi already speaks — `StyledGrapheme` is what
-`ResolvedView` holds — so the renderer is written once, against the trait, and
-each backend converts one grapheme at a time.
+runtime or any application. The associated cell type lets the lower-level
+trait express "place this cell value here" while the TUI binds it to
+`StyledGrapheme`, the value a `ResolvedView` holds. The renderer is written
+once against that binding, and each backend converts one grapheme at a time.
 
 Rejected: wrapping `ratatui::Terminal` behind the trait anyway. Possible, but
 the contract violations above remain under the wrapper, and the wrapper is

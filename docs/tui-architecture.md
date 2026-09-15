@@ -236,10 +236,11 @@ rule, and the representative flows are defined in
 ## Rendering and runtime ownership
 
 The shared rendering vocabulary is `View`, `Renderer`, `Frame`, `Terminal`,
-`TerminalSession`, `Backend`, and `Clock`. `Terminal`, `Frame`,
-`TerminalSession`, and `Clock` are traits Urushi owns, stated in its own
-vocabulary; a backend such as Ratatui implements them inside its own module,
-and the runtime core and the application see no backend type.
+`TerminalSession`, `Backend`, and `Clock`. `urushi-terminal` owns the
+workspace-independent `Terminal`, `Frame`, and `TerminalSession` contracts and their
+geometry. `urushi-tui` owns the runtime's `Clock`. A backend such as Ratatui
+implements the terminal contracts inside its adapter module, and the runtime
+core and the application see no backend type.
 
 | Name | Owns |
 | --- | --- |

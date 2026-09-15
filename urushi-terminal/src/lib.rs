@@ -1,9 +1,15 @@
-//! Target-specific terminal inspection for the Urushi ecosystem.
+//! Backend-independent terminal contracts and target-specific inspection for
+//! the Urushi ecosystem.
 //!
-//! This crate observes an output handle. It does not choose rendering policy,
-//! perform layout, render a view, or write output.
+//! This crate owns vocabulary shared by terminal surfaces without depending on
+//! another Urushi workspace crate.
+//! It does not choose rendering policy, perform layout, or render a view.
 
 use std::io::{self, IsTerminal};
+
+mod terminal;
+
+pub use terminal::{Frame, Position, Rect, Terminal};
 
 /// The color fidelity a terminal can display.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
@@ -173,14 +179,17 @@ impl TerminalCapabilities {
 }
 
 /// The visible dimensions of a terminal in character cells.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
 pub struct TerminalSize {
     columns: usize,
     rows: usize,
 }
 
 impl TerminalSize {
-    const fn new(columns: usize, rows: usize) -> Self {
+    /// The empty terminal surface.
+    pub const ZERO: Self = Self::new(0, 0);
+
+    pub const fn new(columns: usize, rows: usize) -> Self {
         Self { columns, rows }
     }
 

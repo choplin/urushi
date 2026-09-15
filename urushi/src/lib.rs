@@ -19,8 +19,9 @@
 //! ```
 //!
 //! Width calculations are aware of East Asian wide characters. Terminal
-//! inspection lives in the lower-level `urushi-terminal` crate; arbitrary
-//! writers combine it with [`resolve`], [`render`], and [`std::io::Write`].
+//! contracts and inspection live in the workspace-independent
+//! `urushi-terminal` crate; arbitrary writers combine its detection with
+//! [`resolve`], [`render`], and [`std::io::Write`].
 
 mod component;
 mod key;

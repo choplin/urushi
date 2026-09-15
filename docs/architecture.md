@@ -116,8 +116,9 @@ The contracts shared across surfaces are:
   nodes or bound Canvas items without receiving an available area;
 - the [`text`](../urushi/src/text/) implementation, which supplies one
   cell-aware definition of plain-text display width and wrapping; and
-- `urushi-terminal`, which observes the size and rendering capabilities of the
-  actual output handle without choosing application policy.
+- `urushi-terminal`, which defines workspace-independent terminal geometry, frame,
+  terminal, and session contracts and observes the size and rendering
+  capabilities of an actual output handle without choosing application policy.
 
 `View` belongs to that foundation as well. Every surface goes through the same
 `resolve` and draws only the `ResolvedView` it produces — the Ratatui adapter as
@@ -188,11 +189,11 @@ a role are documented with the extension point itself, in
 
 | Crate | Responsibility | Dependencies within the workspace |
 | --- | --- | --- |
-| [`urushi-terminal`](../urushi-terminal/) | Inspection of one output handle: terminal/non-terminal classification, visible size, and feature-granular capabilities. | None within the workspace |
+| [`urushi-terminal`](../urushi-terminal/) | Workspace-independent terminal contracts and inspection: geometry, draw-scoped frames, terminal and session ownership, terminal/non-terminal classification, visible size, and capabilities. | None within the workspace |
 | [`urushi`](../urushi/) | Logical styles, themes, renderer-neutral views and components, layout, ANSI serialization, and standard-stream output convenience. | `urushi-terminal` |
 | [`urushi-cli`](../urushi-cli/) | Opinionated semantic summaries and warnings for human-facing, non-interactive CLI output. | `urushi` |
 | [`urushi-prompt`](../urushi-prompt/) | Typed input, select, and confirm forms; prompt state transitions; inline and alternate-screen presentations; terminal session setup and cleanup. | `urushi`, `urushi-terminal` |
-| [`urushi-tui`](../urushi-tui/) | The Ratatui backend adapter in [`ratatui`](../urushi-tui/src/ratatui/) — style conversion, widgets, and the cell-writing path they share with the renderer — and the full-screen TUI runtime behind the default-on `runtime` Cargo feature. | `urushi` |
+| [`urushi-tui`](../urushi-tui/) | The Ratatui backend adapter in [`ratatui`](../urushi-tui/src/ratatui/) — style conversion, widgets, and the cell-writing path they share with the renderer — and the full-screen TUI runtime behind the default-on `runtime` Cargo feature. | `urushi`, `urushi-terminal` |
 
 `urushi-prompt` owns interactive prompt behavior. The core crate must not gain
 prompt-specific navigation, validation, cursor, or form-submission policy merely
@@ -225,8 +226,9 @@ The dependency direction runs from I/O and adapters toward semantic modules:
 
 `theme` and `component` reference each other because `theme` stores
 canonical component presentations and those presentations derive their
-logical styles from the theme. Terminal inspection remains below rendering, so
-neither capability detection nor standard handles enter the style and view model.
+logical styles from the theme. Terminal contracts and inspection remain below
+rendering, so neither capability detection nor standard handles enter the
+style and view model.
 
 Width and wrapping policy must remain shared. A component or renderer should
 not introduce a private definition of CJK display width.
@@ -283,7 +285,8 @@ thread, timer, or live terminal region of its own.
 
 ### Output resources have explicit owners
 
-`urushi-terminal::detect` observes one supplied handle. It distinguishes a
+`urushi-terminal::detect` is the observation part of the lower terminal layer.
+It observes one supplied handle and distinguishes a
 non-terminal from a terminal whose capability set is empty; a terminal size
 query failure is an error. `print` and `eprint` inspect their own target and use
 the detected width. Redirected output uses unbounded layout and dumb settings.
@@ -309,10 +312,13 @@ the exact resize and ownership rules.
 
 ### External backends stay behind adapters
 
-Ratatui types stay in `urushi-tui`, and Crossterm types stay behind the prompt
-and TUI terminal adapters that use them. `RenderSettings` selects output
-features before data reaches an adapter. Backend replacement therefore remains
-local, and backend lifecycle rules do not become core application contracts.
+The backend-independent `Frame`, `Terminal`, and terminal geometry contracts
+live in `urushi-terminal`. Their cell value is an associated type, so the crate
+does not depend on a renderer or presentation model. Ratatui types stay in
+`urushi-tui`, and Crossterm types stay behind the terminal adapters that use
+them. `RenderSettings` selects output features before data reaches an adapter.
+Backend replacement therefore remains local, and backend lifecycle rules do
+not become core application contracts.
 
 Replacement is not hypothetical. Urushi is built toward owning the layer that
 writes to and reads from the terminal, because a rule this documentation states
@@ -343,7 +349,8 @@ changed deliberately and this document is updated in the same change:
 4. `render` consumes only a `ResolvedView` and explicit `RenderSettings`.
 5. Display width and wrapping use the shared `text` implementation; rendered
    strings are not a layout input.
-6. Terminal inspection is target-specific and centralized in `urushi-terminal`.
+6. Workspace-independent terminal contracts and target-specific inspection are
+   centralized in `urushi-terminal`.
 7. `urushi-tui` widgets write only to the buffer supplied by the caller;
    terminal lifecycle, event delivery, and frame scheduling belong to the
    runtime, never to a widget.

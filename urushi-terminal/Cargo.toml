@@ -1,6 +1,6 @@
 [package]
 name = "urushi-terminal"
-description = "Terminal inspection primitives for the Urushi ecosystem"
+description = "Workspace-independent terminal contracts and inspection for the Urushi ecosystem"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

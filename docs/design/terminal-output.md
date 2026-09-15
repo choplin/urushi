@@ -3,9 +3,11 @@
 How terminal observation, layout, rendering, and writing remain orthogonal while
 the ordinary stdout and stderr calls stay convenient.
 
-## Foundation
+## Observation within the terminal foundation
 
-`urushi-terminal` owns observation of one supplied output handle:
+This design topic covers the observation part of `urushi-terminal`; it does not
+limit the crate's wider ownership of backend-independent terminal contracts.
+`urushi-terminal` observes one supplied output handle:
 
 ```rust
 pub enum TerminalDetection {
@@ -66,8 +68,10 @@ or output deliberately rendered as if it targeted a known terminal.
 
 ## Boundaries
 
-Terminal inspection stays below `urushi`, so prompt and TUI crates may use it
-directly without routing through the core renderer. Renderer types do not own
-writers or detected terminal state. Rendered strings do not carry geometry and
-cannot be joined after rendering; composition is represented in `View` before
-layout.
+All `urushi-terminal` contracts stay below `urushi` and have no workspace
+dependencies. Terminal inspection therefore remains directly usable by prompt
+and TUI crates without routing through the core renderer. Renderer types do not
+own writers or detected terminal state. Rendered strings do not carry geometry
+and cannot be joined after rendering; composition is represented in `View`
+before layout. The frame, terminal, and session contracts are specified in
+[`tui-terminal-ownership.md`](tui-terminal-ownership.md).

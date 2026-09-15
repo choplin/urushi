@@ -1,7 +1,9 @@
 //! Cross-stage tests: source admission followed by runtime-wide acceptance.
 
 use super::*;
+use crate::runtime::testing::Harness;
 use crate::{Input, KeyCode, KeyEvent, KeyKind};
+use urushi_terminal::TerminalSize;
 
 #[test]
 fn accepted_deliveries_keep_one_runtime_wide_order_across_sources() {
@@ -13,31 +15,25 @@ fn accepted_deliveries_keep_one_runtime_wide_order_across_sources() {
         Surface(u8),
     }
 
-    let deliveries = DeliveryQueue::new();
-    let (input_sender, mut input) = source_inbox(Admission::bounded(4));
-    let (subscription_sender, mut subscription) = source_inbox(Admission::bounded(4));
+    let harness = Harness::new(TerminalSize::ZERO);
+    let mut input = harness.source(Admission::bounded(4));
+    let mut subscription = harness.source(Admission::bounded(4));
     let (surface_publisher, mut surface) = surface_slot();
 
-    input_sender.blocking_send(Message::Input(1)).unwrap();
-    subscription_sender
-        .blocking_send(Message::Subscription(1))
-        .unwrap();
-    input_sender.blocking_send(Message::Input(2)).unwrap();
+    input.send(Message::Input(1)).unwrap();
+    subscription.send(Message::Subscription(1)).unwrap();
+    input.send(Message::Input(2)).unwrap();
     assert!(surface_publisher.publish(Message::Surface(1)));
 
-    assert!(input.try_accept(&deliveries));
-    deliveries
-        .ordinary_completion()
-        .complete(Message::Effect(1));
-    assert!(subscription.try_accept(&deliveries));
-    deliveries
-        .ordinary_completion()
-        .complete(Message::Effect(2));
-    assert!(surface.try_accept(&deliveries));
-    assert!(input.try_accept(&deliveries));
+    assert!(harness.accept(&mut input));
+    harness.complete(Message::Effect(1));
+    assert!(harness.accept(&mut subscription));
+    harness.complete(Message::Effect(2));
+    assert!(surface.try_accept(&harness.deliveries()));
+    assert!(harness.accept(&mut input));
 
     assert_eq!(
-        drain(&deliveries),
+        harness.drain(),
         vec![
             Delivery::Async(Message::Input(1)),
             Delivery::Async(Message::Effect(1)),
@@ -54,29 +50,21 @@ fn accepted_deliveries_keep_one_runtime_wide_order_across_sources() {
 
 #[test]
 fn bounded_input_admission_keeps_every_key_repeat_separate() {
-    let deliveries = DeliveryQueue::new();
-    let (sender, mut input) = source_inbox(Admission::bounded(4));
+    let harness = Harness::new(TerminalSize::ZERO);
+    let mut input = harness.source(Admission::bounded(4));
     let repeat = Input::Key(KeyEvent {
         code: KeyCode::Down,
         modifiers: crate::Modifiers::NONE,
         kind: KeyKind::Repeat,
     });
 
-    sender.blocking_send(repeat.clone()).unwrap();
-    sender.blocking_send(repeat.clone()).unwrap();
-    assert!(input.try_accept(&deliveries));
-    assert!(input.try_accept(&deliveries));
+    input.send(repeat.clone()).unwrap();
+    input.send(repeat.clone()).unwrap();
+    assert!(harness.accept(&mut input));
+    assert!(harness.accept(&mut input));
 
     assert_eq!(
-        drain(&deliveries),
+        harness.drain(),
         vec![Delivery::Async(repeat.clone()), Delivery::Async(repeat)]
     );
-}
-
-fn drain<Message>(deliveries: &DeliveryQueue<Message>) -> Vec<Delivery<Message>> {
-    let mut drained = Vec::new();
-    while let Some(delivery) = deliveries.try_next() {
-        drained.push(delivery);
-    }
-    drained
 }
