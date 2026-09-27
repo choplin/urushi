@@ -2,7 +2,7 @@
 
 How an application is started, what the entry point returns, where the executor
 that runs effects comes from, and what the runtime does with an error of its
-own — a failed draw, a startup that does not converge, a panic in `update`.
+own — a failed draw or a panic in `update`.
 [`tui-architecture.md`](../tui-architecture.md) summarizes this under
 "Rendering and runtime ownership"; this file holds the exact contract.
 
@@ -18,7 +18,12 @@ let model = urushi_tui::run(app)?;
 down, and returns the final `Model`. It blocks: `init`, every `update`, and
 every `view` run on the thread that called it, which is why `Model` needs no
 `Send` bound. With no other arrangement, `run` opens the real terminal, reads
-the real input, and drives effects on a Tokio executor of its own.
+the real input, and drives effects on a Tokio current-thread executor of its
+own. Future effects and asynchronous subscriptions share that executor with the
+application loop. The draw scheduler owns its state transitions and uses the
+runtime-provided timer while the application loop waits on the scheduler as one
+event source. Blocking effects and synchronous physical presentation use
+Tokio's blocking pool, so neither stops delivery processing.
 
 `run(app)` is the short spelling of a builder that lets each replaceable
 boundary be supplied:
@@ -60,7 +65,6 @@ or `Application`.
 | `Error` | When |
 | --- | --- |
 | `Terminal(io::Error)` | the terminal could not be entered, drawn to, or restored, and no subscription took the failure |
-| `StartupDidNotConverge` | the startup barrier reached its round limit before the initial `Sync` deliveries settled |
 
 A failure to draw a frame is delivered rather than fatal when the application
 declared `Subscription::terminal_errors(f)`: the failure reaches `update` as

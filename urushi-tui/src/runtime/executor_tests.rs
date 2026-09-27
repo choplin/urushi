@@ -1,12 +1,42 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use super::{EffectControl, EffectExecutor, RunningSource, SourceSpawner, SubscriptionExecutor};
+use super::{
+    EffectControl, EffectExecutor, RunningSource, SourceSpawner, SubscriptionExecutor, TokioClock,
+    TokioExecutor,
+};
 use crate::runtime::delivery::{Delivery, DeliveryQueue};
 use crate::runtime::subscription::Source;
 use crate::runtime::testing::{EffectEvent, Harness, Ready};
 use crate::{Effect, Subscription};
 use urushi_terminal::TerminalSize;
+
+#[test]
+fn tokio_keeps_future_effects_on_the_runtime_thread_and_blocking_effects_off_it() {
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_time()
+        .build()
+        .unwrap();
+    runtime.block_on(async {
+        let runtime_thread = std::thread::current().id();
+        let deliveries = DeliveryQueue::new();
+        let executor = Arc::new(TokioExecutor::new(tokio::runtime::Handle::current()));
+        let clock = Arc::new(TokioClock);
+        let mut effects = EffectExecutor::new(executor, clock, deliveries.clone());
+
+        effects.start(Effect::future(async { std::thread::current().id() }));
+        let Delivery::Async(future_thread) = deliveries.next().await else {
+            panic!("effect completions are Async")
+        };
+        assert_eq!(future_thread, runtime_thread);
+
+        effects.start(Effect::perform(|| std::thread::current().id()));
+        let Delivery::Async(blocking_thread) = deliveries.next().await else {
+            panic!("effect completions are Async")
+        };
+        assert_ne!(blocking_thread, runtime_thread);
+    });
+}
 
 #[test]
 fn one_shot_effects_are_scheduled_in_source_order_and_delivered_as_they_complete() {

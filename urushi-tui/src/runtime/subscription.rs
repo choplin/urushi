@@ -311,6 +311,16 @@ impl<Message> Subscription<Message> {
     pub(crate) fn into_sources(self) -> Vec<Source<Message>> {
         self.sources
     }
+
+    pub(crate) fn terminal_error_mapper(&self) -> Option<Mapper<io::Error, Message>> {
+        self.sources.iter().rev().find_map(|source| {
+            if let SourceKind::TerminalErrors(mapper) = &source.kind {
+                Some(Arc::clone(mapper))
+            } else {
+                None
+            }
+        })
+    }
 }
 
 impl<Message> Source<Message> {

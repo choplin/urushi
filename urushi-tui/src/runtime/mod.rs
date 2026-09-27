@@ -8,6 +8,11 @@
 //! interprets them behind boundaries that do not appear in application types.
 
 mod application;
+#[cfg_attr(
+    not(test),
+    expect(dead_code, reason = "wired by the public runtime entry point")
+)]
+mod core;
 mod delivery;
 mod effect;
 #[cfg_attr(
@@ -15,6 +20,12 @@ mod effect;
     expect(dead_code, reason = "consumed by the runtime core and test harness")
 )]
 mod executor;
+#[cfg_attr(
+    not(test),
+    expect(dead_code, reason = "wired by the public runtime entry point")
+)]
+mod presentation;
+mod scheduler;
 mod source;
 mod subscription;
 #[cfg(test)]

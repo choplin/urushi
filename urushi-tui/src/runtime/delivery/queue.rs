@@ -57,6 +57,7 @@ struct Shared<Message> {
 
 struct State<Message> {
     accepted: VecDeque<Delivery<Message>>,
+    pending_sync: usize,
     receiver_waker: Option<Waker>,
 }
 
@@ -66,6 +67,7 @@ impl<Message> DeliveryQueue<Message> {
             shared: Arc::new(Shared {
                 state: Mutex::new(State {
                     accepted: VecDeque::new(),
+                    pending_sync: 0,
                     receiver_waker: None,
                 }),
                 available: Condvar::new(),
@@ -85,6 +87,9 @@ impl<Message> DeliveryQueue<Message> {
     /// the caller can release every lock before scheduler code runs.
     pub(super) fn enqueue(&self, delivery: Delivery<Message>) -> Option<Waker> {
         let mut state = lock(&self.shared.state);
+        if matches!(delivery, Delivery::Sync { .. }) {
+            state.pending_sync += 1;
+        }
         state.accepted.push_back(delivery);
         state.receiver_waker.take()
     }
@@ -102,6 +107,22 @@ impl<Message> DeliveryQueue<Message> {
     /// Removes the earliest accepted delivery without waiting.
     pub(crate) fn try_next(&self) -> Option<Delivery<Message>> {
         lock(&self.shared.state).accepted.pop_front()
+    }
+
+    /// Whether a draw may be admitted at this linearization point.
+    ///
+    /// A `Sync` accepted after this method returns `true` follows the admitted
+    /// draw. One accepted before it returns keeps the draw fenced until the
+    /// runtime completes that delivery.
+    pub(crate) fn sync_fence_allows_draw(&self) -> bool {
+        lock(&self.shared.state).pending_sync == 0
+    }
+
+    /// Releases the fence held by one completely applied `Sync` delivery.
+    pub(crate) fn complete_sync(&self) {
+        let mut state = lock(&self.shared.state);
+        assert!(state.pending_sync > 0, "a completed Sync holds a fence");
+        state.pending_sync -= 1;
     }
 
     /// Waits without choosing an executor for the earliest accepted delivery.

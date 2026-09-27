@@ -375,6 +375,10 @@ impl ManualClock {
 }
 
 impl Clock for ManualClock {
+    fn now(&self) -> Instant {
+        self.shared.lock().expect("test clock lock is healthy").now
+    }
+
     fn sleep(&self, duration: Duration) -> Pin<Box<dyn Future<Output = Instant> + Send + 'static>> {
         let deadline = self.shared.lock().expect("test clock lock is healthy").now + duration;
         Box::pin(Sleep {

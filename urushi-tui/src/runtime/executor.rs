@@ -34,6 +34,8 @@ pub(crate) trait Executor: Send + Sync + 'static {
 
 /// The source of time shared by delayed effects and interval subscriptions.
 pub(crate) trait Clock: Send + Sync + 'static {
+    fn now(&self) -> Instant;
+
     fn sleep(&self, duration: Duration) -> Pin<Box<dyn Future<Output = Instant> + Send + 'static>>;
 }
 
@@ -47,6 +49,23 @@ impl TokioExecutor {
     #[cfg_attr(test, allow(dead_code, reason = "wired by the runtime core"))]
     pub(crate) fn new(handle: tokio::runtime::Handle) -> Self {
         Self { handle }
+    }
+}
+
+#[cfg_attr(test, allow(dead_code, reason = "wired by the runtime core"))]
+pub(crate) struct TokioClock;
+
+impl Clock for TokioClock {
+    fn now(&self) -> Instant {
+        Instant::now()
+    }
+
+    fn sleep(&self, duration: Duration) -> Pin<Box<dyn Future<Output = Instant> + Send + 'static>> {
+        let deadline = Instant::now() + duration;
+        Box::pin(async move {
+            tokio::time::sleep_until(tokio::time::Instant::from_std(deadline)).await;
+            deadline
+        })
     }
 }
 

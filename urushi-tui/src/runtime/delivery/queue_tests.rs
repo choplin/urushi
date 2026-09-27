@@ -72,6 +72,21 @@ fn a_sync_delivery_preserves_its_non_empty_message_order() {
 }
 
 #[test]
+fn an_accepted_sync_fences_draws_until_the_runtime_completes_it() {
+    let deliveries = DeliveryQueue::new();
+    assert!(deliveries.sync_fence_allows_draw());
+
+    deliveries.accept(Delivery::sync(1, []));
+    assert!(!deliveries.sync_fence_allows_draw());
+
+    assert!(matches!(deliveries.try_next(), Some(Delivery::Sync { .. })));
+    assert!(!deliveries.sync_fence_allows_draw());
+
+    deliveries.complete_sync();
+    assert!(deliveries.sync_fence_allows_draw());
+}
+
+#[test]
 fn the_queue_wakes_an_async_or_blocking_runtime_driver() {
     let deliveries = DeliveryQueue::new();
     let mut next = Box::pin(deliveries.next());

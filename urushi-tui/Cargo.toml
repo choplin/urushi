@@ -10,7 +10,7 @@ categories = ["command-line-interface"]
 [dependencies]
 futures-core = { version = "0.3", optional = true }
 ratatui = { version = "0.29", default-features = false }
-tokio = { version = "1", features = ["rt"], optional = true }
+tokio = { version = "1", features = ["macros", "rt", "sync", "time"], optional = true }
 urushi = { path = "../urushi", version = "=0.1.0" }
 urushi-terminal = { path = "../urushi-terminal", version = "=0.1.0" }
 unicode-width.workspace = true

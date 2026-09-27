@@ -190,22 +190,29 @@ Deliveries from all sources are processed in the runtime-wide accepted order; a
 `Sync` delivery does not overtake an earlier accepted `Async` one.
 
 `Async` is the default. The runtime processes accepted messages independently
-of physical drawing: it may consume several messages and then draw only the
-latest resulting model when the terminal is ready. This is draw coalescing, not
-message coalescing — no accepted logical transition is skipped. Draw scheduling
-is a runtime policy, not an application command; the application API has no
+of physical drawing. After each `update`, the runtime marks the draw scheduler
+dirty directly; this is state inside the runtime, not another message. An idle
+scheduler builds a view immediately. While a draw is running and during the
+minimum interval after it completes, further updates only retain one dirty
+state. The scheduler uses a runtime-provided timer but starts and receives that
+timer itself, keeping its phase transitions internal. At the end of the
+interval the runtime draws the latest resulting model when dirty, or the
+scheduler becomes idle when clean. This is draw coalescing, not message
+coalescing — no accepted logical transition is skipped. Draw scheduling is a
+runtime policy, not an application command; the application API has no
 `request_draw`, no public damage or invalidation type, and no `View` equality
-prerequisite for skipping a draw, because Ratatui's cell diff already does that
-work.
+prerequisite for skipping a draw, because the terminal's cell diff already does
+that work.
 
 `Sync` is the exceptional mode for changes to the logical rendering
 environment — terminal dimensions, cell pixel dimensions, a graphics
 capability. Accepting a `Sync` delivery is a render barrier: earlier deliveries
-are processed, the whole batch is applied without intermediate draws, and
-`view` is evaluated and drawn once with the matching environment snapshot
-before later deliveries. The first frame is guarded the same way: a startup
-barrier applies initial `Sync` deliveries to convergence before the first
-draw, staging initial `Async` input until after it.
+are processed and no new draw is admitted until the whole batch has been
+applied without intermediate draws. The scheduler is evaluated after the fence
+is released and before the next delivery. A draw already in progress is not
+interrupted. The first frame uses the same rule: the runtime accepts the known
+initial surface delivery before its first scheduling decision, so the ordinary
+Sync fence delays that decision until the model contains the initial surface.
 
 Surface information reaches the application only through a subscription as a
 message, retained in the model when needed; `view` receives no implicit
@@ -255,7 +262,7 @@ physical I/O. The runtime core and the application see no backend type.
 
 The runtime itself owns the live model; source admission and the accepted
 delivery order; subscription reconciliation; effect execution and cancellation
-known to the runtime; draw scheduling and pending-draw cancellation; the
+known to the runtime; coalesced draw invalidation, admission, and cooldown; the
 terminal and terminal session; and runtime control such as shutdown. Shutdown
 is a control-path concern rather than a privileged application message
 variant: an application requests it through an effect it returns from
@@ -292,8 +299,8 @@ Implementation of the TUI subsystem must preserve these invariants:
    through messages.
 6. `Async` is the default; `Sync` is reserved for a logical rendering-environment
    barrier.
-7. A completed `Sync` batch produces one view and one draw before later
-   deliveries are processed.
+7. An accepted `Sync` fences new draw admission until its complete batch has
+   updated the model; the scheduler is then evaluated before later delivery.
 8. Application-visible surface information reaches `update` through a
    subscription message and is retained in the model when needed.
 9. The framework does not expose draw planning or a universal damage model as

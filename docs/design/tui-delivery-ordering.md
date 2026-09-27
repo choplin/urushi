@@ -83,15 +83,33 @@ may consume several messages and then draw only the latest resulting model when
 the terminal is ready. This is draw coalescing, not message coalescing: no
 accepted logical transition is skipped.
 
+The scheduler has three phases: `Idle`, `Drawing`, and `CoolingDown`. It also
+has one coalesced dirty bit. Completing `init` or an `update` invalidates the
+scheduler directly on the application thread; invalidation is not a delivery
+or a runtime-event message. The transitions are:
+
+1. invalidating `Idle` makes a draw ready immediately;
+2. starting that draw consumes dirty and enters `Drawing`;
+3. invalidation during `Drawing` only sets dirty;
+4. completion always enters `CoolingDown` until the completion time plus the
+   configured minimum interval;
+5. invalidation during `CoolingDown` only sets dirty; and
+6. the scheduler starts and receives the cooldown timer itself; when it fires,
+   dirty starts one draw from the latest model, while clean returns to `Idle`.
+
+The default interval is approximately one 30 fps frame period. It limits
+physical presentation frequency while the application is busy; it does not
+delay an update that reaches an idle scheduler.
+
 Draw scheduling is a runtime policy rather than an application command. The
 core application API therefore has no `request_draw`, `plan_draw`, public
 `Damage`, or public `Invalidation` type. The application expresses changes
 through its model, effects, and view.
 
 The initial runtime also does not require `View` equality as a prerequisite for
-skipping a draw. Ratatui already compares cell buffers and emits only changed
-cells. Caching or equality checks above that layer should be introduced only
-after measurement identifies a material benefit and a correct ownership
+skipping a draw. `Terminal` already compares cell buffers and emits only
+changed cells. Caching or equality checks above that layer should be introduced
+only after measurement identifies a material benefit and a correct ownership
 boundary.
 
 ### Sync delivery as a render barrier
@@ -103,17 +121,17 @@ before the corresponding frame is built.
 
 When the runtime accepts a `Sync` delivery, it:
 
-1. cancels any pending draw that has not started;
-2. processes all earlier accepted deliveries in order;
+1. records a fence at the same queue linearization point as acceptance;
+2. processes all earlier accepted deliveries in order while admitting no new
+   draw;
 3. applies every message in the `Sync` batch through `update` without drawing
    intermediate models;
-4. evaluates `view` once from the model after the complete batch; and
-5. draws that view with the matching logical rendering-environment snapshot
-   before processing later deliveries.
+4. releases that delivery's fence after the complete batch; and
+5. evaluates the scheduler before processing a later delivery.
 
 If another `Sync` delivery arrives during a draw, the runtime does not interrupt
-the draw already in progress. It queues the new delivery at the next position in
-the global order.
+the admitted draw. Acceptance fences the next draw and gives the new delivery
+its position in the global order.
 
 Shutdown inside the batch follows the rule that holds everywhere: the `update`
 that returns `Effect::shutdown()` is the last `update`. The rest of the batch
@@ -153,32 +171,23 @@ coordination without inspecting those messages.
 ### Startup barrier
 
 The first frame must not be built from placeholder surface information when an
-initial surface observation is available. The runtime therefore establishes a
-startup barrier before the first draw.
+initial surface observation is available. Startup uses the ordinary Sync fence
+rather than a second scheduling mode.
 
 During startup, the runtime:
 
-1. calls `init` and evaluates the initial subscriptions;
-2. collects initial `Sync` deliveries from those subscriptions;
-3. applies their messages in deterministic order, batching related surface
-   facts where possible;
-4. reevaluates model-dependent subscriptions when those messages change the
-   subscription set;
-5. repeats until no new initial `Sync` delivery is produced; and
-6. evaluates `view` once and performs the first draw.
+1. calls `init` synchronously to create the initial model;
+2. starts the initial subscriptions, whose runtime-owned surface source accepts
+   its known initial observation synchronously;
+3. invalidates the scheduler for the initial model; and
+4. enters the normal loop.
 
-Initial `Async` deliveries are staged during this process. They enter normal
-admission and receive global ordering only after the first draw, so they cannot
-make the initial rendering environment inconsistent.
-
-Startup reconciliation is bounded by a round limit the runtime owns; it is not
-a configuration the application sets. When the limit is reached before the
-initial `Sync` deliveries converge, the runtime does not draw: the entry point
-returns `Error::StartupDidNotConverge`, and the terminal session is restored
-as on any exit. With the runtime's `surface` source as the only producer of
-`Sync` deliveries, and that source a singleton, reconciliation converges in
-two rounds; the limit guards a runtime defect or a future `Sync` source, and
-its value is the implementation's.
+The accepted initial `Sync` keeps the first scheduling decision fenced. The
+runtime applies it through `update`, reconciles the resulting subscriptions,
+releases the fence, and evaluates the scheduler before accepting another
+delivery. Initial `Async` deliveries need no staging; they retain their normal
+accepted positions, and any one processed before the initial `Sync` still
+cannot cause a draw while that fence is pending.
 
 ### A lightweight Ratatui application
 
@@ -195,14 +204,15 @@ not wait for them.
 | Pure state transitions | Unit tests for `init`, `update`, and `view` without a terminal |
 | Global ordering | Deterministic tests with interleaved input, subscription, and effect sources |
 | Bounded admission | Saturation tests for bounded FIFO, backpressure, replacement, and cancellation |
-| Async draw coalescing | Tests proving every update reaches `update` while the runtime draws only the latest model |
-| Sync barrier | Tests proving no intermediate draw and no later delivery before the barrier draw |
-| Startup | Tests for multiple initial `Sync` batches, staged `Async` input, and subscription convergence |
+| Async draw coalescing | Tests proving every update reaches `update`, idle invalidation draws immediately, and busy invalidations produce one latest-model draw after cooldown |
+| Sync barrier | Tests proving acceptance fences new draws, batches have no intermediate draw, and an in-flight draw is not interrupted |
+| Startup | Tests proving `init` and the known initial surface `Sync` are reflected in the first view through the ordinary fence |
 
 The runtime test harness should provide deterministic message sources, a
-controllable clock, an in-memory backend, and observable effect scheduling.
-Tests should assert externally meaningful ordering and presentation behavior,
-not private task structure.
+controllable clock, a deterministic presentation boundary backed where needed
+by an in-memory `Terminal`, and observable effect scheduling. Tests should
+assert externally meaningful ordering and presentation behavior, not private
+task structure.
 
 ## Why `Delivery` and its variants stay internal
 
@@ -215,8 +225,11 @@ Should a rendering-environment source ever come from an application — a
 graphics capability probe, say — a barrier choice on `Admission` is an additive
 change.
 
-## Why the startup limit is not configurable
+## Why startup has no convergence mode
 
-The limit is reached only by a defect or by a `Sync` source that does not
-exist yet; a knob for it would be a knob nobody turns. One error variant on the
-entry point states the failure, and the value stays with the implementation.
+The set of runtime sources that can produce `Sync` is fixed, and startup has one
+known initial surface observation. Treating arbitrary application traffic as a
+startup fixed point would add staging, a round budget, and an error state to a
+case the source model does not create. Accepting the known observation before
+the first scheduling decision gives startup the same fence semantics as every
+later surface change.
