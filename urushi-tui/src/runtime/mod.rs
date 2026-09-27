@@ -25,6 +25,7 @@ mod executor;
     expect(dead_code, reason = "wired by the public runtime entry point")
 )]
 mod presentation;
+pub(crate) mod renderer;
 mod scheduler;
 mod source;
 mod subscription;

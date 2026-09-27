@@ -412,4 +412,27 @@ mod tests {
         assert_eq!(terminal.size(), TerminalSize::new(3, 1));
         assert_eq!(terminal.writer().clears, 2);
     }
+
+    #[cfg(feature = "runtime")]
+    #[test]
+    fn runtime_renderer_matches_draw_resolved_cells() {
+        use urushi::{Available, TextStyle, View, resolve};
+
+        use super::super::draw_resolved;
+
+        let view = View::text("界x\ny", TextStyle::new().bold());
+        let size = TerminalSize::new(4, 2);
+        let mut terminal =
+            RatatuiTerminal::new(RecordingBackend::new(), size).expect("valid terminal size");
+        terminal
+            .draw(|frame| crate::runtime::renderer::render(&view, frame))
+            .expect("renderer frame succeeds");
+
+        let area = RatatuiRect::new(0, 0, 4, 2);
+        let mut expected = Buffer::empty(area);
+        let resolved = resolve(&view, Available::size(4, 2)).expect("finite view geometry");
+        draw_resolved(&resolved, area, &mut expected);
+
+        assert_eq!(terminal.committed, expected);
+    }
 }

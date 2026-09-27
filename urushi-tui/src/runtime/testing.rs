@@ -429,12 +429,13 @@ pub(crate) struct CommittedFrame {
     cursor: Option<Position>,
 }
 
-#[expect(dead_code, reason = "read by the runtime core tests in the next issue")]
 impl CommittedFrame {
+    #[expect(dead_code, reason = "retained for runtime behavior tests")]
     pub(crate) fn size(&self) -> TerminalSize {
         self.size
     }
 
+    #[expect(dead_code, reason = "retained for runtime behavior tests")]
     pub(crate) fn cells(&self) -> &[InMemoryCell] {
         &self.cells
     }
@@ -458,14 +459,13 @@ pub(crate) struct InMemoryTerminal {
 }
 
 impl InMemoryTerminal {
-    fn new(size: TerminalSize) -> Self {
+    pub(crate) fn new(size: TerminalSize) -> Self {
         Self {
             size,
             committed: Vec::new(),
         }
     }
 
-    #[expect(dead_code, reason = "read by the runtime core tests in the next issue")]
     pub(crate) fn frames(&self) -> &[CommittedFrame] {
         &self.committed
     }
