@@ -1,123 +1,34 @@
-//! Terminal color types and their ANSI SGR encoding.
+use std::fmt::{self, Write as _};
 
-/// A terminal color.
-///
-/// Construct one directly, from a named constant, or by parsing a string:
-///
-/// ```
-/// use urushi::Color;
-///
-/// let a = Color::RED;
-/// let b = Color::Ansi256(212);
-/// let c = Color::Rgb(0xfa, 0xfa, 0xfa);
-/// let d = Color::parse("#ff88cc").unwrap();
-/// let e = Color::parse("212").unwrap();
-/// ```
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum Color {
-    /// Standard 4-bit ANSI color (0–15). Values 8–15 are the bright variants.
-    Ansi(u8),
-    /// 8-bit indexed color from the 256-color palette.
-    Ansi256(u8),
-    /// 24-bit true color.
-    Rgb(u8, u8, u8),
-}
+use urushi_terminal::Color;
 
-impl Color {
-    pub const BLACK: Self = Self::Ansi(0);
-    pub const RED: Self = Self::Ansi(1);
-    pub const GREEN: Self = Self::Ansi(2);
-    pub const YELLOW: Self = Self::Ansi(3);
-    pub const BLUE: Self = Self::Ansi(4);
-    pub const MAGENTA: Self = Self::Ansi(5);
-    pub const CYAN: Self = Self::Ansi(6);
-    pub const WHITE: Self = Self::Ansi(7);
-    pub const BRIGHT_BLACK: Self = Self::Ansi(8);
-    pub const BRIGHT_RED: Self = Self::Ansi(9);
-    pub const BRIGHT_GREEN: Self = Self::Ansi(10);
-    pub const BRIGHT_YELLOW: Self = Self::Ansi(11);
-    pub const BRIGHT_BLUE: Self = Self::Ansi(12);
-    pub const BRIGHT_MAGENTA: Self = Self::Ansi(13);
-    pub const BRIGHT_CYAN: Self = Self::Ansi(14);
-    pub const BRIGHT_WHITE: Self = Self::Ansi(15);
-
-    /// Parses a color from a hex string (`"#fac"` or `"#ffaacc"`) or a
-    /// decimal palette index (`"0"`–`"255"`).
-    ///
-    /// Indexes below 16 become [`Color::Ansi`]; the rest become
-    /// [`Color::Ansi256`].
-    pub fn parse(s: &str) -> Option<Self> {
-        if let Some(hex) = s.strip_prefix('#') {
-            return match hex.len() {
-                3 => {
-                    let mut it = hex.chars().map(|c| c.to_digit(16).map(|d| (d * 17) as u8));
-                    let r = it.next()??;
-                    let g = it.next()??;
-                    let b = it.next()??;
-                    Some(Self::Rgb(r, g, b))
-                }
-                6 => {
-                    let r = u8::from_str_radix(&hex[0..2], 16).ok()?;
-                    let g = u8::from_str_radix(&hex[2..4], 16).ok()?;
-                    let b = u8::from_str_radix(&hex[4..6], 16).ok()?;
-                    Some(Self::Rgb(r, g, b))
-                }
-                _ => None,
-            };
+pub(crate) fn write_sgr_params(output: &mut String, color: Color, background: bool) -> fmt::Result {
+    match color {
+        Color::Ansi(index) if index < 8 => write!(
+            output,
+            "{}",
+            u16::from(index) + if background { 40 } else { 30 }
+        ),
+        Color::Ansi(index) if index < 16 => write!(
+            output,
+            "{}",
+            u16::from(index - 8) + if background { 100 } else { 90 }
+        ),
+        Color::Ansi(index) | Color::Ansi256(index) => {
+            write!(output, "{};5;{index}", if background { 48 } else { 38 })
         }
-        let n = s.parse::<u8>().ok()?;
-        Some(if n < 16 {
-            Self::Ansi(n)
-        } else {
-            Self::Ansi256(n)
-        })
-    }
-
-    /// Returns the SGR parameter string selecting this color for the
-    /// foreground or background layer (e.g. `"38;5;212"`).
-    pub(crate) fn sgr_params(self, background: bool) -> String {
-        match self {
-            Self::Ansi(n) if n < 8 => (u16::from(n) + if background { 40 } else { 30 }).to_string(),
-            Self::Ansi(n) if n < 16 => {
-                (u16::from(n - 8) + if background { 100 } else { 90 }).to_string()
-            }
-            // Out-of-range Ansi values fall back to the indexed form.
-            Self::Ansi(n) | Self::Ansi256(n) => {
-                format!("{};5;{n}", if background { 48 } else { 38 })
-            }
-            Self::Rgb(r, g, b) => {
-                format!("{};2;{r};{g};{b}", if background { 48 } else { 38 })
-            }
-        }
-    }
-
-    /// Returns the SGR parameter string selecting this color for the underline
-    /// layer (e.g. `"58;5;212"`).
-    ///
-    /// SGR 58 has no short form for the first sixteen colors, so a palette
-    /// index always takes the indexed spelling.
-    pub(crate) fn sgr_underline_params(self) -> String {
-        match self {
-            Self::Ansi(n) | Self::Ansi256(n) => format!("58;5;{n}"),
-            Self::Rgb(r, g, b) => format!("58;2;{r};{g};{b}"),
-        }
+        Color::Rgb(red, green, blue) => write!(
+            output,
+            "{};2;{red};{green};{blue}",
+            if background { 48 } else { 38 }
+        ),
     }
 }
 
-impl From<u8> for Color {
-    /// Converts a palette index, mirroring [`Color::parse`] for numbers.
-    fn from(n: u8) -> Self {
-        if n < 16 {
-            Self::Ansi(n)
-        } else {
-            Self::Ansi256(n)
-        }
-    }
-}
-
-impl From<(u8, u8, u8)> for Color {
-    fn from((r, g, b): (u8, u8, u8)) -> Self {
-        Self::Rgb(r, g, b)
+pub(crate) fn write_sgr_underline_params(output: &mut String, color: Color) -> fmt::Result {
+    match color {
+        Color::Ansi(index) | Color::Ansi256(index) => write!(output, "58;5;{index}"),
+        Color::Rgb(red, green, blue) => write!(output, "58;2;{red};{green};{blue}"),
     }
 }
 
@@ -126,26 +37,22 @@ mod tests {
     use super::*;
 
     #[test]
-    fn parse_hex() {
-        assert_eq!(Color::parse("#fff"), Some(Color::Rgb(255, 255, 255)));
-        assert_eq!(Color::parse("#ff88cc"), Some(Color::Rgb(0xff, 0x88, 0xcc)));
-        assert_eq!(Color::parse("#ffff"), None);
-        assert_eq!(Color::parse("#gggggg"), None);
-    }
+    fn encodes_each_ansi_color_form() {
+        fn encoded(color: Color, background: bool) -> String {
+            let mut output = String::new();
+            write_sgr_params(&mut output, color, background).expect("String writes cannot fail");
+            output
+        }
 
-    #[test]
-    fn parse_index() {
-        assert_eq!(Color::parse("1"), Some(Color::Ansi(1)));
-        assert_eq!(Color::parse("212"), Some(Color::Ansi256(212)));
-        assert_eq!(Color::parse("256"), None);
-    }
+        assert_eq!(encoded(Color::RED, false), "31");
+        assert_eq!(encoded(Color::BRIGHT_RED, false), "91");
+        assert_eq!(encoded(Color::RED, true), "41");
+        assert_eq!(encoded(Color::Ansi256(212), false), "38;5;212");
+        assert_eq!(encoded(Color::Rgb(1, 2, 3), true), "48;2;1;2;3");
 
-    #[test]
-    fn sgr_encoding() {
-        assert_eq!(Color::RED.sgr_params(false), "31");
-        assert_eq!(Color::BRIGHT_RED.sgr_params(false), "91");
-        assert_eq!(Color::RED.sgr_params(true), "41");
-        assert_eq!(Color::Ansi256(212).sgr_params(false), "38;5;212");
-        assert_eq!(Color::Rgb(1, 2, 3).sgr_params(true), "48;2;1;2;3");
+        let mut underline = String::new();
+        write_sgr_underline_params(&mut underline, Color::Ansi(1))
+            .expect("String writes cannot fail");
+        assert_eq!(underline, "58;5;1");
     }
 }

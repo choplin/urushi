@@ -1,6 +1,6 @@
 use urushi::{
-    Align, Available, BlockStyle, Border, Color, ColorLevel, List, ListItem, Modifier,
-    RenderSettings, SemanticTokens, Table, TableBorder, TablePresentation, TableRowPresentation,
+    Align, Available, BlockStyle, Border, Color, ColorLevel, List, ListItem, RenderSettings,
+    SemanticTokens, Table, TableBorder, TablePresentation, TableRowPresentation, TextAttributes,
     TextStyle, TextTableRow, Theme, Tree, TreeNode, UnderlineStyleSet, VerticalAlign, View,
     arabic_enumerator, measure, render, resolve,
 };
@@ -607,7 +607,7 @@ pub fn render_showcase() -> String {
         &resolved,
         &RenderSettings::default()
             .color_level(ColorLevel::TrueColor)
-            .modifiers(Modifier::all())
+            .attributes(TextAttributes::all())
             .underline_styles(UnderlineStyleSet::all())
             .underline_colors(true)
             .hyperlinks(true),

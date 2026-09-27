@@ -126,9 +126,12 @@ The contracts shared across surfaces are:
   nodes or bound Canvas items without receiving an available area;
 - the [`text`](../urushi/src/text/) implementation, which supplies one
   cell-aware definition of plain-text display width and wrapping; and
-- `urushi-terminal`, which defines workspace-independent terminal geometry, frame,
-  terminal, and session contracts and observes the size and rendering
-  capabilities of an actual output handle without choosing application policy.
+- `urushi-terminal`, which defines workspace-independent style and geometry
+  primitives, commands, events, queries, raw-mode control, and session
+  restoration and observes the size and rendering capabilities of an actual
+  output handle without choosing prompt or TUI policy. Core `urushi`
+  re-exports the style primitives, so ordinary styling APIs do not expose the
+  lower crate as a second vocabulary.
 
 `View` belongs to that foundation as well. Every surface goes through the same
 `resolve` and draws only the `ResolvedView` it produces — the Ratatui adapter as
@@ -199,7 +202,7 @@ a role are documented with the extension point itself, in
 
 | Crate | Responsibility | Dependencies within the workspace |
 | --- | --- | --- |
-| [`urushi-terminal`](../urushi-terminal/) | Workspace-independent terminal contracts and inspection: geometry, draw-scoped frames, terminal and session ownership, terminal/non-terminal classification, visible size, and capabilities. | None within the workspace |
+| [`urushi-terminal`](../urushi-terminal/) | Workspace-independent terminal contracts and inspection: style and geometry primitives, commands, events, queries, session restoration, terminal/non-terminal classification, visible size, and capabilities. | None within the workspace |
 | [`urushi`](../urushi/) | Logical styles, themes, renderer-neutral views and components, layout, ANSI serialization, and standard-stream output convenience. | `urushi-terminal` |
 | [`urushi-cli`](../urushi-cli/) | Opinionated semantic summaries and warnings for human-facing, non-interactive CLI output. | `urushi` |
 | [`urushi-prompt`](../urushi-prompt/) | Typed input, select, and confirm forms; prompt state transitions; inline and alternate-screen presentations; terminal session setup and cleanup. | `urushi`, `urushi-terminal` |
@@ -213,7 +216,7 @@ to share styling.
 
 | Module | Responsibility | Internal dependencies |
 | --- | --- | --- |
-| [`style`](../urushi/src/style/) | Colors, border glyphs, box spacing and alignment, the text `TextStyle`, and the geometry-bearing `BlockStyle`. | `text` |
+| [`style`](../urushi/src/style/) | Re-exports shared terminal style primitives and builds logical `TextStyle`, border glyphs, box spacing and alignment, and geometry-bearing `BlockStyle` from them. | `text`, `urushi-terminal` |
 | [`text`](../urushi/src/text/) | Plain-text values, including grapheme-aligned `StyledText`, plus display-width measurement and cell-aware word/CJK wrapping. | `style` |
 | [`theme`](../urushi/src/theme/) | Semantic color tokens, reusable component roles, canonical component presentations, application role resolution, and explicit light/dark selection. | `style`, `component` |
 | [`view`](../urushi/src/view/) | The renderer-neutral `View` tree and the one layout pass in its three phases — width, height, and assembly — behind `measure` / `resolve` (`Size`, `Available`, `StyledGrapheme`, `ResolvedView`). Canvas assembly rasterizes and immediately composes one command at a time after sizing. | `style`, `text` |
@@ -223,8 +226,9 @@ to share styling.
 
 The dependency direction runs from I/O and adapters toward semantic modules:
 
-- `style` and `text` do not depend on themes, components, renderers, or terminal
-  lifecycle;
+- `style` and `text` do not depend on themes, components, renderers, terminal
+  lifecycle, or a backend adapter; style uses only backend-independent
+  primitives from `urushi-terminal`;
 - `theme` assigns semantic meaning to styles but does not inspect a terminal;
 - `view` does not choose a renderer or own terminal state;
 - renderers translate Urushi values into a backend representation and do not
@@ -236,9 +240,10 @@ The dependency direction runs from I/O and adapters toward semantic modules:
 
 `theme` and `component` reference each other because `theme` stores
 canonical component presentations and those presentations derive their
-logical styles from the theme. Terminal contracts and inspection remain below
+logical styles from the theme. Terminal inspection and lifecycle remain below
 rendering, so neither capability detection nor standard handles enter the
-style and view model.
+style and view model; backend-independent colors, attributes, and underlines
+are shared values rather than converted copies.
 
 Width and wrapping policy must remain shared. A component or renderer should
 not introduce a private definition of CJK display width.
@@ -258,7 +263,7 @@ part of core. The general contract is defined in
 ### TextStyle remains logical until an output boundary
 
 `Theme` and `View` retain logical `TextStyle` values. `RenderSettings` selects
-the color level, modifier set, underline styles and color, and hyperlink support
+the color level, text attribute set, underline styles and color, and hyperlink support
 at an output boundary. It is explicit input to `render` and defaults to dumb
 plain output.
 
@@ -323,11 +328,24 @@ the exact resize and ownership rules.
 
 ### External backends stay behind adapters
 
-The backend-independent `Frame`, `Terminal`, and terminal geometry contracts
-live in `urushi-terminal`. Their cell value is an associated type, so the crate
-does not depend on a renderer or presentation model. Ratatui types stay in
-`urushi-tui`, and Crossterm types stay behind the terminal adapters that use
-them. `RenderSettings` selects output features before data reaches an adapter.
+The backend-independent command, event, query, raw-mode, session-restoration,
+and terminal-geometry contracts live in `urushi-terminal`. It contains no
+frame, buffer, cell-diff, or presentation model. `urushi-tui::terminal` owns
+`Cell`, `CellWriter`, `Frame`, `Terminal`, and `Rect`; its Ratatui terminal owns
+buffers and diffing, and its cell writer lowers positioned cells to
+`urushi_terminal::Command` values. `TerminalBackend` describes one interactive
+connection that owns input, output, process modes, and queries; its component
+traits remain usable independently for tests and non-interactive output.
+Queries take mutable access because an implementation may have to write a
+request and consume its response from the same connection.
+
+`backend::ansi::AnsiWriter` encodes the output protocol without a terminal
+framework. `backend::native::NativeTerminal` owns `/dev/tty`, Unix raw mode,
+window queries, input decoding, and that encoder as one concrete interactive
+connection. Crossterm remains an optional cross-platform adapter, and its types
+stay inside `backend::crossterm`. The crate root exposes only Urushi-owned
+contracts and values.
+`RenderSettings` selects output features before data reaches an adapter.
 Backend replacement therefore remains local, and backend lifecycle rules do
 not become core application contracts.
 
@@ -345,6 +363,15 @@ The deviation is recorded at the code that deviates, so a reader of that code
 sees it, and in the issue tracker, so it is scheduled. Softening a rule to
 match a backend removes the only record of what the backend owes, and makes it
 permanent by making it invisible.
+
+Prompt renderers hold presentation state but receive the connection that
+performs each draw; they do not own a second physical writer.
+
+The inverse mistake is also forbidden: the Urushi contract does not reproduce
+a backend library command-for-command. It models coherent terminal domains and
+preserves the information within each owned domain. Adapters lower those
+semantic operations to their library or platform primitives. Current call-site
+counts neither define nor narrow this contract.
 
 ## Architectural invariants
 

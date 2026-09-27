@@ -117,7 +117,7 @@ mod tests {
         .unwrap();
         let settings = RenderSettings::default()
             .color_level(crate::ColorLevel::Ansi16)
-            .modifiers(crate::Modifier::BOLD);
+            .attributes(crate::TextAttribute::Bold.into());
 
         assert_eq!(
             render_text(&text, &settings),

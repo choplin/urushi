@@ -7,10 +7,10 @@ use ratatui::{
     widgets::Widget as _,
 };
 use urushi::{
-    Align, Available, BlockStyle, Border, Color, ColorLevel, Length, Modifier as UrushiModifier,
-    Overflow, PanelRole, PrintableText, RenderSettings, SemanticTokens, Size, StyledText,
-    TabPolicy, TextSpan, TextStyle, Theme, UnderlineStyleSet, VerticalAlign, View, measure, render,
-    resolve,
+    Align, Available, BlockStyle, Border, Color, ColorLevel, Length, Overflow, PanelRole,
+    PrintableText, RenderSettings, SemanticTokens, Size, StyledText, TabPolicy, TextAttribute,
+    TextAttributes, TextSpan, TextStyle, Theme, UnderlineStyleSet, VerticalAlign, View, measure,
+    render, resolve,
 };
 use urushi_tui::ratatui::{
     CellWriteMode, RatatuiStyle, RatatuiStyleExt as _, ViewWidget, available,
@@ -464,18 +464,18 @@ fn panel_view(style: BlockStyle, content: &str) -> View {
 fn ansi_settings() -> RenderSettings {
     RenderSettings::default()
         .color_level(ColorLevel::TrueColor)
-        .modifiers(UrushiModifier::all())
+        .attributes(TextAttributes::all())
         .underline_styles(UnderlineStyleSet::all())
         .underline_colors(true)
         .hyperlinks(true)
 }
 
 #[test]
-fn ratatui_converts_the_active_modifier_set() {
+fn ratatui_converts_the_active_attribute_set() {
     let converted = RatatuiStyle::from(
         &TextStyle::new()
-            .add_modifier(UrushiModifier::BOLD | UrushiModifier::ITALIC)
-            .remove_modifier(UrushiModifier::ITALIC),
+            .add_attributes(TextAttribute::Bold | TextAttribute::Italic)
+            .remove_attribute(TextAttribute::Italic),
     )
     .into_inner();
 

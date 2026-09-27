@@ -2,7 +2,7 @@
 
 use ::ratatui::style::{Color as RatatuiColor, Modifier as RatatuiModifier, Style as InnerStyle};
 
-use urushi::{Color, Modifier, TextStyle};
+use urushi::{Color, TerminalTextStyle, TextAttribute, TextAttributes, TextStyle};
 
 /// One logical [`TextStyle`] as a Ratatui style.
 ///
@@ -28,51 +28,66 @@ impl RatatuiStyle {
 
 impl From<&TextStyle> for RatatuiStyle {
     fn from(value: &TextStyle) -> Self {
+        let terminal = TerminalTextStyle::from(value).style();
         let mut style = InnerStyle::new();
-        if let Some(color) = value.get_foreground() {
-            style = style.fg(convert_color(color));
+        if let Some(color) = ratatui_color(terminal.foreground) {
+            style = style.fg(color);
         }
-        if let Some(color) = value.get_background() {
-            style = style.bg(convert_color(color));
+        if let Some(color) = ratatui_color(terminal.background) {
+            style = style.bg(color);
         }
         // Ratatui has no underline shape, and its underline color lives behind
         // a feature that pulls in a backend this adapter does not depend on, so
         // every underline degrades to the plain `UNDERLINED` modifier. The
         // degradation is deterministic: two styles differing only in underline
         // shape or color reach Ratatui as the same style.
-        if value.get_underline().is_some() {
+        if terminal.underline.is_some() {
             style = style.add_modifier(RatatuiModifier::UNDERLINED);
         }
         Self {
-            content: style.add_modifier(convert_modifier(value.get_modifiers())),
+            content: style.add_modifier(ratatui_attributes(terminal.attributes)),
         }
     }
 }
 
-const fn convert_modifier(modifier: Modifier) -> RatatuiModifier {
+fn ratatui_attributes(attributes: TextAttributes) -> RatatuiModifier {
     let mut converted = RatatuiModifier::empty();
-    if modifier.contains(Modifier::BOLD) {
-        converted = converted.union(RatatuiModifier::BOLD);
-    }
-    if modifier.contains(Modifier::DIM) {
-        converted = converted.union(RatatuiModifier::DIM);
-    }
-    if modifier.contains(Modifier::ITALIC) {
-        converted = converted.union(RatatuiModifier::ITALIC);
-    }
-    if modifier.contains(Modifier::SLOW_BLINK) {
-        converted = converted.union(RatatuiModifier::SLOW_BLINK);
-    }
-    if modifier.contains(Modifier::REVERSED) {
-        converted = converted.union(RatatuiModifier::REVERSED);
-    }
-    if modifier.contains(Modifier::HIDDEN) {
-        converted = converted.union(RatatuiModifier::HIDDEN);
-    }
-    if modifier.contains(Modifier::CROSSED_OUT) {
-        converted = converted.union(RatatuiModifier::CROSSED_OUT);
+    for attribute in attributes {
+        converted = converted.union(match attribute {
+            TextAttribute::Bold => RatatuiModifier::BOLD,
+            TextAttribute::Dim => RatatuiModifier::DIM,
+            TextAttribute::Italic => RatatuiModifier::ITALIC,
+            TextAttribute::SlowBlink => RatatuiModifier::SLOW_BLINK,
+            TextAttribute::RapidBlink => RatatuiModifier::RAPID_BLINK,
+            TextAttribute::Reversed => RatatuiModifier::REVERSED,
+            TextAttribute::Hidden => RatatuiModifier::HIDDEN,
+            TextAttribute::CrossedOut => RatatuiModifier::CROSSED_OUT,
+            TextAttribute::Fraktur
+            | TextAttribute::Framed
+            | TextAttribute::Encircled
+            | TextAttribute::Overlined => RatatuiModifier::empty(),
+        });
     }
     converted
+}
+
+pub(super) fn terminal_attributes(modifier: RatatuiModifier) -> TextAttributes {
+    let mut attributes = TextAttributes::empty();
+    for (ratatui, terminal) in [
+        (RatatuiModifier::BOLD, TextAttribute::Bold),
+        (RatatuiModifier::DIM, TextAttribute::Dim),
+        (RatatuiModifier::ITALIC, TextAttribute::Italic),
+        (RatatuiModifier::SLOW_BLINK, TextAttribute::SlowBlink),
+        (RatatuiModifier::RAPID_BLINK, TextAttribute::RapidBlink),
+        (RatatuiModifier::REVERSED, TextAttribute::Reversed),
+        (RatatuiModifier::HIDDEN, TextAttribute::Hidden),
+        (RatatuiModifier::CROSSED_OUT, TextAttribute::CrossedOut),
+    ] {
+        if modifier.contains(ratatui) {
+            attributes = attributes | terminal;
+        }
+    }
+    attributes
 }
 
 impl From<RatatuiStyle> for InnerStyle {
@@ -81,41 +96,66 @@ impl From<RatatuiStyle> for InnerStyle {
     }
 }
 
-const fn convert_color(color: Color) -> RatatuiColor {
+const fn ratatui_color(color: Option<Color>) -> Option<RatatuiColor> {
     match color {
-        Color::Ansi(0) => RatatuiColor::Black,
-        Color::Ansi(1) => RatatuiColor::Red,
-        Color::Ansi(2) => RatatuiColor::Green,
-        Color::Ansi(3) => RatatuiColor::Yellow,
-        Color::Ansi(4) => RatatuiColor::Blue,
-        Color::Ansi(5) => RatatuiColor::Magenta,
-        Color::Ansi(6) => RatatuiColor::Cyan,
-        Color::Ansi(7) => RatatuiColor::Gray,
-        Color::Ansi(8) => RatatuiColor::DarkGray,
-        Color::Ansi(9) => RatatuiColor::LightRed,
-        Color::Ansi(10) => RatatuiColor::LightGreen,
-        Color::Ansi(11) => RatatuiColor::LightYellow,
-        Color::Ansi(12) => RatatuiColor::LightBlue,
-        Color::Ansi(13) => RatatuiColor::LightMagenta,
-        Color::Ansi(14) => RatatuiColor::LightCyan,
-        Color::Ansi(15) => RatatuiColor::White,
-        Color::Ansi(index) | Color::Ansi256(index) => RatatuiColor::Indexed(index),
-        Color::Rgb(red, green, blue) => RatatuiColor::Rgb(red, green, blue),
+        None => None,
+        Some(Color::Ansi(0)) => Some(RatatuiColor::Black),
+        Some(Color::Ansi(1)) => Some(RatatuiColor::Red),
+        Some(Color::Ansi(2)) => Some(RatatuiColor::Green),
+        Some(Color::Ansi(3)) => Some(RatatuiColor::Yellow),
+        Some(Color::Ansi(4)) => Some(RatatuiColor::Blue),
+        Some(Color::Ansi(5)) => Some(RatatuiColor::Magenta),
+        Some(Color::Ansi(6)) => Some(RatatuiColor::Cyan),
+        Some(Color::Ansi(7)) => Some(RatatuiColor::Gray),
+        Some(Color::Ansi(8)) => Some(RatatuiColor::DarkGray),
+        Some(Color::Ansi(9)) => Some(RatatuiColor::LightRed),
+        Some(Color::Ansi(10)) => Some(RatatuiColor::LightGreen),
+        Some(Color::Ansi(11)) => Some(RatatuiColor::LightYellow),
+        Some(Color::Ansi(12)) => Some(RatatuiColor::LightBlue),
+        Some(Color::Ansi(13)) => Some(RatatuiColor::LightMagenta),
+        Some(Color::Ansi(14)) => Some(RatatuiColor::LightCyan),
+        Some(Color::Ansi(15)) => Some(RatatuiColor::White),
+        Some(Color::Ansi(index) | Color::Ansi256(index)) => Some(RatatuiColor::Indexed(index)),
+        Some(Color::Rgb(red, green, blue)) => Some(RatatuiColor::Rgb(red, green, blue)),
+    }
+}
+
+pub(super) const fn terminal_color(color: RatatuiColor) -> Option<Color> {
+    match color {
+        RatatuiColor::Reset => None,
+        RatatuiColor::Black => Some(Color::Ansi(0)),
+        RatatuiColor::Red => Some(Color::Ansi(1)),
+        RatatuiColor::Green => Some(Color::Ansi(2)),
+        RatatuiColor::Yellow => Some(Color::Ansi(3)),
+        RatatuiColor::Blue => Some(Color::Ansi(4)),
+        RatatuiColor::Magenta => Some(Color::Ansi(5)),
+        RatatuiColor::Cyan => Some(Color::Ansi(6)),
+        RatatuiColor::Gray => Some(Color::Ansi(7)),
+        RatatuiColor::DarkGray => Some(Color::Ansi(8)),
+        RatatuiColor::LightRed => Some(Color::Ansi(9)),
+        RatatuiColor::LightGreen => Some(Color::Ansi(10)),
+        RatatuiColor::LightYellow => Some(Color::Ansi(11)),
+        RatatuiColor::LightBlue => Some(Color::Ansi(12)),
+        RatatuiColor::LightMagenta => Some(Color::Ansi(13)),
+        RatatuiColor::LightCyan => Some(Color::Ansi(14)),
+        RatatuiColor::White => Some(Color::Ansi(15)),
+        RatatuiColor::Indexed(index) => Some(Color::Ansi256(index)),
+        RatatuiColor::Rgb(red, green, blue) => Some(Color::Rgb(red, green, blue)),
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use urushi::UnderlineStyle;
+    use urushi::{Color, TextAttribute, UnderlineStyle};
 
     use super::*;
 
     #[test]
-    fn converts_active_modifiers() {
+    fn converts_active_attributes() {
         let converted = RatatuiStyle::from(
             &TextStyle::new()
-                .add_modifier(Modifier::BOLD | Modifier::ITALIC)
-                .remove_modifier(Modifier::ITALIC),
+                .add_attributes(TextAttribute::Bold | TextAttribute::Italic)
+                .remove_attribute(TextAttribute::Italic),
         )
         .into_inner();
 

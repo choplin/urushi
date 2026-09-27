@@ -7,9 +7,45 @@
 
 use std::io::{self, IsTerminal};
 
+pub mod backend;
+mod command;
+mod event;
+mod query;
+mod session;
+mod style;
 mod terminal;
 
-pub use terminal::{Frame, Position, Rect, Terminal};
+pub use command::{
+    ClearRegion, Command, CommandWriter, CursorAppearance, CursorMove, HyperlinkParameter,
+    InvalidTerminalText, TerminalHyperlink, TerminalOutput, TerminalText,
+};
+pub use event::{
+    Event, EventSource, FocusChange, KeyCode, KeyEvent, KeyEventState, KeyKind,
+    KeyboardEnhancementFlags, MediaKeyCode, ModifierKeyCode, Modifiers, MouseButton, MouseEvent,
+    MouseKind,
+};
+pub use query::{KeyboardEnhancementQuery, PixelSize, TerminalQuery, WindowSize};
+pub use session::{RawModeControl, SessionError, SessionOptions, TerminalSession};
+pub use style::{
+    Color, TerminalStyle, TextAttribute, TextAttributeIter, TextAttributes, Underline,
+    UnderlineStyle,
+};
+pub use terminal::Position;
+
+/// A complete interactive terminal connection.
+///
+/// Implementations own the input and output paths, parser state, process-side
+/// modes, and terminal queries for one physical terminal connection. The
+/// smaller supertraits remain independently useful in tests and adapters.
+pub trait TerminalBackend:
+    CommandWriter + EventSource + RawModeControl + TerminalQuery + KeyboardEnhancementQuery
+{
+}
+
+impl<T> TerminalBackend for T where
+    T: CommandWriter + EventSource + RawModeControl + TerminalQuery + KeyboardEnhancementQuery
+{
+}
 
 /// The color fidelity a terminal can display.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
@@ -23,52 +59,6 @@ pub enum ColorLevel {
     Ansi256,
     /// 24-bit RGB colors.
     TrueColor,
-}
-
-/// A set of independently selectable SGR text attributes.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
-pub struct TextAttributes(u16);
-
-impl TextAttributes {
-    pub const BOLD: Self = Self(1 << 0);
-    pub const DIM: Self = Self(1 << 1);
-    pub const ITALIC: Self = Self(1 << 2);
-    pub const SLOW_BLINK: Self = Self(1 << 3);
-    pub const REVERSED: Self = Self(1 << 4);
-    pub const HIDDEN: Self = Self(1 << 5);
-    pub const CROSSED_OUT: Self = Self(1 << 6);
-
-    const ALL_BITS: u16 = Self::BOLD.0
-        | Self::DIM.0
-        | Self::ITALIC.0
-        | Self::SLOW_BLINK.0
-        | Self::REVERSED.0
-        | Self::HIDDEN.0
-        | Self::CROSSED_OUT.0;
-
-    pub const fn empty() -> Self {
-        Self(0)
-    }
-
-    pub const fn all() -> Self {
-        Self(Self::ALL_BITS)
-    }
-
-    pub const fn union(self, other: Self) -> Self {
-        Self(self.0 | other.0)
-    }
-
-    pub const fn contains(self, other: Self) -> bool {
-        self.0 & other.0 == other.0
-    }
-}
-
-impl std::ops::BitOr for TextAttributes {
-    type Output = Self;
-
-    fn bitor(self, rhs: Self) -> Self::Output {
-        self.union(rhs)
-    }
 }
 
 /// A set of underline shapes supported by a terminal.
@@ -97,8 +87,15 @@ impl UnderlineStyles {
         Self(self.0 | other.0)
     }
 
-    pub const fn contains(self, other: Self) -> bool {
-        self.0 & other.0 == other.0
+    pub const fn contains(self, style: UnderlineStyle) -> bool {
+        let selected = match style {
+            UnderlineStyle::Single => Self::SINGLE,
+            UnderlineStyle::Double => Self::DOUBLE,
+            UnderlineStyle::Curly => Self::CURLY,
+            UnderlineStyle::Dotted => Self::DOTTED,
+            UnderlineStyle::Dashed => Self::DASHED,
+        };
+        self.0 & selected.0 != 0
     }
 }
 
@@ -122,7 +119,7 @@ pub struct TerminalCapabilities {
 
 impl TerminalCapabilities {
     /// Returns capabilities with every output feature disabled.
-    const fn none() -> Self {
+    pub const fn none() -> Self {
         Self {
             color_level: ColorLevel::None,
             attributes: TextAttributes::empty(),
@@ -152,27 +149,27 @@ impl TerminalCapabilities {
         self.hyperlinks
     }
 
-    const fn with_color_level(mut self, color_level: ColorLevel) -> Self {
+    pub const fn with_color_level(mut self, color_level: ColorLevel) -> Self {
         self.color_level = color_level;
         self
     }
 
-    const fn with_attributes(mut self, attributes: TextAttributes) -> Self {
+    pub const fn with_attributes(mut self, attributes: TextAttributes) -> Self {
         self.attributes = attributes;
         self
     }
 
-    const fn with_underline_styles(mut self, styles: UnderlineStyles) -> Self {
+    pub const fn with_underline_styles(mut self, styles: UnderlineStyles) -> Self {
         self.underline_styles = styles;
         self
     }
 
-    const fn with_underline_colors(mut self, enabled: bool) -> Self {
+    pub const fn with_underline_colors(mut self, enabled: bool) -> Self {
         self.underline_colors = enabled;
         self
     }
 
-    const fn with_hyperlinks(mut self, enabled: bool) -> Self {
+    pub const fn with_hyperlinks(mut self, enabled: bool) -> Self {
         self.hyperlinks = enabled;
         self
     }
@@ -210,7 +207,7 @@ pub struct TerminalInfo {
 }
 
 impl TerminalInfo {
-    const fn new(size: TerminalSize, capabilities: TerminalCapabilities) -> Self {
+    pub const fn new(size: TerminalSize, capabilities: TerminalCapabilities) -> Self {
         Self { size, capabilities }
     }
 
@@ -335,23 +332,23 @@ fn supports_basic_sgr(term: &str) -> bool {
 
 fn basic_attributes(term: &str) -> TextAttributes {
     let bold_blink_reverse =
-        TextAttributes::BOLD | TextAttributes::SLOW_BLINK | TextAttributes::REVERSED;
+        TextAttribute::Bold | TextAttribute::SlowBlink | TextAttribute::Reversed;
     let xterm_attributes =
-        bold_blink_reverse | TextAttributes::DIM | TextAttributes::ITALIC | TextAttributes::HIDDEN;
+        bold_blink_reverse | TextAttribute::Dim | TextAttribute::Italic | TextAttribute::Hidden;
     if is_modern_terminal(term) {
         TextAttributes::all()
     } else if term == "linux" {
-        bold_blink_reverse | TextAttributes::DIM
+        bold_blink_reverse | TextAttribute::Dim
     } else if term.starts_with("screen") {
         bold_blink_reverse
     } else if term.starts_with("tmux") || term.contains("xterm") {
         xterm_attributes
     } else if term.contains("konsole") {
-        bold_blink_reverse | TextAttributes::ITALIC
+        bold_blink_reverse | TextAttribute::Italic
     } else if term.contains("ansi") {
-        bold_blink_reverse | TextAttributes::HIDDEN
+        bold_blink_reverse | TextAttribute::Hidden
     } else if term.contains("cygwin") {
-        TextAttributes::BOLD | TextAttributes::REVERSED | TextAttributes::HIDDEN
+        TextAttribute::Bold | TextAttribute::Reversed | TextAttribute::Hidden
     } else if term.contains("rxvt") || term.contains("vt100") {
         bold_blink_reverse
     } else {
@@ -412,10 +409,10 @@ mod tests {
         assert_eq!(linux.color_level(), ColorLevel::Ansi16);
         assert_eq!(
             linux.attributes(),
-            TextAttributes::BOLD
-                | TextAttributes::DIM
-                | TextAttributes::SLOW_BLINK
-                | TextAttributes::REVERSED
+            TextAttribute::Bold
+                | TextAttribute::Dim
+                | TextAttribute::SlowBlink
+                | TextAttribute::Reversed
         );
         assert_eq!(linux.underline_styles(), UnderlineStyles::SINGLE);
         assert!(!linux.underline_colors());
@@ -433,12 +430,12 @@ mod tests {
         let xterm = detect_capabilities(Some("xterm-256color"), None);
         assert_eq!(
             xterm.attributes(),
-            TextAttributes::BOLD
-                | TextAttributes::DIM
-                | TextAttributes::ITALIC
-                | TextAttributes::SLOW_BLINK
-                | TextAttributes::REVERSED
-                | TextAttributes::HIDDEN
+            TextAttribute::Bold
+                | TextAttribute::Dim
+                | TextAttribute::Italic
+                | TextAttribute::SlowBlink
+                | TextAttribute::Reversed
+                | TextAttribute::Hidden
         );
         assert_eq!(xterm.underline_styles(), UnderlineStyles::SINGLE);
         assert!(!xterm.underline_colors());
@@ -467,20 +464,20 @@ mod tests {
     fn text_attributes_follow_conservative_terminal_families() {
         assert_eq!(
             detect_capabilities(Some("ansi"), None).attributes(),
-            TextAttributes::BOLD
-                | TextAttributes::SLOW_BLINK
-                | TextAttributes::REVERSED
-                | TextAttributes::HIDDEN
+            TextAttribute::Bold
+                | TextAttribute::SlowBlink
+                | TextAttribute::Reversed
+                | TextAttribute::Hidden
         );
         assert_eq!(
             detect_capabilities(Some("cygwin"), None).attributes(),
-            TextAttributes::BOLD | TextAttributes::REVERSED | TextAttributes::HIDDEN
+            TextAttribute::Bold | TextAttribute::Reversed | TextAttribute::Hidden
         );
         assert_eq!(
             detect_capabilities(Some("rxvt"), None).attributes(),
-            TextAttributes::BOLD | TextAttributes::SLOW_BLINK | TextAttributes::REVERSED
+            TextAttribute::Bold | TextAttribute::SlowBlink | TextAttribute::Reversed
         );
-        let screen = TextAttributes::BOLD | TextAttributes::SLOW_BLINK | TextAttributes::REVERSED;
+        let screen = TextAttribute::Bold | TextAttribute::SlowBlink | TextAttribute::Reversed;
         assert_eq!(
             detect_capabilities(Some("screen.xterm-256color"), None).attributes(),
             screen

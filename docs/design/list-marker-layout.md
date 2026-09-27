@@ -17,7 +17,7 @@ track(group) = max(width(marker(item)))
 Each marker is right-aligned within that track. The alignment cells are layout
 geometry rather than spaces prepended to the marker string. The complete track
 on the first visual row receives the enumerator role style, including otherwise
-empty alignment cells, so backgrounds, underline, modifiers, and hyperlinks
+empty alignment cells, so backgrounds, underline, attributes, and hyperlinks
 remain continuous.
 
 Tracks are local. Separate sibling groups at the same depth may have different

@@ -87,8 +87,8 @@ fn typed_cell_styles_receive_the_column_or_table_fallback() {
     assert!(
         resolved.rows()[1][11]
             .style()
-            .get_modifiers()
-            .contains(urushi::Modifier::BOLD)
+            .get_attributes()
+            .contains(urushi::TextAttribute::Bold)
     );
 }
 
@@ -114,9 +114,13 @@ fn positional_and_cell_styles_are_complete_replacements_in_precedence_order() {
     let header = resolved.rows()[1][2].style();
     let body = resolved.rows()[3][2].style();
     assert_eq!(header.get_foreground(), Some(Color::CYAN));
-    assert!(!header.get_modifiers().contains(urushi::Modifier::BOLD));
+    assert!(
+        !header
+            .get_attributes()
+            .contains(urushi::TextAttribute::Bold)
+    );
     assert_eq!(body.get_foreground(), Some(Color::YELLOW));
-    assert!(!body.get_modifiers().contains(urushi::Modifier::BOLD));
+    assert!(!body.get_attributes().contains(urushi::TextAttribute::Bold));
 }
 
 #[test]

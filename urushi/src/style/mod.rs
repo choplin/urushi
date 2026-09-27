@@ -6,16 +6,16 @@ mod color;
 mod grid;
 mod hyperlink;
 mod layout;
-mod modifier;
 mod text;
 mod underline;
 
 pub use block::BlockStyle;
 pub use border::Border;
-pub use color::Color;
 pub use grid::GridStyle;
 pub use hyperlink::Hyperlink;
 pub use layout::{Align, InvalidFillWeight, Length, Overflow, Sides, VerticalAlign};
-pub use modifier::Modifier;
 pub use text::TextStyle;
-pub use underline::{Underline, UnderlineStyle, UnderlineStyleSet};
+pub use urushi_terminal::{
+    Color, TextAttribute, TextAttributes, Underline, UnderlineStyle,
+    UnderlineStyles as UnderlineStyleSet,
+};

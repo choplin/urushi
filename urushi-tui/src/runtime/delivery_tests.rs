@@ -52,11 +52,7 @@ fn accepted_deliveries_keep_one_runtime_wide_order_across_sources() {
 fn bounded_input_admission_keeps_every_key_repeat_separate() {
     let harness = Harness::new(TerminalSize::ZERO);
     let mut input = harness.source(Admission::bounded(4));
-    let repeat = Input::Key(KeyEvent {
-        code: KeyCode::Down,
-        modifiers: crate::Modifiers::NONE,
-        kind: KeyKind::Repeat,
-    });
+    let repeat = Input::Key(KeyEvent::new(KeyCode::Down).with_kind(KeyKind::Repeat));
 
     input.send(repeat.clone()).unwrap();
     input.send(repeat.clone()).unwrap();

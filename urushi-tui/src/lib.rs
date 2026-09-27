@@ -12,13 +12,24 @@
 //! pass, and the adapter only translates a Ratatui `Rect` into
 //! [`Available`](urushi::Available), calls [`resolve`](urushi::resolve), and
 //! converts the resulting graphemes and logical styles into cells.
+//!
+//! [`terminal`] is the lower-level full-screen presentation layer: frame and
+//! commit contracts plus a cell writer that lowers changed cells to
+//! `urushi-terminal` commands. The optional TEA runtime is layered above it.
 
 pub mod ratatui;
 #[cfg(feature = "runtime")]
 mod runtime;
+pub mod terminal;
+
+pub use urushi_terminal::{Position, TerminalSize};
+
+#[cfg(feature = "crossterm")]
+pub use urushi_terminal::backend::crossterm;
 
 #[cfg(feature = "runtime")]
 pub use runtime::{
-    Admission, Application, CellPixels, Effect, FocusChange, Input, KeyCode, KeyEvent, KeyKind,
-    Modifiers, SendError, Sender, Signal, Subscription, Surface, SurfaceSize,
+    Admission, Application, CellPixels, Effect, FocusChange, Input, KeyCode, KeyEvent,
+    KeyEventState, KeyKind, MediaKeyCode, ModifierKeyCode, Modifiers, MouseButton, MouseEvent,
+    MouseKind, SendError, Sender, Signal, Subscription, Surface, SurfaceSize,
 };

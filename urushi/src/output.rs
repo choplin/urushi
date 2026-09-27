@@ -133,7 +133,7 @@ fn apply_no_color(settings: RenderSettings, no_color: bool) -> RenderSettings {
 mod tests {
     use super::*;
 
-    use crate::{Color, Modifier, TextStyle};
+    use crate::{Color, TextAttribute, TextStyle};
 
     #[test]
     fn terminal_output_uses_its_width_and_capabilities() {
@@ -149,7 +149,7 @@ mod tests {
             Available::columns(3),
             RenderSettings::default()
                 .color_level(ColorLevel::Ansi16)
-                .modifiers(Modifier::BOLD),
+                .attributes(TextAttribute::Bold.into()),
             false,
         )
         .unwrap();
@@ -164,12 +164,12 @@ mod tests {
     fn no_color_narrows_settings_without_disabling_other_features() {
         let settings = RenderSettings::default()
             .color_level(ColorLevel::Ansi16)
-            .modifiers(Modifier::BOLD);
+            .attributes(TextAttribute::Bold.into());
 
         let narrowed = apply_no_color(settings, true);
 
         assert_eq!(narrowed.get_color_level(), ColorLevel::None);
-        assert_eq!(narrowed.get_modifiers(), Modifier::BOLD);
+        assert_eq!(narrowed.get_attributes(), TextAttribute::Bold.into());
         assert_eq!(apply_no_color(settings, false), settings);
     }
 

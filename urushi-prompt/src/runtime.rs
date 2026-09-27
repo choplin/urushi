@@ -1,7 +1,6 @@
 //! Blocking prompt runtime facade.
 
-mod crossterm;
-mod crossterm_executor;
+mod command_executor;
 mod error;
 mod field;
 mod form;
@@ -10,6 +9,7 @@ mod inline_plan;
 mod presentation;
 pub(crate) mod resolve;
 mod terminal;
+mod terminal_backend;
 mod view;
 
 pub use error::{FieldConfigError, FormBuildError, GroupBuildError, IoOperation, RunError};
@@ -21,9 +21,9 @@ pub use form::{
 };
 #[cfg(test)]
 pub(crate) use form::{FormState, ReducerResult};
-pub(crate) use terminal::{Event, KeyCode, RenderFinish};
+pub(crate) use terminal::{Event, KeyCode, KeyModifiers, RenderFinish};
 #[cfg(test)]
-pub(crate) use terminal::{EventSource, KeyEvent, KeyModifiers, Renderer, TerminalControl};
+pub(crate) use terminal::{EventSource, KeyEvent, Renderer};
 pub(crate) use urushi::TextSpan;
 pub(crate) use view::{
     FieldPresentation, FieldRegionKind, LineKind, PromptStyles, PromptView, ViewCursor,

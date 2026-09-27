@@ -6,15 +6,15 @@ use urushi::{ColorLevel, RenderSettings, Theme};
 
 use super::{
     TextSpan,
-    crossterm::{CrosstermEventSource, CrosstermRenderer, CrosstermTerminalControl},
     error::{FormBuildError, GroupBuildError, IoOperation, RunError},
     field::{self, Field, FieldAction, FieldEntry},
-    terminal::{
-        Event, EventSource, KeyCode, KeyEvent, KeyModifiers, RenderFinish, Renderer,
-        TerminalControl, TerminalSession,
-    },
+    terminal::{Event, KeyCode, KeyEvent, KeyModifiers, RenderFinish, Renderer, TerminalSession},
+    terminal_backend::{TerminalRenderer, accepts_prompt_event},
     view::{GUTTER, LineKind, PromptLine, PromptStyles, PromptView, gutter_view},
 };
+
+#[cfg(test)]
+use super::terminal::{EventSource, SplitTerminal, TerminalControl};
 
 pub struct FieldKey<T> {
     name: String,
@@ -240,43 +240,65 @@ impl Form {
         }
     }
 
-    /// Runs this form using the process terminal input and standard error.
+    /// Runs this form on the process's interactive terminal connection.
     ///
     /// The supplied theme and detected terminal capabilities are resolved once into the
     /// prompt's styles, and fields build their view from those resolved
     /// values; no component role reaches the renderer.
     pub fn run(self, theme: &Theme) -> Result<FormOutcome, RunError> {
-        let stderr = std::io::stderr();
-        let (size, mut settings) =
-            match urushi_terminal::detect(&stderr).map_err(|source| RunError::Io {
+        #[cfg(unix)]
+        let (mut terminal, info) =
+            {
+                let mut terminal = urushi_terminal::backend::native::NativeTerminal::open()
+                    .map_err(|source| RunError::Io {
+                        operation: IoOperation::EnterTerminal,
+                        source,
+                        cleanup: None,
+                    })?;
+                let info = terminal.terminal_info().map_err(|source| RunError::Io {
+                    operation: IoOperation::EnterTerminal,
+                    source,
+                    cleanup: None,
+                })?;
+                (terminal, info)
+            };
+
+        #[cfg(not(unix))]
+        let (mut terminal, info) = {
+            let stderr = std::io::stderr();
+            let info = match urushi_terminal::detect(&stderr).map_err(|source| RunError::Io {
                 operation: IoOperation::EnterTerminal,
                 source,
                 cleanup: None,
             })? {
-                urushi_terminal::TerminalDetection::Terminal(info) => (
-                    (
-                        info.size().columns().try_into().unwrap_or(u16::MAX),
-                        info.size().rows().try_into().unwrap_or(u16::MAX),
-                    ),
-                    RenderSettings::from(info.capabilities()),
-                ),
+                urushi_terminal::TerminalDetection::Terminal(info) => info,
                 urushi_terminal::TerminalDetection::NonTerminal => {
-                    ((80, 24), RenderSettings::default())
+                    return Err(RunError::NotInteractive);
                 }
             };
+            (
+                urushi_terminal::backend::crossterm::CrosstermBackend::new(stderr),
+                info,
+            )
+        };
+
+        let size = (
+            info.size().columns().try_into().unwrap_or(u16::MAX),
+            info.size().rows().try_into().unwrap_or(u16::MAX),
+        );
+        let mut settings = RenderSettings::from(info.capabilities());
         settings = apply_no_color(
             settings,
             std::env::var_os("NO_COLOR").is_some_and(|value| !value.is_empty()),
         );
-        let mut events = CrosstermEventSource;
-        let mut renderer = CrosstermRenderer::stderr(size);
-        let mut terminal = CrosstermTerminalControl;
+        let mut renderer = TerminalRenderer::with_size(size);
         let styles = PromptStyles::resolve(theme, &settings);
-        self.run_with(&mut events, &mut renderer, &mut terminal, &styles)
+        self.run_on(&mut renderer, &mut terminal, &styles)
     }
 
+    #[cfg(test)]
     pub(crate) fn run_with<S, R, T>(
-        mut self,
+        self,
         events: &mut S,
         renderer: &mut R,
         terminal: &mut T,
@@ -286,6 +308,20 @@ impl Form {
         S: EventSource,
         R: Renderer,
         T: TerminalControl,
+    {
+        let mut terminal = SplitTerminal::new(events, terminal);
+        self.run_on(renderer, &mut terminal, styles)
+    }
+
+    fn run_on<R, T>(
+        mut self,
+        renderer: &mut R,
+        terminal: &mut T,
+        styles: &PromptStyles,
+    ) -> Result<FormOutcome, RunError>
+    where
+        R: Renderer,
+        T: urushi_terminal::TerminalBackend,
     {
         if !terminal.is_interactive() {
             return Err(RunError::NotInteractive);
@@ -300,10 +336,10 @@ impl Form {
         let mut deferred: Option<Event> = None;
 
         loop {
-            let terminal_columns = session.renderer.columns();
+            let terminal_columns = session.columns();
             let start = self.start.within(terminal_columns);
             let drawing_columns = self.drawing_width(terminal_columns);
-            if let Err(source) = session.renderer.draw(
+            if let Err(source) = session.draw(
                 &self.view(&state, styles, drawing_columns),
                 start,
                 drawing_columns,
@@ -313,19 +349,23 @@ impl Form {
 
             let mut event = match deferred.take() {
                 Some(event) => event,
-                None => match events.read_event() {
-                    Ok(event) => event,
-                    Err(source) => return Err(session.fail(IoOperation::ReadEvent, source)),
+                None => loop {
+                    match session.read_event() {
+                        Ok(event) if accepts_prompt_event(&event) => break event,
+                        Ok(_) => {}
+                        Err(source) => return Err(session.fail(IoOperation::ReadEvent, source)),
+                    }
                 },
             };
-            if matches!(event, Event::Resize { .. }) {
+            if matches!(event, Event::Resize(_)) {
                 // Dragging a window edge emits a resize per intermediate size.
                 // Act once on the latest size already waiting: ReturnError has
                 // one terminal exit, while ClearViewportAndRedraw has one
                 // destructive clear and one replacement frame.
                 loop {
-                    match events.poll_event() {
-                        Ok(Some(waiting @ Event::Resize { .. })) => event = waiting,
+                    match session.poll_event() {
+                        Ok(Some(waiting)) if !accepts_prompt_event(&waiting) => {}
+                        Ok(Some(waiting @ Event::Resize(_))) => event = waiting,
                         Ok(Some(waiting)) => {
                             deferred = Some(waiting);
                             break;
@@ -335,15 +375,18 @@ impl Form {
                     }
                 }
             }
-            if let Event::Resize { columns, rows } = &event {
-                session.renderer.resize(*columns, *rows);
+            if let Event::Resize(size) = &event {
+                session.resize(
+                    size.columns().try_into().unwrap_or(u16::MAX),
+                    size.rows().try_into().unwrap_or(u16::MAX),
+                );
                 match self.inline_resize_policy {
                     InlineResizePolicy::ReturnError => {
                         let cleanup = session.cleanup(RenderFinish::Error);
                         return Err(RunError::Resized { cleanup });
                     }
                     InlineResizePolicy::ClearViewportAndRedraw => {
-                        if let Err(source) = session.renderer.clear_viewport() {
+                        if let Err(source) = session.clear_viewport() {
                             return Err(session.fail(IoOperation::Render, source));
                         }
                         continue;
@@ -393,8 +436,9 @@ impl Form {
         let action = match event {
             Event::Key(KeyEvent {
                 code: KeyCode::Char('c'),
-                modifiers: KeyModifiers { control: true, .. },
-            }) => FieldAction::Cancel,
+                modifiers,
+                ..
+            }) if modifiers.contains(KeyModifiers::CONTROL) => FieldAction::Cancel,
             Event::Key(KeyEvent {
                 code: KeyCode::BackTab,
                 ..
@@ -633,9 +677,7 @@ mod tests {
     use std::io;
 
     use super::*;
-    use crate::runtime::{
-        IoOperation, KeyCode, KeyEvent, KeyModifiers, terminal::tests::*, test_styles,
-    };
+    use crate::runtime::{IoOperation, KeyCode, KeyEvent, terminal::tests::*, test_styles};
     use crate::{
         Confirm, ConfirmAnswer, ConfirmSource, FieldConfigError, Input, Select, SelectOption,
     };
@@ -772,10 +814,7 @@ mod tests {
             .build()
             .expect("configured form is valid");
         let mut events = ScriptedEvents::new([
-            Ok(Event::Resize {
-                columns: 3,
-                rows: 4,
-            }),
+            Ok(Event::Resize(urushi_terminal::TerminalSize::new(3, 4))),
             Ok(cancel()),
         ]);
         let mut renderer = RecordingRenderer::default();
@@ -873,9 +912,10 @@ mod tests {
             terminal.calls,
             [
                 "enable_raw_mode",
+                "flush",
                 "show_cursor",
-                "disable_raw_mode",
-                "flush"
+                "flush",
+                "disable_raw_mode"
             ]
         );
 
@@ -896,9 +936,10 @@ mod tests {
             terminal.calls,
             [
                 "enable_raw_mode",
+                "flush",
                 "show_cursor",
-                "disable_raw_mode",
-                "flush"
+                "flush",
+                "disable_raw_mode"
             ]
         );
 
@@ -919,9 +960,10 @@ mod tests {
             terminal.calls,
             [
                 "enable_raw_mode",
+                "flush",
                 "show_cursor",
-                "disable_raw_mode",
-                "flush"
+                "flush",
+                "disable_raw_mode"
             ]
         );
     }
@@ -942,14 +984,8 @@ mod tests {
             .build()
             .expect("form is valid");
         let mut events = ScriptedEvents::new([
-            Ok(Event::Key(KeyEvent {
-                code: KeyCode::Tab,
-                modifiers: KeyModifiers::default(),
-            })),
-            Ok(Event::Key(KeyEvent {
-                code: KeyCode::Char('n'),
-                modifiers: KeyModifiers::default(),
-            })),
+            Ok(Event::Key(KeyEvent::new(KeyCode::Tab))),
+            Ok(Event::Key(KeyEvent::new(KeyCode::Char('n')))),
         ]);
         let mut renderer = RecordingRenderer::default();
         let mut terminal = RecordingTerminal::interactive();
@@ -1005,23 +1041,11 @@ mod tests {
             .expect("form is valid");
         let mut events = ScriptedEvents::new([
             Ok(enter()),
-            Ok(Event::Key(KeyEvent {
-                code: KeyCode::Char('名'),
-                modifiers: KeyModifiers::default(),
-            })),
-            Ok(Event::Key(KeyEvent {
-                code: KeyCode::Tab,
-                modifiers: KeyModifiers::default(),
-            })),
-            Ok(Event::Key(KeyEvent {
-                code: KeyCode::Down,
-                modifiers: KeyModifiers::default(),
-            })),
+            Ok(Event::Key(KeyEvent::new(KeyCode::Char('名')))),
+            Ok(Event::Key(KeyEvent::new(KeyCode::Tab))),
+            Ok(Event::Key(KeyEvent::new(KeyCode::Down))),
             Ok(enter()),
-            Ok(Event::Key(KeyEvent {
-                code: KeyCode::Char('y'),
-                modifiers: KeyModifiers::default(),
-            })),
+            Ok(Event::Key(KeyEvent::new(KeyCode::Char('y')))),
             Ok(enter()),
         ]);
         let mut renderer = RecordingRenderer::default();
@@ -1047,27 +1071,19 @@ mod tests {
             terminal.calls,
             [
                 "enable_raw_mode",
+                "flush",
                 "show_cursor",
-                "disable_raw_mode",
-                "flush"
+                "flush",
+                "disable_raw_mode"
             ]
         );
     }
     #[test]
     fn the_default_resize_policy_returns_an_error_after_one_coalesced_resize() {
         let mut events = ScriptedEvents::new([
-            Ok(Event::Resize {
-                columns: 10,
-                rows: 5,
-            }),
-            Ok(Event::Resize {
-                columns: 20,
-                rows: 6,
-            }),
-            Ok(Event::Resize {
-                columns: 30,
-                rows: 7,
-            }),
+            Ok(Event::Resize(urushi_terminal::TerminalSize::new(10, 5))),
+            Ok(Event::Resize(urushi_terminal::TerminalSize::new(20, 6))),
+            Ok(Event::Resize(urushi_terminal::TerminalSize::new(30, 7))),
             Ok(enter()),
         ])
         .arriving_together(3);
@@ -1091,10 +1107,7 @@ mod tests {
     #[test]
     fn clear_viewport_policy_redraws_then_keeps_the_event_that_ended_the_burst() {
         let mut events = ScriptedEvents::new([
-            Ok(Event::Resize {
-                columns: 10,
-                rows: 5,
-            }),
+            Ok(Event::Resize(urushi_terminal::TerminalSize::new(10, 5))),
             Ok(enter()),
         ])
         .arriving_together(2);
@@ -1117,10 +1130,8 @@ mod tests {
 
     #[test]
     fn resize_error_retains_a_cleanup_failure() {
-        let mut events = ScriptedEvents::new([Ok(Event::Resize {
-            columns: 10,
-            rows: 5,
-        })]);
+        let mut events =
+            ScriptedEvents::new([Ok(Event::Resize(urushi_terminal::TerminalSize::new(10, 5)))]);
         let mut renderer = RecordingRenderer {
             fail_finish: true,
             ..RecordingRenderer::default()
@@ -1144,19 +1155,18 @@ mod tests {
             terminal.calls,
             [
                 "enable_raw_mode",
+                "flush",
                 "show_cursor",
-                "disable_raw_mode",
-                "flush"
+                "flush",
+                "disable_raw_mode"
             ]
         );
     }
 
     #[test]
     fn a_failed_viewport_clear_is_a_render_error_and_runs_cleanup() {
-        let mut events = ScriptedEvents::new([Ok(Event::Resize {
-            columns: 10,
-            rows: 5,
-        })]);
+        let mut events =
+            ScriptedEvents::new([Ok(Event::Resize(urushi_terminal::TerminalSize::new(10, 5)))]);
         let mut renderer = RecordingRenderer {
             fail_clear_viewport: true,
             ..RecordingRenderer::default()

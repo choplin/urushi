@@ -2,9 +2,9 @@
 //! and what one layout pass hands a renderer.
 
 use urushi::{
-    Align, Available, BlockStyle, BlockTitle, Border, Color, ColorLevel, Length, Modifier,
-    Overflow, RenderSettings, ResolvedView, Size, StyledGrapheme, StyledText, TextSpan, TextStyle,
-    UnderlineStyleSet, VerticalAlign, View, measure, render, resolve,
+    Align, Available, BlockStyle, BlockTitle, Border, Color, ColorLevel, Length, Overflow,
+    RenderSettings, ResolvedView, Size, StyledGrapheme, StyledText, TextAttributes, TextSpan,
+    TextStyle, UnderlineStyleSet, VerticalAlign, View, measure, render, resolve,
 };
 
 fn resolve_ok(view: &View, available: Available) -> ResolvedView {
@@ -14,7 +14,7 @@ fn resolve_ok(view: &View, available: Available) -> ResolvedView {
 fn ansi_settings() -> RenderSettings {
     RenderSettings::default()
         .color_level(ColorLevel::TrueColor)
-        .modifiers(Modifier::all())
+        .attributes(TextAttributes::all())
         .underline_styles(UnderlineStyleSet::all())
         .underline_colors(true)
         .hyperlinks(true)

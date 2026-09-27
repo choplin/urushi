@@ -77,6 +77,16 @@ the default `Inline` mode. Inline rendering must:
   terminal write fails midway; and
 - allow command ordering and state transitions to be tested without a terminal.
 
+The prompt owns those policies but not the physical terminal mechanism. Its
+executor emits `urushi-terminal` commands, its event loop consumes normalized
+`urushi-terminal` events, and its lifecycle is a configured shared
+`TerminalSession`. The process entry point initially constructs the optional
+Crossterm adapter; form and field behavior and the rendering plan operate only
+on the shared contracts, and no Crossterm crate type enters the public prompt
+API. Execute converts resolved logical styles into `urushi-terminal` physical
+styles and sends validated printable text separately; it never places ANSI or
+another backend instruction inside a text command.
+
 ## The owned region
 
 A prompt draws inline and never enters the alternate screen. Its ordinary plan

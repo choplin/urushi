@@ -3,15 +3,15 @@
 
 use crate::view::Size;
 use crate::{
-    Align, Border, Color, Hyperlink, Length, Modifier, Overflow, Sides, TextStyle, Underline,
-    UnderlineStyle, VerticalAlign,
+    Align, Border, Color, Hyperlink, Length, Overflow, Sides, TextAttribute, TextAttributes,
+    TextStyle, Underline, UnderlineStyle, VerticalAlign,
 };
 
 /// A rectangle: padding, margin, border, dimensions, alignment, and the
 /// [`TextStyle`] that fills the geometry they create.
 ///
 /// A `BlockStyle` is an immutable value, like [`TextStyle`]. Its text properties —
-/// colors and modifiers — are the style of the block's own fill: padding rows,
+/// colors and attributes — are the style of the block's own fill: padding rows,
 /// alignment gaps, and text explicitly built from [`BlockStyle::text`]. A block's style
 /// does not flow into a child view; each child carries its own complete value.
 ///
@@ -114,34 +114,46 @@ impl BlockStyle {
         self
     }
 
-    /// Adds every flag in `modifier` to the active fill text modifiers.
-    pub fn add_modifier(mut self, modifier: Modifier) -> Self {
-        self.text_style = self.text_style.add_modifier(modifier);
+    /// Adds one active fill text attribute.
+    pub fn add_attribute(mut self, attribute: TextAttribute) -> Self {
+        self.text_style = self.text_style.add_attribute(attribute);
         self
     }
 
-    /// Removes every flag in `modifier` from the active fill text modifiers.
-    pub fn remove_modifier(mut self, modifier: Modifier) -> Self {
-        self.text_style = self.text_style.remove_modifier(modifier);
+    /// Adds a set of active fill text attributes.
+    pub fn add_attributes(mut self, attributes: TextAttributes) -> Self {
+        self.text_style = self.text_style.add_attributes(attributes);
         self
     }
 
-    /// Restores the active fill text modifiers to their default value.
-    pub fn reset_modifiers(mut self) -> Self {
-        self.text_style = self.text_style.reset_modifiers();
+    /// Removes one active fill text attribute.
+    pub fn remove_attribute(mut self, attribute: TextAttribute) -> Self {
+        self.text_style = self.text_style.remove_attribute(attribute);
+        self
+    }
+
+    /// Removes a set of active fill text attributes.
+    pub fn remove_attributes(mut self, attributes: TextAttributes) -> Self {
+        self.text_style = self.text_style.remove_attributes(attributes);
+        self
+    }
+
+    /// Restores the active fill text attributes to their default value.
+    pub fn reset_attributes(mut self) -> Self {
+        self.text_style = self.text_style.reset_attributes();
         self
     }
 
     pub fn bold(self) -> Self {
-        self.add_modifier(Modifier::BOLD)
+        self.add_attribute(TextAttribute::Bold)
     }
 
     pub fn dim(self) -> Self {
-        self.add_modifier(Modifier::DIM)
+        self.add_attribute(TextAttribute::Dim)
     }
 
     pub fn italic(self) -> Self {
-        self.add_modifier(Modifier::ITALIC)
+        self.add_attribute(TextAttribute::Italic)
     }
 
     /// Underlines the fill text with a single line in the foreground color.
@@ -189,19 +201,19 @@ impl BlockStyle {
     }
 
     pub fn blink(self) -> Self {
-        self.add_modifier(Modifier::SLOW_BLINK)
+        self.add_attribute(TextAttribute::SlowBlink)
     }
 
     pub fn reverse(self) -> Self {
-        self.add_modifier(Modifier::REVERSED)
+        self.add_attribute(TextAttribute::Reversed)
     }
 
     pub fn hide(self) -> Self {
-        self.add_modifier(Modifier::HIDDEN)
+        self.add_attribute(TextAttribute::Hidden)
     }
 
     pub fn strikethrough(self) -> Self {
-        self.add_modifier(Modifier::CROSSED_OUT)
+        self.add_attribute(TextAttribute::CrossedOut)
     }
 
     /// Sets padding between the content and the border.
@@ -464,9 +476,9 @@ impl BlockStyle {
         self.text_style.get_underline()
     }
 
-    /// Returns the active fill text modifiers.
-    pub const fn get_modifiers(&self) -> Modifier {
-        self.text_style.get_modifiers()
+    /// Returns the active fill text attributes.
+    pub const fn get_attributes(&self) -> TextAttributes {
+        self.text_style.get_attributes()
     }
 
     /// Returns the padding applied inside the border.
@@ -608,7 +620,7 @@ mod tests {
         let style = BlockStyle::new()
             .foreground(Color::RED)
             .background(Color::BLUE)
-            .add_modifier(Modifier::ITALIC)
+            .add_attribute(TextAttribute::Italic)
             .underline_color(Color::GREEN)
             .hyperlink("https://example.com")
             .padding(1)
@@ -632,7 +644,7 @@ mod tests {
             .vertical_align(VerticalAlign::Bottom)
             .reset_foreground()
             .reset_background()
-            .reset_modifiers()
+            .reset_attributes()
             .reset_underline()
             .reset_hyperlink()
             .reset_padding()
@@ -659,12 +671,12 @@ mod tests {
     }
 
     #[test]
-    fn modifier_operations_accept_sets() {
-        let modifiers = Modifier::BOLD | Modifier::ITALIC;
+    fn attribute_operations_accept_sets() {
+        let attributes = TextAttribute::Bold | TextAttribute::Italic;
         let style = BlockStyle::new()
-            .add_modifier(modifiers)
-            .remove_modifier(Modifier::ITALIC);
+            .add_attributes(attributes)
+            .remove_attribute(TextAttribute::Italic);
 
-        assert_eq!(style.get_modifiers(), Modifier::BOLD);
+        assert_eq!(style.get_attributes(), TextAttribute::Bold.into());
     }
 }

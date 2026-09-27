@@ -1,7 +1,7 @@
 //! Explicit feature selection for one render operation.
 
-use crate::{Modifier, TextStyle, Underline, UnderlineStyleSet};
-use urushi_terminal::{ColorLevel, TerminalCapabilities, TextAttributes, UnderlineStyles};
+use crate::{TextAttributes, TextStyle, UnderlineStyleSet};
+use urushi_terminal::{ColorLevel, TerminalCapabilities};
 
 use super::palette::{quantize_to_ansi16, quantize_to_ansi256};
 
@@ -13,7 +13,7 @@ use super::palette::{quantize_to_ansi16, quantize_to_ansi256};
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct RenderSettings {
     color_level: ColorLevel,
-    modifiers: Modifier,
+    attributes: TextAttributes,
     underline_styles: UnderlineStyleSet,
     underline_colors: bool,
     hyperlinks: bool,
@@ -28,7 +28,7 @@ impl RenderSettings {
     pub const fn all() -> Self {
         Self {
             color_level: ColorLevel::TrueColor,
-            modifiers: Modifier::all(),
+            attributes: TextAttributes::all(),
             underline_styles: UnderlineStyleSet::all(),
             underline_colors: true,
             hyperlinks: true,
@@ -39,8 +39,8 @@ impl RenderSettings {
         self.color_level
     }
 
-    pub const fn get_modifiers(self) -> Modifier {
-        self.modifiers
+    pub const fn get_attributes(self) -> TextAttributes {
+        self.attributes
     }
 
     pub const fn get_underline_styles(self) -> UnderlineStyleSet {
@@ -60,8 +60,8 @@ impl RenderSettings {
         self
     }
 
-    pub const fn modifiers(mut self, modifiers: Modifier) -> Self {
-        self.modifiers = modifiers;
+    pub const fn attributes(mut self, attributes: TextAttributes) -> Self {
+        self.attributes = attributes;
         self
     }
 
@@ -85,8 +85,8 @@ impl RenderSettings {
         self
     }
 
-    pub const fn reset_modifiers(mut self) -> Self {
-        self.modifiers = Modifier::empty();
+    pub const fn reset_attributes(mut self) -> Self {
+        self.attributes = TextAttributes::empty();
         self
     }
 
@@ -117,13 +117,14 @@ impl RenderSettings {
             ColorLevel::Ansi256 => style.clone().map_colors(quantize_to_ansi256),
             ColorLevel::TrueColor => style.clone(),
         };
-        resolved.modifiers = resolved.modifiers.intersection(self.modifiers);
+        resolved.attributes = resolved.attributes.intersection(self.attributes);
         resolved.underline = resolved.underline.and_then(|underline| {
             self.underline_styles
-                .contains(underline.style)
-                .then_some(Underline {
-                    color: self.underline_colors.then_some(underline.color).flatten(),
-                    ..underline
+                .contains(underline.get_style())
+                .then_some(if self.underline_colors {
+                    underline
+                } else {
+                    underline.reset_color()
                 })
         });
         if !self.hyperlinks {
@@ -137,51 +138,17 @@ impl From<TerminalCapabilities> for RenderSettings {
     fn from(capabilities: TerminalCapabilities) -> Self {
         Self::default()
             .color_level(capabilities.color_level())
-            .modifiers(modifiers_from(capabilities.attributes()))
-            .underline_styles(underline_styles_from(capabilities.underline_styles()))
+            .attributes(capabilities.attributes())
+            .underline_styles(capabilities.underline_styles())
             .underline_colors(capabilities.underline_colors())
             .hyperlinks(capabilities.hyperlinks())
     }
 }
 
-fn modifiers_from(attributes: TextAttributes) -> Modifier {
-    let mut modifiers = Modifier::empty();
-    for (capability, modifier) in [
-        (TextAttributes::BOLD, Modifier::BOLD),
-        (TextAttributes::DIM, Modifier::DIM),
-        (TextAttributes::ITALIC, Modifier::ITALIC),
-        (TextAttributes::SLOW_BLINK, Modifier::SLOW_BLINK),
-        (TextAttributes::REVERSED, Modifier::REVERSED),
-        (TextAttributes::HIDDEN, Modifier::HIDDEN),
-        (TextAttributes::CROSSED_OUT, Modifier::CROSSED_OUT),
-    ] {
-        if attributes.contains(capability) {
-            modifiers = modifiers.union(modifier);
-        }
-    }
-    modifiers
-}
-
-fn underline_styles_from(styles: UnderlineStyles) -> UnderlineStyleSet {
-    let mut selected = UnderlineStyleSet::empty();
-    for (capability, style) in [
-        (UnderlineStyles::SINGLE, UnderlineStyleSet::SINGLE),
-        (UnderlineStyles::DOUBLE, UnderlineStyleSet::DOUBLE),
-        (UnderlineStyles::CURLY, UnderlineStyleSet::CURLY),
-        (UnderlineStyles::DOTTED, UnderlineStyleSet::DOTTED),
-        (UnderlineStyles::DASHED, UnderlineStyleSet::DASHED),
-    ] {
-        if styles.contains(capability) {
-            selected = selected.union(style);
-        }
-    }
-    selected
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{Color, Hyperlink, UnderlineStyle};
+    use crate::{Color, Hyperlink, TextAttribute, Underline, UnderlineStyle};
 
     #[test]
     fn default_is_plain_text() {
@@ -209,14 +176,14 @@ mod tests {
             .hyperlink("https://example.com");
         let settings = RenderSettings::default()
             .color_level(ColorLevel::Ansi16)
-            .modifiers(Modifier::ITALIC)
+            .attributes(TextAttribute::Italic.into())
             .underline_styles(UnderlineStyleSet::CURLY)
             .underline_colors(false)
             .hyperlinks(false);
         let resolved = settings.resolve_text_style(&style);
 
         assert_eq!(resolved.get_foreground(), Some(Color::BRIGHT_RED));
-        assert_eq!(resolved.get_modifiers(), Modifier::ITALIC);
+        assert_eq!(resolved.get_attributes(), TextAttribute::Italic.into());
         assert_eq!(
             resolved.get_underline(),
             Some(Underline::new(UnderlineStyle::Curly))
@@ -242,12 +209,12 @@ mod tests {
     fn reset_builders_restore_every_setting_default() {
         let settings = RenderSettings::default()
             .color_level(ColorLevel::TrueColor)
-            .modifiers(Modifier::all())
+            .attributes(TextAttributes::all())
             .underline_styles(UnderlineStyleSet::all())
             .underline_colors(true)
             .hyperlinks(true)
             .reset_color_level()
-            .reset_modifiers()
+            .reset_attributes()
             .reset_underline_styles()
             .reset_underline_colors()
             .reset_hyperlinks();

@@ -1,6 +1,6 @@
 use urushi::{
-    Align, Available, BlockStyle, Border, Color, ColorLevel, List, ListItem, Modifier,
-    RenderSettings, SemanticTokens, Table, TableBorder, TablePresentation, TextStyle, Theme, Tree,
+    Align, Available, BlockStyle, Border, Color, ColorLevel, List, ListItem, RenderSettings,
+    SemanticTokens, Table, TableBorder, TablePresentation, TextAttributes, TextStyle, Theme, Tree,
     TreeNode, UnderlineStyleSet, VerticalAlign, View, arabic_enumerator, measure, render, resolve,
 };
 
@@ -420,7 +420,7 @@ pub fn render_cjk_showcase() -> String {
         &resolved,
         &RenderSettings::default()
             .color_level(ColorLevel::Ansi16)
-            .modifiers(Modifier::all())
+            .attributes(TextAttributes::all())
             .underline_styles(UnderlineStyleSet::all())
             .underline_colors(true)
             .hyperlinks(true),

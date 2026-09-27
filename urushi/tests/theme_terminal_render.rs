@@ -1,6 +1,6 @@
 use urushi::{
     Align, Available, BlockStyle, Border, Color, ColorLevel, ColorScheme, ComponentRole,
-    ComponentTheme, Modifier, PanelRole, RenderSettings, SemanticTokens, Theme, ThemeSet,
+    ComponentTheme, PanelRole, RenderSettings, SemanticTokens, TextAttributes, Theme, ThemeSet,
     UnderlineStyleSet, View, render, resolve,
 };
 
@@ -56,7 +56,7 @@ fn themes() -> ThemeSet {
 fn settings(color_level: ColorLevel) -> RenderSettings {
     RenderSettings::default()
         .color_level(color_level)
-        .modifiers(Modifier::all())
+        .attributes(TextAttributes::all())
         .underline_styles(UnderlineStyleSet::all())
         .underline_colors(true)
         .hyperlinks(true)

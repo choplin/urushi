@@ -4,8 +4,8 @@ use crate::{
     FieldConfigError, FieldKey,
     runtime::{
         self, Event, FieldAction, FieldEntry, FieldPresentation, FieldRegionKind, KeyCode,
-        PromptStyles, RuntimeField, TextSpan, clipped_line_view, field_line_view, fixed_view,
-        line_view, region,
+        KeyModifiers, PromptStyles, RuntimeField, TextSpan, clipped_line_view, field_line_view,
+        fixed_view, line_view, region,
     },
 };
 use urushi::{Align, BlockStyle, GridStyle, Length, VerticalAlign, View};
@@ -154,7 +154,11 @@ impl RuntimeField for Confirm {
             return FieldAction::Stay;
         };
 
-        match (key.code, key.modifiers.control, key.modifiers.alt) {
+        match (
+            key.code,
+            key.modifiers.contains(KeyModifiers::CONTROL),
+            key.modifiers.contains(KeyModifiers::ALT),
+        ) {
             (KeyCode::Escape, _, _) => FieldAction::Cancel,
             (KeyCode::Up | KeyCode::Left, _, _) | (KeyCode::Char('h'), false, false) => {
                 self.select_explicit(true);
@@ -303,10 +307,7 @@ mod tests {
     use crate::runtime::test_styles;
 
     fn key(code: KeyCode) -> Event {
-        Event::Key(runtime::KeyEvent {
-            code,
-            modifiers: runtime::KeyModifiers::default(),
-        })
+        Event::Key(runtime::KeyEvent::new(code))
     }
 
     #[test]

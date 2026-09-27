@@ -34,14 +34,14 @@ let focused = base.clone().bold();
 ```
 
 Each singleton property has at most one value. Adding another value of the
-same kind replaces it. Modifiers are a set, so they are unioned and subtracted
+same kind replaces it. Attributes are a set, so they are unioned and subtracted
 individually.
 
 ```rust
 let style = TextStyle::new()
     .foreground(Color::CYAN)
-    .add_modifier(Modifier::BOLD | Modifier::ITALIC)
-    .remove_modifier(Modifier::ITALIC);
+    .add_attributes(TextAttribute::Bold | TextAttribute::Italic)
+    .remove_attribute(TextAttribute::Italic);
 ```
 
 `TextStyle::new()` and `TextStyle::default()` are empty styles.
@@ -52,25 +52,24 @@ bounds, wrap overflow, left horizontal alignment, or top vertical alignment.
 
 ## Typed property vocabulary
 
-The text vocabulary is foreground, background, underline, hyperlink, and
-modifier. A hyperlink is one URI plus zero or more OSC 8 parameters;
+The text vocabulary is foreground, background, underline, hyperlink, and text
+attributes. A hyperlink is one URI plus zero or more OSC 8 parameters;
 construction percent-encodes control and delimiter characters so caller input
 cannot escape its field. The block vocabulary is the geometry — padding,
 margin, the border glyph set, its four edge switches, complete logical text
 style, and color overrides, the six sizing properties, overflow, and the two
 alignments — together with named access to the text properties of the style
-filling it. The complete border style lets a semantic rail retain modifiers as
+filling it. The complete border style lets a semantic rail retain attributes as
 well as colors; explicit border foreground and background values override
 those two properties.
 
 Geometry methods exist only on `BlockStyle`, so a geometry property cannot be
 applied to a `TextStyle`. Shared text operations use the same names on both
-types: `foreground`, `add_modifier`, `reset_underline`, and their peers.
+types: `foreground`, `add_attribute`, `reset_underline`, and their peers.
 
 The values are chosen so that one appearance has one value: an underline is
-one optional value carrying its shape and its color, not a modifier flag beside
-a color property, and Select Graphic Rendition (SGR) parameter 6 (rapid blink)
-is deliberately absent. The full value shape and the precise rules for its
+one optional value carrying its shape and its color, not an attribute flag beside
+a color property. The full value shape and the precise rules for its
 public operations are recorded in
 [`design/style-value-model.md`](design/style-value-model.md); the underline
 value and its builders in [`design/underline.md`](design/underline.md).
@@ -95,9 +94,9 @@ The public API names the operation a consumer intends:
 ```rust
 let style = TextStyle::new()
     .foreground(Color::CYAN)
-    .add_modifier(Modifier::BOLD)
+    .add_attribute(TextAttribute::Bold)
     .reset_foreground()
-    .remove_modifier(Modifier::BOLD);
+    .remove_attribute(TextAttribute::Bold);
 
 let documentation = TextStyle::new().hyperlink("https://example.com/docs");
 ```
@@ -122,8 +121,9 @@ let style = BlockStyle::new()
 Style setters keep the bare property name, resets use `reset_*`, and paired
 getters use `get_*`; read-only accessors are not mechanically prefixed. Complete
 underline values use `underline`, while `underlined`, `underline_style`, and
-`underline_color` shorten common construction. Modifier sets retain explicit
-`add_modifier` and `remove_modifier` operations. The exact naming rule, its
+`underline_color` shorten common construction. Text attributes retain explicit
+singular `add_attribute` and `remove_attribute` operations, with
+`add_attributes` and `remove_attributes` for sets. The exact naming rule, its
 scope, and the rejected alternatives are recorded in
 [`design/style-api-naming.md`](design/style-api-naming.md).
 
@@ -137,7 +137,7 @@ let focused = base
     .clone()
     .foreground(accent)
     .bold()
-    .remove_modifier(Modifier::DIM);
+    .remove_attribute(TextAttribute::Dim);
 ```
 
 Reusable sequences of changes are ordinary functions:
@@ -211,11 +211,11 @@ complete value, so a theme role resolves to the whole style its position uses.
 
 Renderers consume the values present in one `TextStyle`.
 
-- ANSI rendering emits the active colors, modifiers, and underline, in SGR
+- ANSI rendering emits the active colors, attributes, and underline, in SGR
   parameter order so that one style always spells one sequence. It emits a
   hyperlink as an OSC 8 scope around the styled run and closes the scope before
   a line boundary.
-- The `urushi-tui` adapter maps the active modifier set to Ratatui's
+- The `urushi-tui` adapter maps the active attribute set to Ratatui's
   `add_modifier`; it does not populate `sub_modifier`. Its default cell-writing
   mode therefore follows Ratatui's patch semantics, while the explicit
   `CellWriteMode::Replace` resets each cell the view writes before applying its
@@ -223,7 +223,7 @@ Renderers consume the values present in one `TextStyle`.
   parameter field, so the adapter intentionally discards hyperlinks while
   retaining every representable text property.
 - `RenderSettings::resolve_text_style` independently selects color fidelity,
-  modifiers, underline shapes, underline color, and hyperlinks, then returns a
+  attributes, underline shapes, underline color, and hyperlinks, then returns a
   canonical effective style.
 
 A style value does not serialize an arbitrary string itself. `render_text`
@@ -235,7 +235,7 @@ escape hatch on `TextStyle`.
 How each backend spells and degrades the underline is recorded in
 [`design/underline.md`](design/underline.md).
 
-Removing a modifier from an immutable `TextStyle` removes the value; a renderer
+Removing an attribute from an immutable `TextStyle` removes the value; a renderer
 that maintains prior terminal state is responsible for diffing previous and
 next effective styles and emitting any required reset codes.
 [`design/style-value-model.md`](design/style-value-model.md) records why a

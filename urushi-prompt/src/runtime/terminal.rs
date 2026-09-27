@@ -7,65 +7,25 @@ use super::{
     form::PromptStart,
     view::PromptView,
 };
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) enum Event {
-    Key(KeyEvent),
-    Paste(String),
-    Resize { columns: u16, rows: u16 },
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct KeyEvent {
-    pub code: KeyCode,
-    pub modifiers: KeyModifiers,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) enum KeyCode {
-    Char(char),
-    Enter,
-    Escape,
-    Tab,
-    BackTab,
-    Backspace,
-    Delete,
-    Left,
-    Right,
-    Up,
-    Down,
-    Home,
-    End,
-}
-
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub(crate) struct KeyModifiers {
-    pub shift: bool,
-    pub control: bool,
-    pub alt: bool,
-}
-
-pub(crate) trait EventSource {
-    fn read_event(&mut self) -> io::Result<Event>;
-
-    /// The next event if one is already waiting, without blocking for it.
-    ///
-    /// This exists so the session can coalesce a burst of resize events into
-    /// the size the burst settled on. The default reports nothing waiting,
-    /// which makes coalescing a no-op rather than a wrong answer.
-    fn poll_event(&mut self) -> io::Result<Option<Event>> {
-        Ok(None)
-    }
-}
+#[cfg(test)]
+pub(crate) use urushi_terminal::EventSource;
+#[cfg(test)]
+use urushi_terminal::TerminalOutput;
+use urushi_terminal::{
+    Command, CommandWriter, KeyboardEnhancementQuery, RawModeControl, TerminalBackend,
+    TerminalQuery,
+};
+pub(crate) use urushi_terminal::{Event, KeyCode, KeyEvent, Modifiers as KeyModifiers};
 
 pub(crate) trait Renderer {
     fn draw(
         &mut self,
+        output: &mut dyn CommandWriter,
         view: &PromptView,
         start: PromptStart,
         drawing_columns: u16,
     ) -> io::Result<()>;
-    fn finish(&mut self, outcome: RenderFinish) -> io::Result<()>;
+    fn finish(&mut self, output: &mut dyn CommandWriter, outcome: RenderFinish) -> io::Result<()>;
 
     /// The terminal width from which the form derives its drawing width.
     ///
@@ -80,21 +40,103 @@ pub(crate) trait Renderer {
 
     /// Clear the visible primary-buffer viewport and establish a known cursor
     /// origin for the next draw.
-    fn clear_viewport(&mut self) -> io::Result<()>;
+    fn clear_viewport(&mut self, output: &mut dyn CommandWriter) -> io::Result<()>;
 }
 
-pub(crate) trait TerminalControl {
-    fn is_interactive(&self) -> bool;
-    fn enable_raw_mode(&mut self) -> io::Result<()>;
-    fn enable_bracketed_paste(&mut self) -> io::Result<()> {
-        Ok(())
+pub(crate) trait TerminalControl:
+    RawModeControl + CommandWriter + TerminalQuery + KeyboardEnhancementQuery
+{
+}
+
+/// Adapts independently scripted input and control halves into one connection.
+/// Production backends own both halves directly; tests use this adapter to
+/// inject them independently without weakening the runtime contract.
+#[cfg(test)]
+pub(crate) struct SplitTerminal<'a, E, C> {
+    events: &'a mut E,
+    control: &'a mut C,
+}
+
+#[cfg(test)]
+impl<'a, E, C> SplitTerminal<'a, E, C> {
+    pub(crate) const fn new(events: &'a mut E, control: &'a mut C) -> Self {
+        Self { events, control }
     }
-    fn show_cursor(&mut self) -> io::Result<()>;
-    fn disable_bracketed_paste(&mut self) -> io::Result<()> {
-        Ok(())
+}
+
+#[cfg(test)]
+impl<E, C: TerminalOutput> TerminalOutput for SplitTerminal<'_, E, C> {
+    fn flush(&mut self) -> io::Result<()> {
+        self.control.flush()
     }
-    fn disable_raw_mode(&mut self) -> io::Result<()>;
-    fn flush(&mut self) -> io::Result<()>;
+}
+
+#[cfg(test)]
+impl<E, C: CommandWriter> CommandWriter for SplitTerminal<'_, E, C> {
+    fn write_command(&mut self, command: Command<'_>) -> io::Result<()> {
+        self.control.write_command(command)
+    }
+}
+
+#[cfg(test)]
+impl<E: EventSource, C> EventSource for SplitTerminal<'_, E, C> {
+    fn read_event(&mut self) -> io::Result<Event> {
+        self.events.read_event()
+    }
+
+    fn poll_event(&mut self) -> io::Result<Option<Event>> {
+        self.events.poll_event()
+    }
+
+    fn poll_event_timeout(&mut self, timeout: std::time::Duration) -> io::Result<Option<Event>> {
+        self.events.poll_event_timeout(timeout)
+    }
+}
+
+#[cfg(test)]
+impl<E, C: RawModeControl> RawModeControl for SplitTerminal<'_, E, C> {
+    fn is_interactive(&self) -> bool {
+        self.control.is_interactive()
+    }
+
+    fn enable_raw_mode(&mut self) -> io::Result<()> {
+        self.control.enable_raw_mode()
+    }
+
+    fn disable_raw_mode(&mut self) -> io::Result<()> {
+        self.control.disable_raw_mode()
+    }
+}
+
+#[cfg(test)]
+impl<E, C: TerminalQuery> TerminalQuery for SplitTerminal<'_, E, C> {
+    fn terminal_size(&mut self) -> io::Result<urushi_terminal::TerminalSize> {
+        self.control.terminal_size()
+    }
+
+    fn cursor_position(&mut self) -> io::Result<urushi_terminal::Position> {
+        self.control.cursor_position()
+    }
+
+    fn window_size(&mut self) -> io::Result<urushi_terminal::WindowSize> {
+        self.control.window_size()
+    }
+
+    fn raw_mode_enabled(&mut self) -> io::Result<bool> {
+        self.control.raw_mode_enabled()
+    }
+}
+
+#[cfg(test)]
+impl<E, C: KeyboardEnhancementQuery> KeyboardEnhancementQuery for SplitTerminal<'_, E, C> {
+    fn supports_keyboard_enhancement(&mut self) -> io::Result<bool> {
+        self.control.supports_keyboard_enhancement()
+    }
+}
+
+impl<T> TerminalControl for T where
+    T: RawModeControl + CommandWriter + TerminalQuery + KeyboardEnhancementQuery + ?Sized
+{
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -107,9 +149,7 @@ pub(crate) enum RenderFinish {
 
 pub(super) struct TerminalSession<'a, R: Renderer, T: TerminalControl> {
     pub(super) renderer: &'a mut R,
-    terminal: &'a mut T,
-    raw_mode: bool,
-    bracketed_paste: bool,
+    terminal: urushi_terminal::TerminalSession<'a, T>,
     cleaned: bool,
 }
 
@@ -119,24 +159,19 @@ where
     T: TerminalControl,
 {
     pub(super) fn enter(renderer: &'a mut R, terminal: &'a mut T) -> Result<Self, RunError> {
-        terminal.enable_raw_mode().map_err(|source| RunError::Io {
-            operation: IoOperation::EnterTerminal,
-            source,
-            cleanup: None,
-        })?;
-        if let Err(source) = terminal.enable_bracketed_paste() {
-            let cleanup = terminal.disable_raw_mode().err();
-            return Err(RunError::Io {
-                operation: IoOperation::EnterTerminal,
-                source,
-                cleanup,
-            });
-        }
+        let terminal =
+            urushi_terminal::TerminalSession::enter(terminal, inline_prompt_session_options())
+                .map_err(|error| {
+                    let (source, cleanup) = error.into_parts();
+                    RunError::Io {
+                        operation: IoOperation::EnterTerminal,
+                        source,
+                        cleanup,
+                    }
+                })?;
         Ok(Self {
             renderer,
             terminal,
-            raw_mode: true,
-            bracketed_paste: true,
             cleaned: false,
         })
     }
@@ -150,32 +185,75 @@ where
         }
     }
 
+    pub(super) fn draw(
+        &mut self,
+        view: &PromptView,
+        start: PromptStart,
+        drawing_columns: u16,
+    ) -> io::Result<()> {
+        self.renderer
+            .draw(self.terminal.control_mut(), view, start, drawing_columns)
+    }
+
+    pub(super) fn columns(&self) -> u16 {
+        self.renderer.columns()
+    }
+
+    pub(super) fn resize(&mut self, columns: u16, rows: u16) {
+        self.renderer.resize(columns, rows);
+    }
+
+    pub(super) fn clear_viewport(&mut self) -> io::Result<()> {
+        self.renderer.clear_viewport(self.terminal.control_mut())
+    }
+
     pub(super) fn cleanup(&mut self, finish: RenderFinish) -> Option<io::Error> {
         if self.cleaned {
             return None;
         }
         self.cleaned = true;
 
-        let mut first_error = self.renderer.finish(finish).err();
-        if let Err(error) = self.terminal.show_cursor() {
+        let mut first_error = self
+            .renderer
+            .finish(self.terminal.control_mut(), finish)
+            .err();
+        if let Err(error) = self
+            .terminal
+            .control_mut()
+            .write_command(Command::SetCursorVisible(true))
+        {
             record_first_error(&mut first_error, error);
         }
-        if self.bracketed_paste {
-            self.bracketed_paste = false;
-            if let Err(error) = self.terminal.disable_bracketed_paste() {
-                record_first_error(&mut first_error, error);
-            }
-        }
-        if self.raw_mode {
-            self.raw_mode = false;
-            if let Err(error) = self.terminal.disable_raw_mode() {
-                record_first_error(&mut first_error, error);
-            }
-        }
-        if let Err(error) = self.terminal.flush() {
+        if let Err(error) = self.terminal.restore() {
             record_first_error(&mut first_error, error);
         }
         first_error
+    }
+}
+
+impl<R, T> TerminalSession<'_, R, T>
+where
+    R: Renderer,
+    T: TerminalBackend,
+{
+    pub(super) fn read_event(&mut self) -> io::Result<Event> {
+        self.terminal.control_mut().read_event()
+    }
+
+    pub(super) fn poll_event(&mut self) -> io::Result<Option<Event>> {
+        self.terminal.control_mut().poll_event()
+    }
+}
+
+const fn inline_prompt_session_options() -> urushi_terminal::SessionOptions {
+    urushi_terminal::SessionOptions {
+        raw_mode: true,
+        alternate_screen: false,
+        bracketed_paste: true,
+        focus_change: false,
+        keyboard_enhancement: None,
+        mouse_capture: false,
+        hide_cursor: false,
     }
 }
 
@@ -311,6 +389,13 @@ pub(crate) mod tests {
             }
             self.take().map(Some)
         }
+
+        fn poll_event_timeout(
+            &mut self,
+            _timeout: std::time::Duration,
+        ) -> io::Result<Option<Event>> {
+            self.poll_event()
+        }
     }
 
     pub(crate) struct RecordingRenderer {
@@ -344,6 +429,7 @@ pub(crate) mod tests {
     impl Renderer for RecordingRenderer {
         fn draw(
             &mut self,
+            _output: &mut dyn CommandWriter,
             view: &PromptView,
             start: PromptStart,
             drawing_columns: u16,
@@ -356,7 +442,11 @@ pub(crate) mod tests {
             Ok(())
         }
 
-        fn finish(&mut self, outcome: RenderFinish) -> io::Result<()> {
+        fn finish(
+            &mut self,
+            _output: &mut dyn CommandWriter,
+            outcome: RenderFinish,
+        ) -> io::Result<()> {
             self.finishes.push(outcome);
             if self.fail_finish {
                 return Err(io::Error::other("finish failed"));
@@ -369,7 +459,7 @@ pub(crate) mod tests {
             self.columns = columns.max(1);
         }
 
-        fn clear_viewport(&mut self) -> io::Result<()> {
+        fn clear_viewport(&mut self, _output: &mut dyn CommandWriter) -> io::Result<()> {
             self.viewport_clears += 1;
             if self.fail_clear_viewport {
                 Err(io::Error::other("clear viewport failed"))
@@ -402,7 +492,7 @@ pub(crate) mod tests {
         }
     }
 
-    impl TerminalControl for RecordingTerminal {
+    impl RawModeControl for RecordingTerminal {
         fn is_interactive(&self) -> bool {
             self.interactive
         }
@@ -416,15 +506,6 @@ pub(crate) mod tests {
             }
         }
 
-        fn show_cursor(&mut self) -> io::Result<()> {
-            self.calls.push("show_cursor");
-            if self.fail_show {
-                Err(io::Error::other("show failed"))
-            } else {
-                Ok(())
-            }
-        }
-
         fn disable_raw_mode(&mut self) -> io::Result<()> {
             self.calls.push("disable_raw_mode");
             if self.fail_disable {
@@ -433,10 +514,51 @@ pub(crate) mod tests {
                 Ok(())
             }
         }
+    }
 
+    impl CommandWriter for RecordingTerminal {
+        fn write_command(&mut self, command: Command<'_>) -> io::Result<()> {
+            if command == Command::SetCursorVisible(true) {
+                self.calls.push("show_cursor");
+                if self.fail_show {
+                    return Err(io::Error::other("show failed"));
+                }
+            }
+            Ok(())
+        }
+    }
+
+    impl TerminalQuery for RecordingTerminal {
+        fn terminal_size(&mut self) -> io::Result<urushi_terminal::TerminalSize> {
+            Ok(urushi_terminal::TerminalSize::new(80, 24))
+        }
+
+        fn cursor_position(&mut self) -> io::Result<urushi_terminal::Position> {
+            Ok(urushi_terminal::Position::new(0, 0))
+        }
+
+        fn window_size(&mut self) -> io::Result<urushi_terminal::WindowSize> {
+            Ok(urushi_terminal::WindowSize::new(
+                urushi_terminal::TerminalSize::new(80, 24),
+                None,
+            ))
+        }
+
+        fn raw_mode_enabled(&mut self) -> io::Result<bool> {
+            Ok(false)
+        }
+    }
+
+    impl urushi_terminal::KeyboardEnhancementQuery for RecordingTerminal {
+        fn supports_keyboard_enhancement(&mut self) -> io::Result<bool> {
+            Ok(false)
+        }
+    }
+
+    impl urushi_terminal::TerminalOutput for RecordingTerminal {
         fn flush(&mut self) -> io::Result<()> {
             self.calls.push("flush");
-            if self.fail_flush {
+            if self.fail_flush && self.calls.contains(&"show_cursor") {
                 Err(io::Error::other("flush failed"))
             } else {
                 Ok(())
@@ -465,34 +587,19 @@ pub(crate) mod tests {
     }
 
     pub(crate) fn enter() -> Event {
-        Event::Key(KeyEvent {
-            code: KeyCode::Enter,
-            modifiers: KeyModifiers::default(),
-        })
+        Event::Key(KeyEvent::new(KeyCode::Enter))
     }
 
     pub(crate) fn back() -> Event {
-        Event::Key(KeyEvent {
-            code: KeyCode::BackTab,
-            modifiers: KeyModifiers::default(),
-        })
+        Event::Key(KeyEvent::new(KeyCode::BackTab))
     }
 
     pub(crate) fn cancel() -> Event {
-        Event::Key(KeyEvent {
-            code: KeyCode::Escape,
-            modifiers: KeyModifiers::default(),
-        })
+        Event::Key(KeyEvent::new(KeyCode::Escape))
     }
 
     pub(crate) fn ctrl_c() -> Event {
-        Event::Key(KeyEvent {
-            code: KeyCode::Char('c'),
-            modifiers: KeyModifiers {
-                control: true,
-                ..KeyModifiers::default()
-            },
-        })
+        Event::Key(KeyEvent::new(KeyCode::Char('c')).with_modifiers(KeyModifiers::CONTROL))
     }
 
     #[test]
@@ -529,9 +636,10 @@ pub(crate) mod tests {
             terminal.calls,
             [
                 "enable_raw_mode",
+                "flush",
                 "show_cursor",
-                "disable_raw_mode",
-                "flush"
+                "flush",
+                "disable_raw_mode"
             ]
         );
 
@@ -553,9 +661,10 @@ pub(crate) mod tests {
             terminal.calls,
             [
                 "enable_raw_mode",
+                "flush",
                 "show_cursor",
-                "disable_raw_mode",
-                "flush"
+                "flush",
+                "disable_raw_mode"
             ]
         );
     }
@@ -584,9 +693,10 @@ pub(crate) mod tests {
             terminal.calls,
             [
                 "enable_raw_mode",
+                "flush",
                 "show_cursor",
-                "disable_raw_mode",
-                "flush"
+                "flush",
+                "disable_raw_mode"
             ]
         );
     }
@@ -610,9 +720,10 @@ pub(crate) mod tests {
             terminal.calls,
             [
                 "enable_raw_mode",
+                "flush",
                 "show_cursor",
-                "disable_raw_mode",
-                "flush"
+                "flush",
+                "disable_raw_mode"
             ]
         );
     }

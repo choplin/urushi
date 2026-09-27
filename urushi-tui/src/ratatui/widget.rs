@@ -213,7 +213,7 @@ fn write_cells(
 }
 
 /// Writes one grapheme, leaving the cells a wide grapheme hides reset.
-fn write_grapheme(
+pub(crate) fn write_grapheme(
     grapheme: &StyledGrapheme,
     x: u16,
     y: u16,
@@ -262,7 +262,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn converts_colors_and_every_modifier() {
+    fn converts_colors_and_every_supported_attribute() {
         let converted = RatatuiStyle::from(
             &TextStyle::new()
                 .foreground(Color::Rgb(1, 2, 3))

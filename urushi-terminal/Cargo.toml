@@ -8,4 +8,12 @@ keywords = ["cli", "terminal", "tty"]
 categories = ["command-line-interface"]
 
 [dependencies]
+crossterm = { version = "0.29", optional = true }
 terminal_size = "0.4.4"
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
+[features]
+default = []
+crossterm = ["dep:crossterm"]

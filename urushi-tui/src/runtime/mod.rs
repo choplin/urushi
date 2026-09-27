@@ -24,7 +24,7 @@ pub use application::Application;
 pub use delivery::{Admission, SendError, Sender};
 pub use effect::Effect;
 pub use source::{
-    CellPixels, FocusChange, Input, KeyCode, KeyEvent, KeyKind, Modifiers, Signal, Surface,
-    SurfaceSize,
+    CellPixels, FocusChange, Input, KeyCode, KeyEvent, KeyEventState, KeyKind, MediaKeyCode,
+    ModifierKeyCode, Modifiers, MouseButton, MouseEvent, MouseKind, Signal, Surface, SurfaceSize,
 };
 pub use subscription::Subscription;

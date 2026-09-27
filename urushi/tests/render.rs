@@ -1,6 +1,6 @@
 use urushi::{
-    Align, Available, BlockStyle, Border, Color, ColorLevel, Modifier, Overflow, RenderSettings,
-    Size, UnderlineStyleSet, VerticalAlign, View, render, resolve,
+    Align, Available, BlockStyle, Border, Color, ColorLevel, Overflow, RenderSettings, Size,
+    TextAttributes, UnderlineStyleSet, VerticalAlign, View, render, resolve,
 };
 
 struct TestRender {
@@ -33,7 +33,7 @@ impl RenderBlockForTest for BlockStyle {
         let resolved = resolve(&view, Available::NONE).unwrap();
         let settings = RenderSettings::default()
             .color_level(ColorLevel::TrueColor)
-            .modifiers(Modifier::all())
+            .attributes(TextAttributes::all())
             .underline_styles(UnderlineStyleSet::all())
             .underline_colors(true)
             .hyperlinks(true);
@@ -416,7 +416,7 @@ fn width_only_rendering_is_unchanged_by_the_height_default() {
 }
 
 #[test]
-fn colors_and_modifiers_emit_sgr() {
+fn colors_and_attributes_emit_sgr() {
     let out = BlockStyle::new()
         .foreground(Color::Ansi256(212))
         .bold()
@@ -426,10 +426,10 @@ fn colors_and_modifiers_emit_sgr() {
 }
 
 #[test]
-fn modifiers_can_be_removed_from_a_style_value() {
+fn attributes_can_be_removed_from_a_style_value() {
     let out = BlockStyle::new()
         .bold()
-        .remove_modifier(Modifier::all())
+        .remove_attributes(TextAttributes::all())
         .render("plain")
         .into_string();
 

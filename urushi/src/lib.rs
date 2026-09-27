@@ -47,10 +47,11 @@ pub use key::Key;
 pub use output::{
     eprint, eprint_view, eprintln, eprintln_view, print, print_view, println, println_view,
 };
-pub use render::{RenderSettings, render, render_text};
+pub use render::{RenderSettings, TerminalTextStyle, render, render_text};
 pub use style::{
-    Align, BlockStyle, Border, Color, GridStyle, Hyperlink, InvalidFillWeight, Length, Modifier,
-    Overflow, Sides, TextStyle, Underline, UnderlineStyle, UnderlineStyleSet, VerticalAlign,
+    Align, BlockStyle, Border, Color, GridStyle, Hyperlink, InvalidFillWeight, Length, Overflow,
+    Sides, TextAttribute, TextAttributes, TextStyle, Underline, UnderlineStyle, UnderlineStyleSet,
+    VerticalAlign,
 };
 pub use text::{
     Grapheme, InvalidTabMarker, PrintableLines, PrintableText, StyledText, StyledTextError,
@@ -61,7 +62,7 @@ pub use theme::{
     SemanticTokens, TableRole, TextThemeRole, Theme, ThemeSet, TreeRole,
 };
 pub use urushi_derive::TableRow;
-pub use urushi_terminal::ColorLevel;
+pub use urushi_terminal::{ColorLevel, TerminalCapabilities, TerminalStyle};
 pub use view::{
     AnchoredRect, Available, Axis, BlockTitle, Canvas, CanvasCell, CanvasContext, CanvasItem,
     CanvasSizing, CellContribution, Composition, LayoutError, LayoutErrorKind, LineContinuations,

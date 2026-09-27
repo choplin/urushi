@@ -81,7 +81,9 @@ or output deliberately rendered as if it targeted a known terminal.
 All `urushi-terminal` contracts stay below `urushi` and have no workspace
 dependencies. Terminal inspection therefore remains directly usable by prompt
 and TUI crates without routing through the core renderer. Renderer types do not
-own writers or detected terminal state. Rendered strings do not carry geometry
-and cannot be joined after rendering; composition is represented in `View`
-before layout. The frame, terminal, and session contracts are specified in
+own writers or detected terminal state; an interactive surface passes its one
+terminal connection into each render operation. Rendered strings do not carry
+geometry and cannot be joined after rendering; composition is represented in `View`
+before layout. The TUI frame and terminal contracts and the shared session
+guard are specified in
 [`tui-terminal-ownership.md`](tui-terminal-ownership.md).

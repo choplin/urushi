@@ -13,6 +13,7 @@ ratatui = { version = "0.29", default-features = false }
 tokio = { version = "1", features = ["rt"], optional = true }
 urushi = { path = "../urushi", version = "=0.1.0" }
 urushi-terminal = { path = "../urushi-terminal", version = "=0.1.0" }
+unicode-width.workspace = true
 
 [features]
 default = ["runtime"]
@@ -20,6 +21,7 @@ default = ["runtime"]
 # subscriptions, and the machinery that drives them. A consumer that only wants
 # the Ratatui adapter sets `default-features = false`.
 runtime = ["dep:futures-core", "dep:tokio"]
+crossterm = ["urushi-terminal/crossterm"]
 
 [[example]]
 name = "themed_ratatui"

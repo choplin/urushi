@@ -1,7 +1,7 @@
 //! The [`TextStyle`] builder: everything a terminal can express about a run of
 //! text.
 
-use crate::{Color, Hyperlink, Modifier, Underline, UnderlineStyle};
+use crate::{Color, Hyperlink, TextAttribute, TextAttributes, Underline, UnderlineStyle};
 
 /// A reusable set of text styling rules.
 ///
@@ -36,7 +36,7 @@ pub struct TextStyle {
     pub(crate) background: Option<Color>,
     pub(crate) underline: Option<Underline>,
     pub(crate) hyperlink: Option<Hyperlink>,
-    pub(crate) modifiers: Modifier,
+    pub(crate) attributes: TextAttributes,
 }
 
 impl TextStyle {
@@ -68,34 +68,46 @@ impl TextStyle {
         self
     }
 
-    /// Adds every flag in `modifier` to the active text modifiers.
-    pub fn add_modifier(mut self, modifier: Modifier) -> Self {
-        self.modifiers = self.modifiers.union(modifier);
+    /// Adds one active text attribute.
+    pub fn add_attribute(mut self, attribute: TextAttribute) -> Self {
+        self.attributes = self.attributes.union(attribute.into());
         self
     }
 
-    /// Removes every flag in `modifier` from the active text modifiers.
-    pub fn remove_modifier(mut self, modifier: Modifier) -> Self {
-        self.modifiers = self.modifiers.difference(modifier);
+    /// Adds a set of active text attributes.
+    pub fn add_attributes(mut self, attributes: TextAttributes) -> Self {
+        self.attributes = self.attributes.union(attributes);
         self
     }
 
-    /// Removes every active text modifier.
-    pub fn reset_modifiers(mut self) -> Self {
-        self.modifiers = Modifier::empty();
+    /// Removes one active text attribute.
+    pub fn remove_attribute(mut self, attribute: TextAttribute) -> Self {
+        self.attributes = self.attributes.difference(attribute.into());
+        self
+    }
+
+    /// Removes a set of active text attributes.
+    pub fn remove_attributes(mut self, attributes: TextAttributes) -> Self {
+        self.attributes = self.attributes.difference(attributes);
+        self
+    }
+
+    /// Removes every active text attribute.
+    pub fn reset_attributes(mut self) -> Self {
+        self.attributes = TextAttributes::empty();
         self
     }
 
     pub fn bold(self) -> Self {
-        self.add_modifier(Modifier::BOLD)
+        self.add_attribute(TextAttribute::Bold)
     }
 
     pub fn dim(self) -> Self {
-        self.add_modifier(Modifier::DIM)
+        self.add_attribute(TextAttribute::Dim)
     }
 
     pub fn italic(self) -> Self {
-        self.add_modifier(Modifier::ITALIC)
+        self.add_attribute(TextAttribute::Italic)
     }
 
     /// Underlines the text with a single line in the foreground color.
@@ -109,10 +121,10 @@ impl TextStyle {
     /// Sets the shape the underline is drawn with, adding an underline in the
     /// foreground color when the style has none.
     pub fn underline_style(self, style: UnderlineStyle) -> Self {
-        let underline = Underline {
-            style,
-            color: self.underline.and_then(|underline| underline.color),
-        };
+        let mut underline = Underline::new(style);
+        if let Some(color) = self.underline.and_then(Underline::get_color) {
+            underline = underline.color(color);
+        }
         self.underline(underline)
     }
 
@@ -154,19 +166,19 @@ impl TextStyle {
     }
 
     pub fn blink(self) -> Self {
-        self.add_modifier(Modifier::SLOW_BLINK)
+        self.add_attribute(TextAttribute::SlowBlink)
     }
 
     pub fn reverse(self) -> Self {
-        self.add_modifier(Modifier::REVERSED)
+        self.add_attribute(TextAttribute::Reversed)
     }
 
     pub fn hide(self) -> Self {
-        self.add_modifier(Modifier::HIDDEN)
+        self.add_attribute(TextAttribute::Hidden)
     }
 
     pub fn strikethrough(self) -> Self {
-        self.add_modifier(Modifier::CROSSED_OUT)
+        self.add_attribute(TextAttribute::CrossedOut)
     }
 
     /// Returns the foreground color instruction, if this style sets one.
@@ -189,9 +201,9 @@ impl TextStyle {
         self.hyperlink.as_ref()
     }
 
-    /// Returns the active text modifiers.
-    pub const fn get_modifiers(&self) -> Modifier {
-        self.modifiers
+    /// Returns the active text attributes.
+    pub const fn get_attributes(&self) -> TextAttributes {
+        self.attributes
     }
 
     pub(crate) fn overlay(mut self, contribution: &Self) -> Self {
@@ -200,7 +212,7 @@ impl TextStyle {
             background,
             underline,
             hyperlink,
-            modifiers,
+            attributes,
         } = contribution;
         if let Some(color) = foreground {
             self.foreground = Some(*color);
@@ -214,7 +226,7 @@ impl TextStyle {
         if let Some(hyperlink) = hyperlink {
             self.hyperlink = Some(hyperlink.clone());
         }
-        self.modifiers = self.modifiers.union(*modifiers);
+        self.attributes = self.attributes.union(*attributes);
         self
     }
 
@@ -240,13 +252,10 @@ impl TextStyle {
     /// equal to it cannot be recognized.
     pub(crate) fn canonical(mut self) -> Self {
         if let Some(underline) = self.underline
-            && underline.color.is_some()
-            && underline.color == self.foreground
+            && underline.get_color().is_some()
+            && underline.get_color() == self.foreground
         {
-            self.underline = Some(Underline {
-                color: None,
-                ..underline
-            });
+            self.underline = Some(underline.reset_color());
         }
         self
     }
@@ -255,68 +264,110 @@ impl TextStyle {
     pub(crate) fn map_colors(mut self, map: impl Fn(Color) -> Color) -> Self {
         self.foreground = self.foreground.map(&map);
         self.background = self.background.map(&map);
-        self.underline = self.underline.map(|underline| Underline {
-            color: underline.color.map(&map),
-            ..underline
+        self.underline = self.underline.map(|underline| {
+            underline
+                .get_color()
+                .map(&map)
+                .map_or_else(|| underline.reset_color(), |color| underline.color(color))
         });
         self
     }
 
-    /// Removes every color while preserving modifiers and the underline shape.
+    /// Removes every color while preserving attributes and the underline shape.
     ///
     /// An underline survives colorless render settings — it is a shape, not a
     /// color — but its color does not, exactly as a foreground does not.
     pub(crate) fn without_colors(mut self) -> Self {
         self.foreground = None;
         self.background = None;
-        self.underline = self.underline.map(|underline| Underline {
-            color: None,
-            ..underline
-        });
+        self.underline = self.underline.map(Underline::reset_color);
         self
     }
 
-    /// The SGR sequence enabling this style's modifiers and colors, or an
+    /// The SGR sequence enabling this style's attributes and colors, or an
     /// empty string when the style sets none of them.
     pub(crate) fn sgr_prefix(&self) -> String {
-        let mut params: Vec<String> = Vec::new();
-        // Attribute parameters are emitted in SGR order, the underline in the
-        // slot its code occupies, so one style always spells one sequence.
-        for (added, code) in [
-            (self.modifiers.contains(Modifier::BOLD), "1"),
-            (self.modifiers.contains(Modifier::DIM), "2"),
-            (self.modifiers.contains(Modifier::ITALIC), "3"),
-            (
-                self.underline.is_some(),
-                self.underline.unwrap_or_default().style.sgr_params(),
-            ),
-            (self.modifiers.contains(Modifier::SLOW_BLINK), "5"),
-            (self.modifiers.contains(Modifier::REVERSED), "7"),
-            (self.modifiers.contains(Modifier::HIDDEN), "8"),
-            (self.modifiers.contains(Modifier::CROSSED_OUT), "9"),
-        ] {
-            if added {
-                params.push(code.to_string());
+        let mut sequence = String::new();
+        let mut underline = self.underline;
+        for attribute in self.attributes {
+            if matches!(
+                attribute,
+                TextAttribute::SlowBlink
+                    | TextAttribute::RapidBlink
+                    | TextAttribute::Reversed
+                    | TextAttribute::Hidden
+                    | TextAttribute::CrossedOut
+                    | TextAttribute::Fraktur
+                    | TextAttribute::Framed
+                    | TextAttribute::Encircled
+                    | TextAttribute::Overlined
+            ) && let Some(underline) = underline.take()
+            {
+                push_sgr_parameter(
+                    &mut sequence,
+                    super::underline::sgr_params(underline.get_style()),
+                );
             }
+            push_sgr_parameter(
+                &mut sequence,
+                match attribute {
+                    TextAttribute::Bold => "1",
+                    TextAttribute::Dim => "2",
+                    TextAttribute::Italic => "3",
+                    TextAttribute::SlowBlink => "5",
+                    TextAttribute::RapidBlink => "6",
+                    TextAttribute::Reversed => "7",
+                    TextAttribute::Hidden => "8",
+                    TextAttribute::CrossedOut => "9",
+                    TextAttribute::Fraktur => "20",
+                    TextAttribute::Framed => "51",
+                    TextAttribute::Encircled => "52",
+                    TextAttribute::Overlined => "53",
+                },
+            );
+        }
+        if let Some(underline) = underline {
+            push_sgr_parameter(
+                &mut sequence,
+                super::underline::sgr_params(underline.get_style()),
+            );
         }
         if let Some(c) = self.foreground {
-            params.push(c.sgr_params(false));
+            begin_sgr_parameter(&mut sequence);
+            super::color::write_sgr_params(&mut sequence, c, false)
+                .expect("writing to a String cannot fail");
         }
         if let Some(c) = self.background {
-            params.push(c.sgr_params(true));
+            begin_sgr_parameter(&mut sequence);
+            super::color::write_sgr_params(&mut sequence, c, true)
+                .expect("writing to a String cannot fail");
         }
         // An absent underline color is the terminal's default, which a style of
         // effective values expresses by emitting nothing: the reset that closes
         // every painted scope already restores it, so there is no SGR 59 here.
-        if let Some(c) = self.underline.and_then(|underline| underline.color) {
-            params.push(c.sgr_underline_params());
+        if let Some(c) = self.underline.and_then(Underline::get_color) {
+            begin_sgr_parameter(&mut sequence);
+            super::color::write_sgr_underline_params(&mut sequence, c)
+                .expect("writing to a String cannot fail");
         }
-        if params.is_empty() {
-            String::new()
-        } else {
-            format!("\x1b[{}m", params.join(";"))
+        if !sequence.is_empty() {
+            sequence.push('m');
         }
+        sequence
     }
+}
+
+fn begin_sgr_parameter(sequence: &mut String) {
+    if sequence.is_empty() {
+        sequence.push_str("\x1b[");
+    } else {
+        sequence.push(';');
+    }
+}
+
+fn push_sgr_parameter(sequence: &mut String, parameter: &str) {
+    begin_sgr_parameter(sequence);
+    sequence.push_str(parameter);
 }
 
 #[cfg(test)]
@@ -328,12 +379,12 @@ mod tests {
     fn named_operations_preserve_effective_value_semantics() {
         let style = TextStyle::new()
             .bold()
-            .add_modifier(Modifier::ITALIC)
+            .add_attribute(TextAttribute::Italic)
             .foreground(Color::CYAN)
-            .remove_modifier(Modifier::ITALIC)
+            .remove_attribute(TextAttribute::Italic)
             .reset_foreground();
 
-        assert_eq!(style.get_modifiers(), Modifier::BOLD);
+        assert_eq!(style.get_attributes(), TextAttribute::Bold.into());
         assert_eq!(style.get_foreground(), None);
     }
 
@@ -342,12 +393,12 @@ mod tests {
         let style = TextStyle::new()
             .foreground(Color::RED)
             .background(Color::BLUE)
-            .add_modifier(Modifier::BOLD | Modifier::ITALIC)
+            .add_attributes(TextAttribute::Bold | TextAttribute::Italic)
             .underline_color(Color::GREEN)
             .hyperlink("https://example.com")
             .reset_foreground()
             .reset_background()
-            .reset_modifiers()
+            .reset_attributes()
             .reset_underline()
             .reset_hyperlink();
 
@@ -401,15 +452,18 @@ mod tests {
     }
 
     #[test]
-    fn removing_a_modifier_removes_it_from_painted_value() {
+    fn removing_an_attribute_removes_it_from_painted_value() {
         let style = TextStyle::new()
             .bold()
             .dim()
-            .remove_modifier(Modifier::BOLD);
+            .remove_attribute(TextAttribute::Bold);
 
         assert_eq!(render_style(&style, "text"), "\x1b[2mtext\x1b[0m");
         assert_eq!(
-            render_style(&TextStyle::new().remove_modifier(Modifier::all()), "text",),
+            render_style(
+                &TextStyle::new().remove_attributes(TextAttributes::all()),
+                "text",
+            ),
             "text"
         );
     }
@@ -495,10 +549,26 @@ mod tests {
         );
         assert_eq!(
             render_style(
-                &TextStyle::new().hide().add_modifier(Modifier::REVERSED),
+                &TextStyle::new()
+                    .hide()
+                    .add_attribute(TextAttribute::Reversed),
                 "t",
             ),
             "\x1b[7;8mt\x1b[0m"
+        );
+    }
+
+    #[test]
+    fn shared_terminal_attributes_keep_their_ansi_meaning() {
+        let attributes = TextAttribute::RapidBlink
+            | TextAttribute::Fraktur
+            | TextAttribute::Framed
+            | TextAttribute::Encircled
+            | TextAttribute::Overlined;
+
+        assert_eq!(
+            render_style(&TextStyle::new().add_attributes(attributes), "t"),
+            "\x1b[6;20;51;52;53mt\x1b[0m"
         );
     }
 
@@ -510,10 +580,7 @@ mod tests {
 
         assert_eq!(
             style.get_underline(),
-            Some(Underline {
-                style: UnderlineStyle::Single,
-                color: Some(Color::RED),
-            })
+            Some(Underline::default().color(Color::RED))
         );
         assert_eq!(
             render_style(
@@ -528,10 +595,7 @@ mod tests {
 
     #[test]
     fn setting_a_shape_keeps_the_color_and_setting_a_color_keeps_the_shape() {
-        let expected = Some(Underline {
-            style: UnderlineStyle::Dotted,
-            color: Some(Color::GREEN),
-        });
+        let expected = Some(Underline::new(UnderlineStyle::Dotted).color(Color::GREEN));
 
         assert_eq!(
             TextStyle::new()

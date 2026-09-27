@@ -80,7 +80,7 @@ background would set it once and inner text would pick it up — and it is
 deliberately not adopted. `TextStyle` is a complete immutable value, as
 [`style-value-model.md`](style-value-model.md) settles; expressing "inherit
 unless overridden" requires a patch representation (which Urushi does not have
-as an operation anywhere) and would force modifiers from a bitset into an
+as an operation anywhere) and would force attributes from a bitset into an
 add/remove set, since a bitset cannot express "do not inherit bold". The cost
 is repeating a background across nested blocks. The benefit is that a style
 means one thing wherever it is read.

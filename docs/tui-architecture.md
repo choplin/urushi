@@ -91,7 +91,7 @@ subscription events ---> admission policies ----+              |
                                                      Renderer
                                                         |
                                                         v
-                                      Terminal.draw(borrowed Frame) --> Backend
+                                      Terminal.draw(borrowed Frame) --> CellWriter --> CommandWriter
 ```
 
 `Application` and `Runtime` are deliberately separate. An application can be
@@ -236,11 +236,13 @@ rule, and the representative flows are defined in
 ## Rendering and runtime ownership
 
 The shared rendering vocabulary is `View`, `Renderer`, `Frame`, `Terminal`,
-`TerminalSession`, `Backend`, and `Clock`. `urushi-terminal` owns the
-workspace-independent `Terminal`, `Frame`, and `TerminalSession` contracts and their
-geometry. `urushi-tui` owns the runtime's `Clock`. A backend such as Ratatui
-implements the terminal contracts inside its adapter module, and the runtime
-core and the application see no backend type.
+`TerminalSession`, `CellWriter`, and `Clock`. `urushi-terminal` owns generic
+terminal commands, events, queries, raw-mode control, and the reusable
+`TerminalSession` guard. `urushi-tui::terminal` owns `Frame`, `Terminal`,
+`CellWriter`, and their presentation geometry; `urushi-tui::runtime` owns the
+runtime's `Clock`. Ratatui supplies the buffer and cell diff, `CellWriter`
+lowers changed cells to terminal commands, and a backend adapter performs the
+physical I/O. The runtime core and the application see no backend type.
 
 | Name | Owns |
 | --- | --- |
@@ -248,7 +250,7 @@ core and the application see no backend type.
 | `Frame` | A borrowed, draw-scoped handle to the working presentation state: its area, its cells, and the cursor request. Not the previous buffer, backend, diff, output stream, or flush. |
 | `Terminal` | Working and committed presentation state, cell diffing, output, and flushing. A presentation is committed only after output succeeds. |
 | `TerminalSession` | Restoration obligations caused by entering the session — raw mode, alternate screen, the input modes, cursor visibility — on shutdown, on error, on panic, and after a partial entry. |
-| `Backend` | The physical terminal-output boundary, owned by the backend implementation behind `Terminal`; replaceable in tests. |
+| `CellWriter` | The low-level TUI drawing SPI behind `Terminal`; coalesces positioned styled cells into backend-independent terminal commands. |
 | `Clock` | The runtime's one source of time, behind a trait; replaceable in tests. |
 
 The runtime itself owns the live model; source admission and the accepted

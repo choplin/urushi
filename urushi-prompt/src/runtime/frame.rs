@@ -562,8 +562,8 @@ mod tests {
 #[cfg(test)]
 mod integration_tests {
     use crate::runtime::{
-        FormState, LineKind, PromptLine, PromptStyles, ReducerResult, TextSpan, ViewCursor,
-        crossterm::CrosstermRenderer, frame, terminal::tests::enter, test_styles, view::tests::*,
+        FormState, LineKind, PromptLine, PromptStyles, ReducerResult, TextSpan, ViewCursor, frame,
+        terminal::tests::enter, terminal_backend::TerminalRenderer, test_styles, view::tests::*,
     };
     use crate::{FieldKey, Form, Group, Input};
     use urushi::RenderSettings;
@@ -662,7 +662,7 @@ mod integration_tests {
         let styles = PromptStyles::resolve(&theme, &settings);
         let cjk_line = view_line("あ", &styles.cursor);
         for columns in [0, 1] {
-            let mut renderer = CrosstermRenderer::new(Vec::new(), (columns, 1));
+            let mut renderer = TerminalRenderer::new(Vec::new(), (columns, 1));
             let view = renderer_view(
                 vec![cjk_line.clone()],
                 Some(ViewCursor { row: 0, column: 0 }),
@@ -675,8 +675,8 @@ mod integration_tests {
             assert_eq!(layout.cursor, Some(ViewCursor { row: 0, column: 0 }));
 
             renderer.draw(&view).expect("narrow draw succeeds");
-            let output =
-                String::from_utf8(renderer.writer).expect("renderer writes UTF-8 commands");
+            let output = String::from_utf8(renderer.writer.into_inner())
+                .expect("renderer writes UTF-8 commands");
             assert!(!output.contains('あ'));
         }
     }
@@ -687,7 +687,7 @@ mod integration_tests {
         let settings = RenderSettings::default();
         let styles = PromptStyles::resolve(&theme, &settings);
         for rows in 1..=4 {
-            let renderer = CrosstermRenderer::new(Vec::new(), (40, rows));
+            let renderer = TerminalRenderer::new(Vec::new(), (40, rows));
             let view = renderer_view(
                 vec![
                     view_line("previous question", &styles.muted),
@@ -733,7 +733,7 @@ mod integration_tests {
         let theme = test_theme();
         let settings = RenderSettings::default();
         let styles = PromptStyles::resolve(&theme, &settings);
-        let renderer = CrosstermRenderer::new(Vec::new(), (40, 1));
+        let renderer = TerminalRenderer::new(Vec::new(), (40, 1));
         let view = renderer_view(
             vec![
                 active_line(view_line("┃ choose a language", &styles.accent)),

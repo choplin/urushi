@@ -7,7 +7,9 @@ fn a_key_is_a_press_of_no_modifier_unless_it_says_otherwise() {
     assert_eq!(key.kind, KeyKind::Press);
     assert_eq!(key.modifiers, Modifiers::NONE);
     assert_eq!(
-        KeyEvent::with_modifiers(KeyCode::Char('c'), Modifiers::CONTROL).modifiers,
+        KeyEvent::new(KeyCode::Char('c'))
+            .with_modifiers(Modifiers::CONTROL)
+            .modifiers,
         Modifiers::CONTROL
     );
 }
@@ -15,14 +17,8 @@ fn a_key_is_a_press_of_no_modifier_unless_it_says_otherwise() {
 #[test]
 fn a_repeat_and_a_release_are_events_of_their_own() {
     let press = KeyEvent::new(KeyCode::Down);
-    let repeat = KeyEvent {
-        kind: KeyKind::Repeat,
-        ..press
-    };
-    let release = KeyEvent {
-        kind: KeyKind::Release,
-        ..press
-    };
+    let repeat = press.with_kind(KeyKind::Repeat);
+    let release = press.with_kind(KeyKind::Release);
 
     assert_ne!(press, repeat);
     assert_ne!(press, release);
@@ -33,7 +29,9 @@ fn a_repeat_and_a_release_are_events_of_their_own() {
 fn modifiers_combine_and_say_which_are_held() {
     let control_alt = Modifiers::CONTROL.union(Modifiers::ALT);
 
-    assert!(control_alt.control && control_alt.alt && !control_alt.shift);
+    assert!(control_alt.contains(Modifiers::CONTROL));
+    assert!(control_alt.contains(Modifiers::ALT));
+    assert!(!control_alt.contains(Modifiers::SHIFT));
     assert_eq!(format!("{control_alt:?}"), "Modifiers(control+alt)");
     assert_eq!(format!("{:?}", Modifiers::NONE), "Modifiers(none)");
 }
@@ -42,20 +40,11 @@ fn modifiers_combine_and_say_which_are_held() {
 fn a_surface_reports_pixel_geometry_only_where_the_terminal_did() {
     let surface = Surface::new(80, 24);
 
-    assert_eq!(
-        surface.size,
-        SurfaceSize {
-            columns: 80,
-            rows: 24
-        }
-    );
+    assert_eq!(surface.size, SurfaceSize::new(80, 24));
     assert_eq!(surface.cell_pixels, None);
     assert_eq!(
         Surface {
-            cell_pixels: Some(CellPixels {
-                width: 8,
-                height: 16
-            }),
+            cell_pixels: Some(CellPixels::new(8, 16)),
             ..surface
         }
         .size,

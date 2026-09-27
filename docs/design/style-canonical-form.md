@@ -58,8 +58,8 @@ stays logical until an output boundary.
 ## Why normalization folds only what is inert
 
 Two runs can look identical while holding different values, and the type rules
-out most of that: one underline value rather than a modifier bit plus a color, a
-color type with no reset spelling, one modifier set rather than an add set and a
+out most of that: one underline value rather than an attribute bit plus a color, a
+color type with no reset spelling, one attribute set rather than an add set and a
 subtract set. That is why no separate "effective" style type is needed alongside
 `TextStyle`. What the type cannot rule out is duplication *between* fields, and
 there the design normalizes instead.

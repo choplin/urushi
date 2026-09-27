@@ -142,7 +142,7 @@ fn a_full_row_text_replace_clears_prior_wide_content() {
     );
     assert!(resolved.rows()[0].iter().all(|cell| {
         cell.style().get_foreground() == Some(urushi::Color::RED)
-            && cell.style().get_modifiers().is_empty()
+            && cell.style().get_attributes().is_empty()
     }));
 }
 
@@ -462,8 +462,8 @@ fn style_only_overlay_on_a_continuation_updates_the_wide_grapheme_in_place() {
     assert!(
         resolved.rows()[0][0]
             .style()
-            .get_modifiers()
-            .contains(urushi::Modifier::BOLD)
+            .get_attributes()
+            .contains(urushi::TextAttribute::Bold)
     );
 }
 
@@ -982,8 +982,8 @@ fn line_network_overlays_every_text_style_property() {
     assert!(
         crossing
             .style()
-            .get_modifiers()
-            .contains(urushi::Modifier::BOLD)
+            .get_attributes()
+            .contains(urushi::TextAttribute::Bold)
     );
 }
 

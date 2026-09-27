@@ -32,9 +32,10 @@ reconstruct the containing value. For example, `reset_border()` removes the
 glyph set but retains the independently configured edge fields.
 
 Set-valued style properties expose changes as `add_*` and `remove_*` rather
-than overloading the complete-value setter. `add_modifier(set)` and
-`remove_modifier(set)` therefore say whether their argument is unioned or
-subtracted. Common fixed values may also have concise conveniences such as
+than overloading the complete-value setter. Text styling distinguishes
+`add_attribute(attribute)` from `add_attributes(set)`, with matching removal
+operations, so the argument's cardinality is explicit. Common fixed values may
+also have concise conveniences such as
 `bold()` and `underlined()`; the adjective leaves `underline(value)` available
 for setting the complete underline value.
 
@@ -76,7 +77,7 @@ general getter convention.
 
 `BlockStyle::text_style()` is also a structural accessor rather than a leaf
 property pair. The block forwards ordinary fill configuration through
-`foreground`, `background`, the modifier operations, underline operations, and
+`foreground`, `background`, the attribute operations, underline operations, and
 `hyperlink`; `BlockStyle::from_text_style` supplies construction from a complete
 `TextStyle`. It therefore has no complete-text-style replacement builder whose
 name the accessor must yield.

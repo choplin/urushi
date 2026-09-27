@@ -7,8 +7,8 @@ use crate::{
     FieldConfigError, FieldKey,
     runtime::{
         self, Event, FieldAction, FieldEntry, FieldPresentation, FieldRegionKind, KeyCode,
-        PromptStyles, RuntimeField, TextSpan, clipped_line_view, field_line_view, fixed_view,
-        line_view, line_view_with_cursor, region, window_spans,
+        KeyModifiers, PromptStyles, RuntimeField, TextSpan, clipped_line_view, field_line_view,
+        fixed_view, line_view, line_view_with_cursor, region, window_spans,
     },
 };
 
@@ -255,7 +255,11 @@ impl RuntimeField for Input {
             return FieldAction::Stay;
         };
 
-        match (key.code, key.modifiers.control, key.modifiers.alt) {
+        match (
+            key.code,
+            key.modifiers.contains(KeyModifiers::CONTROL),
+            key.modifiers.contains(KeyModifiers::ALT),
+        ) {
             (KeyCode::Escape, _, _) => FieldAction::Cancel,
             (KeyCode::Char('a'), true, _) | (KeyCode::Home, _, _) => {
                 self.cursor = 0;
@@ -436,14 +440,11 @@ mod tests {
     use crate::runtime::PromptView;
     use crate::{
         Form, FormOutcome, Group,
-        runtime::{EventSource, RenderFinish, Renderer, TerminalControl, test_styles},
+        runtime::{EventSource, RenderFinish, Renderer, test_styles},
     };
 
     fn key(code: KeyCode) -> Event {
-        Event::Key(runtime::KeyEvent {
-            code,
-            modifiers: runtime::KeyModifiers::default(),
-        })
+        Event::Key(runtime::KeyEvent::new(code))
     }
 
     #[test]
@@ -635,6 +636,17 @@ mod tests {
                 .pop_front()
                 .unwrap_or_else(|| Err(io::Error::other("event script exhausted")))
         }
+
+        fn poll_event(&mut self) -> io::Result<Option<Event>> {
+            Ok(None)
+        }
+
+        fn poll_event_timeout(
+            &mut self,
+            _timeout: std::time::Duration,
+        ) -> io::Result<Option<Event>> {
+            self.poll_event()
+        }
     }
 
     #[derive(Default)]
@@ -645,6 +657,7 @@ mod tests {
     impl Renderer for RecordingRenderer {
         fn draw(
             &mut self,
+            _output: &mut dyn urushi_terminal::CommandWriter,
             view: &PromptView,
             _start: crate::PromptStart,
             _drawing_columns: u16,
@@ -653,11 +666,18 @@ mod tests {
             Ok(())
         }
 
-        fn finish(&mut self, _outcome: RenderFinish) -> io::Result<()> {
+        fn finish(
+            &mut self,
+            _output: &mut dyn urushi_terminal::CommandWriter,
+            _outcome: RenderFinish,
+        ) -> io::Result<()> {
             Ok(())
         }
 
-        fn clear_viewport(&mut self) -> io::Result<()> {
+        fn clear_viewport(
+            &mut self,
+            _output: &mut dyn urushi_terminal::CommandWriter,
+        ) -> io::Result<()> {
             Ok(())
         }
     }
@@ -668,7 +688,7 @@ mod tests {
 
     struct InteractiveTerminal;
 
-    impl TerminalControl for InteractiveTerminal {
+    impl urushi_terminal::RawModeControl for InteractiveTerminal {
         fn is_interactive(&self) -> bool {
             true
         }
@@ -677,14 +697,45 @@ mod tests {
             Ok(())
         }
 
-        fn show_cursor(&mut self) -> io::Result<()> {
-            Ok(())
-        }
-
         fn disable_raw_mode(&mut self) -> io::Result<()> {
             Ok(())
         }
+    }
 
+    impl urushi_terminal::CommandWriter for InteractiveTerminal {
+        fn write_command(&mut self, _command: urushi_terminal::Command<'_>) -> io::Result<()> {
+            Ok(())
+        }
+    }
+
+    impl urushi_terminal::TerminalQuery for InteractiveTerminal {
+        fn terminal_size(&mut self) -> io::Result<urushi_terminal::TerminalSize> {
+            Ok(urushi_terminal::TerminalSize::new(80, 24))
+        }
+
+        fn cursor_position(&mut self) -> io::Result<urushi_terminal::Position> {
+            Ok(urushi_terminal::Position::new(0, 0))
+        }
+
+        fn window_size(&mut self) -> io::Result<urushi_terminal::WindowSize> {
+            Ok(urushi_terminal::WindowSize::new(
+                urushi_terminal::TerminalSize::new(80, 24),
+                None,
+            ))
+        }
+
+        fn raw_mode_enabled(&mut self) -> io::Result<bool> {
+            Ok(false)
+        }
+    }
+
+    impl urushi_terminal::KeyboardEnhancementQuery for InteractiveTerminal {
+        fn supports_keyboard_enhancement(&mut self) -> io::Result<bool> {
+            Ok(false)
+        }
+    }
+
+    impl urushi_terminal::TerminalOutput for InteractiveTerminal {
         fn flush(&mut self) -> io::Result<()> {
             Ok(())
         }

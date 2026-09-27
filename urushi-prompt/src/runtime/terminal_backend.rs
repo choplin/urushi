@@ -1,139 +1,127 @@
-//! Crossterm implementations of prompt input, rendering, and terminal control.
+//! Prompt rendering over the shared terminal backend.
 
-use std::{
-    io::{self, IsTerminal, Write},
-    time::Duration,
-};
+#[cfg(test)]
+use std::time::Duration;
+use std::{io, marker::PhantomData};
 
-use crossterm::{
-    cursor,
-    event::{
-        self, DisableBracketedPaste, EnableBracketedPaste, Event as CrosstermEvent,
-        KeyCode as CrosstermKeyCode, KeyEventKind,
-    },
-    execute,
-    terminal::{self},
-};
+#[cfg(test)]
+use std::io::Write;
+
+#[cfg(test)]
+use urushi_terminal::EventSource;
+#[cfg(test)]
+use urushi_terminal::backend::ansi::AnsiWriter;
+use urushi_terminal::{CommandWriter, Event, KeyKind};
 
 use super::{
-    crossterm_executor,
+    command_executor,
     form::PromptStart,
     frame,
-    inline_plan::{self, InlineRenderPlan},
+    inline_plan::{self},
     presentation::InlinePresentation,
     resolve,
-    terminal::{
-        Event, EventSource, KeyCode, KeyEvent, KeyModifiers, RenderFinish, Renderer,
-        TerminalControl,
-    },
+    terminal::{RenderFinish, Renderer},
     view::PromptView,
 };
 
-pub(super) struct CrosstermEventSource;
+#[cfg(test)]
+use super::inline_plan::InlineRenderPlan;
 
-impl EventSource for CrosstermEventSource {
+/// Restricts the shared terminal event stream to events meaningful to an
+/// inline prompt. Key releases, mouse input, and focus notifications belong to
+/// full-screen runtimes and must not become duplicate prompt edits.
+#[cfg(test)]
+pub(super) struct PromptEvents<S> {
+    source: S,
+}
+
+#[cfg(test)]
+impl<S> PromptEvents<S> {
+    pub(super) const fn new(source: S) -> Self {
+        Self { source }
+    }
+}
+
+#[cfg(test)]
+impl<S: EventSource> EventSource for PromptEvents<S> {
     fn read_event(&mut self) -> io::Result<Event> {
         loop {
-            if let Some(event) = translate_event(event::read()?) {
+            let event = self.source.read_event()?;
+            if accepts_prompt_event(&event) {
                 return Ok(event);
             }
         }
     }
 
     fn poll_event(&mut self) -> io::Result<Option<Event>> {
-        while event::poll(Duration::ZERO)? {
-            if let Some(event) = translate_event(event::read()?) {
+        while let Some(event) = self.source.poll_event()? {
+            if accepts_prompt_event(&event) {
                 return Ok(Some(event));
             }
         }
         Ok(None)
     }
-}
 
-/// The prompt's own event, for the crossterm events it has a use for.
-fn translate_event(event: CrosstermEvent) -> Option<Event> {
-    match event {
-        CrosstermEvent::Key(key)
-            if matches!(key.kind, KeyEventKind::Press | KeyEventKind::Repeat) =>
-        {
-            translate_key(key.code, key.modifiers).map(Event::Key)
+    fn poll_event_timeout(&mut self, mut timeout: Duration) -> io::Result<Option<Event>> {
+        loop {
+            let started = std::time::Instant::now();
+            let Some(event) = self.source.poll_event_timeout(timeout)? else {
+                return Ok(None);
+            };
+            if accepts_prompt_event(&event) {
+                return Ok(Some(event));
+            }
+            timeout = timeout.saturating_sub(started.elapsed());
         }
-        CrosstermEvent::Resize(columns, rows) => Some(Event::Resize { columns, rows }),
-        CrosstermEvent::Paste(text) => Some(Event::Paste(text)),
-        _ => None,
     }
 }
 
-fn translate_key(
-    code: CrosstermKeyCode,
-    modifiers: crossterm::event::KeyModifiers,
-) -> Option<KeyEvent> {
-    let code = match code {
-        CrosstermKeyCode::Char(character) => KeyCode::Char(character),
-        CrosstermKeyCode::Enter => KeyCode::Enter,
-        CrosstermKeyCode::Esc => KeyCode::Escape,
-        CrosstermKeyCode::Tab => KeyCode::Tab,
-        CrosstermKeyCode::BackTab => KeyCode::BackTab,
-        CrosstermKeyCode::Backspace => KeyCode::Backspace,
-        CrosstermKeyCode::Delete => KeyCode::Delete,
-        CrosstermKeyCode::Left => KeyCode::Left,
-        CrosstermKeyCode::Right => KeyCode::Right,
-        CrosstermKeyCode::Up => KeyCode::Up,
-        CrosstermKeyCode::Down => KeyCode::Down,
-        CrosstermKeyCode::Home => KeyCode::Home,
-        CrosstermKeyCode::End => KeyCode::End,
-        _ => return None,
-    };
-    Some(KeyEvent {
-        code,
-        modifiers: KeyModifiers {
-            shift: modifiers.contains(crossterm::event::KeyModifiers::SHIFT),
-            control: modifiers.contains(crossterm::event::KeyModifiers::CONTROL),
-            alt: modifiers.contains(crossterm::event::KeyModifiers::ALT),
-        },
-    })
+pub(super) fn accepts_prompt_event(event: &Event) -> bool {
+    matches!(
+        event,
+        Event::Key(key) if key.kind != KeyKind::Release
+    ) || matches!(event, Event::Paste(_) | Event::Resize(_))
 }
 
-pub(super) struct CrosstermRenderer<W> {
+pub(super) struct TerminalRenderer<W> {
+    #[cfg(test)]
     pub(super) writer: W,
+    marker: PhantomData<W>,
     pub(super) presentation: InlinePresentation,
     pub(super) columns: u16,
     pub(super) rows: u16,
 }
 
-impl CrosstermRenderer<io::Stderr> {
-    pub(super) fn stderr(size: (u16, u16)) -> Self {
-        Self::new(io::stderr(), size)
+#[cfg(test)]
+impl<W: Write> TerminalRenderer<AnsiWriter<W>> {
+    pub(super) fn new(writer: W, size: (u16, u16)) -> Self {
+        Self::from_backend(AnsiWriter::new(writer), size)
     }
 }
 
-impl<W: Write> CrosstermRenderer<W> {
-    pub(super) fn new(writer: W, size: (u16, u16)) -> Self {
+impl<W: CommandWriter> TerminalRenderer<W> {
+    #[cfg(test)]
+    pub(super) fn from_backend(writer: W, size: (u16, u16)) -> Self {
         Self {
             writer,
+            marker: PhantomData,
             presentation: InlinePresentation::default(),
             columns: size.0.max(1),
             rows: size.1.max(1),
         }
     }
 
-    fn present(&mut self, plan: InlineRenderPlan) -> io::Result<()> {
-        crossterm_executor::execute(&mut self.writer, &mut self.presentation, plan)
-    }
-
     #[cfg(test)]
     pub(super) fn draw(&mut self, view: &PromptView) -> io::Result<()> {
-        <Self as Renderer>::draw(
-            self,
+        self.draw_at(
             view,
             PromptStart::CurrentPosition { column: 0 },
             self.columns,
         )
     }
-}
 
-impl<W: Write> Renderer for CrosstermRenderer<W> {
-    fn draw(
+    #[cfg(test)]
+    pub(super) fn draw_at(
         &mut self,
         view: &PromptView,
         start: PromptStart,
@@ -148,16 +136,63 @@ impl<W: Write> Renderer for CrosstermRenderer<W> {
             drawing_columns,
             self.rows,
         );
-        self.present(plan)
+        command_executor::execute(&mut self.writer, &mut self.presentation, plan)
+    }
+
+    #[cfg(test)]
+    pub(super) fn finish(&mut self, outcome: RenderFinish) -> io::Result<()> {
+        let plan = inline_plan::plan_finish(outcome, &self.presentation);
+        command_executor::execute(&mut self.writer, &mut self.presentation, plan)
+    }
+
+    #[cfg(test)]
+    pub(super) fn clear_viewport(&mut self) -> io::Result<()> {
+        command_executor::clear_viewport(&mut self.writer)?;
+        self.presentation = InlinePresentation::default();
+        Ok(())
+    }
+}
+
+impl TerminalRenderer<()> {
+    pub(super) fn with_size(size: (u16, u16)) -> Self {
+        Self {
+            #[cfg(test)]
+            writer: (),
+            marker: PhantomData,
+            presentation: InlinePresentation::default(),
+            columns: size.0.max(1),
+            rows: size.1.max(1),
+        }
+    }
+}
+
+impl<W> Renderer for TerminalRenderer<W> {
+    fn draw(
+        &mut self,
+        output: &mut dyn CommandWriter,
+        view: &PromptView,
+        start: PromptStart,
+        drawing_columns: u16,
+    ) -> io::Result<()> {
+        let resolved = resolve::resolve_prompt(drawing_columns, view);
+        let framed = frame::frame(&resolved, self.rows);
+        let plan = inline_plan::plan_draw(
+            framed,
+            &self.presentation,
+            start,
+            drawing_columns,
+            self.rows,
+        );
+        command_executor::execute(output, &mut self.presentation, plan)
     }
 
     fn columns(&self) -> u16 {
         self.columns
     }
 
-    fn finish(&mut self, outcome: RenderFinish) -> io::Result<()> {
+    fn finish(&mut self, output: &mut dyn CommandWriter, outcome: RenderFinish) -> io::Result<()> {
         let plan = inline_plan::plan_finish(outcome, &self.presentation);
-        self.present(plan)
+        command_executor::execute(output, &mut self.presentation, plan)
     }
 
     fn resize(&mut self, columns: u16, rows: u16) {
@@ -170,43 +205,12 @@ impl<W: Write> Renderer for CrosstermRenderer<W> {
         self.presentation.lose_region();
     }
 
-    fn clear_viewport(&mut self) -> io::Result<()> {
+    fn clear_viewport(&mut self, output: &mut dyn CommandWriter) -> io::Result<()> {
         // The resize already made the old region unlocatable. Keep it
         // abandoned if any clear command fails so cleanup never infers rows.
-        crossterm_executor::clear_viewport(&mut self.writer)?;
+        command_executor::clear_viewport(output)?;
         self.presentation = InlinePresentation::default();
         Ok(())
-    }
-}
-pub(super) struct CrosstermTerminalControl;
-
-impl TerminalControl for CrosstermTerminalControl {
-    fn is_interactive(&self) -> bool {
-        io::stdin().is_terminal() && io::stderr().is_terminal()
-    }
-
-    fn enable_raw_mode(&mut self) -> io::Result<()> {
-        terminal::enable_raw_mode()
-    }
-
-    fn enable_bracketed_paste(&mut self) -> io::Result<()> {
-        execute!(io::stderr(), EnableBracketedPaste)
-    }
-
-    fn show_cursor(&mut self) -> io::Result<()> {
-        execute!(io::stderr(), cursor::Show)
-    }
-
-    fn disable_bracketed_paste(&mut self) -> io::Result<()> {
-        execute!(io::stderr(), DisableBracketedPaste)
-    }
-
-    fn disable_raw_mode(&mut self) -> io::Result<()> {
-        terminal::disable_raw_mode()
-    }
-
-    fn flush(&mut self) -> io::Result<()> {
-        io::stderr().flush()
     }
 }
 
@@ -214,8 +218,8 @@ impl TerminalControl for CrosstermTerminalControl {
 mod tests {
     use super::*;
     use crate::runtime::{
-        Form, FormState, Group, LineKind, PromptLine, PromptStyles, PromptView, ReducerResult,
-        TextSpan, ViewCursor,
+        Event, Form, FormState, Group, KeyCode, KeyEvent, LineKind, PromptLine, PromptStyles,
+        PromptView, ReducerResult, TextSpan, ViewCursor,
         inline_plan::{InlineCommand, RenderState, step},
         terminal::tests::*,
         test_styles,
@@ -223,8 +227,28 @@ mod tests {
     };
     use crate::{Confirm, FieldKey, Input, Select, SelectOption};
     use urushi::RenderSettings;
+
+    #[test]
+    fn prompt_events_ignore_full_screen_only_notifications_and_key_releases() {
+        let release = Event::Key(
+            KeyEvent::new(KeyCode::Char('x')).with_kind(urushi_terminal::KeyKind::Release),
+        );
+        let resize = Event::Resize(urushi_terminal::TerminalSize::new(90, 30));
+        let mut events = PromptEvents::new(
+            ScriptedEvents::new([
+                Ok(Event::Focus(urushi_terminal::FocusChange::Gained)),
+                Ok(release),
+                Ok(resize.clone()),
+            ])
+            .arriving_together(3),
+        );
+
+        assert_eq!(events.poll_event().expect("poll succeeds"), Some(resize));
+        assert_eq!(events.poll_event().expect("queue is drained"), None);
+    }
+
     /// The plan the renderer would execute for `view`, without writing it.
-    fn draw_plan<W>(renderer: &CrosstermRenderer<W>, view: &PromptView) -> InlineRenderPlan {
+    fn draw_plan<W>(renderer: &TerminalRenderer<W>, view: &PromptView) -> InlineRenderPlan {
         draw_plan_at(
             renderer,
             PromptStart::CurrentPosition { column: 0 },
@@ -234,7 +258,7 @@ mod tests {
     }
 
     fn draw_plan_at<W>(
-        renderer: &CrosstermRenderer<W>,
+        renderer: &TerminalRenderer<W>,
         start: PromptStart,
         drawing_columns: u16,
         view: &PromptView,
@@ -360,7 +384,7 @@ mod tests {
         let theme = test_theme();
         let settings = ansi_settings();
         let styles = PromptStyles::resolve(&theme, &settings);
-        let mut renderer = CrosstermRenderer::new(Vec::new(), (20, 4));
+        let mut renderer = TerminalRenderer::new(Vec::new(), (20, 4));
         let view = renderer_view(
             vec![PromptLine::spans(vec![
                 TextSpan::new("質問", styles.question.clone()),
@@ -389,10 +413,11 @@ mod tests {
 
         renderer.draw(&view).expect("renderer writes to a buffer");
 
-        let output = String::from_utf8(renderer.writer).expect("renderer writes UTF-8 commands");
-        assert!(output.contains("\x1b[1m質問\x1b[0m"));
-        assert!(output.contains("\x1b[4m＊\x1b[0m"));
-        assert!(output.contains("\x1b[K"));
+        let output = String::from_utf8(renderer.writer.into_inner())
+            .expect("renderer writes UTF-8 commands");
+        assert!(output.contains("\x1b[0;1m質問\x1b[0m"));
+        assert!(output.contains("\x1b[0;4m＊\x1b[0m"));
+        assert!(output.contains("\x1b[0K"));
         assert!(!output.contains("\x1b[2K"));
     }
 
@@ -401,7 +426,7 @@ mod tests {
         let theme = test_theme();
         let settings = RenderSettings::default();
         let styles = PromptStyles::resolve(&theme, &settings);
-        let mut renderer = CrosstermRenderer::new(Vec::new(), (20, 4));
+        let mut renderer = TerminalRenderer::new(Vec::new(), (20, 4));
         let view = renderer_view(
             vec![view_line("question", &styles.question)],
             Some(ViewCursor { row: 0, column: 2 }),
@@ -433,9 +458,11 @@ mod tests {
         assert_eq!(anchored.reserved_rows, 1);
         assert_eq!(plan.next.reserved_rows, 1);
 
-        <CrosstermRenderer<_> as Renderer>::draw(&mut renderer, &view, PromptStart::NewLine, 20)
+        renderer
+            .draw_at(&view, PromptStart::NewLine, 20)
             .expect("renderer writes to a buffer");
-        let output = String::from_utf8(renderer.writer).expect("renderer writes UTF-8 commands");
+        let output = String::from_utf8(renderer.writer.into_inner())
+            .expect("renderer writes UTF-8 commands");
         assert!(output.starts_with("\x1b[?25l\r\n"), "{output:?}");
     }
 
@@ -525,20 +552,14 @@ mod tests {
         let theme = test_theme();
         let settings = RenderSettings::default();
         let styles = PromptStyles::resolve(&theme, &settings);
-        let renderer = CrosstermRenderer::new(Vec::new(), (80, 10));
+        let renderer = TerminalRenderer::new(Vec::new(), (80, 10));
         let before = lay_out(
             renderer.columns,
             renderer.rows,
             &form.view(&state, &styles, renderer.columns),
         );
         assert_eq!(
-            form.reduce(
-                &mut state,
-                Event::Key(KeyEvent {
-                    code: KeyCode::Down,
-                    modifiers: KeyModifiers::default(),
-                })
-            ),
+            form.reduce(&mut state, Event::Key(KeyEvent::new(KeyCode::Down))),
             ReducerResult::Running
         );
         let after = lay_out(
@@ -563,7 +584,7 @@ mod tests {
         let theme = test_theme();
         let settings = RenderSettings::default();
         let styles = PromptStyles::resolve(&theme, &settings);
-        let mut renderer = CrosstermRenderer::new(FailOnLineFeedWriter::new(2), (20, 4));
+        let mut renderer = TerminalRenderer::new(FailOnLineFeedWriter::new(2), (20, 4));
 
         assert!(
             renderer
@@ -613,7 +634,7 @@ mod tests {
         let theme = test_theme();
         let settings = RenderSettings::default();
         let styles = PromptStyles::resolve(&theme, &settings);
-        let mut renderer = CrosstermRenderer::new(Vec::new(), (20, 4));
+        let mut renderer = TerminalRenderer::new(Vec::new(), (20, 4));
         renderer
             .draw(&renderer_view(
                 vec![
@@ -665,7 +686,7 @@ mod tests {
         let theme = test_theme();
         let settings = RenderSettings::default();
         let styles = PromptStyles::resolve(&theme, &settings);
-        let mut renderer = CrosstermRenderer::new(Vec::new(), (20, 4));
+        let mut renderer = TerminalRenderer::new(Vec::new(), (20, 4));
         let tall = renderer_view(
             vec![
                 view_line("first", &styles.question),
@@ -675,11 +696,11 @@ mod tests {
             None,
         );
         renderer.draw(&tall).expect("first draw succeeds");
-        let before_clear = renderer.writer.len();
+        let before_clear = renderer.writer.writer().len();
         renderer.resize(20, 4);
         renderer.clear_viewport().expect("viewport clear succeeds");
         assert_eq!(
-            &renderer.writer[before_clear..],
+            &renderer.writer.writer()[before_clear..],
             b"\x1b[?25l\x1b[2J\x1b[1;1H"
         );
         assert_eq!(renderer.presentation, InlinePresentation::default());
@@ -710,7 +731,7 @@ mod tests {
         let theme = test_theme();
         let settings = RenderSettings::default();
         let styles = PromptStyles::resolve(&theme, &settings);
-        let mut renderer = CrosstermRenderer::new(ToggleFailFlushWriter::default(), (20, 4));
+        let mut renderer = TerminalRenderer::new(ToggleFailFlushWriter::default(), (20, 4));
         renderer
             .draw(&renderer_view(
                 vec![view_line("prompt", &styles.question)],
@@ -718,7 +739,7 @@ mod tests {
             ))
             .expect("first draw succeeds");
         renderer.resize(10, 4);
-        renderer.writer.fail_flush = true;
+        renderer.writer.writer_mut().fail_flush = true;
 
         assert!(renderer.clear_viewport().is_err());
         assert!(!renderer.presentation.anchored);
@@ -739,7 +760,7 @@ mod tests {
         let settings = RenderSettings::default();
         let styles = PromptStyles::resolve(&theme, &settings);
         let writer = PrefixThenFailWriter::new("first");
-        let mut renderer = CrosstermRenderer::new(writer, (20, 4));
+        let mut renderer = TerminalRenderer::new(writer, (20, 4));
         let view = renderer_view(
             vec![
                 view_line("first", &styles.question),
@@ -771,8 +792,8 @@ mod tests {
             .finish(RenderFinish::Error)
             .expect("error cleanup succeeds after one draw failure");
 
-        let output =
-            String::from_utf8(renderer.writer.bytes).expect("renderer writes UTF-8 commands");
+        let output = String::from_utf8(renderer.writer.into_inner().bytes)
+            .expect("renderer writes UTF-8 commands");
         assert!(output.contains('f'));
     }
 
@@ -781,7 +802,7 @@ mod tests {
         let theme = test_theme();
         let settings = RenderSettings::default();
         let styles = PromptStyles::resolve(&theme, &settings);
-        let mut renderer = CrosstermRenderer::new(PrefixThenFailWriter::new("growth"), (20, 4));
+        let mut renderer = TerminalRenderer::new(PrefixThenFailWriter::new("growth"), (20, 4));
         renderer
             .draw(&renderer_view(
                 vec![view_line("short", &styles.question)],
@@ -824,7 +845,7 @@ mod tests {
         let theme = test_theme();
         let settings = ansi_settings();
         let styles = PromptStyles::resolve(&theme, &settings);
-        let mut renderer = CrosstermRenderer::new(Vec::new(), (4, 2));
+        let mut renderer = TerminalRenderer::new(Vec::new(), (4, 2));
         renderer
             .draw(&renderer_view(
                 vec![
@@ -884,14 +905,15 @@ mod tests {
         let theme = test_theme();
         let settings = RenderSettings::default();
         let styles = PromptStyles::resolve(&theme, &settings);
-        let mut renderer = CrosstermRenderer::new(Vec::new(), (20, 2));
+        let mut renderer = TerminalRenderer::new(Vec::new(), (20, 2));
         renderer
             .draw(&renderer_view(
                 vec![view_line("plain", &styles.question)],
                 None,
             ))
             .expect("draw succeeds");
-        let output = String::from_utf8(renderer.writer).expect("renderer writes UTF-8 commands");
+        let output = String::from_utf8(renderer.writer.into_inner())
+            .expect("renderer writes UTF-8 commands");
         assert!(!output.contains("\x1b[1m"));
         assert!(output.contains("plain"));
     }

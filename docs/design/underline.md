@@ -17,7 +17,8 @@ struct Underline {
 ```
 
 `TextStyle::underline` is `Option<Underline>`; `None` is no underline. There is
-no `Modifier::UNDERLINED` flag and no free-standing underline color property.
+no underlined `TextAttribute` variant and no free-standing underline color
+property.
 
 ```rust
 TextStyle::new().underlined();                              // single, foreground color
@@ -52,14 +53,14 @@ At the output boundary:
 
 The property vocabulary decides whether two styles with the same appearance are
 the same value, and a run's style is the unit a redraw compares. An underline
-is where the naive vocabulary fails twice. An `UNDERLINED` modifier flag spells
+is where the naive vocabulary fails twice. An underlined attribute flag spells
 Select Graphic Rendition (SGR) `4`, which is SGR `4:1`, so a separate shape
 property would give a single underline two spellings; and an underline color
 paints nothing on a run with no underline, so a free-standing color property
 would be invisible in the output while still making two values unequal. Both
 are closed by making the underline one optional value that owns its shape and
-its color — which is why `Modifier` lost its underline flag rather than gaining
-a sibling shape property.
+its color — which is why `TextAttribute` has no underline variant rather than
+gaining a sibling shape property.
 
 What a single field cannot decide — an underline color equal to the foreground —
 is left to the canonical fold of

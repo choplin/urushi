@@ -3,7 +3,7 @@
 //! The prompt owns a region of rows anchored at the position it saved on its
 //! first draw. Planning that region's updates as a value — rather than emitting
 //! them straight into a writer — lets the command order and the owned-region
-//! state transitions be tested without a terminal, and keeps the crossterm
+//! state transitions be tested without a terminal, and keeps the command
 //! executor free of layout and diffing.
 //!
 //! # The region's left edge
@@ -71,8 +71,8 @@ use super::{
 
 /// A terminal operation in the prompt's own vocabulary.
 ///
-/// Deliberately not a crossterm re-export: reserving rows is a bare line feed,
-/// which crossterm has no command for, and this vocabulary is the thing kept
+/// Deliberately not a backend command re-export: this vocabulary captures the
+/// prompt's recovery semantics and is the thing kept
 /// aligned with the sibling MoonBit implementation.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum InlineCommand {
@@ -404,12 +404,12 @@ mod tests {
     use super as inline_plan;
     use super::*;
     use crate::runtime::{
-        LineKind, PromptStyles, PromptView, ViewCursor, crossterm::CrosstermRenderer,
-        terminal::Renderer, test_styles, view::tests::*,
+        LineKind, PromptStyles, PromptView, ViewCursor, terminal::Renderer,
+        terminal_backend::TerminalRenderer, test_styles, view::tests::*,
     };
     use urushi::RenderSettings;
     /// The plan the renderer would execute for `view`, without writing it.
-    fn draw_plan<W>(renderer: &CrosstermRenderer<W>, view: &PromptView) -> InlineRenderPlan {
+    fn draw_plan<W>(renderer: &TerminalRenderer<W>, view: &PromptView) -> InlineRenderPlan {
         draw_plan_at(
             renderer,
             PromptStart::CurrentPosition { column: 0 },
@@ -419,7 +419,7 @@ mod tests {
     }
 
     fn draw_plan_at<W>(
-        renderer: &CrosstermRenderer<W>,
+        renderer: &TerminalRenderer<W>,
         start: PromptStart,
         drawing_columns: u16,
         view: &PromptView,
@@ -448,7 +448,7 @@ mod tests {
     #[test]
     fn every_prompt_start_has_an_explicit_first_frame_plan() {
         let styles = test_styles();
-        let renderer = CrosstermRenderer::new(Vec::new(), (20, 4));
+        let renderer = TerminalRenderer::new(Vec::new(), (20, 4));
         let view = renderer_view(vec![view_line("question", &styles.question)], None);
 
         let cases = [
@@ -496,7 +496,7 @@ mod tests {
 
         let mut plans = Vec::new();
 
-        let mut renderer = CrosstermRenderer::new(Vec::new(), (20, 4));
+        let mut renderer = TerminalRenderer::new(Vec::new(), (20, 4));
         plans.push((
             "first frame, cursor at the origin",
             draw_plan(&renderer, &one_row(Some(ViewCursor { row: 0, column: 0 }))).commands,
@@ -679,7 +679,7 @@ mod tests {
         let theme = test_theme();
         let settings = RenderSettings::default();
         let styles = PromptStyles::resolve(&theme, &settings);
-        let mut renderer = CrosstermRenderer::new(Vec::new(), (20, 4));
+        let mut renderer = TerminalRenderer::new(Vec::new(), (20, 4));
         let view = renderer_view(
             vec![
                 view_line("first", &styles.question),
@@ -736,7 +736,7 @@ mod tests {
         let theme = test_theme();
         let settings = RenderSettings::default();
         let styles = PromptStyles::resolve(&theme, &settings);
-        let mut renderer = CrosstermRenderer::new(Vec::new(), (20, 4));
+        let mut renderer = TerminalRenderer::new(Vec::new(), (20, 4));
         let view = renderer_view(
             vec![view_line("stable", &styles.answer)],
             Some(ViewCursor { row: 0, column: 2 }),
@@ -764,9 +764,9 @@ mod tests {
             );
         }
 
-        let first_frame_bytes = renderer.writer.len();
+        let first_frame_bytes = renderer.writer.writer().len();
         renderer.draw(&view).expect("unchanged frame renders");
-        let update = String::from_utf8(renderer.writer[first_frame_bytes..].to_vec())
+        let update = String::from_utf8(renderer.writer.writer()[first_frame_bytes..].to_vec())
             .expect("renderer writes UTF-8 commands");
         assert!(!update.contains("stable"), "{update:?}");
     }
@@ -776,7 +776,7 @@ mod tests {
         let theme = test_theme();
         let settings = RenderSettings::default();
         let styles = PromptStyles::resolve(&theme, &settings);
-        let mut renderer = CrosstermRenderer::new(Vec::new(), (20, 2));
+        let mut renderer = TerminalRenderer::new(Vec::new(), (20, 2));
         renderer
             .draw(&renderer_view(
                 vec![
@@ -812,7 +812,7 @@ mod tests {
         let theme = test_theme();
         let settings = RenderSettings::default();
         let styles = PromptStyles::resolve(&theme, &settings);
-        let renderer = CrosstermRenderer::new(Vec::new(), (20, 4));
+        let renderer = TerminalRenderer::new(Vec::new(), (20, 4));
         let plan = draw_plan(
             &renderer,
             &renderer_view(
@@ -863,7 +863,7 @@ mod tests {
         let theme = test_theme();
         let settings = RenderSettings::default();
         let styles = PromptStyles::resolve(&theme, &settings);
-        let mut renderer = CrosstermRenderer::new(Vec::new(), (20, 4));
+        let mut renderer = TerminalRenderer::new(Vec::new(), (20, 4));
         let tall = renderer_view(
             vec![
                 view_line("first", &styles.question),

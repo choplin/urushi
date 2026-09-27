@@ -430,13 +430,13 @@ pub(crate) fn test_styles() -> PromptStyles {
 pub(crate) mod tests {
     use super::*;
     use crate::runtime::{
-        Event, Form, FormState, KeyCode, KeyEvent, KeyModifiers, PromptLine, PromptView,
-        ReducerResult, TextSpan, ViewCursor, frame, resolve, terminal::tests::*,
+        Event, Form, FormState, KeyCode, KeyEvent, PromptLine, PromptView, ReducerResult, TextSpan,
+        ViewCursor, frame, resolve, terminal::tests::*,
     };
     use crate::{Confirm, FieldKey, Group, Input, Select, SelectOption};
     use urushi::{
-        Color, ColorLevel, ComponentRole, ComponentTheme, Modifier, RenderSettings, SemanticTokens,
-        TextStyle, Theme, UnderlineStyleSet,
+        Color, ColorLevel, ComponentRole, ComponentTheme, RenderSettings, SemanticTokens,
+        TextAttributes, TextStyle, Theme, UnderlineStyleSet,
     };
 
     pub(crate) fn ansi_settings() -> RenderSettings {
@@ -453,7 +453,7 @@ pub(crate) mod tests {
         }
         RenderSettings::default()
             .color_level(color_level)
-            .modifiers(Modifier::all())
+            .attributes(TextAttributes::all())
             .underline_styles(UnderlineStyleSet::all())
             .underline_colors(true)
             .hyperlinks(true)
@@ -775,13 +775,7 @@ pub(crate) mod tests {
             .expect("form");
         let mut state = FormState::Running { group: 0, field: 0 };
         assert_eq!(
-            form.reduce(
-                &mut state,
-                Event::Key(KeyEvent {
-                    code: KeyCode::Right,
-                    modifiers: KeyModifiers::default(),
-                }),
-            ),
+            form.reduce(&mut state, Event::Key(KeyEvent::new(KeyCode::Right)),),
             ReducerResult::Running
         );
         let styles = test_styles();

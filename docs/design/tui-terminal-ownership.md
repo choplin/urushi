@@ -1,7 +1,7 @@
 # TUI Rendering and Terminal Ownership
 
 What each name in the runtime's rendering vocabulary — `Renderer`, `Frame`,
-`Terminal`, `TerminalSession`, `Backend`, `Clock` — owns and does not own, the
+`Terminal`, `TerminalSession`, `CellWriter`, `Clock` — owns and does not own, the
 Rust shape each has, the commit guarantee the terminal gives, and what a
 session can and cannot promise to restore.
 [`tui-architecture.md`](../tui-architecture.md) summarizes the ownership under
@@ -9,21 +9,25 @@ session can and cannot promise to restore.
 
 ## The rule
 
-The terminal layer is Urushi's. The workspace-independent `urushi-terminal` crate
-owns `Terminal`, `Frame`, `TerminalSession`, and terminal geometry. A frame's
-cell value is an associated type, so this lower crate does not depend on
-`urushi` or any renderer. `urushi-tui` binds that cell to `StyledGrapheme` and
-owns the runtime's `Clock`. A backend such as Ratatui is one implementation of
-the terminal traits, kept inside its adapter module; replacing it changes no
-runtime type and no application. [`architecture.md`](../architecture.md)
-records why replacement is the direction rather than a contingency.
+The terminal primitive layer is Urushi's. The workspace-independent
+`urushi-terminal` crate owns shared style and geometry primitives, commands,
+events, queries, raw-mode control, the `TerminalSession` restoration guard,
+and terminal geometry used by those operations. Core `urushi` re-exports its
+color, attribute, and underline primitives and uses them inside `TextStyle`;
+surfaces do not maintain equivalent style types. The terminal crate owns no
+frame, cell buffer, diff, or presentation transaction.
+`urushi-tui::terminal` owns `Terminal`, `Frame`, `CellWriter`, and `Rect`, and
+binds a frame's associated cell to `StyledGrapheme`. Its `RatatuiTerminal` uses
+Ratatui for the working buffer and cell diff, then sends changed cells through
+a `CellWriter` that lowers them to `urushi_terminal::Command` values. Replacing
+the command backend changes no runtime type and no application.
 
 ### Terminal
 
 ```rust
 pub trait Terminal {
     type Cell: ?Sized;
-    type Frame<'a>: Frame<Cell = Self::Cell> where Self: 'a;
+    type Frame<'a>: Frame<Cell = Self::Cell>;
 
     fn size(&self) -> TerminalSize;
     fn resize(&mut self, size: TerminalSize) -> io::Result<()>;
@@ -35,9 +39,10 @@ pub trait Terminal {
 output, and flushing. `draw` lends a frame over the working state, diffs it
 against the committed state, writes the difference and the cursor request, and
 flushes; only when every step has succeeded does the working state become the
-committed state. A failed output leaves the committed state as it was, so the
-next `draw` diffs against what the terminal actually shows and redraws what the
-failed frame would have changed. What the runtime does with the failure itself
+committed state. A failed output leaves the committed state as it was but marks
+the physical surface unknown, because an arbitrary prefix may have arrived.
+The next `draw` clears that surface and redraws its complete working state from
+a blank baseline before it may commit. What the runtime does with the failure itself
 — deliver it to an application that subscribed to terminal errors, or end the
 run — is defined in [`tui-runtime-entry.md`](tui-runtime-entry.md).
 
@@ -95,15 +100,18 @@ extension of its own, and the runtime contract does not change when it does.
 
 ### TerminalSession
 
-`TerminalSession` owns the restoration obligations that entering the TUI
-session creates. Entering, by default, enables raw mode, the alternate screen,
-bracketed paste, focus-change reporting, and keyboard enhancement where the
-terminal reports support for it, and hides the cursor until a frame requests
-one; mouse capture is off. Each is an option on the entry point's builder, so
-an application opts out of one it does not want and into mouse capture when it
-needs it. Input that these modes produce — a paste as one `Input::Paste`, a
+`TerminalSession` owns the restoration obligations that entering an
+interactive terminal session creates. Its generic default acquires nothing;
+the TUI entry point selects raw mode, the alternate screen, bracketed paste,
+focus-change reporting, keyboard enhancement where supported, and a hidden
+cursor, while leaving mouse capture off. Each is an option on the entry point's
+builder, so an application opts out of one it does not want and into mouse
+capture when it needs it. Input that these modes produce — a paste as one `Input::Paste`, a
 focus change as `Input::Focus`, a key release when an application asks for
-releases — reaches `update` through `Subscription::input` like any key.
+releases, and mouse input when capture is enabled — reaches `update` through
+`Subscription::input`. `Input` classifies the terminal event stream for the
+TEA runtime but re-exports and carries the same key, focus, modifier, and mouse
+values; it does not copy that vocabulary.
 
 The session restores the state it changed, in reverse order, on every exit
 path the runtime controls: a shutdown the application requested, an `Err` the
@@ -126,15 +134,61 @@ alternate screen did not protect, restoration after `panic = "abort"`, `kill
 -9`, or a signal the application did not declare. That limitation is part of
 the public contract.
 
-### Backend
+### CellWriter
 
-`Backend` is the physical terminal-output boundary, and it belongs to the
-backend implementation, not to the runtime vocabulary. The Ratatui-backed
-terminal is `RatatuiTerminal<B: ratatui::backend::Backend>`: it borrows
-Ratatui's `Buffer`, its cell diff, and its backends — `CrosstermBackend` for
-the real terminal, `TestBackend` in memory — and implements `Terminal` over
-them. An application meets it only as the default behind `run(app)` or as the
-value it passes to the builder's `terminal`.
+`CellWriter` is the low-level full-screen drawing SPI in
+`urushi-tui::terminal`. `RatatuiTerminal<W: CellWriter>` owns the working and
+committed Ratatui `Buffer` values and calls `Buffer::diff`, then passes changed
+positions, graphemes, resolved terminal styles, cursor state, clear, and flush
+to `W`. The blanket implementation for `CommandWriter` coalesces adjacent
+positions and repeated styles before emitting backend-independent commands.
+The optional Crossterm adapter only serializes those primitive commands; it
+does not know about cells, Ratatui buffers, frame history, or diffing.
+
+### Backend capability model
+
+`urushi-terminal` is a terminal abstraction, not a list of operations extracted
+from its current callers and not a renamed copy of Crossterm. Its contracts
+cover four semantic capability groups:
+
+- observation: cell dimensions, optional pixel geometry, cursor position,
+  rendering capabilities, raw-mode state, and enhanced-keyboard support;
+- output: validated printable text, complete physical text style and hyperlink
+  state, cursor movement and appearance, clear and scroll regions, screen and
+  wrapping modes, synchronized updates, title, resize, and flush;
+- input: keys, mouse, focus, paste, and resize, including timed polling and the
+  enhanced key kind, state, modifier, media-key, and modifier-key information a
+  backend observes;
+- session ownership: explicit acquisition options and reverse-order restoration
+  for terminal modes selected by a caller.
+
+These are Urushi values and invariants. Cursor displacement, for example, is
+one signed semantic operation even if an adapter lowers it to separate up/down
+and left/right commands. Underline shape and color form one value instead of
+mirroring SGR enable/disable commands. Input adapters do not discard an event
+because no current Urushi control uses it. Printable text excludes control
+characters, so ANSI and other backend instructions cannot enter through a text
+payload; only an adapter serializes commands and styles.
+
+Backend implementations live below `urushi_terminal::backend`. One complete
+interactive backend owns both directions of a physical connection, its parser,
+process-side modes, and queries. `TerminalQuery` therefore takes mutable access:
+a query may write a protocol request and consume a response without racing the
+ordinary event reader. `backend::ansi::AnsiWriter` implements the output
+protocol without a terminal framework. On Unix,
+`backend::native::NativeTerminal` owns `/dev/tty`, raw-mode restoration, input
+decoding, resize observation, and terminal protocol replies around that writer;
+it is the production backend used by prompts. The optional
+`backend::crossterm` module remains the cross-platform adapter. No Crossterm
+type appears in an Urushi contract or a surface API.
+
+The boundary excludes whole capability groups rather than individual values:
+asynchronous scheduling and stream ownership belong to the runtime source
+layer, clipboard transfer is a separate service, and graphics presentation is
+the extension described below. Serialization helper features and arbitrary
+backend-library commands are not terminal capabilities. These exclusions do
+not justify dropping information inside the synchronous text-terminal groups
+that the boundary does own.
 
 ### Clock
 
@@ -149,11 +203,11 @@ advances by hand in the harness. An application never reads it directly.
 The test harness of [`tui-delivery-ordering.md`](tui-delivery-ordering.md)
 replaces the terminal layer at two levels. The runtime core — delivery,
 scheduling, barriers — runs against an in-memory implementation of the
-`urushi-terminal::Terminal` contract, which records every committed frame and
-cursor request and depends on no backend. The Ratatui-backed terminal is tested
-on its own, over `TestBackend`. A harness that needed the backend to test the
-runtime would bind the runtime's tests to the backend the runtime is built to
-outgrow.
+`urushi_tui::terminal::Terminal` contract, which records every committed frame
+and cursor request and depends on no backend. The Ratatui-backed terminal is
+tested on its own over a recording `CellWriter`. A harness that needed a physical
+adapter to test the runtime would bind the runtime's tests to an implementation
+detail the runtime is built to outgrow.
 
 ### Cell output and terminal graphics
 
@@ -167,8 +221,8 @@ together.
 
 | Guarantee | Required evidence |
 | --- | --- |
-| Terminal failures | Tests proving committed state advances only after successful output |
-| Session restoration | Integration tests for normal exit, error, interruption, and partial setup failure |
+| Terminal failures | Tests at draw, cursor, clear, and flush proving committed state advances only after successful output and failed frames are retried |
+| Session restoration | Tests for normal exit, each partial setup failure, multiple cleanup failures, and panic unwinding |
 
 ## Why the terminal is Urushi's trait and not an adapted one
 
@@ -184,13 +238,13 @@ own over a backend's draw-and-flush holds the contract directly: it diffs, it
 writes, it flushes, and it commits last, in about the code the workarounds
 would have cost.
 
-That the trait is in `urushi-terminal` rather than the backend's crate follows from
-[`architecture.md`](../architecture.md): the runtime core should see no
-backend type, so that the backend can be replaced without touching the
-runtime or any application. The associated cell type lets the lower-level
-trait express "place this cell value here" while the TUI binds it to
-`StyledGrapheme`, the value a `ResolvedView` holds. The renderer is written
-once against that binding, and each backend converts one grapheme at a time.
+That the trait is in `urushi-tui::terminal` rather than a backend module follows
+from [`architecture.md`](../architecture.md): the runtime core should see no
+backend type, but a presentation transaction is still a TUI concern rather
+than a generic terminal primitive. The associated cell type expresses "place
+this cell value here" while the TUI binds it to `StyledGrapheme`, the value a
+`ResolvedView` holds. The renderer is written once against that binding, and
+the cell writer converts changed graphemes into commands.
 
 Rejected: wrapping `ratatui::Terminal` behind the trait anyway. Possible, but
 the contract violations above remain under the wrapper, and the wrapper is
@@ -209,16 +263,19 @@ backend type, and leaves sized anchors to the caller that has a buffer. A
 backend implementation may offer an embedding hook as its own extension; the
 runtime contract is the same with or without it.
 
-## Why the session's defaults are what they are
+## Why session profiles belong to their callers
 
-Raw mode and the alternate screen are what a full-screen application is.
+`SessionOptions::default()` acquires no mode. Raw mode and the alternate screen
+are what a full-screen application normally selects.
 Bracketed paste turns a paste into one input instead of a stream of keys whose
 newlines would act as Enter; focus reporting costs nothing an application did
 not ask to see; keyboard enhancement makes Escape and modifier combinations
 unambiguous where the terminal supports it and is probed first so an
 unsupporting terminal is unchanged. Mouse capture is the one default that
 takes something from the user — the terminal's own text selection — so it is
-off until an application asks.
+off until an application asks. Those choices form the `urushi-tui` full-screen
+profile rather than a generic-library default. `urushi-prompt` independently
+selects raw mode and bracketed paste while retaining the primary screen.
 
 Signals are subscriptions because that is how every other source is declared
 and because a handler the runtime installed unasked would collide with one the

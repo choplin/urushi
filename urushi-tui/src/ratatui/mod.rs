@@ -1,8 +1,9 @@
 //! The Ratatui backend adapter.
 //!
 //! The adapter converts Urushi styles and resolved views into Ratatui
-//! representations and writes them into a buffer the caller owns. It acquires
-//! no application state, no event handling, and no terminal ownership.
+//! representations. Stateless widgets write into a buffer the caller owns;
+//! [`RatatuiTerminal`] owns a committed buffer and sends its cell diff through
+//! a [`crate::terminal::CellWriter`].
 //!
 //! Two entry points share one cell-writing path. [`ViewWidget`] and
 //! [`RatatuiWidget`] serve a plain Ratatui application drawing into a `Rect`
@@ -12,9 +13,11 @@
 //! the result with [`draw_resolved`].
 
 mod style;
+mod terminal;
 mod widget;
 
 pub use style::RatatuiStyle;
+pub use terminal::{RatatuiFrame, RatatuiTerminal};
 pub use widget::{
     CellWriteMode, RatatuiStyleExt, RatatuiWidget, ViewWidget, available, draw_resolved,
     draw_resolved_with_mode,

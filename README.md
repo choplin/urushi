@@ -19,7 +19,8 @@ output, interactive prompts, and full TUIs. `urushi` aims to fill that gap:
   output without raw mode or an event loop.
 - **Ride the ratatui ecosystem via an adapter.** The `urushi-tui` crate draws
   urushi styles and view trees into a ratatui `Buffer`, mapping the
-  fg/bg/modifier subset onto `ratatui::style::Style` and keeping the box model
+  foreground, background, and attribute subset onto `ratatui::style::Style` and
+  keeping the box model
   in urushi's layout pass. A ratatui application can use urushi as its UI
   library without giving up its own loop.
 - **CJK correctness as a first-class goal.** Width measurement, wrapping,
@@ -33,11 +34,11 @@ surface layers, including which parts are implemented today.
 
 | Crate | Description | Status |
 |---|---|---|
-| [`urushi`](urushi/) | Style definitions: colors, modifiers, padding, margin, borders, alignment, wrapping | Core rendering works |
+| [`urushi`](urushi/) | Style definitions: colors, attributes, padding, margin, borders, alignment, wrapping | Core rendering works |
 | [`urushi-cli`](urushi-cli/) | Opinionated `Summary` and `Warning` presentation for human-facing, non-interactive CLI output | Core presentations work |
-| [`urushi-terminal`](urushi-terminal/) | Workspace-independent terminal contracts, size, and output-capability inspection | `Frame` / `Terminal` contracts and detection work |
+| [`urushi-terminal`](urushi-terminal/) | Generic terminal commands, events, session restoration, geometry, capability inspection, and physical backends | Shared primitives, native Unix backend, and optional Crossterm adapter work |
 | [`urushi-prompt`](urushi-prompt/) | Theme-aware `Input`, `Select`, and `Confirm` fields with synchronous validation | Core prompt flow works |
-| [`urushi-tui`](urushi-tui/) | The `ratatui` adapter — style conversion, box-model widgets, and the cell-writing path they share with a renderer — and the home of the full-screen runtime | Adapter works; runtime is not implemented |
+| [`urushi-tui`](urushi-tui/) | The `ratatui` adapter — style conversion, widgets, transactional buffer diffing over `urushi-terminal` — and the home of the full-screen runtime | Adapter and terminal path work; runtime entry is not implemented |
 
 ## Two ways to build a full-screen TUI
 
@@ -104,7 +105,7 @@ view for the other.
 ## Example
 
 Run the English showcase to see one labeled example per styling feature. Each
-entry changes one subject at a time, including colors, modifiers, spacing,
+entry changes one subject at a time, including colors, attributes, spacing,
 alignment, joins, and individual border sides:
 
 ```sh
@@ -162,7 +163,7 @@ urushi-tui = "0.1.0"
 ```
 
 Resolve a component from the same `Theme` used by plain output, then pass its
-widget adapter to a ratatui frame. Colors and modifiers stay logical in the
+widget adapter to a ratatui frame. Colors and attributes stay logical in the
 Theme; Ratatui performs its own backend conversion.
 
 ```rust
@@ -173,7 +174,7 @@ frame.render_widget(panel.widget("保存しました"), frame.area());
 ```
 
 `RatatuiStyle::from(&style)` converts a `TextStyle` when only foreground,
-background, and text modifiers are needed; that conversion carries no geometry,
+background, and text attributes are needed; that conversion carries no geometry,
 because a `TextStyle` has none.
 
 Run the complete Theme → plain CLI / ratatui example with:
@@ -247,7 +248,7 @@ new size; expect all other visible primary-buffer content to be erased.
 
 ## Roadmap
 
-- [x] `TextStyle` / `BlockStyle` builders: colors, modifiers, padding, margin, border, width, align
+- [x] `TextStyle` / `BlockStyle` builders: colors, attributes, padding, margin, border, width, align
 - [x] ANSI-aware width measurement and CJK-aware word wrap
 - [x] View composition before layout and rendering
 - [x] Workspace-independent terminal contracts, target-specific detection, and feature-granular rendering settings

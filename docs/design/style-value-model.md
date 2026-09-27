@@ -12,7 +12,7 @@ closes the one duplication the vocabulary cannot
 ## The value shape
 
 `TextStyle` stores foreground, background, underline, and hyperlink as
-independent optional typed values and stores modifiers as one set. `BlockStyle`
+independent optional typed values and stores attributes as one set. `BlockStyle`
 stores one `TextStyle` for its fill plus the geometry of a rectangle:
 
 ```rust
@@ -57,7 +57,7 @@ realize them. A style whose entries are instructions — "turn bold off" — onl
 means something relative to a prior state, so every reader must agree on what
 that state is.
 
-Removing a modifier from an immutable value therefore removes the value; it
+Removing an attribute from an immutable value therefore removes the value; it
 does not preserve an ANSI off-code instruction. A renderer that maintains prior
 terminal state diffs the previous and next effective styles itself.
 ANSI rendering surrounds emitted styling with a final reset. No stored removal
@@ -77,24 +77,18 @@ property vocabulary. Their setter, reset, getter, set-operation, and convenience
 names follow the single rule recorded in
 [`style-api-naming.md`](style-api-naming.md).
 
-## Why rapid blink is not in the vocabulary
+## Why attributes retain terminal distinctions
 
-The property vocabulary is not merely a list of what a terminal can express; it
-decides whether two styles with the same appearance are the same value. A run's
-style is the unit a redraw compares, so a vocabulary admitting two spellings of
-one appearance makes every frame redraw rows that did not change.
-
-SGR parameter 6, rapid blink, is left out for that reason. Xterm-family
-terminals draw it exactly as SGR 5, so it would be distinguishable as a value
-and indistinguishable on screen — one appearance with two values, admitted at
-the vocabulary level. The underline is where the same test bites twice, and
-[`underline.md`](underline.md) records how it is closed; what no single field
-can close is left to the canonical fold of
-[`style-canonical-form.md`](style-canonical-form.md).
+`TextAttribute` is shared with `urushi-terminal`, whose contract models terminal
+capabilities independently of one backend or one terminal emulator's current
+rendering. Distinct SGR attributes such as slow and rapid blink therefore remain
+distinct values even when a particular terminal presents them identically.
+Backend capability selection may remove an unsupported attribute; the logical
+style does not silently substitute another one.
 
 ## Why no patch operation
 
-Urushi has no patch operation, and modifiers are one set rather than an
+Urushi has no patch operation, and attributes are one set rather than an
 add set and a subtract set. Reusable changes are ordinary
 `fn(TextStyle) -> TextStyle` transforms, and no Urushi boundary requires a
 separately inspectable patch value. A patch data type would be introduced only
