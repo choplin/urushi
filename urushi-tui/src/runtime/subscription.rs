@@ -411,6 +411,10 @@ impl<Message> fmt::Debug for Source<Message> {
 }
 
 impl<Message> SourceKind<Message> {
+    pub(crate) fn is_surface(&self) -> bool {
+        matches!(self, Self::Surface(_))
+    }
+
     pub(crate) fn name(&self) -> &'static str {
         match self {
             Self::Input(_) => "input",

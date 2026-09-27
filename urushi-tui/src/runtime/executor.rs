@@ -8,6 +8,7 @@
 
 use std::collections::{HashMap, HashSet};
 use std::future::Future;
+use std::io;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -254,7 +255,11 @@ pub(crate) trait SourceSpawner<Message>: Send + Sync + 'static {
         &self,
         source: Source<Message>,
         deliveries: DeliveryQueue<Message>,
-    ) -> Box<dyn RunningSource<Message>>;
+    ) -> io::Result<Box<dyn RunningSource<Message>>>;
+
+    fn failure(&self) -> Pin<Box<dyn Future<Output = io::Error> + Send + '_>> {
+        Box::pin(std::future::pending())
+    }
 }
 
 /// One running source. Refreshing changes its declaration without restarting it.
@@ -281,7 +286,7 @@ impl<Message: Send + 'static> SubscriptionExecutor<Message> {
         }
     }
 
-    pub(crate) fn reconcile(&mut self, subscription: Subscription<Message>) {
+    pub(crate) fn reconcile(&mut self, subscription: Subscription<Message>) -> io::Result<()> {
         let desired = latest_declarations(subscription.into_sources());
         let desired_keys: HashSet<Key> = desired.iter().map(|source| source.key).collect();
         self.running.retain(|key, _| desired_keys.contains(key));
@@ -291,13 +296,22 @@ impl<Message: Send + 'static> SubscriptionExecutor<Message> {
                 running.refresh(source);
             } else {
                 let key = source.key;
-                let running = self.spawner.start(source, self.deliveries.clone());
+                let running = self.spawner.start(source, self.deliveries.clone())?;
                 self.running.insert(key, running);
             }
         }
+        Ok(())
     }
 
     pub(crate) fn stop(&mut self) {
+        self.running.clear();
+    }
+}
+
+impl<Message> Drop for SubscriptionExecutor<Message> {
+    fn drop(&mut self) {
+        // Running sources may synchronously release blocking producers. Drop
+        // them before the spawner that owns and joins those producers.
         self.running.clear();
     }
 }
@@ -313,6 +327,7 @@ fn latest_declarations<Message>(sources: Vec<Source<Message>>) -> Vec<Source<Mes
         .filter(|source| seen.insert(source.key))
         .collect();
     declarations.reverse();
+    declarations.sort_by_key(|source| !source.kind.is_surface());
     declarations
 }
 

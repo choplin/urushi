@@ -19,6 +19,7 @@ pub(crate) struct RuntimeCore<A: Application, P: Presentation> {
     deliveries: DeliveryQueue<A::Message>,
     effects: EffectExecutor<A::Message>,
     subscriptions: SubscriptionExecutor<A::Message>,
+    source_spawner: Arc<dyn SourceSpawner<A::Message>>,
     scheduler: DrawScheduler,
     presentation: P,
     terminal_error_mapper: Option<Mapper<io::Error, A::Message>>,
@@ -34,7 +35,7 @@ pub(crate) enum RuntimeError<E> {
 impl<E: fmt::Display> fmt::Display for RuntimeError<E> {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::Terminal(error) => write!(formatter, "terminal presentation failed: {error}"),
+            Self::Terminal(error) => write!(formatter, "terminal operation failed: {error}"),
             Self::Presentation(error) => write!(formatter, "presentation worker failed: {error}"),
         }
     }
@@ -53,35 +54,39 @@ where
         clock: Arc<dyn Clock>,
         source_spawner: Arc<dyn SourceSpawner<A::Message>>,
         presentation: P,
-    ) -> Self {
+    ) -> Result<Self, RuntimeError<P::Error>> {
         let deliveries = DeliveryQueue::new();
         let (model, initial_effect) = application.init();
         let mut effects = EffectExecutor::new(executor, Arc::clone(&clock), deliveries.clone());
-        let mut subscriptions = SubscriptionExecutor::new(source_spawner, deliveries.clone());
+        let mut subscriptions =
+            SubscriptionExecutor::new(Arc::clone(&source_spawner), deliveries.clone());
         let stopping = effects.start(initial_effect) == EffectControl::Shutdown;
         let terminal_error_mapper = if stopping {
             None
         } else {
             let subscription = application.subscriptions(&model);
             let mapper = subscription.terminal_error_mapper();
-            subscriptions.reconcile(subscription);
+            subscriptions
+                .reconcile(subscription)
+                .map_err(RuntimeError::Terminal)?;
             mapper
         };
         let mut scheduler = DrawScheduler::new(DEFAULT_MINIMUM_INTERVAL, Arc::clone(&clock));
         if !stopping {
             scheduler.invalidate();
         }
-        Self {
+        Ok(Self {
             application,
             model,
             deliveries,
             effects,
             subscriptions,
+            source_spawner,
             scheduler,
             presentation,
             terminal_error_mapper,
             stopping,
-        }
+        })
     }
 
     #[cfg(test)]
@@ -89,20 +94,24 @@ where
         self.deliveries.clone()
     }
 
-    pub(crate) fn process_delivery(&mut self, delivery: Delivery<A::Message>) {
+    pub(crate) fn process_delivery(
+        &mut self,
+        delivery: Delivery<A::Message>,
+    ) -> Result<(), RuntimeError<P::Error>> {
         match delivery {
-            Delivery::Async(message) => self.update(message),
+            Delivery::Async(message) => self.update(message)?,
             Delivery::Sync { first, rest } => {
-                self.update(first);
+                self.update(first)?;
                 for message in rest {
                     if self.stopping {
                         break;
                     }
-                    self.update(message);
+                    self.update(message)?;
                 }
                 self.deliveries.complete_sync();
             }
         }
+        Ok(())
     }
 
     #[cfg(test)]
@@ -119,6 +128,9 @@ where
             tokio::select! {
                 biased;
 
+                error = self.source_spawner.failure() => {
+                    break Err(RuntimeError::Terminal(error));
+                }
                 _ = self.scheduler.next_draw(|| self.deliveries.sync_fence_allows_draw()) => {
                     let view = self.application.view(&self.model);
                     if let Err(error) = self.presentation.submit(view) {
@@ -139,7 +151,9 @@ where
                     Err(error) => break Err(RuntimeError::Presentation(error)),
                 },
                 delivery = self.deliveries.next() => {
-                    self.process_delivery(delivery);
+                    if let Err(error) = self.process_delivery(delivery) {
+                        break Err(error);
+                    }
                 }
             }
         };
@@ -156,7 +170,7 @@ where
         Ok(self.model)
     }
 
-    fn update(&mut self, message: A::Message) {
+    fn update(&mut self, message: A::Message) -> Result<(), RuntimeError<P::Error>> {
         let effect = self.application.update(&mut self.model, message);
         self.scheduler.invalidate();
         if self.effects.start(effect) == EffectControl::Shutdown {
@@ -165,8 +179,11 @@ where
         } else {
             let subscription = self.application.subscriptions(&self.model);
             self.terminal_error_mapper = subscription.terminal_error_mapper();
-            self.subscriptions.reconcile(subscription);
+            self.subscriptions
+                .reconcile(subscription)
+                .map_err(RuntimeError::Terminal)?;
         }
+        Ok(())
     }
 }
 

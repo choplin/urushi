@@ -5,6 +5,7 @@
 //! function that turns the source's own value — an [`Input`], a [`Surface`], a
 //! [`Signal`] — into the application's message. These are those values.
 
+use urushi_terminal::WindowSize;
 pub use urushi_terminal::{
     FocusChange, KeyCode, KeyEvent, KeyEventState, KeyKind, MediaKeyCode, ModifierKeyCode,
     Modifiers, MouseButton, MouseEvent, MouseKind, PixelSize as CellPixels,
@@ -60,6 +61,18 @@ impl Surface {
             size: SurfaceSize::new(columns, rows),
             cell_pixels: None,
         }
+    }
+
+    pub(crate) fn from_window_size(window: WindowSize) -> Self {
+        let size = window.cells();
+        // Backends report whole-window pixels. Surface exposes one cell's
+        // integer pixel extent so applications do not repeat this conversion.
+        let cell_pixels = window.pixels().and_then(|pixels| {
+            let width = pixels.width().checked_div(size.columns())?;
+            let height = pixels.height().checked_div(size.rows())?;
+            (width > 0 && height > 0).then(|| CellPixels::new(width, height))
+        });
+        Self { size, cell_pixels }
     }
 }
 

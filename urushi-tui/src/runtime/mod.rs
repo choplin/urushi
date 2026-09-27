@@ -29,6 +29,11 @@ pub(crate) mod renderer;
 mod scheduler;
 mod source;
 mod subscription;
+#[cfg_attr(
+    not(test),
+    expect(dead_code, reason = "wired by the public runtime entry point")
+)]
+mod terminal_source;
 #[cfg(test)]
 mod testing;
 

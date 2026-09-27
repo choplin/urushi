@@ -39,6 +39,12 @@ pub(crate) struct SourceInbox<Message> {
     shared: Arc<Shared<Message>>,
 }
 
+/// Synchronously closes the runtime end even when its acceptance task has not
+/// yet observed cancellation.
+pub(crate) struct SourceInboxCloser<Message> {
+    shared: Arc<Shared<Message>>,
+}
+
 struct InboxSink<Message> {
     shared: Arc<Shared<Message>>,
 }
@@ -217,6 +223,12 @@ fn admit<Message>(
 }
 
 impl<Message> SourceInbox<Message> {
+    pub(crate) fn closer(&self) -> SourceInboxCloser<Message> {
+        SourceInboxCloser {
+            shared: Arc::clone(&self.shared),
+        }
+    }
+
     /// Waits until a value can be accepted, or returns `false` when the source
     /// has ended and no value remains.
     ///
@@ -256,17 +268,27 @@ impl<Message> SourceInbox<Message> {
 /// values the runtime never accepted.
 impl<Message> Drop for SourceInbox<Message> {
     fn drop(&mut self) {
-        let sender_wakers = {
-            let mut state = lock(&self.shared.state);
-            state.receiver_open = false;
-            state.unaccepted.clear();
-            std::mem::take(&mut state.sender_wakers)
-        };
-        self.shared.space_available.notify_all();
-        sender_wakers
-            .into_iter()
-            .for_each(|(_, waker)| waker.wake());
+        close_receiver(&self.shared);
     }
+}
+
+impl<Message> SourceInboxCloser<Message> {
+    pub(crate) fn close(&self) {
+        close_receiver(&self.shared);
+    }
+}
+
+fn close_receiver<Message>(shared: &Shared<Message>) {
+    let sender_wakers = {
+        let mut state = lock(&shared.state);
+        state.receiver_open = false;
+        state.unaccepted.clear();
+        std::mem::take(&mut state.sender_wakers)
+    };
+    shared.space_available.notify_all();
+    sender_wakers
+        .into_iter()
+        .for_each(|(_, waker)| waker.wake());
 }
 
 /// Executor-neutral notification that an inbox is ready for acceptance.

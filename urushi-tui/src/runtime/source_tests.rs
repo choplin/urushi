@@ -51,3 +51,26 @@ fn a_surface_reports_pixel_geometry_only_where_the_terminal_did() {
         surface.size
     );
 }
+
+#[test]
+fn a_surface_derives_each_cell_size_from_window_geometry() {
+    use urushi_terminal::{PixelSize, WindowSize};
+
+    assert_eq!(
+        Surface::from_window_size(WindowSize::new(
+            SurfaceSize::new(80, 24),
+            Some(PixelSize::new(640, 384)),
+        )),
+        Surface {
+            size: SurfaceSize::new(80, 24),
+            cell_pixels: Some(CellPixels::new(8, 16)),
+        }
+    );
+    assert_eq!(
+        Surface::from_window_size(WindowSize::new(
+            SurfaceSize::ZERO,
+            Some(PixelSize::new(640, 384)),
+        )),
+        Surface::new(0, 0)
+    );
+}

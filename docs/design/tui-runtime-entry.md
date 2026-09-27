@@ -64,7 +64,7 @@ or `Application`.
 
 | `Error` | When |
 | --- | --- |
-| `Terminal(io::Error)` | the terminal could not be entered, drawn to, or restored, and no subscription took the failure |
+| `Terminal(io::Error)` | the terminal could not be entered, read, queried, drawn to, or restored, and no subscription took the failure |
 
 A failure to draw a frame is delivered rather than fatal when the application
 declared `Subscription::terminal_errors(f)`: the failure reaches `update` as
@@ -74,6 +74,10 @@ application decides in `update` — ignore, record, save and shut down. Without
 that subscription the failure ends the run with `Error::Terminal`. The general
 rule is that an error the runtime cannot hand to anyone is fatal, and the
 terminal session is restored on every exit path the same way.
+
+Input reads and surface queries have no application error subscription. Their
+failure therefore follows the general fatal rule and returns
+`Error::Terminal`; terminal restoration still runs before `run` returns.
 
 A panic in `update`, `view`, `subscriptions`, or `init` is not caught. It
 unwinds through `run`; `TerminalSession` restores the terminal during the

@@ -14,7 +14,7 @@ Initial source policies should support these common cases:
 
 | Source | Admission behavior |
 | --- | --- |
-| Terminal key and text input | Bounded FIFO with reader backpressure |
+| Terminal input | Bounded FIFO with reader backpressure |
 | Surface observations | Latest value may replace an unaccepted observation |
 | Ordinary effect completion | FIFO |
 | Canceled latest-only effect | Suppress the known-canceled completion |
@@ -54,6 +54,36 @@ runtime-wide order. This keeps both mapper timing and surface replacement policy
 with the only producer that needs the render barrier, while
 `Admission::latest()` remains available for application-defined snapshot
 sources whose accepted messages are ordinary `Async` deliveries.
+
+### Terminal input and surface observation
+
+The runtime reads one backend-independent `urushi-terminal` connection through
+`EventSource` and `TerminalQuery`; a Crossterm or native event type never enters
+the TUI runtime. A polling reader runs off the application thread while either
+the input or surface subscription is declared. Dropping both declarations parks
+the reader, and runtime shutdown stops and joins it.
+
+`Key`, `Paste`, `Focus`, and `Mouse` events use the mapper current when the
+reader observes them, then enter the input source's default bounded inbox. The
+reader calls its blocking sender, so a full inbox stops further terminal reads
+until the runtime accepts space. This is the backpressure boundary; every
+accepted event, including every key repeat, remains a separate `Async`
+delivery.
+
+`Resize` is not input. When the surface subscription is declared, it causes a
+fresh `WindowSize` query. The window's cell dimensions become `Surface::size`;
+when the backend also reports whole-window pixel dimensions, dividing them by
+the corresponding non-zero cell dimensions produces `Surface::cell_pixels`.
+The current surface mapper is applied before publication into the dedicated
+latest slot. If no surface subscription is declared, resize events are ignored
+without querying the window.
+
+Starting a surface subscription queries and accepts its current observation
+synchronously. During startup this happens before the scheduler is invalidated,
+so the resulting `Sync` delivery is already fencing the first draw. A terminal
+event-read failure, initial surface-query failure, or resize-query failure is a
+runtime terminal error. It ends the run rather than becoming an application
+message, because the input and surface subscriptions have no error mapper.
 
 ### Implementation synchronization
 

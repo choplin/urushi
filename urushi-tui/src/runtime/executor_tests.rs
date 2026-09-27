@@ -237,10 +237,12 @@ fn reconciliation_starts_refreshes_and_stops_sources() {
     let spawner = Arc::new(ObservableSources);
     let mut subscriptions = SubscriptionExecutor::new(spawner, deliveries.clone());
 
-    subscriptions.reconcile(Subscription::batch([
-        Subscription::run_blocking("alpha", |_| {}),
-        Subscription::run_blocking("beta", |_| {}),
-    ]));
+    subscriptions
+        .reconcile(Subscription::batch([
+            Subscription::run_blocking("alpha", |_| {}),
+            Subscription::run_blocking("beta", |_| {}),
+        ]))
+        .unwrap();
     assert_events(
         &deliveries,
         [
@@ -249,10 +251,12 @@ fn reconciliation_starts_refreshes_and_stops_sources() {
         ],
     );
 
-    subscriptions.reconcile(Subscription::batch([
-        Subscription::run_blocking("alpha", |_| {}),
-        Subscription::run_blocking("gamma", |_| {}),
-    ]));
+    subscriptions
+        .reconcile(Subscription::batch([
+            Subscription::run_blocking("alpha", |_| {}),
+            Subscription::run_blocking("gamma", |_| {}),
+        ]))
+        .unwrap();
     let mut events = take_events(&deliveries);
     events.sort();
     assert_eq!(
@@ -282,13 +286,15 @@ fn duplicate_subscription_key_uses_the_latest_declaration_once() {
     let mut subscriptions =
         SubscriptionExecutor::new(Arc::new(ObservableSources), deliveries.clone());
 
-    subscriptions.reconcile(Subscription::batch([
-        Subscription::stream(
-            "source",
-            Ready::new([SourceEvent::Started("unused".into())]),
-        ),
-        Subscription::run_blocking("source", |_| {}),
-    ]));
+    subscriptions
+        .reconcile(Subscription::batch([
+            Subscription::stream(
+                "source",
+                Ready::new([SourceEvent::Started("unused".into())]),
+            ),
+            Subscription::run_blocking("source", |_| {}),
+        ]))
+        .unwrap();
 
     assert_eq!(
         take_events(&deliveries),
@@ -310,12 +316,12 @@ impl SourceSpawner<SourceEvent> for ObservableSources {
         &self,
         source: Source<SourceEvent>,
         deliveries: DeliveryQueue<SourceEvent>,
-    ) -> Box<dyn RunningSource<SourceEvent>> {
+    ) -> std::io::Result<Box<dyn RunningSource<SourceEvent>>> {
         let key = format!("{:?}", source.key);
         deliveries
             .ordinary_completion()
             .complete(SourceEvent::Started(key.clone()));
-        Box::new(ObservableSource { key, deliveries })
+        Ok(Box::new(ObservableSource { key, deliveries }))
     }
 }
 

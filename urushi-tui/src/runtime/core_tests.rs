@@ -134,7 +134,7 @@ impl<T: Send + 'static> SourceSpawner<T> for NoSources {
         &self,
         _source: Source<T>,
         _deliveries: DeliveryQueue<T>,
-    ) -> Box<dyn RunningSource<T>> {
+    ) -> io::Result<Box<dyn RunningSource<T>>> {
         panic!("these applications declare no sources")
     }
 }
@@ -147,8 +147,8 @@ impl<T: Send + 'static> SourceSpawner<T> for PassiveSources {
         &self,
         _source: Source<T>,
         _deliveries: DeliveryQueue<T>,
-    ) -> Box<dyn RunningSource<T>> {
-        Box::new(PassiveSource)
+    ) -> io::Result<Box<dyn RunningSource<T>>> {
+        Ok(Box::new(PassiveSource))
     }
 }
 
@@ -170,7 +170,8 @@ fn runtime(
         harness.clock(),
         Arc::new(NoSources),
         presentation,
-    );
+    )
+    .unwrap();
     (core, harness)
 }
 
@@ -187,8 +188,10 @@ fn idle_draws_immediately_and_busy_updates_coalesce_to_the_latest_model() {
     let deliveries = core.deliveries();
     deliveries.ordinary_completion().complete(Message::Add(1));
     deliveries.ordinary_completion().complete(Message::Add(2));
-    core.process_delivery(deliveries.try_next().unwrap());
-    core.process_delivery(deliveries.try_next().unwrap());
+    core.process_delivery(deliveries.try_next().unwrap())
+        .unwrap();
+    core.process_delivery(deliveries.try_next().unwrap())
+        .unwrap();
     core.drive_draw().unwrap();
     assert_eq!(&*views.borrow(), &[0]);
 
@@ -217,14 +220,16 @@ fn sync_acceptance_fences_the_initial_draw_and_applies_its_batch_without_interme
     core.drive_draw().unwrap();
     assert!(views.borrow().is_empty());
 
-    core.process_delivery(deliveries.try_next().unwrap());
+    core.process_delivery(deliveries.try_next().unwrap())
+        .unwrap();
     core.drive_draw().unwrap();
     assert!(views.borrow().is_empty());
 
     let Delivery::Sync { first, .. } = deliveries.try_next().unwrap() else {
         panic!("surface observations are Sync")
     };
-    core.process_delivery(Delivery::sync(first, [Message::Add(2)]));
+    core.process_delivery(Delivery::sync(first, [Message::Add(2)]))
+        .unwrap();
     core.drive_draw().unwrap();
 
     assert_eq!(&*views.borrow(), &[13]);
@@ -249,7 +254,8 @@ fn sync_accepted_during_a_draw_fences_only_the_next_draw() {
     core.drive_draw().unwrap();
     assert_eq!(&*views.borrow(), &[0]);
 
-    core.process_delivery(deliveries.try_next().unwrap());
+    core.process_delivery(deliveries.try_next().unwrap())
+        .unwrap();
     core.drive_draw().unwrap();
     assert_eq!(&*views.borrow(), &[0, 4]);
 }
@@ -262,7 +268,8 @@ fn shutdown_effect_stops_before_another_view() {
     let deliveries = core.deliveries();
     deliveries.ordinary_completion().complete(Message::Stop);
 
-    core.process_delivery(deliveries.try_next().unwrap());
+    core.process_delivery(deliveries.try_next().unwrap())
+        .unwrap();
     core.drive_draw().unwrap();
 
     assert!(core.is_stopping());
@@ -303,7 +310,8 @@ fn run_stops_executors_and_presentation_before_returning_the_model() {
         harness.clock(),
         Arc::new(NoSources),
         presentation,
-    );
+    )
+    .unwrap();
     let runtime = tokio::runtime::Builder::new_current_thread()
         .build()
         .unwrap();
@@ -398,7 +406,8 @@ fn run_selects_draw_delivery_completion_and_scheduler_timer_before_shutdown() {
         clock,
         Arc::new(NoSources),
         ImmediatePresentation::new(),
-    );
+    )
+    .unwrap();
 
     let model = runtime.block_on(core.run()).unwrap();
 
@@ -477,7 +486,8 @@ fn a_subscribed_draw_failure_returns_to_update_as_an_async_message() {
         Arc::new(TokioClock),
         Arc::new(PassiveSources),
         FailingPresentation { result: None },
-    );
+    )
+    .unwrap();
 
     let handled = runtime.block_on(core.run()).unwrap();
 

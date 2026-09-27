@@ -39,7 +39,7 @@ pub(crate) use admission::{Policy, Sink};
     expect(unused_imports, reason = "consumed by subscription reconciliation")
 )]
 #[cfg_attr(test, allow(unused_imports))]
-pub(crate) use inbox::{Ready as SourceReady, SourceInbox, source_inbox};
+pub(crate) use inbox::{Ready as SourceReady, SourceInbox, SourceInboxCloser, source_inbox};
 #[cfg_attr(
     not(test),
     expect(
