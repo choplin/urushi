@@ -192,6 +192,14 @@ for roles whose value is a rectangle, such as `PanelRole` and the cell roles of
 the built-in table component. An application role of either kind builds its
 value with the ordinary consuming builders.
 
+`ThemeSet` contains the light and dark alternatives but never inspects a
+terminal. A caller may choose one explicitly or resolve `ThemeMode::Auto` from
+an optional RGB background observed through its own bidirectional terminal
+connection. Auto always carries an explicit fallback, and classification is a
+pure core operation. The exact observation, luminance threshold, ownership,
+and fallback contract is defined in
+[`design/terminal-background.md`](design/terminal-background.md).
+
 `ComponentTheme::text_style` replaces a text role's style,
 `ComponentTheme::panel` and `panel_focused` replace the panel blocks,
 and `Theme::components` exposes the stored built-in styles and canonical

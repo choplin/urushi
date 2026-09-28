@@ -40,6 +40,12 @@ supply positive knowledge from its platform. Kitty and Sixel are independent
 flags because a terminal may support both.
 Environment preferences such as `NO_COLOR` are not capabilities.
 
+A bidirectional `TerminalQuery` may also observe the terminal's optional RGB
+background. That result is presentation input rather than a rendering
+capability, so it is not stored in `TerminalInfo` or `TerminalCapabilities`.
+Its one-shot query, error mapping, and use in explicit theme selection are
+defined in [`terminal-background.md`](terminal-background.md).
+
 ## Selection and rendering
 
 `RenderSettings` describes what one render operation selects. Its axes mirror

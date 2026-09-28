@@ -119,6 +119,14 @@ owns; the two are distinct. An application is a pure value rather than a
 mutable object with lifecycle methods, and nothing it does mutates runtime
 resources.
 
+When an application adapts its theme to a terminal background, its caller
+queries a caller-owned terminal connection before constructing the application,
+resolves the theme, and passes that same connection to `Runtime`. The selected
+theme remains ordinary application configuration available to `view`; the
+background is not a `Surface` field or subscription. The exact one-shot
+observation and fallback contract is defined in
+[`design/terminal-background.md`](design/terminal-background.md).
+
 The runtime owns the live `Model`. It invokes `update` once for every accepted
 message in the runtime-wide accepted order, lending the model mutably for that
 call. `update` does not perform terminal I/O or mutate runtime resources;

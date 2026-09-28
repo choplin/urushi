@@ -28,6 +28,13 @@ not silently move a form between surfaces. Surface-specific options belong to
 the selected mode, so an inline start position cannot be accepted and then
 ignored by an alternate-screen presentation.
 
+Theme selection happens before either display mode starts. `Form::run(&Theme)`
+opens the default terminal and uses the supplied theme unchanged. A caller that
+observes a background instead uses `run_with_terminal`, passing both the
+selected theme and the same caller-owned terminal connection that answered the
+query. The prompt does not detect or replace a theme during a run. See
+[`design/terminal-background.md`](design/terminal-background.md).
+
 ### Inline
 
 `Inline` keeps the active form and its submitted state in the primary buffer

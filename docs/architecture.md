@@ -23,7 +23,9 @@ was chosen over, live under [`design/`](design/);
 documents record.
 
 The exact terminal observation and output contract is recorded in
-[`design/terminal-output.md`](design/terminal-output.md).
+[`design/terminal-output.md`](design/terminal-output.md). Optional terminal
+background observation and theme selection are recorded separately in
+[`design/terminal-background.md`](design/terminal-background.md).
 
 ## Architecture at a glance
 
@@ -140,10 +142,10 @@ The contracts shared across surfaces are:
 - `urushi-terminal`, which defines workspace-independent style and geometry
   primitives, commands, events, queries, raw-mode control, and session
   restoration. Passive handle inspection observes terminal attachment and
-  size; a bidirectional backend obtains rendering capabilities from terminal
-  replies without choosing prompt or TUI policy. Core `urushi` re-exports the
-  style primitives, so ordinary styling APIs do not expose the lower crate as
-  a second vocabulary.
+  size; a bidirectional backend obtains rendering capabilities and an optional
+  RGB background from terminal replies without choosing prompt or TUI policy.
+  Core `urushi` re-exports the style primitives, so ordinary styling APIs do
+  not expose the lower crate as a second vocabulary.
 
 `View` belongs to that foundation as well. Every surface goes through the same
 `resolve` and draws only the `ResolvedView` it produces — the Ratatui adapter as
@@ -262,7 +264,10 @@ Width and wrapping policy must remain shared. A component or renderer should
 not introduce a private definition of CJK display width.
 
 Themes describe meaning. They do not detect `NO_COLOR`, inspect TTY state, emit
-ANSI, or retain an output writer.
+ANSI, or retain an output writer. When presentation should adapt to the
+terminal background, the caller queries its connection, resolves an explicit
+`ThemeMode`, constructs the application or form with that stable choice, and
+passes the same connection to the interactive surface.
 
 Reusable core components separate owned semantic data — `List`, `Tree`, and
 `Table` — from concrete presentations that compose it into a primitive `View`.
@@ -324,7 +329,9 @@ and dumb settings; `print` and `eprint` write `StyledText` without layout.
 Non-TTY output and passive output-handle inspection use append-only plain
 output. Machine-readable stdout remains separate from human-facing diagnostics
 on stderr. Interactive backends can enable richer output only from confirmed
-terminal query responses.
+terminal query responses. A background query likewise requires a bidirectional
+connection to the actual destination; passive inspection and static
+standard-stream helpers never infer a theme.
 
 ### A prompt chooses its terminal surface
 
