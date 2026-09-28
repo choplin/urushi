@@ -476,6 +476,8 @@ pub(crate) mod tests {
     #[derive(Default)]
     pub(crate) struct RecordingTerminal {
         pub(crate) calls: Vec<&'static str>,
+        pub(crate) events: VecDeque<io::Result<Event>>,
+        pub(crate) waiting: usize,
         pub(crate) interactive: bool,
         pub(crate) fail_enable: bool,
         pub(crate) fail_show: bool,
@@ -530,6 +532,7 @@ pub(crate) mod tests {
 
     impl TerminalQuery for RecordingTerminal {
         fn terminal_size(&mut self) -> io::Result<urushi_terminal::TerminalSize> {
+            self.calls.push("terminal_size");
             Ok(urushi_terminal::TerminalSize::new(80, 24))
         }
 
@@ -546,6 +549,41 @@ pub(crate) mod tests {
 
         fn raw_mode_enabled(&mut self) -> io::Result<bool> {
             Ok(false)
+        }
+
+        fn terminal_capabilities(&mut self) -> io::Result<urushi_terminal::TerminalCapabilities> {
+            self.calls.push("terminal_capabilities");
+            Ok(urushi_terminal::TerminalCapabilities::none())
+        }
+
+        fn terminal_background(
+            &mut self,
+        ) -> io::Result<Option<urushi_terminal::TerminalBackground>> {
+            self.calls.push("terminal_background");
+            Ok(Some(urushi_terminal::TerminalBackground::new(0, 0, 0)))
+        }
+    }
+
+    impl EventSource for RecordingTerminal {
+        fn read_event(&mut self) -> io::Result<Event> {
+            self.events
+                .pop_front()
+                .unwrap_or_else(|| Err(io::Error::new(io::ErrorKind::UnexpectedEof, "no event")))
+        }
+
+        fn poll_event(&mut self) -> io::Result<Option<Event>> {
+            if self.waiting == 0 {
+                return Ok(None);
+            }
+            self.waiting -= 1;
+            self.events.pop_front().transpose()
+        }
+
+        fn poll_event_timeout(
+            &mut self,
+            _timeout: std::time::Duration,
+        ) -> io::Result<Option<Event>> {
+            self.poll_event()
         }
     }
 

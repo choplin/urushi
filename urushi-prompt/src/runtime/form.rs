@@ -1,6 +1,11 @@
 //! Form construction, navigation, and blocking execution orchestration.
 
-use std::{any::Any, collections::HashMap, fmt, marker::PhantomData};
+use std::{
+    any::Any,
+    collections::{HashMap, VecDeque},
+    fmt,
+    marker::PhantomData,
+};
 
 use urushi::{ColorLevel, RenderSettings, Theme};
 
@@ -244,24 +249,22 @@ impl Form {
     ///
     /// The supplied theme and detected terminal capabilities are resolved once into the
     /// prompt's styles, and fields build their view from those resolved
-    /// values; no component role reaches the renderer.
+    /// values; no component role reaches the renderer. This convenience path
+    /// opens the process's default interactive terminal. It does not query the
+    /// terminal background or change the supplied theme.
     pub fn run(self, theme: &Theme) -> Result<FormOutcome, RunError> {
         #[cfg(unix)]
-        let (mut terminal, info) =
-            {
-                let mut terminal = urushi_terminal::backend::native::NativeTerminal::open()
-                    .map_err(|source| RunError::Io {
+        {
+            let mut terminal =
+                urushi_terminal::backend::native::NativeTerminal::open().map_err(|source| {
+                    RunError::Io {
                         operation: IoOperation::EnterTerminal,
                         source,
                         cleanup: None,
-                    })?;
-                let info = terminal.terminal_info().map_err(|source| RunError::Io {
-                    operation: IoOperation::EnterTerminal,
-                    source,
-                    cleanup: None,
+                    }
                 })?;
-                (terminal, info)
-            };
+            self.run_with_terminal(&mut terminal, theme)
+        }
 
         #[cfg(not(unix))]
         let (mut terminal, info) = {
@@ -282,6 +285,71 @@ impl Form {
             )
         };
 
+        #[cfg(not(unix))]
+        {
+            self.run_with_info(&mut terminal, theme, info, VecDeque::new())
+        }
+    }
+
+    /// Runs this form on a caller-owned interactive terminal connection.
+    ///
+    /// The same backend supplies terminal queries, input events, and rendered
+    /// output for the complete prompt session. This method queries its size
+    /// and rendering capabilities, but never queries its background and never
+    /// changes the supplied theme. A caller selecting a theme with
+    /// [`urushi::ThemeMode::Auto`] should query the background first and then
+    /// pass that same backend here.
+    pub fn run_with_terminal(
+        self,
+        terminal: &mut impl urushi_terminal::TerminalBackend,
+        theme: &Theme,
+    ) -> Result<FormOutcome, RunError> {
+        if !terminal.is_interactive() {
+            return Err(RunError::NotInteractive);
+        }
+
+        let mut size = terminal.terminal_size().map_err(|source| RunError::Io {
+            operation: IoOperation::EnterTerminal,
+            source,
+            cleanup: None,
+        })?;
+        let capabilities = terminal
+            .terminal_capabilities()
+            .map_err(|source| RunError::Io {
+                operation: IoOperation::EnterTerminal,
+                source,
+                cleanup: None,
+            })?;
+
+        // Queries may preserve ordinary input, including resize notifications,
+        // for the event reader. Fold every resize that happened before session
+        // entry into the initial geometry while retaining prompt input in order.
+        let mut initial_events = VecDeque::new();
+        loop {
+            let event = terminal.poll_event().map_err(|source| RunError::Io {
+                operation: IoOperation::EnterTerminal,
+                source,
+                cleanup: None,
+            })?;
+            match event {
+                Some(Event::Resize(resized)) => size = resized,
+                Some(event) if accepts_prompt_event(&event) => initial_events.push_back(event),
+                Some(_) => {}
+                None => break,
+            }
+        }
+
+        let info = urushi_terminal::TerminalInfo::new(size, capabilities);
+        self.run_with_info(terminal, theme, info, initial_events)
+    }
+
+    fn run_with_info(
+        self,
+        terminal: &mut impl urushi_terminal::TerminalBackend,
+        theme: &Theme,
+        info: urushi_terminal::TerminalInfo,
+        initial_events: VecDeque<Event>,
+    ) -> Result<FormOutcome, RunError> {
         let size = (
             info.size().columns().try_into().unwrap_or(u16::MAX),
             info.size().rows().try_into().unwrap_or(u16::MAX),
@@ -293,7 +361,7 @@ impl Form {
         );
         let mut renderer = TerminalRenderer::with_size(size);
         let styles = PromptStyles::resolve(theme, &settings);
-        self.run_on(&mut renderer, &mut terminal, &styles)
+        self.run_on(&mut renderer, terminal, &styles, initial_events)
     }
 
     #[cfg(test)]
@@ -310,7 +378,7 @@ impl Form {
         T: TerminalControl,
     {
         let mut terminal = SplitTerminal::new(events, terminal);
-        self.run_on(renderer, &mut terminal, styles)
+        self.run_on(renderer, &mut terminal, styles, VecDeque::new())
     }
 
     fn run_on<R, T>(
@@ -318,6 +386,7 @@ impl Form {
         renderer: &mut R,
         terminal: &mut T,
         styles: &PromptStyles,
+        mut deferred: VecDeque<Event>,
     ) -> Result<FormOutcome, RunError>
     where
         R: Renderer,
@@ -331,10 +400,6 @@ impl Form {
         let mut state = FormState::Running { group: 0, field: 0 };
         self.groups[0].fields[0].activate();
 
-        // An event drained while coalescing a resize burst, held over to the
-        // next iteration rather than dropped.
-        let mut deferred: Option<Event> = None;
-
         loop {
             let terminal_columns = session.columns();
             let start = self.start.within(terminal_columns);
@@ -347,7 +412,7 @@ impl Form {
                 return Err(session.fail(IoOperation::Render, source));
             }
 
-            let mut event = match deferred.take() {
+            let mut event = match deferred.pop_front() {
                 Some(event) => event,
                 None => loop {
                     match session.read_event() {
@@ -367,7 +432,7 @@ impl Form {
                         Ok(Some(waiting)) if !accepts_prompt_event(&waiting) => {}
                         Ok(Some(waiting @ Event::Resize(_))) => event = waiting,
                         Ok(Some(waiting)) => {
-                            deferred = Some(waiting);
+                            deferred.push_back(waiting);
                             break;
                         }
                         Ok(None) => break,
@@ -677,7 +742,9 @@ mod tests {
     use std::io;
 
     use super::*;
-    use crate::runtime::{IoOperation, KeyCode, KeyEvent, terminal::tests::*, test_styles};
+    use crate::runtime::{
+        IoOperation, KeyCode, KeyEvent, terminal::tests::*, test_styles, view::tests::test_theme,
+    };
     use crate::{
         Confirm, ConfirmAnswer, ConfirmSource, FieldConfigError, Input, Select, SelectOption,
     };
@@ -798,6 +865,73 @@ mod tests {
         assert_eq!(
             renderer.regions,
             [(PromptStart::CurrentPosition { column: 7 }, 12)]
+        );
+    }
+
+    #[test]
+    fn caller_owned_terminal_is_reused_without_an_implicit_background_query() {
+        let mut terminal = RecordingTerminal {
+            events: [
+                Ok(Event::Resize(urushi_terminal::TerminalSize::new(100, 30))),
+                Ok(cancel()),
+            ]
+            .into(),
+            waiting: 2,
+            ..RecordingTerminal::interactive()
+        };
+        let observed = urushi_terminal::TerminalQuery::terminal_background(&mut terminal)
+            .expect("explicit background query succeeds");
+        assert_eq!(
+            observed,
+            Some(urushi_terminal::TerminalBackground::new(0, 0, 0))
+        );
+
+        let outcome = form([TestField::new("field", "value")])
+            .run_with_terminal(&mut terminal, &test_theme())
+            .expect("caller-owned terminal run succeeds");
+
+        assert!(matches!(outcome, FormOutcome::Cancelled));
+        assert_eq!(
+            terminal.calls,
+            [
+                "terminal_background",
+                "terminal_size",
+                "terminal_capabilities",
+                "enable_raw_mode",
+                "flush",
+                "flush",
+                "flush",
+                "show_cursor",
+                "flush",
+                "disable_raw_mode",
+            ]
+        );
+    }
+
+    #[test]
+    fn caller_owned_terminal_is_restored_after_an_event_failure() {
+        let mut terminal = RecordingTerminal {
+            events: [Err(io::Error::other("read failed"))].into(),
+            ..RecordingTerminal::interactive()
+        };
+
+        let result = form([TestField::new("field", "value")])
+            .run_with_terminal(&mut terminal, &test_theme());
+
+        assert_io_operation(result, IoOperation::ReadEvent);
+        assert_eq!(
+            terminal.calls,
+            [
+                "terminal_size",
+                "terminal_capabilities",
+                "enable_raw_mode",
+                "flush",
+                "flush",
+                "flush",
+                "show_cursor",
+                "flush",
+                "disable_raw_mode",
+            ]
         );
     }
 

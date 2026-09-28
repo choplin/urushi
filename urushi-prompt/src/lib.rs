@@ -1,8 +1,11 @@
 //! Blocking, inline terminal prompt runtime styled with [`urushi`].
 //!
-//! [`Form::run`] owns a short-lived terminal session and blocks until the form
-//! is submitted, cancelled, or terminal I/O fails. The crate exposes the form
-//! runtime ([`Form`], [`FormBuilder`], [`PromptStart`], [`InlineResizePolicy`], [`Group`],
+//! [`Form::run`] opens and owns a short-lived default terminal session, while
+//! [`Form::run_with_terminal`] runs on a caller-owned connection after an
+//! explicit theme has been selected. Both block until the form is submitted,
+//! cancelled, or terminal I/O fails. Neither queries the terminal background
+//! or changes the supplied theme. The crate exposes the form runtime ([`Form`],
+//! [`FormBuilder`], [`PromptStart`], [`InlineResizePolicy`], [`Group`],
 //! [`FormOutcome`], [`RunError`]) together with the [`Input`], [`Select`], and
 //! [`Confirm`] field controls, and re-exports [`urushi`] for styling.
 
