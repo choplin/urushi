@@ -20,7 +20,7 @@
 use crate::text::Grapheme;
 use crate::{Key, TextStyle, View};
 
-use super::assemble::assemble;
+use super::assemble::{AssemblyCache, assemble, assemble_retained};
 use super::geometry::{Available, Constraint, Size};
 use super::height::{fit, heights};
 use super::width::widths;
@@ -337,6 +337,83 @@ pub struct ResolvedView {
     anchors: Vec<AnchoredRect>,
 }
 
+/// An opt-in evaluator that reuses unchanged View evaluation across frames.
+///
+/// `Resolver` has the same observable result as [`resolve`]. It retains only
+/// core reconciliation inputs and materialized output; the current View and
+/// available area still decide layout. Application state, clocks, redraw
+/// scheduling, terminal capabilities, and graphics protocol state stay with
+/// the host that composes those independent capabilities.
+///
+/// The free [`resolve`] function remains the ordinary stateless path and does
+/// not construct this cache metadata.
+pub struct Resolver {
+    previous_available: Option<Available>,
+    previous_result: Option<ResolvedView>,
+    assembly: AssemblyCache,
+}
+
+impl Resolver {
+    /// Creates an empty retained evaluator.
+    pub const fn new() -> Self {
+        Self {
+            previous_available: None,
+            previous_result: None,
+            assembly: AssemblyCache::new(),
+        }
+    }
+
+    /// Resolves one immutable View snapshot, reusing unchanged subtree output.
+    ///
+    /// A changed Viewport origin reprojects its retained child. Changes to
+    /// content or to a settled layout input invalidate the affected artifact,
+    /// while independent unchanged subtrees remain reusable.
+    pub fn resolve(
+        &mut self,
+        view: &View,
+        available: Available,
+    ) -> Result<ResolvedView, LayoutError> {
+        if self.assembly.matches_previous_view(view)
+            && self.previous_available == Some(available)
+            && let Some(result) = &self.previous_result
+        {
+            return Ok(result.clone());
+        }
+
+        let fitted = fit(widths(view, available.width()));
+        let sized = heights(&fitted, Constraint::available(available.height()));
+        validate_canvas_extents(&sized)?;
+
+        self.assembly.begin_frame(view);
+        let mut rect = match assemble_retained(&sized, &mut self.assembly) {
+            Ok(rect) => rect,
+            Err(error) => {
+                self.assembly.abort_frame();
+                return Err(error);
+            }
+        };
+        crop_to_available(&mut rect, available);
+        let result = resolved(rect);
+        self.assembly.finish_frame(view);
+        self.previous_available = Some(available);
+        self.previous_result = Some(result.clone());
+        Ok(result)
+    }
+
+    /// Drops every retained evaluation artifact.
+    pub fn clear(&mut self) {
+        self.previous_available = None;
+        self.previous_result = None;
+        self.assembly.clear();
+    }
+}
+
+impl Default for Resolver {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl ResolvedView {
     pub(crate) fn new(
         size: Size,
@@ -420,12 +497,20 @@ pub fn resolve(view: &View, available: Available) -> Result<ResolvedView, Layout
     let sized = heights(&fitted, Constraint::available(available.height()));
     validate_canvas_extents(&sized)?;
     let mut rect = assemble(&sized)?;
+    crop_to_available(&mut rect, available);
+    Ok(resolved(rect))
+}
+
+fn crop_to_available(rect: &mut super::assemble::Rect, available: Available) {
     if let Some(width) = available.width() {
         rect.crop_width(width, &TextStyle::new());
     }
     if let Some(height) = available.height() {
         rect.crop_height(height);
     }
+}
+
+fn resolved(rect: super::assemble::Rect) -> ResolvedView {
     debug_assert_unique(&rect.anchors);
     let size = rect.size();
     let anchors = rect
@@ -433,7 +518,7 @@ pub fn resolve(view: &View, available: Available) -> Result<ResolvedView, Layout
         .into_iter()
         .map(|anchor| anchor.locate(size))
         .collect();
-    Ok(ResolvedView::new(size, rect.rows, anchors))
+    ResolvedView::new(size, rect.rows, anchors)
 }
 
 fn validate_canvas_extents(sized: &super::height::Sized<'_>) -> Result<(), LayoutError> {

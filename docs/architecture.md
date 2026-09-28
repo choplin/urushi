@@ -60,9 +60,12 @@ its finite size is known. The tree carries logical
 terminal-resolved ANSI strings. Component presentations stop at this boundary.
 The direct [`resolve`](../urushi/src/view/resolve.rs) function turns the tree
 into one `ResolvedView` rectangle of styled graphemes without retained
-evaluation state. Callers that repeatedly project structurally unchanged
-content may instead keep an optional `Resolver`, which produces the same
-rectangle while retaining private evaluation state. The stateless
+evaluation state. Callers that evaluate successive immutable View snapshots
+may instead keep an optional `Resolver`, which produces the same rectangle
+while reusing unchanged materialized subtree output, including settled
+Viewport content. Its retained state never chooses layout; the current View and
+available area remain the complete layout input.
+The stateless
 [`render`](../urushi/src/render/ansi.rs) function applies explicit
 [`RenderSettings`](../urushi/src/render/settings.rs) and serializes the result.
 A presentation either lowers component meaning into built-in nodes or

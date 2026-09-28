@@ -16,10 +16,9 @@ direct
 one-shot projection
     View containing Viewport ----------------------> ResolvedView
 
-retained projection
-    View --prepare--> retained resolved content
-                             --project Viewport-----> ResolvedView
-                             --project Viewport-----> ResolvedView
+retained evaluation
+    View snapshot --reconcile--> retained subtree artifacts --> ResolvedView
+    next snapshot --reconcile unchanged / rebuild changed--> ResolvedView
 ```
 
 The free `resolve(view, available)` operation remains the ordinary path. A view
@@ -28,12 +27,30 @@ does not construct a retained scene, spatial index, or tile cache. A view with
 a viewport may be resolved once by the same stateless entry point; that path
 may eagerly assemble its child and project the result.
 
-Repeated evaluation is opt-in. A stateful resolver may retain an internal
-resolved-content artifact for structurally unchanged viewport children. The
-artifact contains settled layout geometry and whatever owned paint recipes or
-materialized cells are needed to reproduce projection. It is evaluation state,
-not semantic data, a `View` node, application state, or another renderer input.
-Dropping the resolver drops the artifact.
+Repeated evaluation is opt-in. A stateful resolver retains one prior immutable
+View snapshot for structural reconciliation and internal artifacts for
+unchanged subtrees whose settled assembly inputs also remain equal. An artifact
+contains a materialized rectangle and the exact settled assembly input that
+produced it, including the complete content below a Viewport. It is distinct
+from the semantic snapshot, application state, and renderer input. Dropping the
+resolver drops both the snapshot and every artifact.
+
+The resolver's state never decides or changes layout. The current `View` and
+`Available` are the only layout inputs, and the ordinary width, fit, and height
+phases settle them for each non-identical frame before retained assembly is
+consulted. Structural layout changes therefore belong in the next immutable
+View built by an application — in a TUI, in `Application::view`. A retained
+rectangle is reusable only after the current layout pass proves that its local
+assembly input is still equal; otherwise it is discarded. Retention cannot
+preserve an old layout decision against the current View.
+
+Viewport movement is the first important use, not the identity of the
+capability. Two successive immutable View snapshots may differ in one animated
+or live subtree while independent siblings remain equal. The resolver rebuilds
+the changed branch's materialization and every composition result that depends
+on it, while reusing an unchanged sibling whose own settled input is still
+equal. The View itself remains a one-frame value; the resolver does not make it
+stateful.
 
 The application runtime or another output adapter may own that resolver because
 it owns repeated evaluation. An application model is never required to retain
@@ -56,13 +73,15 @@ impl Resolver {
 }
 ```
 
-The initial resolver does not evict a materialized region while its content
-remains valid; replacing, invalidating, clearing, or dropping the resolver
-releases it. This is the guarantee that returning to a previously evaluated
-region does not paint it again. A bounded policy and its accounting unit remain
-an additive follow-up for measured memory pressure rather than an initial
-public enum. The free `resolve` function remains the zero-retention entry point
-rather than an implicit default `Resolver`.
+The initial resolver retains one reconciled frame of subtree artifacts. An
+entry reached unchanged by the next snapshot survives; an entry whose subtree
+or settled input changed is released when that frame succeeds. `clear` and
+drop release everything. Complete Viewport child rectangles are materialized
+eagerly, so moving away and back while the child remains valid does not paint
+it again. A bounded policy and its accounting unit remain an additive follow-up
+for measured memory pressure rather than an initial public enum. The free
+`resolve` function remains the zero-retention entry point rather than an
+implicit default `Resolver`.
 
 ## Equivalence is the contract
 
@@ -88,11 +107,16 @@ the caller responsible for evaluation.
 
 ## Reuse and invalidation
 
-A retained content entry is reusable while both the content value and every
-input that can change its layout remain equal. At minimum these include the
-child `View`, relevant finite allocations, text fitting and overflow policy,
-and final Canvas surface sizes. A changed width invalidates wrapped rows even
-when the child data is unchanged.
+A retained subtree entry is reusable while both its structural View value and
+every settled input that can change its output remain equal. The resolver
+compares one linear structural snapshot in tree order, then matches each node's
+settled assembly input at the same occurrence. Layout itself is recomputed from
+the current View; the comparison authorizes reuse of materialized output rather
+than supplying a layout decision. This avoids public identity and avoids
+copying a complete descendant tree into every cache entry. A changed width
+invalidates wrapped rows even when the child data is unchanged; a changed
+sibling does not invalidate an independent subtree when its own inputs remain
+equal.
 
 Viewport origin and boundary behavior do not invalidate settled content. They
 select another rectangle from it. Placement of the projected result in an
@@ -105,17 +129,27 @@ compares unequal is changed content and invalidates the Canvas entry under the
 same rule as any other child.
 
 The first retained implementation derives reuse from the immutable values and
-layout inputs already in the resolution call. It does not add public revision
-counters, viewport keys, or application identities merely to make lookup
-cheaper. Such a mechanism requires a separately demonstrated need because a
-caller-supplied identity can otherwise make stale output appear valid.
+layout inputs already in the resolution call. Occurrence position is private
+matching machinery, not public identity: duplicate equal subtrees remain
+distinct occurrences, and their output is composed in original tree order. A
+structural insertion may conservatively lose reuse for later siblings but can
+never reuse output from the wrong occurrence. The implementation does not add
+public revision counters, viewport keys, or application identities merely to
+make lookup cheaper. Such a mechanism requires a separately demonstrated need
+because a caller-supplied identity can otherwise make stale output appear
+valid.
 
 ## Eager and lazy materialization
 
-Settled geometry does not require every cell to be retained. A resolver may
-materialize all content eagerly or create cells lazily for requested
-rectangles. Lazy storage may use rows, bands, or two-dimensional tiles; that
-choice is not observable.
+The initial resolver retains complete rectangles at reuse boundaries:
+Viewport children, complete Canvas surfaces, and independent children of
+multi-child composition nodes. Unary layout wrappers are recomposed around
+those artifacts instead of retaining another copy at every depth. This is the
+eager equivalence baseline: it preserves the ordinary assembly and paint order
+without making a deeply wrapped tree retain one full rectangle per wrapper. A
+later implementation may create cells lazily for requested rectangles. Lazy
+storage may use rows, bands, or two-dimensional tiles; that choice is not
+observable.
 
 A positive-width grapheme has one owner at its leading cell even when a cache
 boundary crosses it. Queries include enough neighboring information to apply
@@ -125,6 +159,31 @@ operations come from more than one cache entry.
 Retention lifetime is explicit in the choice to use and retain a stateful
 resolver rather than in `Viewport`. The stateless path need not allocate cache
 metadata at all.
+
+## Composition with other retained capabilities
+
+`Resolver` owns only core View evaluation. It does not own an animation clock,
+wakeup or coalescing policy, application state, terminal capabilities, or a
+graphics protocol transaction. A host composes those responsibilities through
+the existing values:
+
+```text
+Model + clock -> immutable View snapshot
+                         |
+                         v
+                      Resolver -> ResolvedView
+                                      |\
+                                      | +-> graphics reconciliation
+                                      +----> cell presentation and commit
+```
+
+For animation, the host advances semantic state and constructs the next View;
+the resolver reuses unaffected subtrees. For terminal graphics,
+`urushi-graphics` combines its immutable assets from the View with resolved
+anchors, while its host-owned protocol state reconciles upload, placement,
+deletion, and failure recovery. These states have different invalidation and
+commit rules, so neither is registered inside the resolver and no universal
+capability registry is part of the core API.
 
 ## Canvas reuse
 

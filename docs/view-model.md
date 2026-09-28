@@ -353,9 +353,15 @@ A `Viewport` does not revise those decisions. It resolves the child's content
 coordinates and then selects a rectangle from them. The ordinary `resolve`
 function remains a direct, stateless operation: trees without projection do
 not acquire a retained intermediate representation, and one-shot projection
-may assemble eagerly. Reusing settled content across changing origins is an
-optional stateful evaluation path with the same observable result, as defined
-in [`design/resolution-reuse.md`](design/resolution-reuse.md).
+may assemble eagerly. Reusing settled content across changing origins, or
+unchanged subtrees across successive immutable frame snapshots, is an optional
+stateful evaluation path with the same observable result, as defined in
+[`design/resolution-reuse.md`](design/resolution-reuse.md).
+
+That state does not own layout policy or preserve an old layout. Conditional
+structure and every geometry-bearing value still come from the current View;
+the resolver reruns layout and may reuse materialized output only when the
+resulting local assembly input remains equal.
 
 Conditional structure — hiding a sidebar below a width, stacking instead of
 placing side by side — is not a sizing property. It is a decision about which

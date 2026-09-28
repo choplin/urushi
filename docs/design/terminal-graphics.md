@@ -92,3 +92,10 @@ host that owns a redraw lifecycle owns their state: `urushi-tui` for a TUI and
 graphics feature. One-shot callers retain no state, and core `urushi`,
 `ImagePresentation`, `View`, and `ResolvedView` remain independent of the
 lifecycle.
+
+That state is composable with, but not contained by, core `Resolver` state. A
+host may use a `Resolver` to reuse unchanged View evaluation, then pass the
+resulting anchors and the current View's immutable Image assets to its graphics
+reconciler. Clearing materialized View output and resetting terminal-side
+assets remain separate operations because they have different validity, commit,
+and recovery rules.

@@ -7,8 +7,13 @@
 //! and composes Canvas commands. That is what makes the two backends agree: the
 //! geometry existed before either of them saw it.
 
+use std::sync::Arc;
+
 use crate::text::{PrintableText, StyledTextGrapheme};
-use crate::{Align, BlockTitle, Projection, ProjectionBoundary, Sides, TextStyle, VerticalAlign};
+use crate::{
+    Align, BlockStyle, BlockTitle, Canvas, GridStyle, Key, Projection, ProjectionBoundary, Sides,
+    StyledText, TextStyle, VerticalAlign, View, Viewport,
+};
 
 use super::canvas::compose_canvas;
 use super::geometry::Size;
@@ -60,6 +65,363 @@ impl Rect {
     }
 }
 
+/// Materialized subtree rectangles retained by [`Resolver`](super::resolve::Resolver).
+///
+/// Only entries reached by the current frame survive `finish_frame`. This
+/// keeps unchanged branches reusable while dropping content invalidated by a
+/// changed View or settled layout input.
+#[derive(Debug, Default)]
+pub(super) struct AssemblyCache {
+    previous: Vec<Option<Arc<CachedRect>>>,
+    current: Vec<Option<Arc<CachedRect>>>,
+    previous_view: Option<View>,
+    previous_subtree_ends: Vec<usize>,
+    current_subtree_ends: Vec<usize>,
+    equal_run: Vec<usize>,
+}
+
+#[derive(Debug, Clone)]
+struct CachedRect {
+    input: AssemblyInput,
+    rect: Arc<Rect>,
+}
+
+impl AssemblyCache {
+    pub const fn new() -> Self {
+        Self {
+            previous: Vec::new(),
+            current: Vec::new(),
+            previous_view: None,
+            previous_subtree_ends: Vec::new(),
+            current_subtree_ends: Vec::new(),
+            equal_run: Vec::new(),
+        }
+    }
+
+    pub fn begin_frame(&mut self, view: &View) {
+        let current = ViewSnapshot::from_view(view);
+        self.current.clear();
+        self.current.resize_with(current.nodes.len(), || None);
+        self.current_subtree_ends = current.subtree_ends;
+        self.equal_run.clear();
+        let Some(previous_view) = &self.previous_view else {
+            return;
+        };
+        let previous = ViewSnapshot::from_view(previous_view);
+        debug_assert_eq!(previous.subtree_ends, self.previous_subtree_ends);
+        self.equal_run.resize(current.nodes.len(), 0);
+        let shared = previous.nodes.len().min(current.nodes.len());
+        let mut run = 0;
+        for index in (0..shared).rev() {
+            if previous.nodes[index] == current.nodes[index] {
+                run += 1;
+            } else {
+                run = 0;
+            }
+            self.equal_run[index] = run;
+        }
+    }
+
+    pub fn finish_frame(&mut self, view: &View) {
+        self.previous = std::mem::take(&mut self.current);
+        self.previous_view = Some(view.clone());
+        self.previous_subtree_ends = std::mem::take(&mut self.current_subtree_ends);
+    }
+
+    pub fn abort_frame(&mut self) {
+        self.current.clear();
+        self.current_subtree_ends.clear();
+        self.equal_run.clear();
+    }
+
+    pub fn clear(&mut self) {
+        self.previous.clear();
+        self.current.clear();
+        self.previous_view = None;
+        self.previous_subtree_ends.clear();
+        self.current_subtree_ends.clear();
+        self.equal_run.clear();
+    }
+
+    pub fn matches_previous_view(&self, view: &View) -> bool {
+        self.previous_view.as_ref() == Some(view)
+    }
+
+    fn subtree_end(&self, index: usize) -> usize {
+        self.current_subtree_ends[index]
+    }
+
+    fn get(&mut self, key: &AssemblyKey) -> Option<Arc<Rect>> {
+        if let Some(entry) = self.current.get(key.node_index).and_then(Option::as_ref)
+            && entry.input == key.input
+        {
+            return Some(Arc::clone(&entry.rect));
+        }
+        if !self.subtree_reusable(key.node_index) {
+            return None;
+        }
+        let entry = self
+            .previous
+            .get(key.node_index)
+            .and_then(Option::as_ref)
+            .filter(|entry| entry.input == key.input)?
+            .clone();
+        let subtree_end = self.current_subtree_ends[key.node_index];
+        for index in key.node_index..subtree_end {
+            if self.current[index].is_none() {
+                self.current[index] = self.previous.get(index).cloned().flatten();
+            }
+        }
+        Some(Arc::clone(&entry.rect))
+    }
+
+    fn insert(&mut self, key: AssemblyKey, rect: Arc<Rect>) {
+        let slot = &mut self.current[key.node_index];
+        if let Some(entry) = slot {
+            debug_assert_eq!(entry.input, key.input);
+        } else {
+            *slot = Some(Arc::new(CachedRect {
+                input: key.input,
+                rect,
+            }));
+        }
+    }
+
+    fn subtree_reusable(&self, index: usize) -> bool {
+        if self.previous_view.is_none() {
+            return false;
+        }
+        let (Some(&previous_end), Some(&current_end)) = (
+            self.previous_subtree_ends.get(index),
+            self.current_subtree_ends.get(index),
+        ) else {
+            return false;
+        };
+        let previous_len = previous_end - index;
+        let current_len = current_end - index;
+        previous_len == current_len
+            && self.equal_run.get(index).copied().unwrap_or(0) >= current_len
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+struct AssemblyKey {
+    node_index: usize,
+    input: AssemblyInput,
+}
+
+#[derive(Debug)]
+struct ViewSnapshot<'a> {
+    nodes: Vec<SnapshotNode<'a>>,
+    subtree_ends: Vec<usize>,
+}
+
+impl<'a> ViewSnapshot<'a> {
+    fn from_view(view: &'a View) -> Self {
+        let mut snapshot = Self {
+            nodes: Vec::new(),
+            subtree_ends: Vec::new(),
+        };
+        snapshot.push_view(view);
+        snapshot
+    }
+
+    fn push_view(&mut self, view: &'a View) {
+        let index = self.nodes.len();
+        self.nodes.push(SnapshotNode::from_view(view));
+        self.subtree_ends.push(0);
+        match view {
+            View::Text(_) | View::Canvas(_) => {}
+            View::Block(_, _, child)
+            | View::Viewport(_, child)
+            | View::AnchorBlock(_, _, _, child) => self.push_view(child),
+            View::Row(_, children) | View::Column(_, children) => {
+                for child in children {
+                    self.push_view(child);
+                }
+            }
+            View::Grid(_, rows) => {
+                let columns = super::grid::columns(rows);
+                for row in 0..rows.len() {
+                    for column in 0..columns {
+                        self.push_view(super::grid::cell(rows, row, column));
+                    }
+                }
+            }
+        }
+        self.subtree_ends[index] = self.nodes.len();
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+enum SnapshotNode<'a> {
+    Text(&'a StyledText),
+    Block(&'a BlockStyle, Option<&'a BlockTitle>),
+    Row(VerticalAlign, usize),
+    Column(Align, usize),
+    Grid(&'a GridStyle, usize, usize),
+    Canvas(&'a Canvas),
+    Viewport(Viewport),
+    AnchorBlock(Key, &'a BlockStyle, Option<&'a BlockTitle>),
+}
+
+impl<'a> SnapshotNode<'a> {
+    fn from_view(view: &'a View) -> Self {
+        match view {
+            View::Text(text) => Self::Text(text),
+            View::Block(style, title, _) => Self::Block(style, title.as_ref()),
+            View::Row(align, children) => Self::Row(*align, children.len()),
+            View::Column(align, children) => Self::Column(*align, children.len()),
+            View::Grid(style, rows) => Self::Grid(style, rows.len(), super::grid::columns(rows)),
+            View::Canvas(canvas) => Self::Canvas(canvas),
+            View::Viewport(viewport, _) => Self::Viewport(*viewport),
+            View::AnchorBlock(key, style, title, _) => {
+                Self::AnchorBlock(*key, style, title.as_ref())
+            }
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum AssemblyInput {
+    Text {
+        size: Size,
+        rows: Vec<Vec<StyledGrapheme>>,
+        align: Align,
+        fill: TextStyle,
+    },
+    Block {
+        size: Size,
+        padding: Sides,
+        margin: Sides,
+        content_width: usize,
+        content_height: usize,
+        child: Size,
+    },
+    Row {
+        size: Size,
+        align: VerticalAlign,
+        children: Vec<Size>,
+    },
+    Column {
+        size: Size,
+        align: Align,
+        children: Vec<Size>,
+    },
+    Grid {
+        size: Size,
+        columns: Vec<usize>,
+        heights: Vec<usize>,
+        cells: Vec<GridCellInput>,
+    },
+    Canvas {
+        size: Size,
+        width_bounded: bool,
+        height_bounded: bool,
+    },
+    Viewport {
+        size: Size,
+        width_bounded: bool,
+        height_bounded: bool,
+        child: Size,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct GridCellInput {
+    padding: Sides,
+    align: Align,
+    vertical_align: VerticalAlign,
+    child: Size,
+}
+
+impl AssemblyKey {
+    fn from_sized(sized: &Sized<'_>, node_index: usize) -> Self {
+        let size = Size::new(sized.width, sized.height);
+        let input = match &sized.node {
+            SizedNode::Text { lines, align, fill } => AssemblyInput::Text {
+                size,
+                rows: lines.iter().map(|line| styled_graphemes(line)).collect(),
+                align: *align,
+                fill: (*fill).clone(),
+            },
+            SizedNode::Block {
+                style: _,
+                title: _,
+                anchor: _,
+                padding,
+                margin,
+                content_width,
+                content_height,
+                child,
+            } => AssemblyInput::Block {
+                size,
+                padding: *padding,
+                margin: *margin,
+                content_width: *content_width,
+                content_height: *content_height,
+                child: Size::new(child.width, child.height),
+            },
+            SizedNode::Row(align, children) => AssemblyInput::Row {
+                size,
+                align: *align,
+                children: children
+                    .iter()
+                    .map(|child| Size::new(child.width, child.height))
+                    .collect(),
+            },
+            SizedNode::Column(align, children) => AssemblyInput::Column {
+                size,
+                align: *align,
+                children: children
+                    .iter()
+                    .map(|child| Size::new(child.width, child.height))
+                    .collect(),
+            },
+            SizedNode::Grid {
+                columns,
+                heights,
+                rows,
+            } => AssemblyInput::Grid {
+                size,
+                columns: columns.to_vec(),
+                heights: heights.clone(),
+                cells: rows
+                    .iter()
+                    .flatten()
+                    .map(|cell| GridCellInput {
+                        padding: cell.padding,
+                        align: cell.align,
+                        vertical_align: cell.vertical_align,
+                        child: Size::new(cell.child.width, cell.child.height),
+                    })
+                    .collect(),
+            },
+            SizedNode::Canvas {
+                canvas: _,
+                width_bounded,
+                height_bounded,
+            } => AssemblyInput::Canvas {
+                size,
+                width_bounded: *width_bounded,
+                height_bounded: *height_bounded,
+            },
+            SizedNode::Viewport {
+                viewport: _,
+                width_bounded,
+                height_bounded,
+                child,
+            } => AssemblyInput::Viewport {
+                size,
+                width_bounded: *width_bounded,
+                height_bounded: *height_bounded,
+                child: Size::new(child.width, child.height),
+            },
+        };
+        Self { node_index, input }
+    }
+}
+
 /// Moves `anchors` by the offset a parent nests their rectangle at.
 fn shift(anchors: Vec<AnchoredRect>, x: usize, y: usize) -> Vec<AnchoredRect> {
     anchors
@@ -93,31 +455,103 @@ const fn align_offset(gap: usize, align: Align) -> usize {
 
 /// Builds the rectangle `sized` describes.
 pub(super) fn assemble(sized: &Sized<'_>) -> Result<Rect, LayoutError> {
-    let rect = match &sized.node {
-        SizedNode::Text { lines, align, fill } => Ok(Rect {
-            width: sized.width,
-            rows: lines
-                .iter()
-                .map(|line| align_row(styled_graphemes(line), sized.width, *align, fill))
-                .collect(),
-            anchors: Vec::new(),
-        }),
-        SizedNode::Block { .. } => block(sized),
-        SizedNode::Row(align, children) => row(*align, children, sized.width),
-        SizedNode::Column(align, children) => column(*align, children, sized.width),
-        SizedNode::Grid { .. } => grid_rect(sized),
-        SizedNode::Canvas { canvas, .. } => {
-            compose_canvas(canvas, Size::new(sized.width, sized.height))
+    Assembler {
+        cache: None,
+        next_node: 0,
+    }
+    .assemble(sized, false)
+    .map(Assembled::into_owned)
+}
+
+pub(super) fn assemble_retained(
+    sized: &Sized<'_>,
+    cache: &mut AssemblyCache,
+) -> Result<Rect, LayoutError> {
+    Assembler {
+        cache: Some(cache),
+        next_node: 0,
+    }
+    .assemble(sized, false)
+    .map(Assembled::into_owned)
+}
+
+enum Assembled {
+    Owned(Rect),
+    Shared(Arc<Rect>),
+}
+
+impl Assembled {
+    fn as_rect(&self) -> &Rect {
+        match self {
+            Self::Owned(rect) => rect,
+            Self::Shared(rect) => rect,
         }
-        SizedNode::Viewport { .. } => viewport(sized),
-    };
-    let rect = rect?;
-    debug_assert_eq!(
-        rect.size(),
-        Size::new(sized.width, sized.height),
-        "assembly builds exactly the rectangle the sizing phases decided"
-    );
-    Ok(rect)
+    }
+
+    fn into_owned(self) -> Rect {
+        match self {
+            Self::Owned(rect) => rect,
+            Self::Shared(rect) => Arc::unwrap_or_clone(rect),
+        }
+    }
+}
+
+struct Assembler<'cache> {
+    cache: Option<&'cache mut AssemblyCache>,
+    next_node: usize,
+}
+
+impl Assembler<'_> {
+    fn assemble(&mut self, sized: &Sized<'_>, retain: bool) -> Result<Assembled, LayoutError> {
+        let node_index = self.cache.as_ref().map(|_| {
+            let index = self.next_node;
+            self.next_node += 1;
+            index
+        });
+        let retain = retain || matches!(&sized.node, SizedNode::Canvas { .. });
+        let key = self
+            .cache
+            .as_ref()
+            .zip(node_index)
+            .filter(|_| retain)
+            .map(|(_, node_index)| AssemblyKey::from_sized(sized, node_index));
+        if let (Some(cache), Some(key)) = (self.cache.as_deref_mut(), key.as_ref())
+            && let Some(rect) = cache.get(key)
+        {
+            self.next_node = cache.subtree_end(key.node_index);
+            return Ok(Assembled::Shared(rect));
+        }
+
+        let rect = match &sized.node {
+            SizedNode::Text { lines, align, fill } => Ok(Rect {
+                width: sized.width,
+                rows: lines
+                    .iter()
+                    .map(|line| align_row(styled_graphemes(line), sized.width, *align, fill))
+                    .collect(),
+                anchors: Vec::new(),
+            }),
+            SizedNode::Block { .. } => block(sized, self),
+            SizedNode::Row(align, children) => row(*align, children, sized.width, self),
+            SizedNode::Column(align, children) => column(*align, children, sized.width, self),
+            SizedNode::Grid { .. } => grid_rect(sized, self),
+            SizedNode::Canvas { canvas, .. } => {
+                compose_canvas(canvas, Size::new(sized.width, sized.height))
+            }
+            SizedNode::Viewport { .. } => viewport(sized, self),
+        }?;
+        debug_assert_eq!(
+            rect.size(),
+            Size::new(sized.width, sized.height),
+            "assembly builds exactly the rectangle the sizing phases decided"
+        );
+        if let (Some(cache), Some(key)) = (self.cache.as_deref_mut(), key) {
+            let rect = Arc::new(rect);
+            cache.insert(key, Arc::clone(&rect));
+            return Ok(Assembled::Shared(rect));
+        }
+        Ok(Assembled::Owned(rect))
+    }
 }
 
 /// The style filling padding a parent introduces around a node.
@@ -129,7 +563,7 @@ fn fill_style(sized: &Sized<'_>) -> TextStyle {
 }
 
 /// Builds a block: place the content, then close the frame around it.
-fn block(sized: &Sized<'_>) -> Result<Rect, LayoutError> {
+fn block(sized: &Sized<'_>, assembler: &mut Assembler<'_>) -> Result<Rect, LayoutError> {
     let SizedNode::Block {
         style,
         title,
@@ -152,7 +586,7 @@ fn block(sized: &Sized<'_>) -> Result<Rect, LayoutError> {
         usize::from(padding.bottom),
     );
 
-    let content = assemble(child)?;
+    let content = assembler.assemble(child, false)?.into_owned();
     debug_assert!(
         content.width <= content_width,
         "a box is never widened by what it contains: {} > {content_width}",
@@ -382,10 +816,21 @@ fn spaced(rect: Rect, margin: Sides) -> Rect {
 }
 
 /// Places children side by side, padding the shorter ones by `align`.
-fn row(align: VerticalAlign, children: &[Sized<'_>], width: usize) -> Result<Rect, LayoutError> {
+fn row(
+    align: VerticalAlign,
+    children: &[Sized<'_>],
+    width: usize,
+    assembler: &mut Assembler<'_>,
+) -> Result<Rect, LayoutError> {
+    let retain_children = children.len() > 1;
     let rects: Vec<(Rect, TextStyle)> = children
         .iter()
-        .map(|child| Ok((assemble(child)?, fill_style(child))))
+        .map(|child| {
+            Ok((
+                assembler.assemble(child, retain_children)?.into_owned(),
+                fill_style(child),
+            ))
+        })
         .collect::<Result<_, LayoutError>>()?;
     let height = rects
         .iter()
@@ -429,12 +874,18 @@ fn row(align: VerticalAlign, children: &[Sized<'_>], width: usize) -> Result<Rec
 }
 
 /// Stacks children, padding the narrower ones to `width` by `align`.
-fn column(align: Align, children: &[Sized<'_>], width: usize) -> Result<Rect, LayoutError> {
+fn column(
+    align: Align,
+    children: &[Sized<'_>],
+    width: usize,
+    assembler: &mut Assembler<'_>,
+) -> Result<Rect, LayoutError> {
     let mut rows = Vec::new();
     let mut anchors = Vec::new();
+    let retain_children = children.len() > 1;
     for child in children {
         let fill = fill_style(child);
-        let rect = assemble(child)?;
+        let rect = assembler.assemble(child, retain_children)?.into_owned();
         // Every row of a child is padded to the column's width by the same
         // alignment, so its anchors shift by that same offset, and by the
         // rows already stacked above it.
@@ -455,7 +906,7 @@ fn column(align: Align, children: &[Sized<'_>], width: usize) -> Result<Rect, La
 }
 
 /// Builds a grid by placing every cell in its settled column and row.
-fn grid_rect(sized: &Sized<'_>) -> Result<Rect, LayoutError> {
+fn grid_rect(sized: &Sized<'_>, assembler: &mut Assembler<'_>) -> Result<Rect, LayoutError> {
     let SizedNode::Grid {
         columns,
         heights,
@@ -464,7 +915,8 @@ fn grid_rect(sized: &Sized<'_>) -> Result<Rect, LayoutError> {
     else {
         unreachable!("a grid")
     };
-    let (rows, anchors) = bands(rows, columns, heights)?;
+    let retain_children = rows.iter().map(Vec::len).sum::<usize>() > 1;
+    let (rows, anchors) = bands(rows, columns, heights, retain_children, assembler)?;
     Ok(Rect {
         width: sized.width,
         rows,
@@ -477,6 +929,8 @@ fn bands(
     rows: &[Vec<SizedCell<'_>>],
     columns: &[usize],
     heights: &[usize],
+    retain_children: bool,
+    assembler: &mut Assembler<'_>,
 ) -> Result<(Vec<Vec<StyledGrapheme>>, Vec<AnchoredRect>), LayoutError> {
     let mut out = Vec::new();
     let mut anchors = Vec::new();
@@ -485,7 +939,7 @@ fn bands(
         let rects: Vec<Rect> = cells
             .iter()
             .zip(columns)
-            .map(|(cell, width)| cell_rect(cell, *width, *height))
+            .map(|(cell, width)| cell_rect(cell, *width, *height, retain_children, assembler))
             .collect::<Result<_, LayoutError>>()?;
 
         let mut x = 0;
@@ -507,7 +961,13 @@ fn bands(
 }
 
 /// One cell, padded and placed inside the column and row it was assigned.
-fn cell_rect(cell: &SizedCell<'_>, width: usize, height: usize) -> Result<Rect, LayoutError> {
+fn cell_rect(
+    cell: &SizedCell<'_>,
+    width: usize,
+    height: usize,
+    retain: bool,
+    assembler: &mut Assembler<'_>,
+) -> Result<Rect, LayoutError> {
     let (pl, pr, pt, pb) = (
         usize::from(cell.padding.left),
         usize::from(cell.padding.right),
@@ -518,7 +978,7 @@ fn cell_rect(cell: &SizedCell<'_>, width: usize, height: usize) -> Result<Rect, 
     let content_height = height.saturating_sub(pt + pb);
     let fill = fill_style(&cell.child);
 
-    let content = assemble(&cell.child)?;
+    let content = assembler.assemble(&cell.child, retain)?.into_owned();
     let kept = content.rows.len().min(content_height);
     let gap = content_height - kept;
     let (above, below) = match cell.vertical_align {
@@ -569,14 +1029,15 @@ fn cell_rect(cell: &SizedCell<'_>, width: usize, height: usize) -> Result<Rect, 
     Ok(rect)
 }
 
-fn viewport(sized: &Sized<'_>) -> Result<Rect, LayoutError> {
+fn viewport(sized: &Sized<'_>, assembler: &mut Assembler<'_>) -> Result<Rect, LayoutError> {
     let SizedNode::Viewport {
         viewport, child, ..
     } = &sized.node
     else {
         unreachable!("a viewport")
     };
-    let child = assemble(child)?;
+    let child = assembler.assemble(child, true)?;
+    let child = child.as_rect();
     let horizontal = viewport.horizontal_projection();
     let vertical = viewport.vertical_projection();
     let x = horizontal.map_or(0, |projection| {
@@ -599,7 +1060,11 @@ fn viewport(sized: &Sized<'_>) -> Result<Rect, LayoutError> {
         });
     }
 
-    let mut anchors = shift_signed(child.anchors, x.saturating_neg(), y.saturating_neg());
+    let mut anchors = shift_signed(
+        child.anchors.clone(),
+        x.saturating_neg(),
+        y.saturating_neg(),
+    );
     clip_anchors(&mut anchors, 0, 0, sized.width, sized.height);
     Ok(Rect {
         width: sized.width,

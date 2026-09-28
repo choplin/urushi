@@ -306,9 +306,15 @@ Resolver reuse is a rendering choice, not application state. The runtime uses
 the direct stateless path unless its host selects a retained evaluator; in that
 case the runtime owns the `Resolver` and the renderer only borrows it for the
 frame. In either case `Application::view` returns the same `View`, and retained
-evaluation cannot produce messages or alter model behavior. The equivalence
+evaluation cannot produce messages, alter model behavior, or choose a prior
+layout over the one that View describes. Responsive or otherwise changed
+layout is expressed by `Application::view`; Resolver state may only reuse
+materialized output after the current layout pass validates it. The equivalence
 and invalidation rules are defined in
 [`design/resolution-reuse.md`](design/resolution-reuse.md).
+Graphics reconciliation and animation scheduling remain separate retained
+capabilities owned by the same host; neither is registered inside the core
+resolver.
 
 What each owner does at the boundary — the commit guarantee Ratatui does not
 give, cursor restoration, what a session cannot promise to restore — and the
