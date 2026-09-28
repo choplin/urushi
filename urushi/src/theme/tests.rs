@@ -1,5 +1,5 @@
 use crate::test_support::{render_block, render_style};
-use crate::{BlockStyle, Color, TextStyle};
+use crate::{BlockStyle, Color, TerminalBackground, TextStyle};
 
 use super::*;
 
@@ -287,5 +287,50 @@ fn theme_set_selects_between_a_light_and_dark_theme() {
             "x",
         ),
         "\x1b[91mx\x1b[0m"
+    );
+}
+
+#[test]
+fn explicit_theme_modes_ignore_an_observed_background() {
+    let white = TerminalBackground::new(u16::MAX, u16::MAX, u16::MAX);
+    let black = TerminalBackground::new(0, 0, 0);
+
+    assert_eq!(ThemeMode::Light.resolve(Some(black)), ColorScheme::Light);
+    assert_eq!(ThemeMode::Dark.resolve(Some(white)), ColorScheme::Dark);
+}
+
+#[test]
+fn automatic_theme_mode_uses_its_explicit_fallback() {
+    assert_eq!(
+        ThemeMode::Auto {
+            fallback: ColorScheme::Light,
+        }
+        .resolve(None),
+        ColorScheme::Light
+    );
+    assert_eq!(
+        ThemeMode::Auto {
+            fallback: ColorScheme::Dark,
+        }
+        .resolve(None),
+        ColorScheme::Dark
+    );
+}
+
+#[test]
+fn automatic_theme_mode_classifies_across_the_luminance_boundary() {
+    assert_eq!(
+        ThemeMode::Auto {
+            fallback: ColorScheme::Light,
+        }
+        .resolve(Some(TerminalBackground::new(48_191, 48_191, 48_191))),
+        ColorScheme::Dark
+    );
+    assert_eq!(
+        ThemeMode::Auto {
+            fallback: ColorScheme::Dark,
+        }
+        .resolve(Some(TerminalBackground::new(48_192, 48_192, 48_192))),
+        ColorScheme::Light
     );
 }

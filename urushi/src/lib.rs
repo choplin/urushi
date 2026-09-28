@@ -59,10 +59,10 @@ pub use text::{
 };
 pub use theme::{
     BlockThemeRole, ColorScheme, ComponentRole, ComponentTheme, ListRole, PanelRole,
-    SemanticTokens, TableRole, TextThemeRole, Theme, ThemeSet, TreeRole,
+    SemanticTokens, TableRole, TextThemeRole, Theme, ThemeMode, ThemeSet, TreeRole,
 };
 pub use urushi_derive::TableRow;
-pub use urushi_terminal::{ColorLevel, TerminalCapabilities, TerminalStyle};
+pub use urushi_terminal::{ColorLevel, TerminalBackground, TerminalCapabilities, TerminalStyle};
 pub use view::{
     AnchoredRect, Available, Axis, BlockTitle, Canvas, CanvasCell, CanvasContext, CanvasItem,
     CanvasSizing, CellContribution, Composition, LayoutError, LayoutErrorKind, LineContinuations,

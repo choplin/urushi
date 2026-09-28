@@ -67,7 +67,7 @@ mod role;
 mod tokens;
 
 pub use component_theme::ComponentTheme;
-pub use definition::{ColorScheme, Theme, ThemeSet};
+pub use definition::{ColorScheme, Theme, ThemeMode, ThemeSet};
 pub use role::{
     BlockThemeRole, ComponentRole, ListRole, PanelRole, TableRole, TextThemeRole, TreeRole,
 };

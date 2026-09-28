@@ -25,7 +25,9 @@ pub use event::{
     KeyboardEnhancementFlags, MediaKeyCode, ModifierKeyCode, Modifiers, MouseButton, MouseEvent,
     MouseKind,
 };
-pub use query::{KeyboardEnhancementQuery, PixelSize, TerminalQuery, WindowSize};
+pub use query::{
+    KeyboardEnhancementQuery, PixelSize, TerminalBackground, TerminalQuery, WindowSize,
+};
 pub use session::{RawModeControl, SessionError, SessionOptions, TerminalSession};
 pub use style::{
     Color, TerminalStyle, TextAttribute, TextAttributeIter, TextAttributes, Underline,

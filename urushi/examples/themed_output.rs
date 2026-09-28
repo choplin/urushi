@@ -1,4 +1,4 @@
-use urushi::{Color, ColorScheme, PanelRole, SemanticTokens, Theme, ThemeSet, View};
+use urushi::{Color, PanelRole, SemanticTokens, Theme, ThemeMode, ThemeSet, View};
 
 fn light_tokens() -> SemanticTokens {
     SemanticTokens {
@@ -35,7 +35,10 @@ fn main() {
         Theme::from_tokens(light_tokens()),
         Theme::from_tokens(dark_tokens()),
     );
-    let theme = themes.select(ColorScheme::Dark);
+    // An explicit mode resolves without opening or querying a terminal. Auto
+    // callers conditionally perform the query shown in ThemeMode's rustdoc.
+    let mode = ThemeMode::Dark;
+    let theme = themes.select(mode.resolve(None));
 
     let panel = theme.block_style(PanelRole::PanelFocused);
     let view = View::block(

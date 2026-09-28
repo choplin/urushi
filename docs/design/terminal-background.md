@@ -24,16 +24,16 @@ background implicitly.
 
 ```rust
 pub struct TerminalBackground {
-    red: u8,
-    green: u8,
-    blue: u8,
+    red: u16,
+    green: u16,
+    blue: u16,
 }
 
 impl TerminalBackground {
-    pub const fn new(red: u8, green: u8, blue: u8) -> Self;
-    pub const fn red(self) -> u8;
-    pub const fn green(self) -> u8;
-    pub const fn blue(self) -> u8;
+    pub const fn new(red: u16, green: u16, blue: u16) -> Self;
+    pub const fn red(self) -> u16;
+    pub const fn green(self) -> u16;
+    pub const fn blue(self) -> u16;
 }
 
 pub trait TerminalQuery {
@@ -47,9 +47,11 @@ pub trait TerminalQuery {
 The query is a synchronous, one-shot observation of the connection on which it
 is invoked. The native backend sends the OSC 11 background-color query and
 parses an OSC 11 `rgb:` reply. Protocol components from one through four
-hexadecimal digits are scaled to the nearest eight-bit value. Ordinary input
-consumed while waiting for the reply remains pending for the event reader, as
-it does for other terminal queries.
+hexadecimal digits are scaled to the nearest sixteen-bit value. Four-digit
+components therefore retain the exact value reported by the terminal instead
+of losing precision at the observation boundary. Ordinary input consumed while
+waiting for the reply remains pending for the event reader, as it does for
+other terminal queries.
 
 An unsupported query, no reply, a malformed reply, or expiry of the query
 timeout produces `Ok(None)`. Failure to read from or write to the owned
@@ -86,8 +88,8 @@ terminal observation. `Auto` classifies a present background and uses its
 explicit `fallback` when observation returns `None`; there is no implicit
 fallback and `ThemeMode` has no default.
 
-Classification uses relative luminance over sRGB. For each eight-bit channel,
-first normalize `c = channel / 255`. Linearize it as:
+Classification uses relative luminance over sRGB. For each sixteen-bit channel,
+first normalize `c = channel / 65535`. Linearize it as:
 
 ```text
 c_linear = c / 12.92                         when c <= 0.04045
@@ -158,6 +160,11 @@ surface state.
 
 ## Rejected alternatives
 
+- Reducing the observation to eight-bit channels would match common rendering
+  color types but discard precision from four-digit OSC 11 components before a
+  caller chooses how to use it. The observation retains the protocol's maximum
+  sixteen-bit precision; a renderer that needs eight-bit RGB converts at its
+  own boundary.
 - Putting the result in TUI `Surface` would repeatedly deliver a value that is
   stable for the ordinary run and would incorrectly make initial theme
   construction depend on application messages.

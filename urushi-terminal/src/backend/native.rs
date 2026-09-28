@@ -13,14 +13,16 @@ use std::{
 use crate::{
     ColorLevel, Command, CommandWriter, Event, EventSource, FocusChange, KeyCode, KeyEvent,
     KeyKind, KeyboardEnhancementQuery, Modifiers, MouseButton, MouseEvent, MouseKind, PixelSize,
-    Position, RawModeControl, TerminalCapabilities, TerminalGraphicsProtocols, TerminalInfo,
-    TerminalOutput, TerminalQuery, TerminalSize, WindowSize, backend::ansi::AnsiWriter,
+    Position, RawModeControl, TerminalBackground, TerminalCapabilities, TerminalGraphicsProtocols,
+    TerminalInfo, TerminalOutput, TerminalQuery, TerminalSize, WindowSize,
+    backend::ansi::AnsiWriter,
 };
 
 const ESCAPE_TIMEOUT: Duration = Duration::from_millis(10);
 const QUERY_TIMEOUT: Duration = Duration::from_secs(2);
 const RESIZE_POLL_INTERVAL: Duration = Duration::from_millis(50);
 const MAX_CONTROL_RESPONSE_BYTES: usize = 64 * 1024;
+const BACKGROUND_QUERY: &[u8] = b"\x1b]11;?\x1b\\";
 const CAPABILITY_QUERY: &[u8] = concat!(
     "\x1b_Gi=31,s=1,v=1,a=q,t=d,f=24;AAAA\x1b\\",
     "\x1b[c",
@@ -96,6 +98,9 @@ pub struct NativeTerminal {
     input_start: usize,
     pending: VecDeque<Event>,
     cursor_response: Option<Position>,
+    background_query_active: bool,
+    background_response_discarding: bool,
+    background_response: Option<Option<TerminalBackground>>,
     capability_probe: Option<CapabilityProbe>,
     capabilities: Option<TerminalCapabilities>,
     last_size: TerminalSize,
@@ -121,6 +126,9 @@ impl NativeTerminal {
             input_start: 0,
             pending: VecDeque::new(),
             cursor_response: None,
+            background_query_active: false,
+            background_response_discarding: false,
+            background_response: None,
             capability_probe: None,
             capabilities: None,
             last_size,
@@ -155,12 +163,26 @@ impl NativeTerminal {
         let mut attempted_read = false;
         let raw_mode = self.original_termios.is_some() || self.raw_mode_enabled()?;
         loop {
-            if let Some(decoded) = decode(self.unread_input(), false, raw_mode)? {
+            if let Some(decoded) = decode(
+                self.unread_input(),
+                false,
+                raw_mode,
+                self.background_query_active,
+                self.background_response_discarding,
+            )? {
                 self.consume_input(decoded.consumed);
                 match decoded.item {
                     DecodedItem::Event(event) => return Ok(Some(event)),
                     DecodedItem::Cursor(position) => {
                         self.cursor_response = Some(position);
+                        return Ok(None);
+                    }
+                    DecodedItem::Background(background) => {
+                        self.background_response = Some(background);
+                        return Ok(None);
+                    }
+                    DecodedItem::BackgroundOverflow => {
+                        self.background_response_discarding = true;
                         return Ok(None);
                     }
                     DecodedItem::Response(response) => {
@@ -186,12 +208,26 @@ impl NativeTerminal {
             let read = self.read_input(wait)?;
             attempted_read = true;
             if !read {
-                if let Some(decoded) = decode(self.unread_input(), true, raw_mode)? {
+                if let Some(decoded) = decode(
+                    self.unread_input(),
+                    true,
+                    raw_mode,
+                    self.background_query_active,
+                    self.background_response_discarding,
+                )? {
                     self.consume_input(decoded.consumed);
                     match decoded.item {
                         DecodedItem::Event(event) => return Ok(Some(event)),
                         DecodedItem::Cursor(position) => {
                             self.cursor_response = Some(position);
+                            return Ok(None);
+                        }
+                        DecodedItem::Background(background) => {
+                            self.background_response = Some(background);
+                            return Ok(None);
+                        }
+                        DecodedItem::BackgroundOverflow => {
+                            self.background_response_discarding = true;
                             return Ok(None);
                         }
                         DecodedItem::Response(response) => {
@@ -351,9 +387,71 @@ impl TerminalQuery for NativeTerminal {
             (Err(error), _) | (Ok(_), Err(error)) => Err(error),
         }
     }
+
+    fn terminal_background(&mut self) -> io::Result<Option<TerminalBackground>> {
+        let restore_raw_mode = self.original_termios.is_none();
+        if restore_raw_mode {
+            self.enable_raw_mode()?;
+        }
+
+        let query_result = self.query_terminal_background(QUERY_TIMEOUT);
+        let restore_result = if restore_raw_mode {
+            self.disable_raw_mode()
+        } else {
+            Ok(())
+        };
+
+        match (query_result, restore_result) {
+            (Ok(background), Ok(())) => Ok(background),
+            (Err(error), _) | (Ok(_), Err(error)) => Err(error),
+        }
+    }
 }
 
 impl NativeTerminal {
+    fn query_terminal_background(
+        &mut self,
+        timeout: Duration,
+    ) -> io::Result<Option<TerminalBackground>> {
+        self.background_response = None;
+        self.background_query_active = true;
+        self.background_response_discarding = false;
+        let result = (|| {
+            self.output.writer_mut().write_all(BACKGROUND_QUERY)?;
+            self.output.flush()?;
+
+            let started = Instant::now();
+            loop {
+                if let Some(background) = self.background_response.take() {
+                    return Ok(background);
+                }
+                let remaining = timeout.saturating_sub(started.elapsed());
+                if remaining.is_zero() {
+                    self.discard_unterminated_background_response();
+                    return Ok(None);
+                }
+                if let Some(event) = self.next_wire_event(Some(remaining))? {
+                    self.pending.push_back(event);
+                }
+            }
+        })();
+        self.background_query_active = false;
+        self.background_response_discarding = false;
+        result
+    }
+
+    fn discard_unterminated_background_response(&mut self) {
+        let discard = self.background_response_discarding
+            || (self.unread_input().starts_with(b"\x1b]11;")
+                && osc_terminator(&self.unread_input()[2..]).is_none());
+        if discard {
+            let discarded = self.unread_input().len();
+            if discarded != 0 {
+                self.consume_input(discarded);
+            }
+        }
+    }
+
     fn query_terminal_capabilities(&mut self) -> io::Result<TerminalCapabilities> {
         self.capability_probe = Some(CapabilityProbe::default());
         let result = (|| {
@@ -492,13 +590,24 @@ struct Decoded {
 enum DecodedItem {
     Event(Event),
     Cursor(Position),
+    Background(Option<TerminalBackground>),
+    BackgroundOverflow,
     Response(CapabilityResponse),
 }
 
-fn decode(input: &[u8], escape_complete: bool, raw_mode: bool) -> io::Result<Option<Decoded>> {
+fn decode(
+    input: &[u8],
+    escape_complete: bool,
+    raw_mode: bool,
+    background_query_active: bool,
+    background_response_discarding: bool,
+) -> io::Result<Option<Decoded>> {
     let Some(&first) = input.first() else {
         return Ok(None);
     };
+    if background_response_discarding {
+        return Ok(decode_osc_discard(input));
+    }
     if first != 0x1b {
         return decode_plain(input, raw_mode);
     }
@@ -509,6 +618,11 @@ fn decode(input: &[u8], escape_complete: bool, raw_mode: bool) -> io::Result<Opt
     }
     match input[1] {
         b'[' => decode_csi(input, escape_complete),
+        b']' if (background_query_active && possible_background_response(input))
+            || complete_background_response(input) =>
+        {
+            decode_osc(input, escape_complete)
+        }
         b'P' => decode_control_string(input, b'P', escape_complete),
         b'_' => decode_control_string(input, b'_', escape_complete),
         b'O' => decode_ss3(input),
@@ -528,6 +642,102 @@ fn decode(input: &[u8], escape_complete: bool, raw_mode: bool) -> io::Result<Opt
             Ok(Some(decoded))
         }
     }
+}
+
+fn possible_background_response(input: &[u8]) -> bool {
+    input
+        .strip_prefix(b"\x1b]")
+        .is_some_and(|body| b"11;".starts_with(body) || body.starts_with(b"11;"))
+}
+
+fn complete_background_response(input: &[u8]) -> bool {
+    input
+        .strip_prefix(b"\x1b]11;")
+        .is_some_and(|body| osc_terminator(body).is_some())
+}
+
+fn decode_osc(input: &[u8], escape_complete: bool) -> io::Result<Option<Decoded>> {
+    let unfinished_body = &input[2..];
+    let Some((body_end, terminator_length)) = osc_terminator(unfinished_body) else {
+        if input.len() > MAX_CONTROL_RESPONSE_BYTES {
+            let consumed = discardable_osc_bytes(input);
+            if consumed == 0 {
+                return Ok(None);
+            }
+            return Ok(Some(Decoded {
+                item: DecodedItem::BackgroundOverflow,
+                consumed,
+            }));
+        }
+        if b"11;".starts_with(unfinished_body) || unfinished_body.starts_with(b"11;") {
+            return Ok(None);
+        }
+        return if escape_complete {
+            decoded_key(KeyCode::Escape, Modifiers::NONE, 1).map(Some)
+        } else {
+            Ok(None)
+        };
+    };
+    let body = &input[2..2 + body_end];
+    let item = match body.strip_prefix(b"11;") {
+        Some(color) => DecodedItem::Background(parse_osc_rgb(color)),
+        None => DecodedItem::Response(CapabilityResponse::Ignored),
+    };
+    Ok(Some(Decoded {
+        item,
+        consumed: 2 + body_end + terminator_length,
+    }))
+}
+
+fn decode_osc_discard(input: &[u8]) -> Option<Decoded> {
+    if let Some((body_end, terminator_length)) = osc_terminator(input) {
+        return Some(Decoded {
+            item: DecodedItem::Background(None),
+            consumed: body_end + terminator_length,
+        });
+    }
+    let consumed = discardable_osc_bytes(input);
+    (consumed != 0).then_some(Decoded {
+        item: DecodedItem::Response(CapabilityResponse::Ignored),
+        consumed,
+    })
+}
+
+fn discardable_osc_bytes(input: &[u8]) -> usize {
+    input.len() - usize::from(input.last() == Some(&0x1b))
+}
+
+fn osc_terminator(body: &[u8]) -> Option<(usize, usize)> {
+    body.iter()
+        .enumerate()
+        .find_map(|(index, byte)| match byte {
+            0x07 => Some((index, 1)),
+            0x1b if body.get(index + 1) == Some(&b'\\') => Some((index, 2)),
+            _ => None,
+        })
+}
+
+fn parse_osc_rgb(value: &[u8]) -> Option<TerminalBackground> {
+    let components = value.strip_prefix(b"rgb:")?;
+    let mut components = components.split(|byte| *byte == b'/');
+    let red = scale_osc_component(components.next()?)?;
+    let green = scale_osc_component(components.next()?)?;
+    let blue = scale_osc_component(components.next()?)?;
+    if components.next().is_some() {
+        return None;
+    }
+    Some(TerminalBackground::new(red, green, blue))
+}
+
+fn scale_osc_component(component: &[u8]) -> Option<u16> {
+    if !(1..=4).contains(&component.len()) {
+        return None;
+    }
+    let component = std::str::from_utf8(component).ok()?;
+    let value = u16::from_str_radix(component, 16).ok()?;
+    let maximum = (1_u64 << (component.len() * 4)) - 1;
+    let scaled = (u64::from(value) * u64::from(u16::MAX) + maximum / 2) / maximum;
+    u16::try_from(scaled).ok()
 }
 
 fn decode_plain(input: &[u8], raw_mode: bool) -> io::Result<Option<Decoded>> {
@@ -899,14 +1109,27 @@ mod tests {
     use crate::TerminalText;
 
     fn event(bytes: &[u8]) -> Event {
-        let decoded = decode(bytes, true, true)
+        let decoded = decode(bytes, true, true, false, false)
             .expect("sequence is valid")
             .expect("sequence is complete");
         assert_eq!(decoded.consumed, bytes.len());
         match decoded.item {
             DecodedItem::Event(event) => event,
             DecodedItem::Cursor(_) => panic!("expected an event"),
+            DecodedItem::Background(_) => panic!("expected an event"),
+            DecodedItem::BackgroundOverflow => panic!("expected an event"),
             DecodedItem::Response(_) => panic!("expected an event"),
+        }
+    }
+
+    fn background(bytes: &[u8]) -> Option<TerminalBackground> {
+        let decoded = decode(bytes, false, true, true, false)
+            .expect("sequence is valid")
+            .expect("sequence is complete");
+        assert_eq!(decoded.consumed, bytes.len());
+        match decoded.item {
+            DecodedItem::Background(background) => background,
+            _ => panic!("expected a background response"),
         }
     }
 
@@ -921,6 +1144,10 @@ mod tests {
             Event::Key(KeyEvent::new(KeyCode::Up).with_modifiers(Modifiers::CONTROL))
         );
         assert_eq!(
+            event(b"\x1b]"),
+            Event::Key(KeyEvent::new(KeyCode::Char(']')).with_modifiers(Modifiers::ALT))
+        );
+        assert_eq!(
             event(b"\x1b[200~a\nb\x1b[201~"),
             Event::Paste("a\nb".to_owned())
         );
@@ -928,7 +1155,7 @@ mod tests {
             event(b"\n"),
             Event::Key(KeyEvent::new(KeyCode::Char('j')).with_modifiers(Modifiers::CONTROL))
         );
-        let canonical_newline = decode(b"\n", true, false)
+        let canonical_newline = decode(b"\n", true, false, false, false)
             .expect("newline is valid")
             .expect("newline is complete");
         assert!(matches!(
@@ -942,12 +1169,51 @@ mod tests {
 
     #[test]
     fn decoder_separates_cursor_replies_from_events() {
-        let decoded = decode(b"\x1b[12;34R", false, true)
+        let decoded = decode(b"\x1b[12;34R", false, true, false, false)
             .expect("reply is valid")
             .expect("reply is complete");
         assert!(matches!(decoded.item, DecodedItem::Cursor(Position { .. })));
         if let DecodedItem::Cursor(position) = decoded.item {
             assert_eq!(position, Position::new(33, 11));
+        }
+    }
+
+    #[test]
+    fn decoder_normalizes_osc_background_components_to_sixteen_bits() {
+        assert!(
+            decode(b"\x1b]11;rgb:ffff", true, true, true, false)
+                .expect("partial reply is valid")
+                .is_none()
+        );
+        assert_eq!(
+            background(b"\x1b]11;rgb:f/0/8\x07"),
+            Some(TerminalBackground::new(0xffff, 0x0000, 0x8888))
+        );
+        assert_eq!(
+            background(b"\x1b]11;rgb:ff/00/80\x1b\\"),
+            Some(TerminalBackground::new(0xffff, 0x0000, 0x8080))
+        );
+        assert_eq!(
+            background(b"\x1b]11;rgb:fff/000/800\x1b\\"),
+            Some(TerminalBackground::new(0xffff, 0x0000, 0x8008))
+        );
+        assert_eq!(
+            background(b"\x1b]11;rgb:ffff/0000/8000\x1b\\"),
+            Some(TerminalBackground::new(0xffff, 0x0000, 0x8000))
+        );
+    }
+
+    #[test]
+    fn decoder_marks_malformed_osc_background_replies_as_unavailable() {
+        for response in [
+            b"\x1b]11;rgb:/0/0\x07".as_slice(),
+            b"\x1b]11;rgb:00000/0/0\x07".as_slice(),
+            b"\x1b]11;rgb:g/0/0\x07".as_slice(),
+            b"\x1b]11;rgb:0/0\x07".as_slice(),
+            b"\x1b]11;rgb:0/0/0/0\x07".as_slice(),
+            b"\x1b]11;not-a-color\x07".as_slice(),
+        ] {
+            assert_eq!(background(response), None);
         }
     }
 
@@ -968,7 +1234,7 @@ mod tests {
         ];
 
         for (wire, expected) in responses {
-            let decoded = decode(wire, false, true)
+            let decoded = decode(wire, false, true, false, false)
                 .expect("response decodes")
                 .expect("response is complete");
             assert_eq!(decoded.consumed, wire.len());
@@ -984,7 +1250,7 @@ mod tests {
             b"\x1bP0+r524742\x1b\\".as_slice(),
             b"\x1bP1+r756e6b6e6f776e=31\x1b\\".as_slice(),
         ] {
-            let decoded = decode(wire, false, true)
+            let decoded = decode(wire, false, true, false, false)
                 .expect("response decodes")
                 .expect("response is complete");
             assert!(matches!(
@@ -999,7 +1265,7 @@ mod tests {
         let mut response = b"\x1b_".to_vec();
         response.resize(MAX_CONTROL_RESPONSE_BYTES + 1, b'x');
 
-        let error = match decode(&response, false, true) {
+        let error = match decode(&response, false, true, false, false) {
             Err(error) => error,
             Ok(_) => panic!("oversized response is accepted"),
         };
@@ -1080,6 +1346,270 @@ mod tests {
             terminal.read_event().expect("queued event is retained"),
             Event::Key(KeyEvent::new(KeyCode::Char('x')))
         );
+    }
+
+    #[test]
+    fn background_query_uses_osc_11_and_preserves_ordinary_input() {
+        let (mut peer, mut terminal) = terminal_pair();
+        let (release_peer, keep_peer_open) = std::sync::mpsc::channel();
+        let responder = std::thread::spawn(move || {
+            let mut query = vec![0_u8; BACKGROUND_QUERY.len()];
+            peer.read_exact(&mut query).expect("query reaches tty");
+            assert_eq!(query, BACKGROUND_QUERY);
+            peer.write_all(b"x\x1b]11;rgb:1234/5678/9abc\x1b\\")
+                .expect("input and response reach tty");
+            keep_peer_open
+                .recv()
+                .expect("peer remains open until the response is consumed");
+        });
+
+        let background = terminal
+            .terminal_background()
+            .expect("background query succeeds");
+        release_peer.send(()).expect("responder remains available");
+        responder.join().expect("responder completes");
+        assert_eq!(
+            background,
+            Some(TerminalBackground::new(0x1234, 0x5678, 0x9abc))
+        );
+        assert_eq!(
+            terminal.read_event().expect("queued event is retained"),
+            Event::Key(KeyEvent::new(KeyCode::Char('x')))
+        );
+        assert!(!terminal.raw_mode_enabled().expect("raw mode is restored"));
+    }
+
+    #[test]
+    fn background_query_preserves_alt_bracket_before_its_reply() {
+        let (mut peer, mut terminal) = terminal_pair();
+        let (release_peer, keep_peer_open) = std::sync::mpsc::channel();
+        let responder = std::thread::spawn(move || {
+            let mut query = vec![0_u8; BACKGROUND_QUERY.len()];
+            peer.read_exact(&mut query).expect("query reaches tty");
+            peer.write_all(b"\x1b]\x1b]11;rgb:1234/5678/9abc\x1b\\")
+                .expect("input and response reach tty");
+            keep_peer_open
+                .recv()
+                .expect("peer remains open until the response is consumed");
+        });
+
+        let background = terminal
+            .terminal_background()
+            .expect("background query succeeds");
+        release_peer.send(()).expect("responder remains available");
+        responder.join().expect("responder completes");
+        assert_eq!(
+            background,
+            Some(TerminalBackground::new(0x1234, 0x5678, 0x9abc))
+        );
+        assert_eq!(
+            terminal.read_event().expect("queued event is retained"),
+            Event::Key(KeyEvent::new(KeyCode::Char(']')).with_modifiers(Modifiers::ALT))
+        );
+    }
+
+    #[test]
+    fn background_query_returns_none_for_malformed_and_timed_out_replies() {
+        let (mut malformed_peer, mut malformed_terminal) = terminal_pair();
+        let (release_malformed_peer, keep_malformed_peer_open) = std::sync::mpsc::channel();
+        let malformed_responder = std::thread::spawn(move || {
+            let mut query = vec![0_u8; BACKGROUND_QUERY.len()];
+            malformed_peer
+                .read_exact(&mut query)
+                .expect("query reaches tty");
+            malformed_peer
+                .write_all(b"\x1b]11;rgb:nope\x07")
+                .expect("malformed response reaches tty");
+            keep_malformed_peer_open
+                .recv()
+                .expect("peer remains open until the response is consumed");
+        });
+        let malformed = malformed_terminal
+            .terminal_background()
+            .expect("malformed reply is not an I/O error");
+        release_malformed_peer
+            .send(())
+            .expect("malformed responder remains available");
+        malformed_responder
+            .join()
+            .expect("malformed responder completes");
+        assert_eq!(malformed, None);
+
+        let (mut silent_peer, mut silent_terminal) = terminal_pair();
+        silent_terminal
+            .enable_raw_mode()
+            .expect("raw mode is enabled");
+        let (release_peer, keep_peer_open) = std::sync::mpsc::channel();
+        let silent_responder = std::thread::spawn(move || {
+            let mut query = vec![0_u8; BACKGROUND_QUERY.len()];
+            silent_peer
+                .read_exact(&mut query)
+                .expect("query reaches tty");
+            keep_peer_open
+                .recv()
+                .expect("peer remains open through timeout");
+        });
+        assert_eq!(
+            silent_terminal
+                .query_terminal_background(Duration::from_millis(20))
+                .expect("timeout is not an I/O error"),
+            None
+        );
+        release_peer.send(()).expect("silent peer is released");
+        silent_responder.join().expect("silent responder completes");
+        silent_terminal
+            .disable_raw_mode()
+            .expect("raw mode is restored");
+    }
+
+    #[test]
+    fn background_query_keeps_connection_failures_as_errors() {
+        let (peer, mut terminal) = terminal_pair();
+        drop(peer);
+
+        assert!(terminal.terminal_background().is_err());
+    }
+
+    #[test]
+    fn background_query_discards_an_unterminated_reply_before_resuming_events() {
+        let (mut peer, mut terminal) = terminal_pair();
+        terminal.enable_raw_mode().expect("raw mode is enabled");
+        let (send_key, key_requested) = std::sync::mpsc::channel();
+        let (release_peer, keep_peer_open) = std::sync::mpsc::channel();
+        let responder = std::thread::spawn(move || {
+            let mut query = vec![0_u8; BACKGROUND_QUERY.len()];
+            peer.read_exact(&mut query).expect("query reaches tty");
+            peer.write_all(b"\x1b]11;rgb:ffff/ffff")
+                .expect("partial response reaches tty");
+            key_requested.recv().expect("ordinary input is requested");
+            peer.write_all(b"x").expect("ordinary input reaches tty");
+            keep_peer_open
+                .recv()
+                .expect("peer remains open until input is consumed");
+        });
+
+        assert_eq!(
+            terminal
+                .query_terminal_background(Duration::from_millis(20))
+                .expect("partial response times out without an I/O error"),
+            None
+        );
+        send_key.send(()).expect("ordinary input is released");
+        assert_eq!(
+            terminal.read_event().expect("event reading resumes"),
+            Event::Key(KeyEvent::new(KeyCode::Char('x')))
+        );
+        release_peer.send(()).expect("responder remains available");
+        responder.join().expect("responder completes");
+        terminal.disable_raw_mode().expect("raw mode is restored");
+    }
+
+    #[test]
+    fn background_query_discards_an_oversized_reply_before_resuming_events() {
+        let (mut peer, mut terminal) = terminal_pair();
+        terminal.enable_raw_mode().expect("raw mode is enabled");
+        let (send_key, key_requested) = std::sync::mpsc::channel();
+        let (release_peer, keep_peer_open) = std::sync::mpsc::channel();
+        let responder = std::thread::spawn(move || {
+            let mut query = vec![0_u8; BACKGROUND_QUERY.len()];
+            peer.read_exact(&mut query).expect("query reaches tty");
+            let mut response = b"\x1b]11;rgb:".to_vec();
+            response.resize(MAX_CONTROL_RESPONSE_BYTES + 16 * 1024, b'x');
+            response.extend_from_slice(b"\x1b\\");
+            peer.write_all(&response)
+                .expect("oversized response reaches tty");
+            key_requested.recv().expect("ordinary input is requested");
+            peer.write_all(b"x").expect("ordinary input reaches tty");
+            keep_peer_open
+                .recv()
+                .expect("peer remains open until input is consumed");
+        });
+
+        assert_eq!(
+            terminal
+                .query_terminal_background(Duration::from_secs(1))
+                .expect("oversized response is not an I/O error"),
+            None
+        );
+        send_key.send(()).expect("ordinary input is released");
+        assert_eq!(
+            terminal.read_event().expect("event reading resumes"),
+            Event::Key(KeyEvent::new(KeyCode::Char('x')))
+        );
+        release_peer.send(()).expect("responder remains available");
+        responder.join().expect("responder completes");
+        terminal.disable_raw_mode().expect("raw mode is restored");
+    }
+
+    #[test]
+    fn background_query_discards_a_trailing_escape_when_overflow_times_out() {
+        let (mut peer, mut terminal) = terminal_pair();
+        terminal.enable_raw_mode().expect("raw mode is enabled");
+        let (send_key, key_requested) = std::sync::mpsc::channel();
+        let (release_peer, keep_peer_open) = std::sync::mpsc::channel();
+        let responder = std::thread::spawn(move || {
+            let mut query = vec![0_u8; BACKGROUND_QUERY.len()];
+            peer.read_exact(&mut query).expect("query reaches tty");
+            let mut response = b"\x1b]11;rgb:".to_vec();
+            response.resize(MAX_CONTROL_RESPONSE_BYTES, b'x');
+            response.push(0x1b);
+            peer.write_all(&response)
+                .expect("unterminated oversized response reaches tty");
+            key_requested.recv().expect("ordinary input is requested");
+            peer.write_all(b"x").expect("ordinary input reaches tty");
+            keep_peer_open
+                .recv()
+                .expect("peer remains open until input is consumed");
+        });
+
+        assert_eq!(
+            terminal
+                .query_terminal_background(Duration::from_secs(1))
+                .expect("unterminated overflow times out without an I/O error"),
+            None
+        );
+        send_key.send(()).expect("ordinary input is released");
+        assert_eq!(
+            terminal.read_event().expect("event reading resumes"),
+            Event::Key(KeyEvent::new(KeyCode::Char('x')))
+        );
+        release_peer.send(()).expect("responder remains available");
+        responder.join().expect("responder completes");
+        terminal.disable_raw_mode().expect("raw mode is restored");
+    }
+
+    #[test]
+    fn background_query_observes_a_fresh_value_on_each_call() {
+        let (mut peer, mut terminal) = terminal_pair();
+        let (release_peer, keep_peer_open) = std::sync::mpsc::channel();
+        let responder = std::thread::spawn(move || {
+            for response in [
+                b"\x1b]11;rgb:0000/0000/0000\x1b\\".as_slice(),
+                b"\x1b]11;rgb:ffff/ffff/ffff\x1b\\".as_slice(),
+            ] {
+                let mut query = vec![0_u8; BACKGROUND_QUERY.len()];
+                peer.read_exact(&mut query).expect("query reaches tty");
+                peer.write_all(response).expect("response reaches tty");
+            }
+            keep_peer_open
+                .recv()
+                .expect("peer remains open until both responses are consumed");
+        });
+
+        assert_eq!(
+            terminal
+                .terminal_background()
+                .expect("first query succeeds"),
+            Some(TerminalBackground::new(0, 0, 0))
+        );
+        assert_eq!(
+            terminal
+                .terminal_background()
+                .expect("second query succeeds"),
+            Some(TerminalBackground::new(u16::MAX, u16::MAX, u16::MAX,))
+        );
+        release_peer.send(()).expect("responder remains available");
+        responder.join().expect("responder completes");
     }
 
     #[test]

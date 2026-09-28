@@ -2,6 +2,8 @@
 
 use std::fmt;
 
+use urushi_terminal::TerminalBackground;
+
 use crate::{BlockStyle, List, Table, TextStyle, Tree, View};
 
 use super::{BlockThemeRole, ComponentTheme, SemanticTokens, TextThemeRole};
@@ -11,6 +13,67 @@ use super::{BlockThemeRole, ComponentTheme, SemanticTokens, TextThemeRole};
 pub enum ColorScheme {
     Light,
     Dark,
+}
+
+/// The caller's policy for selecting a light or dark theme.
+///
+/// `Light` and `Dark` are explicit choices and need no terminal observation.
+/// `Auto` classifies an observed terminal background, or uses its explicit
+/// fallback when observation is unavailable.
+///
+/// ```
+/// use std::io;
+/// use urushi::{ColorScheme, ThemeMode};
+/// use urushi_terminal::TerminalQuery;
+///
+/// # fn resolve_mode(
+/// #     terminal: &mut impl TerminalQuery,
+/// #     mode: ThemeMode,
+/// # ) -> io::Result<ColorScheme> {
+/// let background = match mode {
+///     ThemeMode::Auto { .. } => terminal.terminal_background()?,
+///     ThemeMode::Light | ThemeMode::Dark => None,
+/// };
+/// let scheme = mode.resolve(background);
+/// # Ok(scheme)
+/// # }
+/// ```
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ThemeMode {
+    Light,
+    Dark,
+    Auto { fallback: ColorScheme },
+}
+
+impl ThemeMode {
+    pub fn resolve(self, background: Option<TerminalBackground>) -> ColorScheme {
+        match self {
+            Self::Light => ColorScheme::Light,
+            Self::Dark => ColorScheme::Dark,
+            Self::Auto { fallback } => background.map_or(fallback, classify_background),
+        }
+    }
+}
+
+fn classify_background(background: TerminalBackground) -> ColorScheme {
+    let red = linear_srgb(background.red());
+    let green = linear_srgb(background.green());
+    let blue = linear_srgb(background.blue());
+    let luminance = 0.2126 * red + 0.7152 * green + 0.0722 * blue;
+    if luminance < 0.5 {
+        ColorScheme::Dark
+    } else {
+        ColorScheme::Light
+    }
+}
+
+fn linear_srgb(channel: u16) -> f64 {
+    let encoded = f64::from(channel) / f64::from(u16::MAX);
+    if encoded <= 0.04045 {
+        encoded / 12.92
+    } else {
+        ((encoded + 0.055) / 1.055).powf(2.4)
+    }
 }
 
 /// A theme with common semantic tokens and canonical component presentations.

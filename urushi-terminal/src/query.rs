@@ -4,6 +4,34 @@ use std::io;
 
 use crate::{Position, TerminalCapabilities, TerminalSize};
 
+/// An RGB background color reported by a terminal.
+///
+/// Channels retain the sixteen-bit precision available from an OSC 11 reply.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct TerminalBackground {
+    red: u16,
+    green: u16,
+    blue: u16,
+}
+
+impl TerminalBackground {
+    pub const fn new(red: u16, green: u16, blue: u16) -> Self {
+        Self { red, green, blue }
+    }
+
+    pub const fn red(self) -> u16 {
+        self.red
+    }
+
+    pub const fn green(self) -> u16 {
+        self.green
+    }
+
+    pub const fn blue(self) -> u16 {
+        self.blue
+    }
+}
+
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
 pub struct PixelSize {
     width: usize,
@@ -94,6 +122,15 @@ pub trait TerminalQuery {
     fn terminal_capabilities(&mut self) -> io::Result<TerminalCapabilities> {
         Ok(TerminalCapabilities::none())
     }
+
+    /// Queries the terminal's current background color.
+    ///
+    /// Backends that cannot exchange an OSC 11 query return `Ok(None)`.
+    /// A missing, timed-out, or malformed reply also produces `Ok(None)`;
+    /// failures of the owned terminal connection remain errors.
+    fn terminal_background(&mut self) -> io::Result<Option<TerminalBackground>> {
+        Ok(None)
+    }
 }
 
 impl<T: TerminalQuery + ?Sized> TerminalQuery for &mut T {
@@ -116,6 +153,10 @@ impl<T: TerminalQuery + ?Sized> TerminalQuery for &mut T {
     fn terminal_capabilities(&mut self) -> io::Result<TerminalCapabilities> {
         T::terminal_capabilities(self)
     }
+
+    fn terminal_background(&mut self) -> io::Result<Option<TerminalBackground>> {
+        T::terminal_background(self)
+    }
 }
 
 /// Detects whether enhanced keyboard protocol negotiation is available.
@@ -137,6 +178,26 @@ impl<T: KeyboardEnhancementQuery + ?Sized> KeyboardEnhancementQuery for &mut T {
 mod tests {
     use super::*;
 
+    struct UnsupportedQuery;
+
+    impl TerminalQuery for UnsupportedQuery {
+        fn terminal_size(&mut self) -> io::Result<TerminalSize> {
+            Ok(TerminalSize::new(80, 24))
+        }
+
+        fn cursor_position(&mut self) -> io::Result<Position> {
+            Ok(Position::new(0, 0))
+        }
+
+        fn window_size(&mut self) -> io::Result<WindowSize> {
+            Ok(WindowSize::new(TerminalSize::new(80, 24), None))
+        }
+
+        fn raw_mode_enabled(&mut self) -> io::Result<bool> {
+            Ok(false)
+        }
+    }
+
     #[test]
     fn cell_pixels_require_exact_uniform_geometry() {
         assert_eq!(
@@ -150,5 +211,16 @@ mod tests {
             None
         );
         assert_eq!(WindowSize::default().cell_pixels(), None);
+    }
+
+    #[test]
+    fn unsupported_background_queries_return_none() {
+        let mut query = UnsupportedQuery;
+        assert_eq!(query.terminal_background().unwrap(), None);
+        let mut borrowed = &mut query;
+        assert_eq!(
+            TerminalQuery::terminal_background(&mut borrowed).unwrap(),
+            None
+        );
     }
 }
