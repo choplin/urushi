@@ -10,7 +10,9 @@
 //! it already owns; they resolve the view and discard everything but the
 //! cells. A caller that needs the resolution itself — the TUI runtime's
 //! renderer resolving once per frame — resolves under [`available`] and writes
-//! the result with [`draw_resolved`].
+//! the result with [`draw_resolved`]. A caller filling a sized anchor can use
+//! [`anchor_placement`] to translate its complete logical rectangle and
+//! accumulated visible intersection into a destination and source offset.
 
 mod style;
 mod terminal;
@@ -19,6 +21,6 @@ mod widget;
 pub use style::RatatuiStyle;
 pub use terminal::{RatatuiFrame, RatatuiTerminal};
 pub use widget::{
-    CellWriteMode, RatatuiStyleExt, RatatuiWidget, ViewWidget, available, draw_resolved,
-    draw_resolved_with_mode,
+    CellWriteMode, RatatuiAnchor, RatatuiStyleExt, RatatuiWidget, ViewWidget, anchor_placement,
+    available, draw_resolved, draw_resolved_with_mode,
 };

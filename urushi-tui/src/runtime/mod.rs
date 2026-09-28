@@ -17,6 +17,11 @@ mod delivery;
 mod effect;
 #[cfg_attr(
     not(test),
+    expect(dead_code, reason = "wired by the public runtime entry point")
+)]
+pub(crate) mod evaluator;
+#[cfg_attr(
+    not(test),
     expect(dead_code, reason = "consumed by the runtime core and test harness")
 )]
 mod executor;

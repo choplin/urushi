@@ -10,7 +10,40 @@
 use ::ratatui::{buffer::Buffer, layout::Rect, widgets::Widget};
 
 use super::RatatuiStyle;
-use urushi::{Available, BlockStyle, ResolvedView, StyledGrapheme, View, resolve};
+use crate::cell::visit_resolved;
+use urushi::{AnchoredRect, Available, BlockStyle, ResolvedView, StyledGrapheme, View, resolve};
+
+/// A resolved anchor translated into a caller-owned Ratatui area.
+///
+/// [`logical`](Self::logical) preserves the complete signed core rectangle.
+/// [`destination`](Self::destination) is the part that survived every core
+/// clip, translated into `area`, and the source offsets identify where that
+/// visible fragment begins inside the logical rectangle.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RatatuiAnchor {
+    logical: AnchoredRect,
+    destination: Rect,
+    source_column: usize,
+    source_row: usize,
+}
+
+impl RatatuiAnchor {
+    pub const fn logical(self) -> AnchoredRect {
+        self.logical
+    }
+
+    pub const fn destination(self) -> Rect {
+        self.destination
+    }
+
+    pub const fn source_column(self) -> usize {
+        self.source_column
+    }
+
+    pub const fn source_row(self) -> usize {
+        self.source_row
+    }
+}
 
 /// How an Urushi cell combines with content already present in a Ratatui buffer.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
@@ -182,6 +215,34 @@ pub fn available(area: Rect) -> Available {
     Available::size(usize::from(area.width), usize::from(area.height))
 }
 
+/// Translates an anchor and its accumulated visible intersection into `area`.
+///
+/// Returns `None` when no part of the anchor survived core layout clipping or
+/// when its translated coordinates are not representable by Ratatui. The
+/// caller still owns the buffer and decides how to draw the foreign content.
+pub fn anchor_placement(anchor: &AnchoredRect, area: Rect) -> Option<RatatuiAnchor> {
+    let visible = anchor.visible()?;
+    let visible_x = usize::try_from(visible.x()).ok()?;
+    let visible_y = usize::try_from(visible.y()).ok()?;
+    let x = offset(area.x, visible_x)?;
+    let y = offset(area.y, visible_y)?;
+    let width = u16::try_from(visible.width())
+        .ok()?
+        .min(area.right().saturating_sub(x));
+    let height = u16::try_from(visible.height())
+        .ok()?
+        .min(area.bottom().saturating_sub(y));
+    let source_column = usize::try_from(visible.x().checked_sub(anchor.x())?).ok()?;
+    let source_row = usize::try_from(visible.y().checked_sub(anchor.y())?).ok()?;
+
+    Some(RatatuiAnchor {
+        logical: *anchor,
+        destination: Rect::new(x, y, width, height),
+        source_column,
+        source_row,
+    })
+}
+
 /// Writes a resolved rectangle, anchored at `area`'s origin, under `clip`.
 fn write_cells(
     resolved: &ResolvedView,
@@ -190,26 +251,21 @@ fn write_cells(
     buffer: &mut Buffer,
     mode: CellWriteMode,
 ) {
-    for (row, graphemes) in resolved.rows().iter().enumerate() {
+    visit_resolved(resolved, |column, row, grapheme| {
         let Some(y) = offset(area.y, row) else {
             return;
         };
         if y < clip.top() {
-            continue;
+            return;
         }
         if y >= clip.bottom() {
             return;
         }
-
-        let mut column = 0;
-        for grapheme in graphemes {
-            let Some(x) = offset(area.x, column) else {
-                break;
-            };
-            column += grapheme.width();
-            write_grapheme(grapheme, x, y, clip, buffer, mode);
-        }
-    }
+        let Some(x) = offset(area.x, column) else {
+            return;
+        };
+        write_grapheme(grapheme, x, y, clip, buffer, mode);
+    });
 }
 
 /// Writes one grapheme, leaving the cells a wide grapheme hides reset.
@@ -257,7 +313,10 @@ fn offset(origin: u16, cells: usize) -> Option<u16> {
 #[cfg(test)]
 mod tests {
     use ::ratatui::style::{Color as RatatuiColor, Modifier};
-    use urushi::{Align, Border, Color, TextStyle, VerticalAlign};
+    use urushi::{
+        Align, Border, Color, Length, Projection, ProjectionBoundary, TextStyle, VerticalAlign,
+        Viewport,
+    };
 
     use super::*;
 
@@ -712,6 +771,56 @@ mod tests {
         // The comparison is only meaningful because cells were written and the
         // buffer cropped the block's right half.
         assert_eq!(buffer_line(&through_widget, 1), " status: │");
+    }
+
+    #[test]
+    fn view_widget_matches_one_shot_viewport_resolution() {
+        let view = View::viewport(
+            Viewport::both(
+                Projection::new(1, ProjectionBoundary::Preserve),
+                Projection::new(1, ProjectionBoundary::Preserve),
+            ),
+            View::text("abcd\nefgh\nijkl", TextStyle::new()),
+        );
+        let area = Rect::new(2, 1, 2, 2);
+        let mut through_widget = Buffer::empty(Rect::new(0, 0, 6, 4));
+        let mut through_resolved = Buffer::empty(Rect::new(0, 0, 6, 4));
+
+        ViewWidget::new(&view).render(area, &mut through_widget);
+        draw_resolved(
+            &resolve(&view, available(area)).expect("finite viewport geometry"),
+            area,
+            &mut through_resolved,
+        );
+
+        assert_eq!(through_widget, through_resolved);
+        assert_eq!(buffer_line(&through_widget, 1), "  fg  ");
+        assert_eq!(buffer_line(&through_widget, 2), "  jk  ");
+    }
+
+    #[test]
+    fn partially_visible_anchor_maps_destination_and_source_offset() {
+        let view = View::viewport(
+            Viewport::horizontal(Projection::new(2, ProjectionBoundary::Preserve)),
+            View::anchor_block(
+                "foreign",
+                BlockStyle::new()
+                    .width(Length::Cells(4))
+                    .height(Length::Cells(1)),
+                View::empty(),
+            ),
+        );
+        let area = Rect::new(10, 5, 3, 1);
+        let resolved = resolve(&view, available(area)).expect("finite viewport geometry");
+        let anchor = resolved.anchors().first().expect("foreign anchor");
+
+        let placement = anchor_placement(anchor, area).expect("partially visible placement");
+
+        assert_eq!(placement.logical().x(), -2);
+        assert_eq!(placement.logical().width(), 4);
+        assert_eq!(placement.destination(), Rect::new(10, 5, 2, 1));
+        assert_eq!(placement.source_column(), 2);
+        assert_eq!(placement.source_row(), 0);
     }
 
     /// Asserts the widget reproduces the resolved block in a `Rect` sized to it.

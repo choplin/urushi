@@ -424,8 +424,9 @@ mod tests {
         let size = TerminalSize::new(4, 2);
         let mut terminal =
             RatatuiTerminal::new(RecordingBackend::new(), size).expect("valid terminal size");
+        let mut evaluator = crate::runtime::evaluator::Evaluator::default();
         terminal
-            .draw(|frame| crate::runtime::renderer::render(&view, frame))
+            .draw(|frame| crate::runtime::renderer::render(&view, frame, &mut evaluator))
             .expect("renderer frame succeeds");
 
         let area = RatatuiRect::new(0, 0, 4, 2);

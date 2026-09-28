@@ -8,7 +8,11 @@ use std::time::Instant;
 
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
-use urushi::View;
+use urushi::{StyledGrapheme, View};
+
+use super::evaluator::Evaluator;
+use super::renderer;
+use crate::terminal::Terminal;
 
 pub(crate) trait Presentation {
     type Error;
@@ -65,6 +69,31 @@ impl fmt::Display for BlockingPresentationError {
 impl std::error::Error for BlockingPresentationError {}
 
 impl BlockingPresentation {
+    /// Spawns the ordinary stateless terminal presenter.
+    pub(crate) fn spawn_terminal<T>(terminal: T) -> Self
+    where
+        T: Terminal<Cell = StyledGrapheme> + Send + 'static,
+    {
+        Self::spawn_terminal_with(terminal, Evaluator::default())
+    }
+
+    /// Spawns a terminal presenter that retains core evaluation across frames.
+    pub(crate) fn spawn_retained_terminal<T>(terminal: T) -> Self
+    where
+        T: Terminal<Cell = StyledGrapheme> + Send + 'static,
+    {
+        Self::spawn_terminal_with(terminal, Evaluator::retained())
+    }
+
+    fn spawn_terminal_with<T>(mut terminal: T, mut evaluator: Evaluator) -> Self
+    where
+        T: Terminal<Cell = StyledGrapheme> + Send + 'static,
+    {
+        Self::spawn(move |view| {
+            terminal.draw(|frame| renderer::render(&view, frame, &mut evaluator))
+        })
+    }
+
     pub(crate) fn spawn(mut present: impl FnMut(View) -> io::Result<()> + Send + 'static) -> Self {
         let (commands, mut command_rx) = mpsc::channel(1);
         let (result_tx, results) = mpsc::channel(1);
@@ -128,11 +157,17 @@ impl Presentation for BlockingPresentation {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::{Arc, Mutex};
 
-    use urushi::TextStyle;
+    use urushi::{
+        BlockStyle, Canvas, CanvasContext, CanvasItem, Length, Position, Projection,
+        ProjectionBoundary, Size, TextStyle, Viewport,
+    };
+    use urushi_terminal::TerminalSize;
 
     use super::*;
+    use crate::runtime::testing::InMemoryTerminal;
 
     #[test]
     fn synchronous_presentation_runs_off_the_runtime_thread() {
@@ -159,5 +194,89 @@ mod tests {
         });
 
         assert_ne!(*presentation_thread.lock().unwrap(), Some(runtime_thread));
+    }
+
+    #[test]
+    fn default_terminal_presentation_uses_stateless_evaluation() {
+        let draws = Arc::new(AtomicUsize::new(0));
+        let view = viewport_canvas(1, Arc::clone(&draws));
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .build()
+            .unwrap();
+
+        runtime.block_on(async move {
+            let terminal = InMemoryTerminal::new(TerminalSize::new(2, 1));
+            let mut presentation = BlockingPresentation::spawn_terminal(terminal);
+            for _ in 0..2 {
+                presentation.submit(view.clone()).unwrap();
+                assert!(matches!(
+                    presentation.completed().await.unwrap(),
+                    DrawResult::Completed { .. }
+                ));
+            }
+            presentation.shutdown().await.unwrap();
+        });
+
+        assert_eq!(draws.load(Ordering::Relaxed), 2);
+    }
+
+    #[test]
+    fn retained_terminal_presentation_reuses_viewport_content_across_frames() {
+        let draws = Arc::new(AtomicUsize::new(0));
+        let observed = Arc::clone(&draws);
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .build()
+            .unwrap();
+
+        runtime.block_on(async move {
+            let terminal = InMemoryTerminal::new(TerminalSize::new(2, 1));
+            let mut presentation = BlockingPresentation::spawn_retained_terminal(terminal);
+            for origin in [0, 1, 0] {
+                presentation
+                    .submit(viewport_canvas(origin, Arc::clone(&observed)))
+                    .unwrap();
+                assert!(matches!(
+                    presentation.completed().await.unwrap(),
+                    DrawResult::Completed { .. }
+                ));
+            }
+            presentation.shutdown().await.unwrap();
+        });
+
+        assert_eq!(draws.load(Ordering::Relaxed), 1);
+    }
+
+    #[derive(Debug, Clone)]
+    struct CountingText {
+        draws: Arc<AtomicUsize>,
+    }
+
+    impl PartialEq for CountingText {
+        fn eq(&self, _other: &Self) -> bool {
+            true
+        }
+    }
+
+    impl CanvasItem for CountingText {
+        fn draw(&self, context: &mut CanvasContext) {
+            self.draws.fetch_add(1, Ordering::Relaxed);
+            context.text(Position::new(0, 0), "abcd", TextStyle::new());
+        }
+    }
+
+    fn viewport_canvas(origin: i64, draws: Arc<AtomicUsize>) -> View {
+        View::viewport(
+            Viewport::horizontal(Projection::new(origin, ProjectionBoundary::Preserve)),
+            View::block(
+                BlockStyle::new()
+                    .width(Length::Cells(4))
+                    .height(Length::Cells(1)),
+                View::canvas(
+                    Canvas::new()
+                        .extent(Size::new(4, 1))
+                        .item(CountingText { draws }),
+                ),
+            ),
+        )
     }
 }

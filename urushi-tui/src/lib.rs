@@ -17,6 +17,7 @@
 //! commit contracts plus a cell writer that lowers changed cells to
 //! `urushi-terminal` commands. The optional TEA runtime is layered above it.
 
+mod cell;
 pub mod ratatui;
 #[cfg(feature = "runtime")]
 mod runtime;
