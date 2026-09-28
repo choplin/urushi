@@ -15,7 +15,7 @@ use std::num::NonZeroU16;
 use crate::text::{PrintableLines, PrintableText};
 use crate::{BlockStyle, Length, Sides};
 
-use super::geometry::Size;
+use super::geometry::{Constraint, Size};
 
 /// Returns the smaller of two optional bounds, or whichever one exists.
 pub(super) fn tighter(left: Option<usize>, right: Option<usize>) -> Option<usize> {
@@ -53,17 +53,17 @@ impl Axis {
     /// `min_content` the extent below which the content cannot go. The width
     /// axis passes the widest unsplittable grapheme as `min_content`; the
     /// height axis passes zero, because a row can simply be absent.
-    pub fn used(&self, area: Option<usize>, intrinsic: usize, min_content: usize) -> usize {
+    pub fn used(&self, constraint: Constraint, intrinsic: usize, min_content: usize) -> usize {
         let base = match self.length {
             Some(Length::Cells(cells)) => usize::from(cells),
             // A Fill length needs an area to divide; with none it contributes
             // the intrinsic size.
-            Some(Length::Fill(_)) => area.unwrap_or(self.frame + intrinsic),
+            Some(Length::Fill(_)) => constraint.reference.unwrap_or(self.frame + intrinsic),
             None => self.frame + intrinsic,
         };
         clamp_size(
             base,
-            tighter(self.max.map(usize::from), area),
+            tighter(self.max.map(usize::from), constraint.cap),
             self.min
                 .map_or(0, usize::from)
                 .max(self.frame + min_content),
@@ -72,14 +72,18 @@ impl Axis {
 
     /// The bound the content is laid out under, before its own extent is
     /// known: the tightest of a stated size, the maximum, and the area.
-    pub fn content_bound(&self, area: Option<usize>) -> Option<usize> {
+    pub fn content_constraint(&self, constraint: Constraint) -> Constraint {
         let stated = match self.length {
             Some(Length::Cells(cells)) => Some(usize::from(cells)),
-            Some(Length::Fill(_)) => area,
+            Some(Length::Fill(_)) => constraint.reference,
             None => None,
         };
-        tighter(stated, tighter(self.max.map(usize::from), area))
-            .map(|bound| bound.saturating_sub(self.frame))
+        let local = tighter(stated, self.max.map(usize::from));
+        Constraint {
+            reference: tighter(local, constraint.reference)
+                .map(|bound| bound.saturating_sub(self.frame)),
+            cap: tighter(local, constraint.cap).map(|bound| bound.saturating_sub(self.frame)),
+        }
     }
 }
 
@@ -131,13 +135,29 @@ pub(crate) struct Claim {
 /// the container resolves larger than its area and the degenerate safety net
 /// is what finally bounds it.
 pub(crate) fn distribute(area: usize, claims: &[Claim]) -> Vec<usize> {
+    distribute_constraints(Some(area), Some(area), claims)
+}
+
+/// Divides a finite reference among area-dependent claims, shrinking only
+/// when a content cap exists.
+pub(super) fn distribute_constraints(
+    reference: Option<usize>,
+    cap: Option<usize>,
+    claims: &[Claim],
+) -> Vec<usize> {
+    let Some(reference) = reference else {
+        return claims
+            .iter()
+            .map(|claim| claim.demand.max(claim.floor))
+            .collect();
+    };
     let stated: usize = claims
         .iter()
         .filter(|claim| !matches!(claim.kind, Kind::Fill(_)))
         .map(|claim| claim.demand)
         .sum();
     let weights: usize = claims.iter().map(|claim| claim.weight()).sum();
-    let remaining = area.saturating_sub(stated);
+    let remaining = reference.saturating_sub(stated);
 
     // Shares are cut from a running prefix of the remainder, so they sum to it
     // exactly: three equal weights over ten cells are 3, 3, 4, not 3, 3, 3
@@ -148,7 +168,10 @@ pub(crate) fn distribute(area: usize, claims: &[Claim]) -> Vec<usize> {
         assigned.push(match claim.kind {
             Kind::Fill(_) => {
                 weighted += claim.weight();
-                let upto = remaining * weighted / weights;
+                let upto = remaining
+                    .saturating_mul(weighted)
+                    .checked_div(weights)
+                    .unwrap_or(0);
                 let share = upto - given;
                 given = upto;
                 // A share below the child's own floor is not a share it can
@@ -159,7 +182,10 @@ pub(crate) fn distribute(area: usize, claims: &[Claim]) -> Vec<usize> {
         });
     }
 
-    let mut excess = assigned.iter().sum::<usize>().saturating_sub(area);
+    let Some(cap) = cap else {
+        return assigned;
+    };
+    let mut excess = assigned.iter().sum::<usize>().saturating_sub(cap);
     for group in [Kind::fill(1), Kind::Auto, Kind::Cells] {
         if excess == 0 {
             break;
@@ -339,9 +365,21 @@ mod tests {
             max: None,
         };
 
-        assert_eq!(axis.used(None, 5, 1), 7, "the frame is inside the size");
-        assert_eq!(axis.used(Some(4), 5, 1), 4, "the area caps it");
-        assert_eq!(axis.used(Some(9), 5, 1), 7, "a wider area does not pad it");
+        assert_eq!(
+            axis.used(Constraint::unbounded(), 5, 1),
+            7,
+            "the frame is inside the size"
+        );
+        assert_eq!(
+            axis.used(Constraint::available(Some(4)), 5, 1),
+            4,
+            "the area caps it"
+        );
+        assert_eq!(
+            axis.used(Constraint::available(Some(9)), 5, 1),
+            7,
+            "a wider area does not pad it"
+        );
     }
 
     #[test]
@@ -354,22 +392,22 @@ mod tests {
         };
 
         assert_eq!(
-            axis(Some(Length::Cells(6)), None, None).used(None, 2, 0),
+            axis(Some(Length::Cells(6)), None, None).used(Constraint::unbounded(), 2, 0),
             6,
             "a stated size ignores the content"
         );
         assert_eq!(
-            axis(Some(Length::Cells(6)), None, Some(4)).used(None, 2, 0),
+            axis(Some(Length::Cells(6)), None, Some(4)).used(Constraint::unbounded(), 2, 0),
             4,
             "the maximum caps the stated size"
         );
         assert_eq!(
-            axis(Some(Length::Cells(6)), Some(8), None).used(None, 2, 0),
+            axis(Some(Length::Cells(6)), Some(8), None).used(Constraint::unbounded(), 2, 0),
             8,
             "the minimum floors it"
         );
         assert_eq!(
-            axis(None, None, Some(4)).used(Some(9), 2, 0),
+            axis(None, None, Some(4)).used(Constraint::available(Some(9)), 2, 0),
             2,
             "a maximum alone is shrink-to-fit with a cap"
         );
@@ -384,9 +422,13 @@ mod tests {
             max: None,
         };
 
-        assert_eq!(axis.used(Some(10), 3, 1), 10, "it spans the area");
         assert_eq!(
-            axis.used(None, 3, 1),
+            axis.used(Constraint::available(Some(10)), 3, 1),
+            10,
+            "it spans the area"
+        );
+        assert_eq!(
+            axis.used(Constraint::unbounded(), 3, 1),
             5,
             "with no area it contributes the intrinsic size"
         );
@@ -403,9 +445,9 @@ mod tests {
 
         // Width passes the widest unsplittable grapheme, so the box cannot
         // reach the stated size.
-        assert_eq!(axis.used(Some(1), 4, 2), 4);
+        assert_eq!(axis.used(Constraint::available(Some(1)), 4, 2), 4);
         // Height passes zero, so it can: the frame alone is a valid box.
-        assert_eq!(axis.used(Some(1), 4, 0), 2);
+        assert_eq!(axis.used(Constraint::available(Some(1)), 4, 0), 2);
     }
 
     #[test]
@@ -417,25 +459,33 @@ mod tests {
             max,
         };
 
-        assert_eq!(axis(None, None).content_bound(None), None, "nothing bounds");
-        assert_eq!(axis(None, None).content_bound(Some(9)), Some(7));
         assert_eq!(
-            axis(Some(Length::Cells(5)), None).content_bound(None),
-            Some(3)
+            axis(None, None).content_constraint(Constraint::unbounded()),
+            Constraint::unbounded(),
+            "nothing bounds"
         );
         assert_eq!(
-            axis(Some(Length::Cells(5)), Some(4)).content_bound(Some(9)),
-            Some(2),
+            axis(None, None).content_constraint(Constraint::available(Some(9))),
+            Constraint::available(Some(7))
+        );
+        assert_eq!(
+            axis(Some(Length::Cells(5)), None).content_constraint(Constraint::unbounded()),
+            Constraint::available(Some(3))
+        );
+        assert_eq!(
+            axis(Some(Length::Cells(5)), Some(4))
+                .content_constraint(Constraint::available(Some(9))),
+            Constraint::available(Some(2)),
             "the maximum is tighter than the stated size"
         );
         assert_eq!(
-            axis(Some(Length::fill(1)), None).content_bound(Some(6)),
-            Some(4),
+            axis(Some(Length::fill(1)), None).content_constraint(Constraint::available(Some(6))),
+            Constraint::available(Some(4)),
             "a Fill length is bounded by the area it fills"
         );
         assert_eq!(
-            axis(Some(Length::Cells(1)), None).content_bound(None),
-            Some(0),
+            axis(Some(Length::Cells(1)), None).content_constraint(Constraint::unbounded()),
+            Constraint::available(Some(0)),
             "a size below the frame leaves no content, not a negative one"
         );
     }

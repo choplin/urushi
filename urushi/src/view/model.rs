@@ -2,6 +2,78 @@
 
 use crate::{Align, BlockStyle, Canvas, GridStyle, Key, StyledText, TextStyle, VerticalAlign};
 
+/// How a requested projection origin behaves at a content boundary.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ProjectionBoundary {
+    /// Uses the requested origin exactly, including negative origins and
+    /// origins beyond the content extent.
+    Preserve,
+    /// Constrains the origin so content fills the viewport when it can.
+    Clamp,
+}
+
+/// One projected axis of a [`Viewport`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Projection {
+    origin: i64,
+    boundary: ProjectionBoundary,
+}
+
+impl Projection {
+    pub const fn new(origin: i64, boundary: ProjectionBoundary) -> Self {
+        Self { origin, boundary }
+    }
+
+    pub const fn origin(&self) -> i64 {
+        self.origin
+    }
+
+    pub const fn boundary(&self) -> ProjectionBoundary {
+        self.boundary
+    }
+}
+
+/// The axes one child view projects into its finite layout allocation.
+///
+/// Construction requires at least one projected axis. An absent axis follows
+/// the child's ordinary layout rules.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Viewport {
+    horizontal: Option<Projection>,
+    vertical: Option<Projection>,
+}
+
+impl Viewport {
+    pub const fn horizontal(projection: Projection) -> Self {
+        Self {
+            horizontal: Some(projection),
+            vertical: None,
+        }
+    }
+
+    pub const fn vertical(projection: Projection) -> Self {
+        Self {
+            horizontal: None,
+            vertical: Some(projection),
+        }
+    }
+
+    pub const fn both(horizontal: Projection, vertical: Projection) -> Self {
+        Self {
+            horizontal: Some(horizontal),
+            vertical: Some(vertical),
+        }
+    }
+
+    pub const fn horizontal_projection(&self) -> Option<Projection> {
+        self.horizontal
+    }
+
+    pub const fn vertical_projection(&self) -> Option<Projection> {
+        self.vertical
+    }
+}
+
 /// One styled line embedded in a block's top border.
 ///
 /// A title is content owned by a block, not part of its [`BlockStyle`]. Its
@@ -141,6 +213,8 @@ pub enum View {
     Grid(GridStyle, Vec<Vec<View>>),
     /// A finite free-positioned drawing surface.
     Canvas(Canvas),
+    /// One child projected from local content coordinates into a finite area.
+    Viewport(Viewport, Box<View>),
     /// A block that also reports where it landed, named by a key.
     ///
     /// It is a [`Block`](Self::Block) in every respect layout cares about —
@@ -304,6 +378,12 @@ impl View {
     /// Creates a finite drawing surface from ordered, owned items.
     pub const fn canvas(canvas: Canvas) -> Self {
         Self::Canvas(canvas)
+    }
+
+    /// Projects one child's settled content into the finite extent layout
+    /// supplies on each selected axis.
+    pub fn viewport(viewport: Viewport, child: impl Into<View>) -> Self {
+        Self::Viewport(viewport, Box::new(child.into()))
     }
 
     /// Creates a view that resolves to an empty rectangle.

@@ -273,6 +273,11 @@ fn clipping_keeps_signed_anchor_geometry() {
         (anchor.x(), anchor.y(), anchor.width(), anchor.height()),
         (-2, 1, 4, 2)
     );
+    let visible = anchor.visible().unwrap();
+    assert_eq!(
+        (visible.x(), visible.y(), visible.width(), visible.height()),
+        (0, 1, 2, 2)
+    );
     assert!(!anchor.is_within_resolved_view());
 }
 

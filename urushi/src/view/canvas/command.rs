@@ -176,6 +176,13 @@ fn requires_allocation(view: &View, axis: Axis) -> bool {
             Axis::Width => canvas.explicit_width().is_none(),
             Axis::Height => canvas.explicit_height().is_none(),
         },
+        View::Viewport(viewport, child) => {
+            let projected = match axis {
+                Axis::Width => viewport.horizontal_projection().is_some(),
+                Axis::Height => viewport.vertical_projection().is_some(),
+            };
+            projected || requires_allocation(child, axis)
+        }
         View::Block(style, _, child) | View::AnchorBlock(_, style, _, child) => {
             let (length, maximum) = match axis {
                 Axis::Width => (style.get_width(), style.get_max_width()),

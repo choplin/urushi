@@ -47,6 +47,9 @@ pub(in crate::view) fn compose_canvas(canvas: &Canvas, size: Size) -> Result<Rec
                 .collect()
         })
         .collect();
+    for anchor in &mut anchors {
+        anchor.clip(0, 0, size.width(), size.height());
+    }
     Ok(Rect {
         width: size.width(),
         rows,

@@ -24,13 +24,15 @@
 
 use crate::{
     Align, BlockStyle, BlockTitle, Canvas, GridStyle, Key, Length, Overflow, Sides, StyledText,
-    TextStyle, VerticalAlign, View,
+    TextStyle, VerticalAlign, View, Viewport,
 };
 
+use super::geometry::Constraint;
 use super::grid;
 
 use super::sizing::{
-    Claim, Kind, border_extent, degrade, distribute, horizontal, kind_of, vertical, width_axis,
+    Claim, Kind, border_extent, degrade, distribute_constraints, horizontal, kind_of, vertical,
+    width_axis,
 };
 
 /// The overflow policy a text leaf outside a block is fitted under.
@@ -56,6 +58,9 @@ pub(super) struct Metrics {
     /// height after its content — but the width is decided before the content
     /// is laid out, which is why the width axis has to ask.
     fills: bool,
+    /// Whether an unresolved Viewport dependency reaches this node.
+    width_projection: bool,
+    height_projection: bool,
     width_kind: Kind,
     height_kind: Kind,
     /// One entry per child; a block has exactly one.
@@ -80,6 +85,8 @@ fn metrics(view: &View) -> Metrics {
                     .unwrap_or(0),
                 height_floor: 0,
                 fills: false,
+                width_projection: false,
+                height_projection: false,
                 width_kind: Kind::Auto,
                 height_kind: Kind::Auto,
                 children: Vec::new(),
@@ -97,6 +104,8 @@ fn metrics(view: &View) -> Metrics {
                 floor: width.floor(),
                 height_floor: 0,
                 fills: canvas.uses_viewport_sizing(),
+                width_projection: false,
+                height_projection: false,
                 width_kind: kind,
                 height_kind: kind,
                 children: Vec::new(),
@@ -113,8 +122,11 @@ fn metrics(view: &View) -> Metrics {
                 .max(title_width(style, title.as_ref()).saturating_sub(frame.width()));
             // The undegraded frame: no area is known yet, and degradation is
             // what an area does to a frame.
-            let natural = width_axis(style, frame.width()).used(None, intrinsic, inner.floor)
-                + horizontal(margin);
+            let natural = width_axis(style, frame.width()).used(
+                Constraint::unbounded(),
+                intrinsic,
+                inner.floor,
+            ) + horizontal(margin);
             let floor = style
                 .get_min_width()
                 .map_or(0, usize::from)
@@ -125,22 +137,36 @@ fn metrics(view: &View) -> Metrics {
                 .map_or(0, usize::from)
                 .max(frame.height() + inner.height_floor)
                 + vertical(margin);
+            let fills = match style.get_width() {
+                Some(Length::Fill(_)) => true,
+                Some(Length::Cells(_)) => false,
+                None => inner.fills,
+            };
+            let width_projection = match (style.get_width(), style.get_max_width()) {
+                (None, None) => inner.width_projection,
+                _ => false,
+            };
+            let height_projection = match (style.get_height(), style.get_max_height()) {
+                (None, None) => inner.height_projection,
+                _ => false,
+            };
             Metrics {
                 natural,
                 floor,
                 height_floor,
-                fills: match style.get_width() {
-                    Some(Length::Fill(_)) => true,
-                    Some(Length::Cells(_)) => false,
-                    None => inner.fills,
-                },
-                width_kind: kind_of(style.get_width()),
-                height_kind: kind_of(style.get_height()),
+                fills,
+                width_projection,
+                height_projection,
+                width_kind: dependent_kind(style.get_width(), width_projection),
+                height_kind: dependent_kind(style.get_height(), height_projection),
                 children: vec![inner],
             }
         }
         View::Row(_, children) => {
             let children: Vec<Metrics> = children.iter().map(metrics).collect();
+            let fills = children.iter().any(|child| child.fills);
+            let width_projection = children.iter().any(|child| child.width_projection);
+            let height_projection = children.iter().any(|child| child.height_projection);
             Metrics {
                 natural: children.iter().map(|child| child.natural).sum(),
                 floor: children.iter().map(|child| child.floor).sum(),
@@ -149,14 +175,19 @@ fn metrics(view: &View) -> Metrics {
                     .map(|child| child.height_floor)
                     .max()
                     .unwrap_or(0),
-                fills: children.iter().any(|child| child.fills),
-                width_kind: Kind::Auto,
-                height_kind: Kind::Auto,
+                fills,
+                width_projection,
+                height_projection,
+                width_kind: dependent_kind(None, width_projection),
+                height_kind: dependent_kind(None, height_projection),
                 children,
             }
         }
         View::Column(_, children) => {
             let children: Vec<Metrics> = children.iter().map(metrics).collect();
+            let fills = children.iter().any(|child| child.fills);
+            let width_projection = children.iter().any(|child| child.width_projection);
+            let height_projection = children.iter().any(|child| child.height_projection);
             Metrics {
                 natural: children
                     .iter()
@@ -165,9 +196,11 @@ fn metrics(view: &View) -> Metrics {
                     .unwrap_or(0),
                 floor: children.iter().map(|child| child.floor).max().unwrap_or(0),
                 height_floor: children.iter().map(|child| child.height_floor).sum(),
-                fills: children.iter().any(|child| child.fills),
-                width_kind: Kind::Auto,
-                height_kind: Kind::Auto,
+                fills,
+                width_projection,
+                height_projection,
+                width_kind: dependent_kind(None, width_projection),
+                height_kind: dependent_kind(None, height_projection),
                 children,
             }
         }
@@ -180,20 +213,54 @@ fn metrics(view: &View) -> Metrics {
                 }
             }
             let claims = column_claims(style, rows, &cells, columns);
+            let fills = cells.iter().any(|cell| cell.fills)
+                || (0..columns)
+                    .any(|column| matches!(style.get_column(column), Some(Length::Fill(_))));
+            let width_projection = (0..columns).any(|column| {
+                style.get_column(column).is_none()
+                    && (0..rows.len()).any(|row| cells[row * columns + column].width_projection)
+            });
+            let height_projection = cells.iter().any(|cell| cell.height_projection);
             Metrics {
                 natural: claims.iter().map(|claim| claim.demand).sum(),
                 floor: claims.iter().map(|claim| claim.floor).sum(),
                 height_floor: (0..rows.len())
                     .map(|row| row_floor(style, rows, &cells, columns, row))
                     .sum(),
-                fills: cells.iter().any(|cell| cell.fills)
-                    || (0..columns)
-                        .any(|column| matches!(style.get_column(column), Some(Length::Fill(_)))),
-                width_kind: Kind::Auto,
-                height_kind: Kind::Auto,
+                fills,
+                width_projection,
+                height_projection,
+                width_kind: dependent_kind(None, width_projection),
+                height_kind: dependent_kind(None, height_projection),
                 children: cells,
             }
         }
+        View::Viewport(viewport, child) => {
+            let inner = metrics(child);
+            let horizontal = viewport.horizontal_projection().is_some();
+            let vertical = viewport.vertical_projection().is_some();
+            let fills = horizontal || inner.fills;
+            let width_projection = horizontal || inner.width_projection;
+            let height_projection = vertical || inner.height_projection;
+            Metrics {
+                natural: inner.natural,
+                floor: if horizontal { 0 } else { inner.floor },
+                height_floor: if vertical { 0 } else { inner.height_floor },
+                fills,
+                width_projection,
+                height_projection,
+                width_kind: dependent_kind(None, width_projection),
+                height_kind: dependent_kind(None, height_projection),
+                children: vec![inner],
+            }
+        }
+    }
+}
+
+fn dependent_kind(length: Option<Length>, depends_on_area: bool) -> Kind {
+    match length {
+        None if depends_on_area => Kind::fill(1),
+        _ => kind_of(length),
     }
 }
 
@@ -220,8 +287,10 @@ fn column_claims(
                 floor = floor.max(cell.floor + padding);
             }
             let length = style.get_column(column);
+            let depends_on_area =
+                (0..rows.len()).any(|row| cells[row * columns + column].width_projection);
             Claim {
-                kind: kind_of(length),
+                kind: dependent_kind(length, depends_on_area),
                 // A stated size is a demand of its own, and the floor still
                 // wins over it — the clamp a `Row` child applies to itself,
                 // applied here from outside, because a cell cannot know the
@@ -262,6 +331,8 @@ pub(super) struct Widths<'a> {
     pub height_kind: Kind,
     /// The height below which the node cannot be shrunk.
     pub height_floor: usize,
+    /// Whether an unresolved vertical Viewport reaches this node.
+    pub height_projection: bool,
     pub node: WidthNode<'a>,
 }
 
@@ -273,6 +344,7 @@ pub(super) enum WidthNode<'a> {
     Column(Align, Vec<Widths<'a>>),
     Grid(GridBox<'a>),
     Canvas(&'a Canvas, bool, super::canvas::CanvasRequirements),
+    Viewport(&'a Viewport, bool, Box<Widths<'a>>),
 }
 
 /// A grid whose column widths are settled.
@@ -344,14 +416,20 @@ struct TextFit<'a> {
 
 /// Settles every node's width under `area`.
 pub(super) fn widths(view: &View, area: Option<usize>) -> Widths<'_> {
-    place(view, &metrics(view), area, area.is_some(), None)
+    place(
+        view,
+        &metrics(view),
+        Constraint::available(area),
+        area.is_some(),
+        None,
+    )
 }
 
 /// Pass B: hands `area` down and reads pass A's numbers to settle each width.
 fn place<'a>(
     view: &'a View,
     metrics: &Metrics,
-    area: Option<usize>,
+    constraint: Constraint,
     bounded: bool,
     fit: Option<TextFit<'a>>,
 ) -> Widths<'a> {
@@ -371,12 +449,13 @@ fn place<'a>(
                 |fit| (fit.align, fit.fill.clone(), fit.overflow),
             );
             Widths {
-                width: text_width(area, overflow, metrics),
+                width: text_width(constraint.cap, overflow, metrics),
                 height_kind: metrics.height_kind,
                 height_floor: metrics.height_floor,
+                height_projection: metrics.height_projection,
                 node: WidthNode::Text(TextBox {
                     text,
-                    area,
+                    area: constraint.cap,
                     overflow,
                     align,
                     fill,
@@ -384,7 +463,8 @@ fn place<'a>(
             }
         }
         View::Canvas(canvas) => {
-            let width = area
+            let width = constraint
+                .reference
                 .map(|area| area.max(metrics.floor))
                 .unwrap_or(metrics.natural);
             let height = canvas.height_requirements(width);
@@ -392,6 +472,7 @@ fn place<'a>(
                 width,
                 height_kind: metrics.height_kind,
                 height_floor: height.floor(),
+                height_projection: metrics.height_projection,
                 node: WidthNode::Canvas(canvas, bounded, height),
             }
         }
@@ -405,7 +486,7 @@ fn place<'a>(
             //    The axes degrade independently, so the height phase decides
             //    the other half against the area it is given.
             let across = degrade(
-                area,
+                constraint.cap,
                 horizontal(margin),
                 border.width(),
                 horizontal(padding),
@@ -428,17 +509,26 @@ fn place<'a>(
                 border.width() + usize::from(padding.left) + usize::from(padding.right),
             );
             // Every sizing property measures the box; margin lies outside it.
-            let box_width = area.map(|area| area.saturating_sub(horizontal(margin)));
+            let box_constraint = Constraint {
+                reference: constraint
+                    .reference
+                    .map(|area| area.saturating_sub(horizontal(margin))),
+                cap: constraint
+                    .cap
+                    .map(|area| area.saturating_sub(horizontal(margin))),
+            };
             let title_intrinsic = title_width(style, title.as_ref()).saturating_sub(axis.frame);
             let intrinsic = if inner.fills
-                && let Some(area) = box_width
+                && let Some(area) = box_constraint.reference
             {
                 area.saturating_sub(axis.frame)
             } else {
                 inner.natural.max(title_intrinsic)
             };
-            let used = axis.used(box_width, intrinsic, inner.floor);
+            let used = axis.used(box_constraint, intrinsic, inner.floor);
             let content_width = used - axis.frame;
+            let child_constraint = Constraint::established(content_width);
+            let local_bound = matches!(axis.length, Some(Length::Cells(_))) || axis.max.is_some();
 
             // 3. The child, under what the box leaves it. A directly contained
             //    text leaf meets the block's overflow policy here; any other
@@ -446,8 +536,8 @@ fn place<'a>(
             let child = place(
                 child,
                 inner,
-                Some(content_width),
-                bounded || matches!(axis.length, Some(Length::Cells(_))) || axis.max.is_some(),
+                child_constraint,
+                bounded || local_bound,
                 Some(TextFit {
                     align: style.get_align(),
                     fill: style.text_style(),
@@ -470,6 +560,7 @@ fn place<'a>(
                 width: used + horizontal(margin),
                 height_kind: metrics.height_kind,
                 height_floor,
+                height_projection: metrics.height_projection,
                 node: WidthNode::Block(BlockBox {
                     style,
                     title: title.as_ref(),
@@ -488,18 +579,16 @@ fn place<'a>(
             // The main axis is divided: stated widths, then intrinsic ones,
             // then `Fill` weights over what remains. With no width to divide —
             // under `measure` — every child takes its intrinsic width.
-            let shares = area.map(|area| {
-                let claims: Vec<Claim> = metrics
-                    .children
-                    .iter()
-                    .map(|child| Claim {
-                        kind: child.width_kind,
-                        demand: child.natural,
-                        floor: child.floor,
-                    })
-                    .collect();
-                distribute(area, &claims)
-            });
+            let claims: Vec<Claim> = metrics
+                .children
+                .iter()
+                .map(|child| Claim {
+                    kind: child.width_kind,
+                    demand: child.natural,
+                    floor: child.floor,
+                })
+                .collect();
+            let shares = distribute_constraints(constraint.reference, constraint.cap, &claims);
             let children: Vec<Widths<'a>> = children
                 .iter()
                 .zip(&metrics.children)
@@ -508,7 +597,11 @@ fn place<'a>(
                     place(
                         child,
                         inner,
-                        shares.as_ref().map(|share| share[index]),
+                        if constraint.reference.is_some() {
+                            Constraint::established(shares[index])
+                        } else {
+                            Constraint::unbounded()
+                        },
                         bounded,
                         None,
                     )
@@ -524,6 +617,7 @@ fn place<'a>(
                     .map(|child| child.height_floor)
                     .max()
                     .unwrap_or(0),
+                height_projection: metrics.height_projection,
                 node: WidthNode::Row(*align, children),
             }
         }
@@ -533,12 +627,13 @@ fn place<'a>(
             let children: Vec<Widths<'a>> = children
                 .iter()
                 .zip(&metrics.children)
-                .map(|(child, inner)| place(child, inner, area, bounded, None))
+                .map(|(child, inner)| place(child, inner, constraint, bounded, None))
                 .collect();
             Widths {
                 width: children.iter().map(|child| child.width).max().unwrap_or(0),
                 height_kind: metrics.height_kind,
                 height_floor: children.iter().map(|child| child.height_floor).sum(),
+                height_projection: metrics.height_projection,
                 node: WidthNode::Column(*align, children),
             }
         }
@@ -548,10 +643,7 @@ fn place<'a>(
 
             // One `distribute` settles every column, and column j's width is
             // what every cell of column j resolves under.
-            let mut widths: Vec<usize> = match area {
-                Some(area) => distribute(area, &claims),
-                None => claims.iter().map(|claim| claim.demand).collect(),
-            };
+            let mut widths = distribute_constraints(constraint.reference, constraint.cap, &claims);
 
             let mut placed = Vec::with_capacity(rows.len());
             for row in 0..rows.len() {
@@ -571,7 +663,7 @@ fn place<'a>(
                     let child = place(
                         view,
                         inner,
-                        Some(share.saturating_sub(horizontal(padding))),
+                        Constraint::established(share.saturating_sub(horizontal(padding))),
                         bounded || matches!(claims[column].kind, Kind::Cells),
                         None,
                     );
@@ -605,10 +697,35 @@ fn place<'a>(
                 width: widths.iter().sum(),
                 height_kind: metrics.height_kind,
                 height_floor,
+                height_projection: metrics.height_projection,
                 node: WidthNode::Grid(GridBox {
                     columns: widths,
                     rows: placed,
                 }),
+            }
+        }
+        View::Viewport(viewport, child) => {
+            let horizontal = viewport.horizontal_projection().is_some();
+            let extent = constraint.reference;
+            let child_constraint = if horizontal {
+                Constraint {
+                    reference: extent,
+                    cap: None,
+                }
+            } else {
+                constraint
+            };
+            let child = place(child, &metrics.children[0], child_constraint, bounded, None);
+            Widths {
+                width: if horizontal {
+                    extent.unwrap_or(child.width)
+                } else {
+                    child.width
+                },
+                height_kind: metrics.height_kind,
+                height_floor: metrics.height_floor,
+                height_projection: metrics.height_projection,
+                node: WidthNode::Viewport(viewport, bounded, Box::new(child)),
             }
         }
     }

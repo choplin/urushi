@@ -21,7 +21,7 @@ use crate::text::Grapheme;
 use crate::{Key, TextStyle, View};
 
 use super::assemble::assemble;
-use super::geometry::{Available, Size};
+use super::geometry::{Available, Constraint, Size};
 use super::height::{fit, heights};
 use super::width::widths;
 
@@ -37,6 +37,7 @@ pub enum Axis {
 pub enum LayoutErrorKind {
     CanvasExtent,
     ViewAllocation,
+    ViewportExtent,
 }
 
 /// A layout request that cannot produce finite geometry.
@@ -65,6 +66,12 @@ impl LayoutError {
             axis,
         }
     }
+    pub(crate) const fn missing_viewport_extent(axis: Axis) -> Self {
+        Self {
+            kind: LayoutErrorKind::ViewportExtent,
+            axis,
+        }
+    }
 }
 
 impl std::fmt::Display for LayoutError {
@@ -78,6 +85,11 @@ impl std::fmt::Display for LayoutError {
             LayoutErrorKind::ViewAllocation => write!(
                 f,
                 "a Canvas View command with Fill requires a finite {:?} allocation",
+                self.axis
+            ),
+            LayoutErrorKind::ViewportExtent => write!(
+                f,
+                "Viewport projection requires a finite {:?} allocation",
                 self.axis
             ),
         }
@@ -136,23 +148,42 @@ impl StyledGrapheme {
     }
 }
 
-/// One anchor's rectangle: its key, and where layout put it.
+/// The part of an anchor rectangle that survived every enclosing clip.
 ///
-/// The rectangle is stated relative to the resolved view's own top-left cell,
-/// so `x` and `y` index its rows; where that view sits on the terminal is the
-/// caller's to add.
+/// Coordinates remain relative to the final [`ResolvedView`]. A clipped
+/// rectangle is never moved onto an edge; this value is the true intersection.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct VisibleRect {
+    x: i64,
+    y: i64,
+    width: usize,
+    height: usize,
+}
+
+impl VisibleRect {
+    pub const fn x(&self) -> i64 {
+        self.x
+    }
+
+    pub const fn y(&self) -> i64 {
+        self.y
+    }
+
+    pub const fn width(&self) -> usize {
+        self.width
+    }
+
+    pub const fn height(&self) -> usize {
+        self.height
+    }
+}
+
+/// One anchor's complete logical rectangle and its visible intersection.
 ///
-/// It reports what layout produced, not what survived into the rows: a region
-/// whose cells the rectangle does not contain keeps the extent it was given,
-/// and says so through
-/// [`is_within_resolved_view`](Self::is_within_resolved_view). Rounding it
-/// inwards instead would report a cursor scrolled ten rows out of view as
-/// sitting on the last one, which is the one thing a caller placing a cursor
-/// must not be told.
-///
-/// This crate never looks at what belongs in the region. A backend that knows
-/// draws into the rectangle; one that does not draws the blanks the anchor
-/// resolved to.
+/// The logical rectangle is stated relative to the resolved view's own
+/// top-left cell. It is translated but never clipped or rounded onto an edge.
+/// [`visible`](Self::visible) separately reports what survived Block, Canvas,
+/// Viewport, and final safety clips.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct AnchoredRect {
     key: Key,
@@ -160,7 +191,7 @@ pub struct AnchoredRect {
     y: i64,
     width: usize,
     height: usize,
-    within_resolved_view: bool,
+    visible: Option<VisibleRect>,
 }
 
 impl AnchoredRect {
@@ -171,9 +202,12 @@ impl AnchoredRect {
             y: y as i64,
             width,
             height,
-            // An anchor starts uncut. Every independently resolved rectangle
-            // can only narrow this result as parents nest it further.
-            within_resolved_view: true,
+            visible: Some(VisibleRect {
+                x: x as i64,
+                y: y as i64,
+                width,
+                height,
+            }),
         }
     }
 
@@ -208,35 +242,32 @@ impl AnchoredRect {
     /// Returns whether the [`ResolvedView`] this came from contains the whole
     /// region.
     ///
-    /// False when layout put the region where the resolved rectangle does not
-    /// reach — a cursor below content taller than the area it was given, say.
-    /// The region still reports where it went; what that means is the
-    /// caller's: a full-screen runtime hides a cursor it cannot show or
-    /// scrolls to it, and a caller drawing into a region intersects it with
-    /// the resolved size first.
-    ///
-    /// An empty region sitting one cell past the content is still within the
-    /// resolved view: that is where a cursor belongs when it follows the last
-    /// grapheme.
+    /// A partially visible or outside region returns false. A zero-sized
+    /// cursor point returns true only when it lies inside every half-open clip;
+    /// a point on the right or bottom edge is outside.
     pub const fn is_within_resolved_view(&self) -> bool {
-        self.within_resolved_view
+        match self.visible {
+            Some(_) if self.width == 0 && self.height == 0 => true,
+            Some(visible) => {
+                visible.x == self.x
+                    && visible.y == self.y
+                    && visible.width == self.width
+                    && visible.height == self.height
+            }
+            None => false,
+        }
+    }
+
+    /// The part of the logical rectangle that survived every enclosing clip.
+    pub const fn visible(&self) -> Option<VisibleRect> {
+        self.visible
     }
 
     /// Settles
     /// [`is_within_resolved_view`](Self::is_within_resolved_view) against the
     /// rectangle this is reported with.
     pub(super) fn locate(mut self, resolved: Size) -> Self {
-        self.within_resolved_view = self.within_resolved_view
-            && self.x >= 0
-            && self.y >= 0
-            && self
-                .x
-                .checked_add(self.width as i64)
-                .is_some_and(|right| right <= resolved.width() as i64)
-            && self
-                .y
-                .checked_add(self.height as i64)
-                .is_some_and(|bottom| bottom <= resolved.height() as i64);
+        self.clip(0, 0, resolved.width(), resolved.height());
         self
     }
 
@@ -248,7 +279,47 @@ impl AnchoredRect {
     pub(super) const fn offset(mut self, x: i64, y: i64) -> Self {
         self.x = self.x.saturating_add(x);
         self.y = self.y.saturating_add(y);
+        if let Some(visible) = &mut self.visible {
+            visible.x = visible.x.saturating_add(x);
+            visible.y = visible.y.saturating_add(y);
+        }
         self
+    }
+
+    pub(super) fn clip(&mut self, x: i64, y: i64, width: usize, height: usize) {
+        let Some(visible) = self.visible else {
+            return;
+        };
+        let right = x.saturating_add(i64::try_from(width).unwrap_or(i64::MAX));
+        let bottom = y.saturating_add(i64::try_from(height).unwrap_or(i64::MAX));
+
+        if visible.width == 0 && visible.height == 0 {
+            if visible.x < x || visible.x >= right || visible.y < y || visible.y >= bottom {
+                self.visible = None;
+            }
+            return;
+        }
+
+        let visible_right = visible
+            .x
+            .saturating_add(i64::try_from(visible.width).unwrap_or(i64::MAX));
+        let visible_bottom = visible
+            .y
+            .saturating_add(i64::try_from(visible.height).unwrap_or(i64::MAX));
+        let left = visible.x.max(x);
+        let top = visible.y.max(y);
+        let clipped_right = visible_right.min(right);
+        let clipped_bottom = visible_bottom.min(bottom);
+        if clipped_right <= left || clipped_bottom <= top {
+            self.visible = None;
+            return;
+        }
+        self.visible = Some(VisibleRect {
+            x: left,
+            y: top,
+            width: usize::try_from(clipped_right - left).unwrap_or(usize::MAX),
+            height: usize::try_from(clipped_bottom - top).unwrap_or(usize::MAX),
+        });
     }
 }
 
@@ -326,13 +397,14 @@ impl ResolvedView {
 /// the same two sizing phases, stopping before the rectangle they describe is
 /// built. No rectangle is allocated.
 pub fn measure(view: &View) -> Size {
-    try_measure(view).expect("an intrinsically measured Canvas must state both extents")
+    try_measure(view).expect("intrinsic measurement requires every finite extent to be stated")
 }
 
-/// Tries to measure a view, reporting a Canvas with a missing finite extent.
+/// Tries to measure a view, reporting any required finite extent that is not
+/// established within the tree.
 pub fn try_measure(view: &View) -> Result<Size, LayoutError> {
     let fitted = fit(widths(view, None));
-    let sized = heights(&fitted, None, false);
+    let sized = heights(&fitted, Constraint::unbounded());
     validate_canvas_extents(&sized)?;
     Ok(Size::new(sized.width, sized.height))
 }
@@ -345,7 +417,7 @@ pub fn try_measure(view: &View) -> Result<Size, LayoutError> {
 /// cannot hold a frame at all — and it cuts grapheme-atomically.
 pub fn resolve(view: &View, available: Available) -> Result<ResolvedView, LayoutError> {
     let fitted = fit(widths(view, available.width()));
-    let sized = heights(&fitted, available.height(), available.height().is_some());
+    let sized = heights(&fitted, Constraint::available(available.height()));
     validate_canvas_extents(&sized)?;
     let mut rect = assemble(&sized)?;
     if let Some(width) = available.width() {
@@ -386,6 +458,20 @@ fn validate_canvas_extents(sized: &super::height::Sized<'_>) -> Result<(), Layou
             Ok(())
         }
         SizedNode::Block { child, .. } => validate_canvas_extents(child),
+        SizedNode::Viewport {
+            viewport,
+            width_bounded,
+            height_bounded,
+            child,
+        } => {
+            if viewport.horizontal_projection().is_some() && !width_bounded {
+                return Err(LayoutError::missing_viewport_extent(Axis::Width));
+            }
+            if viewport.vertical_projection().is_some() && !height_bounded {
+                return Err(LayoutError::missing_viewport_extent(Axis::Height));
+            }
+            validate_canvas_extents(child)
+        }
         SizedNode::Row(_, children) | SizedNode::Column(_, children) => {
             children.iter().try_for_each(validate_canvas_extents)
         }

@@ -283,7 +283,7 @@ pub(crate) fn collect(view: &View) -> Vec<&Image> {
 fn collect_from<'a>(view: &'a View, images: &mut Vec<&'a Image>) {
     match view {
         View::Text(_) => {}
-        View::Block(_, _, child) | View::AnchorBlock(_, _, _, child) => {
+        View::Block(_, _, child) | View::Viewport(_, child) | View::AnchorBlock(_, _, _, child) => {
             collect_from(child, images);
         }
         View::Row(_, children) | View::Column(_, children) => {

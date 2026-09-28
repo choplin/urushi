@@ -80,3 +80,35 @@ impl Available {
         self.height
     }
 }
+
+/// The two distinct facts carried internally for one layout axis.
+///
+/// `reference` is the finite size that area-dependent claims such as `Fill`
+/// divide. `cap` is the bound that may shrink content. Ordinary public
+/// [`Available`] values initialize both to the same extent; a projected axis
+/// keeps the reference while removing the child cap.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(super) struct Constraint {
+    pub reference: Option<usize>,
+    pub cap: Option<usize>,
+}
+
+impl Constraint {
+    pub const fn unbounded() -> Self {
+        Self {
+            reference: None,
+            cap: None,
+        }
+    }
+
+    pub const fn available(extent: Option<usize>) -> Self {
+        Self {
+            reference: extent,
+            cap: extent,
+        }
+    }
+
+    pub const fn established(extent: usize) -> Self {
+        Self::available(Some(extent))
+    }
+}

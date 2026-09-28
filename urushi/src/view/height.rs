@@ -22,11 +22,12 @@ use crate::text::{
 };
 use crate::{
     Align, BlockStyle, BlockTitle, Canvas, Key, Overflow, Sides, StyledText, TextStyle,
-    VerticalAlign,
+    VerticalAlign, Viewport,
 };
 
+use super::geometry::Constraint;
 use super::sizing::{
-    Claim, Kind, border_extent, degrade, distribute, height_axis, text_lines, vertical,
+    Claim, Kind, border_extent, degrade, distribute_constraints, height_axis, text_lines, vertical,
 };
 use super::width::{WidthNode, Widths};
 
@@ -36,6 +37,7 @@ pub(super) struct Fitted<'a> {
     pub width: usize,
     height_kind: Kind,
     height_floor: usize,
+    height_projection: bool,
     node: FittedNode<'a>,
 }
 
@@ -62,6 +64,7 @@ enum FittedNode<'a> {
         rows: Vec<Vec<FittedCell<'a>>>,
     },
     Canvas(&'a Canvas, bool, super::canvas::CanvasRequirements),
+    Viewport(&'a Viewport, bool, Box<Fitted<'a>>),
 }
 
 /// One cell of a grid, with its text already fitted to its column's width.
@@ -83,6 +86,7 @@ pub(super) fn fit(widths: Widths<'_>) -> Fitted<'_> {
         width,
         height_kind,
         height_floor,
+        height_projection,
         node,
     } = widths;
     let node = match node {
@@ -129,11 +133,15 @@ pub(super) fn fit(widths: Widths<'_>) -> Fitted<'_> {
         WidthNode::Canvas(canvas, width_bounded, height) => {
             FittedNode::Canvas(canvas, width_bounded, height)
         }
+        WidthNode::Viewport(viewport, width_bounded, child) => {
+            FittedNode::Viewport(viewport, width_bounded, Box::new(fit(*child)))
+        }
     };
     Fitted {
         width,
         height_kind,
         height_floor,
+        height_projection,
         node,
     }
 }
@@ -272,6 +280,12 @@ pub(super) enum SizedNode<'f> {
         width_bounded: bool,
         height_bounded: bool,
     },
+    Viewport {
+        viewport: &'f Viewport,
+        width_bounded: bool,
+        height_bounded: bool,
+        child: Box<Sized<'f>>,
+    },
 }
 
 /// One cell of a grid, with both of its sizes settled.
@@ -287,7 +301,7 @@ pub(super) struct SizedCell<'f> {
 }
 
 /// Counts the rows every node occupies under `area`.
-pub(super) fn heights<'f>(fitted: &'f Fitted<'_>, area: Option<usize>, bounded: bool) -> Sized<'f> {
+pub(super) fn heights<'f>(fitted: &'f Fitted<'_>, constraint: Constraint) -> Sized<'f> {
     match &fitted.node {
         FittedNode::Text { lines, align, fill } => Sized {
             width: fitted.width,
@@ -315,7 +329,7 @@ pub(super) fn heights<'f>(fitted: &'f Fitted<'_>, area: Option<usize>, bounded: 
             // 1. Degrade the frame to the area — the vertical half of it; the
             //    width phase decided the other half.
             let down = degrade(
-                area,
+                constraint.cap,
                 vertical(margin),
                 border.height(),
                 vertical(padding),
@@ -334,19 +348,29 @@ pub(super) fn heights<'f>(fitted: &'f Fitted<'_>, area: Option<usize>, bounded: 
                 style,
                 border.height() + usize::from(padding.top) + usize::from(padding.bottom),
             );
-            let box_height = area.map(|area| area.saturating_sub(vertical(margin)));
+            let box_constraint = Constraint {
+                reference: constraint
+                    .reference
+                    .map(|area| area.saturating_sub(vertical(margin))),
+                cap: constraint
+                    .cap
+                    .map(|area| area.saturating_sub(vertical(margin))),
+            };
 
             // 2. The content, under what the box leaves it, and then the used
             //    height by the same clamp the width took — now that the rows
             //    are known, because the content is what decided how many.
-            let child = heights(
-                child,
-                axis.content_bound(box_height),
-                bounded
-                    || matches!(axis.length, Some(crate::Length::Cells(_)))
-                    || axis.max.is_some(),
-            );
-            let used = axis.used(box_height, child.height, 0);
+            let local_bound =
+                matches!(axis.length, Some(crate::Length::Cells(_))) || axis.max.is_some();
+            let mut child_constraint = axis.content_constraint(box_constraint);
+            if !local_bound && constraint.reference.is_none() {
+                child_constraint.reference = None;
+            }
+            if !local_bound && constraint.cap.is_none() {
+                child_constraint.cap = None;
+            }
+            let child = heights(child, child_constraint);
+            let used = axis.used(box_constraint, child.height, 0);
 
             Sized {
                 width: fitted.width,
@@ -368,7 +392,7 @@ pub(super) fn heights<'f>(fitted: &'f Fitted<'_>, area: Option<usize>, bounded: 
             // row's own height, and a `Fill` there stretches to it.
             let children: Vec<Sized<'f>> = children
                 .iter()
-                .map(|child| heights(child, area, bounded))
+                .map(|child| heights(child, constraint))
                 .collect();
             Sized {
                 width: fitted.width,
@@ -377,13 +401,7 @@ pub(super) fn heights<'f>(fitted: &'f Fitted<'_>, area: Option<usize>, bounded: 
             }
         }
         FittedNode::Column(align, children) => {
-            let children = match area {
-                None => children
-                    .iter()
-                    .map(|child| heights(child, None, false))
-                    .collect::<Vec<_>>(),
-                Some(area) => divide(children, area, bounded),
-            };
+            let children = divide(children, constraint);
             Sized {
                 width: fitted.width,
                 height: children.iter().map(|child| child.height).sum(),
@@ -391,7 +409,7 @@ pub(super) fn heights<'f>(fitted: &'f Fitted<'_>, area: Option<usize>, bounded: 
             }
         }
         FittedNode::Grid { columns, rows } => {
-            let (heights, rows) = rows_of(rows, area, bounded);
+            let (heights, rows) = rows_of(rows, constraint);
             Sized {
                 width: fitted.width,
                 height: heights.iter().sum(),
@@ -404,15 +422,43 @@ pub(super) fn heights<'f>(fitted: &'f Fitted<'_>, area: Option<usize>, bounded: 
         }
         FittedNode::Canvas(canvas, width_bounded, height) => Sized {
             width: fitted.width,
-            height: area
+            height: constraint
+                .reference
                 .map(|area| area.max(height.floor()))
                 .unwrap_or(height.demand()),
             node: SizedNode::Canvas {
                 canvas,
                 width_bounded: *width_bounded,
-                height_bounded: bounded,
+                height_bounded: constraint.reference.is_some(),
             },
         },
+        FittedNode::Viewport(viewport, width_bounded, child) => {
+            let vertical = viewport.vertical_projection().is_some();
+            let extent = constraint.reference;
+            let child_constraint = if vertical {
+                Constraint {
+                    reference: extent,
+                    cap: None,
+                }
+            } else {
+                constraint
+            };
+            let child = heights(child, child_constraint);
+            Sized {
+                width: fitted.width,
+                height: if vertical {
+                    extent.unwrap_or(child.height)
+                } else {
+                    child.height
+                },
+                node: SizedNode::Viewport {
+                    viewport,
+                    width_bounded: *width_bounded,
+                    height_bounded: extent.is_some(),
+                    child: Box::new(child),
+                },
+            }
+        }
     }
 }
 
@@ -426,14 +472,13 @@ pub(super) fn heights<'f>(fitted: &'f Fitted<'_>, area: Option<usize>, bounded: 
 /// exactly as an over-wide cell grows its column.
 fn rows_of<'f>(
     rows: &'f [Vec<FittedCell<'_>>],
-    area: Option<usize>,
-    bounded: bool,
+    constraint: Constraint,
 ) -> (Vec<usize>, Vec<Vec<SizedCell<'f>>>) {
     let asked: Vec<Vec<Sized<'f>>> = rows
         .iter()
         .map(|row| {
             row.iter()
-                .map(|cell| heights(&cell.child, None, false))
+                .map(|cell| heights(&cell.child, Constraint::unbounded()))
                 .collect()
         })
         .collect();
@@ -441,7 +486,11 @@ fn rows_of<'f>(
         .iter()
         .zip(&asked)
         .map(|(row, asked)| Claim {
-            kind: Kind::Auto,
+            kind: if row.iter().any(|cell| cell.child.height_projection) {
+                Kind::fill(1)
+            } else {
+                Kind::Auto
+            },
             demand: row
                 .iter()
                 .zip(asked)
@@ -455,10 +504,7 @@ fn rows_of<'f>(
                 .unwrap_or(0),
         })
         .collect();
-    let shares: Vec<usize> = match area {
-        Some(area) => distribute(area, &claims),
-        None => claims.iter().map(|claim| claim.demand).collect(),
-    };
+    let shares = distribute_constraints(constraint.reference, constraint.cap, &claims);
 
     let mut settled_heights = shares.clone();
     let mut settled = Vec::with_capacity(rows.len());
@@ -479,10 +525,10 @@ fn rows_of<'f>(
                 padding.bottom = 0;
             }
             let inner = share.saturating_sub(vertical(padding));
-            let child = if !bounded && asked.height <= inner {
+            let child = if constraint.cap.is_none() && asked.height <= inner {
                 asked
             } else {
-                heights(&cell.child, Some(inner), bounded)
+                heights(&cell.child, Constraint::established(inner))
             };
             settled_heights[index] = settled_heights[index].max(child.height + vertical(padding));
             cells.push(SizedCell {
@@ -510,12 +556,18 @@ fn rows_of<'f>(
 /// assignment, which closes its frame at the smaller size instead of cutting
 /// it. That second visit is arithmetic over lines that were fitted before this
 /// function ran; nothing is fitted twice.
-fn divide<'f>(children: &'f [Fitted<'_>], area: usize, bounded: bool) -> Vec<Sized<'f>> {
+fn divide<'f>(children: &'f [Fitted<'_>], constraint: Constraint) -> Vec<Sized<'f>> {
+    if constraint.reference.is_none() {
+        return children
+            .iter()
+            .map(|child| heights(child, Constraint::unbounded()))
+            .collect();
+    }
     let asked: Vec<Option<Sized<'f>>> = children
         .iter()
         .map(|child| match child.height_kind {
             Kind::Fill(_) => None,
-            _ => Some(heights(child, None, false)),
+            _ => Some(heights(child, Constraint::unbounded())),
         })
         .collect();
     let claims: Vec<Claim> = children
@@ -531,10 +583,14 @@ fn divide<'f>(children: &'f [Fitted<'_>], area: usize, bounded: bool) -> Vec<Siz
     children
         .iter()
         .zip(asked)
-        .zip(distribute(area, &claims))
+        .zip(distribute_constraints(
+            constraint.reference,
+            constraint.cap,
+            &claims,
+        ))
         .map(|((child, asked), height)| match asked {
-            Some(sized) if !bounded && sized.height <= height => sized,
-            _ => heights(child, Some(height), bounded),
+            Some(sized) if constraint.cap.is_none() && sized.height <= height => sized,
+            _ => heights(child, Constraint::established(height)),
         })
         .collect()
 }

@@ -66,6 +66,6 @@ pub use urushi_terminal::{ColorLevel, TerminalCapabilities, TerminalStyle};
 pub use view::{
     AnchoredRect, Available, Axis, BlockTitle, Canvas, CanvasCell, CanvasContext, CanvasItem,
     CanvasSizing, CellContribution, Composition, LayoutError, LayoutErrorKind, LineContinuations,
-    LineGlyphs, LineNetwork, Position, PositionedCell, ResolvedView, Size, StyledGrapheme, View,
-    measure, resolve, try_measure,
+    LineGlyphs, LineNetwork, Position, PositionedCell, Projection, ProjectionBoundary,
+    ResolvedView, Size, StyledGrapheme, View, Viewport, VisibleRect, measure, resolve, try_measure,
 };

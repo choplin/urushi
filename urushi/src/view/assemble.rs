@@ -8,7 +8,7 @@
 //! geometry existed before either of them saw it.
 
 use crate::text::{PrintableText, StyledTextGrapheme};
-use crate::{Align, BlockTitle, Sides, TextStyle, VerticalAlign};
+use crate::{Align, BlockTitle, Projection, ProjectionBoundary, Sides, TextStyle, VerticalAlign};
 
 use super::canvas::compose_canvas;
 use super::geometry::Size;
@@ -49,12 +49,14 @@ impl Rect {
             *row = truncate_row(std::mem::take(row), max_width, fill);
         }
         self.width = max_width;
+        clip_anchors(&mut self.anchors, 0, 0, self.width, self.rows.len());
     }
 
     pub fn crop_height(&mut self, max_height: usize) {
         if self.rows.len() > max_height {
             self.rows.truncate(max_height);
         }
+        clip_anchors(&mut self.anchors, 0, 0, self.width, self.rows.len());
     }
 }
 
@@ -64,6 +66,19 @@ fn shift(anchors: Vec<AnchoredRect>, x: usize, y: usize) -> Vec<AnchoredRect> {
         .into_iter()
         .map(|anchor| anchor.offset(x as i64, y as i64))
         .collect()
+}
+
+fn shift_signed(anchors: Vec<AnchoredRect>, x: i64, y: i64) -> Vec<AnchoredRect> {
+    anchors
+        .into_iter()
+        .map(|anchor| anchor.offset(x, y))
+        .collect()
+}
+
+fn clip_anchors(anchors: &mut [AnchoredRect], x: i64, y: i64, width: usize, height: usize) {
+    for anchor in anchors {
+        anchor.clip(x, y, width, height);
+    }
 }
 
 /// The cells `align` leaves before a `gap`-cell shortfall.
@@ -94,6 +109,7 @@ pub(super) fn assemble(sized: &Sized<'_>) -> Result<Rect, LayoutError> {
         SizedNode::Canvas { canvas, .. } => {
             compose_canvas(canvas, Size::new(sized.width, sized.height))
         }
+        SizedNode::Viewport { .. } => viewport(sized),
     };
     let rect = rect?;
     debug_assert_eq!(
@@ -146,7 +162,7 @@ fn block(sized: &Sized<'_>) -> Result<Rect, LayoutError> {
     // 1. The content, aligned inside the width the box left it. The alignment
     //    shifts every row by the same cells, so the anchors inside move with
     //    them.
-    let inner_anchors = shift(
+    let mut inner_anchors = shift(
         content.anchors,
         align_offset(
             content_width.saturating_sub(content.width),
@@ -171,6 +187,8 @@ fn block(sized: &Sized<'_>) -> Result<Rect, LayoutError> {
         VerticalAlign::Center => (gap / 2, gap - gap / 2),
         VerticalAlign::Bottom => (gap, 0),
     };
+    inner_anchors = shift(inner_anchors, 0, above);
+    clip_anchors(&mut inner_anchors, 0, 0, content_width, content_height);
 
     // 3. Padding, applied with the block's own fill. An anchor reports the
     //    rectangle the frame leaves, which is where a caller that fills it
@@ -188,7 +206,7 @@ fn block(sized: &Sized<'_>) -> Result<Rect, LayoutError> {
             content_height,
         ));
     }
-    anchors.extend(shift(inner_anchors, pl, above + pt));
+    anchors.extend(shift(inner_anchors, pl, pt));
     let mut rect = Rect {
         width: total,
         rows: Vec::with_capacity(content_height + pt + pb),
@@ -511,10 +529,17 @@ fn cell_rect(cell: &SizedCell<'_>, width: usize, height: usize) -> Result<Rect, 
 
     // The cell's own alignment places it in the column and the row, so the
     // anchors inside it move by exactly what that placement introduced.
-    let anchors = shift(
+    let mut anchors = shift(
         content.anchors,
         pl + align_offset(content_width.saturating_sub(content.width), cell.align),
         pt + above,
+    );
+    clip_anchors(
+        &mut anchors,
+        pl as i64,
+        pt as i64,
+        content_width,
+        content_height,
     );
     let mut content_rows: Vec<Vec<StyledGrapheme>> = content
         .rows
@@ -542,6 +567,84 @@ fn cell_rect(cell: &SizedCell<'_>, width: usize, height: usize) -> Result<Rect, 
         rect.rows.push(blank_row.clone());
     }
     Ok(rect)
+}
+
+fn viewport(sized: &Sized<'_>) -> Result<Rect, LayoutError> {
+    let SizedNode::Viewport {
+        viewport, child, ..
+    } = &sized.node
+    else {
+        unreachable!("a viewport")
+    };
+    let child = assemble(child)?;
+    let horizontal = viewport.horizontal_projection();
+    let vertical = viewport.vertical_projection();
+    let x = horizontal.map_or(0, |projection| {
+        effective_origin(projection, child.width, sized.width)
+    });
+    let y = vertical.map_or(0, |projection| {
+        effective_origin(projection, child.rows.len(), sized.height)
+    });
+
+    let mut rows = Vec::with_capacity(sized.height);
+    for target_y in 0..sized.height {
+        let source_y = i128::try_from(target_y).unwrap_or(i128::MAX) + i128::from(y);
+        let row = usize::try_from(source_y)
+            .ok()
+            .and_then(|source_y| child.rows.get(source_y));
+        rows.push(match (row, horizontal) {
+            (Some(row), Some(_)) => project_row(row, x, sized.width),
+            (Some(row), None) => row.clone(),
+            (None, _) => blank(sized.width, &TextStyle::new()),
+        });
+    }
+
+    let mut anchors = shift_signed(child.anchors, x.saturating_neg(), y.saturating_neg());
+    clip_anchors(&mut anchors, 0, 0, sized.width, sized.height);
+    Ok(Rect {
+        width: sized.width,
+        rows,
+        anchors,
+    })
+}
+
+fn effective_origin(projection: Projection, content: usize, extent: usize) -> i64 {
+    match projection.boundary() {
+        ProjectionBoundary::Preserve => projection.origin(),
+        ProjectionBoundary::Clamp => {
+            let content = i64::try_from(content).unwrap_or(i64::MAX);
+            let extent = i64::try_from(extent).unwrap_or(i64::MAX);
+            projection
+                .origin()
+                .clamp(0, content.saturating_sub(extent).max(0))
+        }
+    }
+}
+
+fn project_row(row: &[StyledGrapheme], origin: i64, width: usize) -> Vec<StyledGrapheme> {
+    let mut output = Vec::new();
+    let mut output_width = 0usize;
+    let mut source_x = 0i128;
+    let origin = i128::from(origin);
+    let edge = i128::try_from(width).unwrap_or(i128::MAX);
+
+    for grapheme in row {
+        let grapheme_width = i128::try_from(grapheme.width()).unwrap_or(i128::MAX);
+        let left = source_x - origin;
+        let right = left.saturating_add(grapheme_width);
+        if left >= 0 && right <= edge {
+            let left = usize::try_from(left).unwrap_or(width);
+            if left > output_width {
+                output.extend(blank(left - output_width, &TextStyle::new()));
+                output_width = left;
+            }
+            output.push(grapheme.clone());
+            output_width = output_width.saturating_add(grapheme.width());
+        }
+        source_x = source_x.saturating_add(grapheme_width);
+    }
+    output.extend(blank(width.saturating_sub(output_width), &TextStyle::new()));
+    output
 }
 
 /// Truncates one row to `max_width` cells.
