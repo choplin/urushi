@@ -169,6 +169,15 @@ or happen to render the same cells. Given equal item data and the same context,
 drawing must be deterministic. This preserves `View`'s value equality and
 makes equality-based redraw avoidance sound.
 
+An extension crate that owns a concrete item type may inspect the directly
+owned items of that type through `Canvas::items::<T>()`. This is a typed
+ownership boundary, not generic scene reflection: Canvas does not expose
+`Any`, return unrelated item types, or interpret the recovered value. It lets an
+adapter keep immutable non-cell payloads in the same View that determines their
+layout. `urushi-graphics` uses it for prepared image snapshots; core still knows
+only that the value is a comparable `CanvasItem` whose `draw` method emits its
+fallback cells and anchor.
+
 Canvas sizing is comparable by the same value rule. Two viewport modes are
 equal when their explicit extents are equal. Two intrinsic modes are equal when
 their erased concrete measurement types and values are equal. A viewport mode

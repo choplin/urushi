@@ -217,6 +217,12 @@ contract is recorded separately in
 Presentations that need no specialized area-dependent algorithm continue to
 compose ordinary primitive trees.
 
+The separate `urushi-graphics` crate applies the same component/presentation
+contract to `Image`. Its presentation returns an ordinary anchored `View` with
+fallback cells; its output adapter later pairs the resolved anchor with the
+prepared raster. Core therefore gains neither an Image component nor an Image
+View variant. See [`design/terminal-graphics.md`](design/terminal-graphics.md).
+
 Shared recursive traversal, marker normalization, or CJK handling may remain
 private implementation. Promote a shared public contract only when external
 callers need generic code over multiple component models.

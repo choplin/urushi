@@ -283,9 +283,16 @@ which is how tests replace them and how a backend is replaced. The entry point,
 the executor boundary, and what the runtime does with an error of its own are
 defined in [`design/tui-runtime-entry.md`](design/tui-runtime-entry.md).
 
-Cell output plus terminal graphics remains an extension boundary: the first
-implementation proves the cell-only runtime before promoting a shared graphics
-contract.
+Cell output plus terminal graphics remains an extension boundary. The separate
+`urushi-graphics` crate pairs Image assets with resolved anchors and may supply
+reusable protocol state machines, but the cell-only runtime does not retain or
+commit them. A future optional graphics integration makes the TUI renderer own
+that state and combine it with its existing frame commit; applications without
+the feature keep the cell-only path. The requirements for adding that lifecycle
+are defined in
+[`design/tui-terminal-ownership.md`](design/tui-terminal-ownership.md), while
+the component-to-output boundary is defined in
+[`design/terminal-graphics.md`](design/terminal-graphics.md).
 
 Resolver reuse is a rendering choice, not application state. The runtime uses
 the direct stateless path unless its host selects a retained evaluator; in that

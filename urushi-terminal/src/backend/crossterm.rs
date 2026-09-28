@@ -11,6 +11,7 @@ use crate::{
     KeyboardEnhancementQuery, MediaKeyCode, ModifierKeyCode, Modifiers, MouseButton, MouseEvent,
     MouseKind, PixelSize, Position, RawModeControl, TerminalOutput, TerminalQuery, TerminalSize,
     TerminalStyle, TextAttribute, TextAttributes, Underline, UnderlineStyle, WindowSize,
+    command::write_control_string,
 };
 use crossterm::{
     cursor,
@@ -107,6 +108,12 @@ impl<W: Write> CommandWriter for CrosstermBackend<W> {
             Command::ResetStyle => queue!(self.writer, SetAttribute(Attribute::Reset), ResetColor),
             Command::SetHyperlink(Some(link)) => write_hyperlink_start(&mut self.writer, link),
             Command::SetHyperlink(None) => self.writer.write_all(b"\x1b]8;;\x1b\\"),
+            Command::ApplicationProgram(payload) => {
+                write_control_string(&mut self.writer, b"\x1b_", payload)
+            }
+            Command::DeviceControl(payload) => {
+                write_control_string(&mut self.writer, b"\x1bP", payload)
+            }
             Command::LineFeed => self.writer.write_all(b"\n"),
             Command::CarriageReturnLineFeed => self.writer.write_all(b"\r\n"),
             Command::Print(text) => queue!(self.writer, Print(text.as_str())),
@@ -619,12 +626,18 @@ mod tests {
                 }],
             })))
             .expect("hyperlink encodes");
+        backend
+            .write_command(Command::ApplicationProgram(
+                crate::ControlString::try_from("Ga=T;AAAA").expect("valid APC payload"),
+            ))
+            .expect("application command encodes");
 
         let output = backend.into_inner();
         assert!(contains(&output, b"\x1b[3B\x1b[2D"));
         assert!(contains(&output, b"\x1b[3J"));
         assert!(contains(&output, b"id%3Aunsafe=value"));
         assert!(contains(&output, b"https://example.invalid/%1B"));
+        assert!(contains(&output, b"\x1b_Ga=T;AAAA\x1b\\"));
     }
 
     #[test]

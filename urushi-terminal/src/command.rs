@@ -1,6 +1,10 @@
 //! Backend-independent terminal output commands.
 
-use std::{error::Error, fmt, io};
+use std::{
+    error::Error,
+    fmt,
+    io::{self, IoSlice, Write},
+};
 
 use crate::{KeyboardEnhancementFlags, Position, TerminalSize, TerminalStyle};
 
@@ -51,6 +55,88 @@ impl fmt::Display for InvalidTerminalText {
 }
 
 impl Error for InvalidTerminalText {}
+
+/// Printable ASCII payload carried by an ECMA-48 control string.
+///
+/// The framing escape sequences are supplied by the terminal backend.
+/// Restricting the payload to printable ASCII prevents an extension protocol
+/// from terminating its string early or exposing C1-valued UTF-8 continuation
+/// bytes to a byte-oriented terminal parser.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct ControlString<'a>(&'a str);
+
+impl<'a> ControlString<'a> {
+    pub const fn as_str(self) -> &'a str {
+        self.0
+    }
+}
+
+impl<'a> TryFrom<&'a str> for ControlString<'a> {
+    type Error = InvalidControlString;
+
+    fn try_from(payload: &'a str) -> Result<Self, Self::Error> {
+        match payload
+            .bytes()
+            .enumerate()
+            .find(|(_, byte)| !(0x20..=0x7e).contains(byte))
+        {
+            Some((byte_offset, _)) => Err(InvalidControlString { byte_offset }),
+            None => Ok(Self(payload)),
+        }
+    }
+}
+
+/// The location of a non-printable-ASCII byte rejected from a control-string payload.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct InvalidControlString {
+    byte_offset: usize,
+}
+
+impl InvalidControlString {
+    pub const fn byte_offset(self) -> usize {
+        self.byte_offset
+    }
+}
+
+impl fmt::Display for InvalidControlString {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            formatter,
+            "terminal control string contains a non-printable-ASCII byte at byte {}",
+            self.byte_offset
+        )
+    }
+}
+
+impl Error for InvalidControlString {}
+
+pub(crate) fn write_control_string(
+    writer: &mut impl Write,
+    introducer: &[u8],
+    payload: ControlString<'_>,
+) -> io::Result<()> {
+    let mut slices = [
+        IoSlice::new(introducer),
+        IoSlice::new(payload.as_str().as_bytes()),
+        IoSlice::new(b"\x1b\\"),
+    ];
+    let mut remaining = slices.as_mut_slice();
+    while !remaining.is_empty() {
+        let written = match writer.write_vectored(remaining) {
+            Ok(written) => written,
+            Err(error) if error.kind() == io::ErrorKind::Interrupted => continue,
+            Err(error) => return Err(error),
+        };
+        if written == 0 {
+            return Err(io::Error::new(
+                io::ErrorKind::WriteZero,
+                "failed to write terminal control string",
+            ));
+        }
+        IoSlice::advance_slices(&mut remaining, written);
+    }
+    Ok(())
+}
 
 /// A terminal output sink whose queued operations can be made visible.
 pub trait TerminalOutput {
@@ -166,6 +252,16 @@ pub enum Command<'a> {
     ResetStyle,
     /// Starts or ends a hyperlink using an OSC 8 control string.
     SetHyperlink(Option<TerminalHyperlink<'a>>),
+    /// Sends an ECMA-48 Application Program Command control string.
+    ///
+    /// Extension crates use this transport for protocols such as Kitty
+    /// graphics while retaining ownership of the protocol payload itself.
+    ApplicationProgram(ControlString<'a>),
+    /// Sends an ECMA-48 Device Control String.
+    ///
+    /// Extension crates use this transport for protocols such as Sixel while
+    /// retaining ownership of the protocol payload itself.
+    DeviceControl(ControlString<'a>),
     /// Writes the UTF-8 text bytes without interpreting them as terminal control data.
     Print(TerminalText<'a>),
     /// Writes the raw C0 line-feed byte without a carriage return.
@@ -205,5 +301,28 @@ mod tests {
             4
         );
         assert!(TerminalText::try_from("line\nfeed").is_err());
+    }
+
+    #[test]
+    fn control_strings_reject_embedded_terminal_commands() {
+        assert_eq!(
+            ControlString::try_from("Gf=32;AAAA")
+                .expect("graphics payload is printable")
+                .as_str(),
+            "Gf=32;AAAA"
+        );
+        assert_eq!(
+            ControlString::try_from("Gf=32\u{1b}\\")
+                .expect_err("escape is rejected")
+                .byte_offset(),
+            5
+        );
+        assert_eq!(
+            ControlString::try_from("Ĝě2J")
+                .expect_err("non-ASCII UTF-8 is rejected")
+                .byte_offset(),
+            0
+        );
+        assert!(ControlString::try_from("Gf=32\u{7f}").is_err());
     }
 }

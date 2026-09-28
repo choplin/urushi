@@ -68,6 +68,12 @@ binds its component snapshot and policy into an intrinsically sized Canvas.
 Neither `View` nor `resolve` can inspect whether a tree or item came from a
 List, Table, Tree, or future Graph.
 
+Terminal graphics use that same core without entering it. `urushi-graphics`
+owns Image data and presentations, composes fallback cells inside generic
+anchored regions, then pairs the resolved anchors with Image assets for Kitty
+or Sixel output. The exact boundary is defined in
+[`design/terminal-graphics.md`](design/terminal-graphics.md).
+
 Primitive styling splits in two, and geometry belongs to only one half: a
 `TextStyle` is everything a terminal can express about a run of text, and a
 `BlockStyle` is a rectangle plus the style filling it.
@@ -133,10 +139,11 @@ The contracts shared across surfaces are:
   cell-aware definition of plain-text display width and wrapping; and
 - `urushi-terminal`, which defines workspace-independent style and geometry
   primitives, commands, events, queries, raw-mode control, and session
-  restoration and observes the size and rendering capabilities of an actual
-  output handle without choosing prompt or TUI policy. Core `urushi`
-  re-exports the style primitives, so ordinary styling APIs do not expose the
-  lower crate as a second vocabulary.
+  restoration. Passive handle inspection observes terminal attachment and
+  size; a bidirectional backend obtains rendering capabilities from terminal
+  replies without choosing prompt or TUI policy. Core `urushi` re-exports the
+  style primitives, so ordinary styling APIs do not expose the lower crate as
+  a second vocabulary.
 
 `View` belongs to that foundation as well. Every surface goes through the same
 `resolve` and draws only the `ResolvedView` it produces — the Ratatui adapter as
@@ -210,6 +217,7 @@ a role are documented with the extension point itself, in
 | [`urushi-terminal`](../urushi-terminal/) | Workspace-independent terminal contracts and inspection: style and geometry primitives, commands, events, queries, session restoration, terminal/non-terminal classification, visible size, and capabilities. | None within the workspace |
 | [`urushi`](../urushi/) | Logical styles, themes, renderer-neutral views and components, layout, ANSI serialization, and standard-stream output convenience. | `urushi-terminal` |
 | [`urushi-cli`](../urushi-cli/) | Opinionated semantic summaries and warnings for human-facing, non-interactive CLI output. | `urushi` |
+| [`urushi-graphics`](../urushi-graphics/) | Image data and presentations, resolved anchor-to-image placement, terminal graphics encoders, and reusable graphics lifecycle machinery. Retaining that state belongs to an opted-in host runtime. | `urushi`, `urushi-terminal` |
 | [`urushi-prompt`](../urushi-prompt/) | Typed input, select, and confirm forms; prompt state transitions; inline and alternate-screen presentations; terminal session setup and cleanup. | `urushi`, `urushi-terminal` |
 | [`urushi-tui`](../urushi-tui/) | The Ratatui backend adapter in [`ratatui`](../urushi-tui/src/ratatui/) — style conversion, widgets, and the cell-writing path they share with the renderer — and the full-screen TUI runtime behind the default-on `runtime` Cargo feature. | `urushi`, `urushi-terminal` |
 
@@ -260,7 +268,8 @@ Reusable core components separate owned semantic data — `List`, `Tree`, and
 `Table` — from concrete presentations that compose it into a primitive `View`.
 [`urushi-cli`](cli-presentation.md) applies the same contract to its `Summary`
 and `Warning` data and presentations without making their CLI visual language
-part of core. The general contract is defined in
+part of core. `urushi-graphics` applies it to Image without making image or
+terminal-protocol APIs part of core. The general contract is defined in
 [`component-model.md`](component-model.md).
 
 ## Core contracts
@@ -312,8 +321,10 @@ query failure is an error. `print_view` and `eprint_view` inspect their own
 target and use the detected width. Redirected View output uses unbounded layout
 and dumb settings; `print` and `eprint` write `StyledText` without layout.
 
-Non-TTY output and `TERM=dumb` use append-only plain output. Machine-readable
-stdout remains separate from human-facing diagnostics on stderr.
+Non-TTY output and passive output-handle inspection use append-only plain
+output. Machine-readable stdout remains separate from human-facing diagnostics
+on stderr. Interactive backends can enable richer output only from confirmed
+terminal query responses.
 
 ### A prompt chooses its terminal surface
 

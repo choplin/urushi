@@ -20,7 +20,12 @@ pub(in crate::view) fn compose_canvas(canvas: &Canvas, size: Size) -> Result<Rec
 
     for command in canvas.draw(size).into_commands() {
         let command = command.rasterize(size)?;
-        anchors.extend(command.anchors);
+        anchors.extend(
+            command
+                .anchors
+                .into_iter()
+                .map(|anchor| anchor.locate(size)),
+        );
         for cell in command.cells {
             compose_cell(
                 &mut slots,

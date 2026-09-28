@@ -162,10 +162,12 @@ from its current callers and not a renamed copy of Crossterm. Its contracts
 cover four semantic capability groups:
 
 - observation: cell dimensions, optional pixel geometry, cursor position,
-  rendering capabilities, raw-mode state, and enhanced-keyboard support;
+  text and graphics rendering capabilities, raw-mode state, and
+  enhanced-keyboard support;
 - output: validated printable text, complete physical text style and hyperlink
   state, cursor movement and appearance, clear and scroll regions, screen and
-  wrapping modes, synchronized updates, title, resize, and flush;
+  wrapping modes, synchronized updates, title, resize, validated APC and DCS
+  extension payloads, and flush;
 - input: keys, mouse, focus, paste, and resize, including timed polling and the
   enhanced key kind, state, modifier, media-key, and modifier-key information a
   backend observes;
@@ -187,18 +189,22 @@ a query may write a protocol request and consume a response without racing the
 ordinary event reader. `backend::ansi::AnsiWriter` implements the output
 protocol without a terminal framework. On Unix,
 `backend::native::NativeTerminal` owns `/dev/tty`, raw-mode restoration, input
-decoding, resize observation, and terminal protocol replies around that writer;
-it is the production backend used by prompts. The optional
-`backend::crossterm` module remains the cross-platform adapter. No Crossterm
-type appears in an Urushi contract or a surface API.
+decoding, resize observation, and terminal protocol replies around that writer.
+Its capability query uses positive Kitty, primary-device-attributes, and
+XTGETTCAP color replies and caches the result; it does not infer support from
+process environment variables. It is the production backend used by prompts.
+The optional `backend::crossterm` module remains the cross-platform adapter. No
+Crossterm type appears in an Urushi contract or a surface API.
 
 The boundary excludes whole capability groups rather than individual values:
 asynchronous scheduling and stream ownership belong to the runtime source
 layer, clipboard transfer is a separate service, and graphics presentation is
-the extension described below. Serialization helper features and arbitrary
-backend-library commands are not terminal capabilities. These exclusions do
-not justify dropping information inside the synchronous text-terminal groups
-that the boundary does own.
+the extension described below. Transporting a validated control string does
+not make the terminal foundation own the image, protocol encoder, or graphics
+lifecycle; it keeps physical output behind `CommandWriter`. Serialization
+helper features and arbitrary backend-library commands are not terminal
+capabilities. These exclusions do not justify dropping information inside the
+synchronous terminal groups that the boundary does own.
 
 ### Clock
 
@@ -221,11 +227,17 @@ detail the runtime is built to outgrow.
 
 ### Cell output and terminal graphics
 
-Cell output plus terminal graphics remains an extension boundary. The first
-implementation should prove the cell-only runtime before promoting a shared
-graphics contract. When that work begins, it must design asset lifetime,
-cell-and-graphics commit, partial-output recovery, and text-only fallback
-together.
+Cell output plus terminal graphics remains an extension boundary. The separate
+`urushi-graphics` crate uses resolved core anchors and emits validated APC or
+DCS payloads through `urushi-terminal::CommandWriter`; it does not open a
+backend or write a physical stream directly. This stateless command path does
+not give the cell-only runtime a graphics lifecycle. A runtime that retains
+terminal graphics owns the corresponding `urushi-graphics` state behind an
+optional feature and must design asset lifetime, cell-and-graphics commit,
+partial-output recovery, and fallback together before making graphics part of
+its committed frame state. Applications that do not enable that integration do
+not pay for or manage graphics state. The package boundary is defined in
+[`terminal-graphics.md`](terminal-graphics.md).
 
 ## Verification
 
@@ -302,4 +314,5 @@ work.
 
 ## Open representation choices
 
-- the graphics presentation and recovery model.
+- retained graphics commit and recovery details beyond the anchored placement
+  contract.

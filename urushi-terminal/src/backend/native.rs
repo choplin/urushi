@@ -11,15 +11,78 @@ use std::{
 };
 
 use crate::{
-    Command, CommandWriter, Event, EventSource, FocusChange, KeyCode, KeyEvent, KeyKind,
-    KeyboardEnhancementQuery, Modifiers, MouseButton, MouseEvent, MouseKind, PixelSize, Position,
-    RawModeControl, TerminalInfo, TerminalOutput, TerminalQuery, TerminalSize, WindowSize,
-    backend::ansi::AnsiWriter,
+    ColorLevel, Command, CommandWriter, Event, EventSource, FocusChange, KeyCode, KeyEvent,
+    KeyKind, KeyboardEnhancementQuery, Modifiers, MouseButton, MouseEvent, MouseKind, PixelSize,
+    Position, RawModeControl, TerminalCapabilities, TerminalGraphicsProtocols, TerminalInfo,
+    TerminalOutput, TerminalQuery, TerminalSize, WindowSize, backend::ansi::AnsiWriter,
 };
 
 const ESCAPE_TIMEOUT: Duration = Duration::from_millis(10);
 const QUERY_TIMEOUT: Duration = Duration::from_secs(2);
 const RESIZE_POLL_INTERVAL: Duration = Duration::from_millis(50);
+const MAX_CONTROL_RESPONSE_BYTES: usize = 64 * 1024;
+const CAPABILITY_QUERY: &[u8] = concat!(
+    "\x1b_Gi=31,s=1,v=1,a=q,t=d,f=24;AAAA\x1b\\",
+    "\x1b[c",
+    "\x1bP+q436f\x1b\\",
+    "\x1bP+q524742\x1b\\",
+    "\x1b[5n",
+)
+.as_bytes();
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum CapabilityResponse {
+    Kitty,
+    Sixel,
+    ColorCount(u16),
+    TrueColor,
+    Complete,
+    Ignored,
+}
+
+#[derive(Default)]
+struct CapabilityProbe {
+    complete: bool,
+    color_count: u16,
+    true_color: bool,
+    graphics_protocols: TerminalGraphicsProtocols,
+}
+
+impl CapabilityProbe {
+    fn record(&mut self, response: CapabilityResponse) {
+        match response {
+            CapabilityResponse::Kitty => {
+                self.graphics_protocols = self
+                    .graphics_protocols
+                    .union(TerminalGraphicsProtocols::KITTY);
+            }
+            CapabilityResponse::Sixel => {
+                self.graphics_protocols = self
+                    .graphics_protocols
+                    .union(TerminalGraphicsProtocols::SIXEL);
+            }
+            CapabilityResponse::ColorCount(count) => self.color_count = count,
+            CapabilityResponse::TrueColor => self.true_color = true,
+            CapabilityResponse::Complete => self.complete = true,
+            CapabilityResponse::Ignored => {}
+        }
+    }
+
+    fn capabilities(&self) -> TerminalCapabilities {
+        let color_level = if self.true_color {
+            ColorLevel::TrueColor
+        } else if self.color_count >= 256 {
+            ColorLevel::Ansi256
+        } else if self.color_count >= 16 {
+            ColorLevel::Ansi16
+        } else {
+            ColorLevel::None
+        };
+        TerminalCapabilities::none()
+            .with_color_level(color_level)
+            .with_graphics_protocols(self.graphics_protocols)
+    }
+}
 
 /// One owned connection to the process's controlling terminal.
 ///
@@ -33,6 +96,8 @@ pub struct NativeTerminal {
     input_start: usize,
     pending: VecDeque<Event>,
     cursor_response: Option<Position>,
+    capability_probe: Option<CapabilityProbe>,
+    capabilities: Option<TerminalCapabilities>,
     last_size: TerminalSize,
 }
 
@@ -56,6 +121,8 @@ impl NativeTerminal {
             input_start: 0,
             pending: VecDeque::new(),
             cursor_response: None,
+            capability_probe: None,
+            capabilities: None,
             last_size,
         })
     }
@@ -63,13 +130,8 @@ impl NativeTerminal {
     /// Inspects the terminal endpoint opened by this backend.
     pub fn terminal_info(&mut self) -> io::Result<TerminalInfo> {
         let size = self.terminal_size()?;
-        Ok(TerminalInfo::new(
-            size,
-            crate::detect_capabilities(
-                std::env::var("TERM").ok().as_deref(),
-                std::env::var("COLORTERM").ok().as_deref(),
-            ),
-        ))
+        let capabilities = self.terminal_capabilities()?;
+        Ok(TerminalInfo::new(size, capabilities))
     }
 
     fn file(&self) -> &File {
@@ -90,6 +152,7 @@ impl NativeTerminal {
 
     fn next_wire_event(&mut self, timeout: Option<Duration>) -> io::Result<Option<Event>> {
         let started = Instant::now();
+        let mut attempted_read = false;
         let raw_mode = self.original_termios.is_some() || self.raw_mode_enabled()?;
         loop {
             if let Some(decoded) = decode(self.unread_input(), false, raw_mode)? {
@@ -100,7 +163,17 @@ impl NativeTerminal {
                         self.cursor_response = Some(position);
                         return Ok(None);
                     }
+                    DecodedItem::Response(response) => {
+                        if let Some(probe) = &mut self.capability_probe {
+                            probe.record(response);
+                        }
+                        return Ok(None);
+                    }
                 }
+            }
+
+            if attempted_read && timeout.is_some_and(|limit| started.elapsed() >= limit) {
+                return Ok(None);
             }
 
             let remaining = timeout.map(|limit| limit.saturating_sub(started.elapsed()));
@@ -111,6 +184,7 @@ impl NativeTerminal {
                 wait = wait.min(ESCAPE_TIMEOUT);
             }
             let read = self.read_input(wait)?;
+            attempted_read = true;
             if !read {
                 if let Some(decoded) = decode(self.unread_input(), true, raw_mode)? {
                     self.consume_input(decoded.consumed);
@@ -118,6 +192,12 @@ impl NativeTerminal {
                         DecodedItem::Event(event) => return Ok(Some(event)),
                         DecodedItem::Cursor(position) => {
                             self.cursor_response = Some(position);
+                            return Ok(None);
+                        }
+                        DecodedItem::Response(response) => {
+                            if let Some(probe) = &mut self.capability_probe {
+                                probe.record(response);
+                            }
                             return Ok(None);
                         }
                     }
@@ -246,6 +326,67 @@ impl TerminalQuery for NativeTerminal {
         let mode = get_termios(self.file())?;
         Ok(mode.c_lflag & (libc::ICANON | libc::ECHO | libc::ISIG) == 0)
     }
+
+    fn terminal_capabilities(&mut self) -> io::Result<TerminalCapabilities> {
+        if let Some(capabilities) = self.capabilities {
+            return Ok(capabilities);
+        }
+        let restore_raw_mode = self.original_termios.is_none();
+        if restore_raw_mode {
+            self.enable_raw_mode()?;
+        }
+
+        let query_result = self.query_terminal_capabilities();
+        let restore_result = if restore_raw_mode {
+            self.disable_raw_mode()
+        } else {
+            Ok(())
+        };
+
+        match (query_result, restore_result) {
+            (Ok(capabilities), Ok(())) => {
+                self.capabilities = Some(capabilities);
+                Ok(capabilities)
+            }
+            (Err(error), _) | (Ok(_), Err(error)) => Err(error),
+        }
+    }
+}
+
+impl NativeTerminal {
+    fn query_terminal_capabilities(&mut self) -> io::Result<TerminalCapabilities> {
+        self.capability_probe = Some(CapabilityProbe::default());
+        let result = (|| {
+            self.output.writer_mut().write_all(CAPABILITY_QUERY)?;
+            self.output.flush()?;
+
+            let started = Instant::now();
+            loop {
+                if self
+                    .capability_probe
+                    .as_ref()
+                    .is_some_and(|probe| probe.complete)
+                {
+                    break;
+                }
+                let remaining = QUERY_TIMEOUT.saturating_sub(started.elapsed());
+                if remaining.is_zero() {
+                    break;
+                }
+                if let Some(event) = self.next_wire_event(Some(remaining))? {
+                    self.pending.push_back(event);
+                }
+            }
+            Ok(())
+        })();
+
+        let capabilities = self
+            .capability_probe
+            .take()
+            .unwrap_or_default()
+            .capabilities();
+        result.map(|()| capabilities)
+    }
 }
 
 impl KeyboardEnhancementQuery for NativeTerminal {
@@ -351,6 +492,7 @@ struct Decoded {
 enum DecodedItem {
     Event(Event),
     Cursor(Position),
+    Response(CapabilityResponse),
 }
 
 fn decode(input: &[u8], escape_complete: bool, raw_mode: bool) -> io::Result<Option<Decoded>> {
@@ -367,6 +509,8 @@ fn decode(input: &[u8], escape_complete: bool, raw_mode: bool) -> io::Result<Opt
     }
     match input[1] {
         b'[' => decode_csi(input, escape_complete),
+        b'P' => decode_control_string(input, b'P', escape_complete),
+        b'_' => decode_control_string(input, b'_', escape_complete),
         b'O' => decode_ss3(input),
         0x1b => decoded_key(KeyCode::Escape, Modifiers::NONE, 1).map(Some),
         _ => {
@@ -449,6 +593,67 @@ fn decode_ss3(input: &[u8]) -> io::Result<Option<Decoded>> {
     decoded_key(key, Modifiers::NONE, 3).map(Some)
 }
 
+fn decode_control_string(
+    input: &[u8],
+    kind: u8,
+    escape_complete: bool,
+) -> io::Result<Option<Decoded>> {
+    let Some(end) = find_subslice(&input[2..], b"\x1b\\") else {
+        if input.len() > MAX_CONTROL_RESPONSE_BYTES {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "terminal control response exceeds the supported size",
+            ));
+        }
+        return if escape_complete {
+            decoded_key(KeyCode::Escape, Modifiers::NONE, 1).map(Some)
+        } else {
+            Ok(None)
+        };
+    };
+    let body = &input[2..2 + end];
+    let response = match kind {
+        b'_' if body == b"Gi=31;OK" => CapabilityResponse::Kitty,
+        b'P' => decode_termcap_response(body),
+        _ => CapabilityResponse::Ignored,
+    };
+    Ok(Some(Decoded {
+        item: DecodedItem::Response(response),
+        consumed: 2 + end + 2,
+    }))
+}
+
+fn decode_termcap_response(body: &[u8]) -> CapabilityResponse {
+    let Some(capability) = body.strip_prefix(b"1+r") else {
+        return CapabilityResponse::Ignored;
+    };
+    let (name, value) = capability
+        .iter()
+        .position(|byte| *byte == b'=')
+        .map_or((capability, &[][..]), |separator| {
+            (&capability[..separator], &capability[separator + 1..])
+        });
+    match name {
+        b"436f" => decode_hex_decimal(value)
+            .map(CapabilityResponse::ColorCount)
+            .unwrap_or(CapabilityResponse::Ignored),
+        b"524742" => CapabilityResponse::TrueColor,
+        _ => CapabilityResponse::Ignored,
+    }
+}
+
+fn decode_hex_decimal(value: &[u8]) -> Option<u16> {
+    if !value.len().is_multiple_of(2) {
+        return None;
+    }
+    let mut decoded = Vec::with_capacity(value.len() / 2);
+    for pair in value.chunks_exact(2) {
+        let pair = std::str::from_utf8(pair).ok()?;
+        decoded.push(u8::from_str_radix(pair, 16).ok()?);
+    }
+    std::str::from_utf8(&decoded).ok()?.parse().ok()
+}
+
 fn decode_csi(input: &[u8], escape_complete: bool) -> io::Result<Option<Decoded>> {
     if input.starts_with(b"\x1b[200~") {
         let Some(end) = find_subslice(&input[6..], b"\x1b[201~") else {
@@ -476,6 +681,25 @@ fn decode_csi(input: &[u8], escape_complete: bool) -> io::Result<Option<Decoded>
     let final_byte = input[final_index];
     let body = &input[2..final_index];
     let consumed = final_index + 1;
+    if final_byte == b'c' && body.starts_with(b"?") {
+        let sixel = body[1..]
+            .split(|byte| *byte == b';')
+            .any(|parameter| parameter == b"4");
+        return Ok(Some(Decoded {
+            item: DecodedItem::Response(if sixel {
+                CapabilityResponse::Sixel
+            } else {
+                CapabilityResponse::Ignored
+            }),
+            consumed,
+        }));
+    }
+    if final_byte == b'n' && body == b"0" {
+        return Ok(Some(Decoded {
+            item: DecodedItem::Response(CapabilityResponse::Complete),
+            consumed,
+        }));
+    }
     if final_byte == b'R' {
         let (row, column) = two_numbers(body)?;
         return Ok(Some(Decoded {
@@ -682,6 +906,7 @@ mod tests {
         match decoded.item {
             DecodedItem::Event(event) => event,
             DecodedItem::Cursor(_) => panic!("expected an event"),
+            DecodedItem::Response(_) => panic!("expected an event"),
         }
     }
 
@@ -724,6 +949,86 @@ mod tests {
         if let DecodedItem::Cursor(position) = decoded.item {
             assert_eq!(position, Position::new(33, 11));
         }
+    }
+
+    #[test]
+    fn decoder_extracts_confirmed_terminal_capabilities() {
+        let responses = [
+            (b"\x1b_Gi=31;OK\x1b\\".as_slice(), CapabilityResponse::Kitty),
+            (b"\x1b[?64;4c".as_slice(), CapabilityResponse::Sixel),
+            (
+                b"\x1bP1+r436f=323536\x1b\\".as_slice(),
+                CapabilityResponse::ColorCount(256),
+            ),
+            (
+                b"\x1bP1+r524742=38\x1b\\".as_slice(),
+                CapabilityResponse::TrueColor,
+            ),
+            (b"\x1b[0n".as_slice(), CapabilityResponse::Complete),
+        ];
+
+        for (wire, expected) in responses {
+            let decoded = decode(wire, false, true)
+                .expect("response decodes")
+                .expect("response is complete");
+            assert_eq!(decoded.consumed, wire.len());
+            assert!(matches!(decoded.item, DecodedItem::Response(actual) if actual == expected));
+        }
+    }
+
+    #[test]
+    fn decoder_does_not_promote_negative_or_unrelated_responses() {
+        for wire in [
+            b"\x1b_Gi=31;EINVAL\x1b\\".as_slice(),
+            b"\x1b[?64;1;2c".as_slice(),
+            b"\x1bP0+r524742\x1b\\".as_slice(),
+            b"\x1bP1+r756e6b6e6f776e=31\x1b\\".as_slice(),
+        ] {
+            let decoded = decode(wire, false, true)
+                .expect("response decodes")
+                .expect("response is complete");
+            assert!(matches!(
+                decoded.item,
+                DecodedItem::Response(CapabilityResponse::Ignored)
+            ));
+        }
+    }
+
+    #[test]
+    fn decoder_rejects_unbounded_control_responses() {
+        let mut response = b"\x1b_".to_vec();
+        response.resize(MAX_CONTROL_RESPONSE_BYTES + 1, b'x');
+
+        let error = match decode(&response, false, true) {
+            Err(error) => error,
+            Ok(_) => panic!("oversized response is accepted"),
+        };
+        assert_eq!(error.kind(), io::ErrorKind::InvalidData);
+    }
+
+    #[test]
+    fn capability_probe_uses_only_positive_responses() {
+        let mut probe = CapabilityProbe::default();
+        for response in [
+            CapabilityResponse::Kitty,
+            CapabilityResponse::Sixel,
+            CapabilityResponse::ColorCount(256),
+            CapabilityResponse::Complete,
+        ] {
+            probe.record(response);
+        }
+
+        let capabilities = probe.capabilities();
+        assert_eq!(capabilities.color_level(), ColorLevel::Ansi256);
+        assert!(capabilities.attributes().is_empty());
+        assert_eq!(
+            capabilities.underline_styles(),
+            crate::UnderlineStyles::empty()
+        );
+        assert!(!capabilities.underline_colors());
+        assert!(!capabilities.hyperlinks());
+        assert!(capabilities.supports_graphics(crate::TerminalGraphicsProtocol::Kitty));
+        assert!(capabilities.supports_graphics(crate::TerminalGraphicsProtocol::Sixel));
     }
 
     #[test]
@@ -775,6 +1080,58 @@ mod tests {
             terminal.read_event().expect("queued event is retained"),
             Event::Key(KeyEvent::new(KeyCode::Char('x')))
         );
+    }
+
+    #[test]
+    fn capability_query_uses_terminal_responses_and_preserves_input() {
+        let (mut peer, mut terminal) = terminal_pair();
+        let (release_peer, keep_peer_open) = std::sync::mpsc::channel();
+        let responder = std::thread::spawn(move || {
+            let mut query = vec![0_u8; CAPABILITY_QUERY.len()];
+            peer.read_exact(&mut query).expect("query reaches tty");
+            assert_eq!(query, CAPABILITY_QUERY);
+            peer.write_all(
+                concat!(
+                    "x",
+                    "\x1b_Gi=31;OK\x1b\\",
+                    "\x1b[?64;4c",
+                    "\x1bP1+r436f=323536\x1b\\",
+                    "\x1bP1+r524742=38\x1b\\",
+                    "\x1b[0n",
+                )
+                .as_bytes(),
+            )
+            .expect("responses reach tty");
+            keep_peer_open
+                .recv()
+                .expect("peer stays open until the response is consumed");
+        });
+
+        let capabilities = terminal
+            .terminal_capabilities()
+            .expect("capabilities are queried");
+        release_peer.send(()).expect("responder remains available");
+        responder.join().expect("responder completes");
+
+        assert_eq!(capabilities.color_level(), ColorLevel::TrueColor);
+        assert!(capabilities.attributes().is_empty());
+        assert_eq!(
+            capabilities.underline_styles(),
+            crate::UnderlineStyles::empty()
+        );
+        assert!(capabilities.supports_graphics(crate::TerminalGraphicsProtocol::Kitty));
+        assert!(capabilities.supports_graphics(crate::TerminalGraphicsProtocol::Sixel));
+        assert_eq!(
+            terminal
+                .terminal_capabilities()
+                .expect("confirmed capabilities are cached"),
+            capabilities
+        );
+        assert_eq!(
+            terminal.read_event().expect("queued event is retained"),
+            Event::Key(KeyEvent::new(KeyCode::Char('x')))
+        );
+        assert!(!terminal.raw_mode_enabled().expect("raw mode is restored"));
     }
 
     fn terminal_pair() -> (File, NativeTerminal) {

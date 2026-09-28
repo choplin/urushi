@@ -2,7 +2,7 @@
 
 use std::io;
 
-use crate::{Position, TerminalSize};
+use crate::{Position, TerminalCapabilities, TerminalSize};
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
 pub struct PixelSize {
@@ -44,6 +44,28 @@ impl WindowSize {
     pub const fn pixels(self) -> Option<PixelSize> {
         self.pixels
     }
+
+    /// Returns the pixel dimensions of one character cell when the reported
+    /// window geometry divides into a uniform non-empty cell grid.
+    pub const fn cell_pixels(self) -> Option<PixelSize> {
+        let Some(pixels) = self.pixels else {
+            return None;
+        };
+        if self.cells.columns() == 0
+            || self.cells.rows() == 0
+            || pixels.width() % self.cells.columns() != 0
+            || pixels.height() % self.cells.rows() != 0
+        {
+            return None;
+        }
+        let width = pixels.width() / self.cells.columns();
+        let height = pixels.height() / self.cells.rows();
+        if width == 0 || height == 0 {
+            None
+        } else {
+            Some(PixelSize::new(width, height))
+        }
+    }
 }
 
 /// Synchronous inspection of terminal state.
@@ -63,6 +85,15 @@ pub trait TerminalQuery {
 
     /// Reports whether process terminal input is currently in raw mode.
     fn raw_mode_enabled(&mut self) -> io::Result<bool>;
+
+    /// Queries rendering capabilities confirmed by the terminal.
+    ///
+    /// Backends that cannot exchange capability queries return an empty set
+    /// rather than inferring support from environment variables or terminal
+    /// names.
+    fn terminal_capabilities(&mut self) -> io::Result<TerminalCapabilities> {
+        Ok(TerminalCapabilities::none())
+    }
 }
 
 impl<T: TerminalQuery + ?Sized> TerminalQuery for &mut T {
@@ -81,6 +112,10 @@ impl<T: TerminalQuery + ?Sized> TerminalQuery for &mut T {
     fn raw_mode_enabled(&mut self) -> io::Result<bool> {
         T::raw_mode_enabled(self)
     }
+
+    fn terminal_capabilities(&mut self) -> io::Result<TerminalCapabilities> {
+        T::terminal_capabilities(self)
+    }
 }
 
 /// Detects whether enhanced keyboard protocol negotiation is available.
@@ -95,5 +130,25 @@ pub trait KeyboardEnhancementQuery {
 impl<T: KeyboardEnhancementQuery + ?Sized> KeyboardEnhancementQuery for &mut T {
     fn supports_keyboard_enhancement(&mut self) -> io::Result<bool> {
         T::supports_keyboard_enhancement(self)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn cell_pixels_require_exact_uniform_geometry() {
+        assert_eq!(
+            WindowSize::new(TerminalSize::new(80, 24), Some(PixelSize::new(800, 480)),)
+                .cell_pixels(),
+            Some(PixelSize::new(10, 20))
+        );
+        assert_eq!(
+            WindowSize::new(TerminalSize::new(80, 24), Some(PixelSize::new(801, 480)),)
+                .cell_pixels(),
+            None
+        );
+        assert_eq!(WindowSize::default().cell_pixels(), None);
     }
 }

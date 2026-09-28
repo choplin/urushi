@@ -171,9 +171,9 @@ impl AnchoredRect {
             y: y as i64,
             width,
             height,
-            // Nothing to compare against until the rectangle this is reported
-            // against exists; `resolve` settles it once, at the end.
-            within_resolved_view: false,
+            // An anchor starts uncut. Every independently resolved rectangle
+            // can only narrow this result as parents nest it further.
+            within_resolved_view: true,
         }
     }
 
@@ -226,7 +226,8 @@ impl AnchoredRect {
     /// [`is_within_resolved_view`](Self::is_within_resolved_view) against the
     /// rectangle this is reported with.
     pub(super) fn locate(mut self, resolved: Size) -> Self {
-        self.within_resolved_view = self.x >= 0
+        self.within_resolved_view = self.within_resolved_view
+            && self.x >= 0
             && self.y >= 0
             && self
                 .x

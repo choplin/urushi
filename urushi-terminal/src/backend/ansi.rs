@@ -4,7 +4,7 @@ use std::io::{self, Write};
 
 use crate::{
     ClearRegion, Color, Command, CommandWriter, CursorAppearance, CursorMove, TerminalOutput,
-    TerminalStyle, TextAttribute, Underline, UnderlineStyle,
+    TerminalStyle, TextAttribute, Underline, UnderlineStyle, command::write_control_string,
 };
 
 /// A backend that writes Urushi commands as ANSI, CSI, OSC, and C0 bytes.
@@ -104,6 +104,12 @@ impl<W: Write> CommandWriter for AnsiWriter<W> {
                 self.writer.write_all(b"\x1b\\")
             }
             Command::SetHyperlink(None) => self.writer.write_all(b"\x1b]8;;\x1b\\"),
+            Command::ApplicationProgram(payload) => {
+                write_control_string(&mut self.writer, b"\x1b_", payload)
+            }
+            Command::DeviceControl(payload) => {
+                write_control_string(&mut self.writer, b"\x1bP", payload)
+            }
             Command::Print(text) => self.writer.write_all(text.as_str().as_bytes()),
             Command::LineFeed => self.writer.write_all(b"\n"),
             Command::CarriageReturnLineFeed => self.writer.write_all(b"\r\n"),
@@ -259,12 +265,16 @@ fn write_osc_field(writer: &mut impl Write, value: &str, separators: &[u8]) -> i
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{HyperlinkParameter, Position, TerminalHyperlink, TerminalText, TextAttributes};
+    use crate::{
+        ControlString, HyperlinkParameter, Position, TerminalHyperlink, TerminalText,
+        TextAttributes,
+    };
 
     #[derive(Default)]
     struct CountingWriter {
         bytes: Vec<u8>,
         writes: usize,
+        vectored_writes: usize,
     }
 
     impl Write for CountingWriter {
@@ -276,6 +286,43 @@ mod tests {
 
         fn flush(&mut self) -> io::Result<()> {
             Ok(())
+        }
+
+        fn write_vectored(&mut self, buffers: &[io::IoSlice<'_>]) -> io::Result<usize> {
+            self.vectored_writes += 1;
+            let length = buffers.iter().map(|buffer| buffer.len()).sum();
+            for buffer in buffers {
+                self.bytes.extend_from_slice(buffer);
+            }
+            Ok(length)
+        }
+    }
+
+    #[derive(Default)]
+    struct InterruptedOnceWriter {
+        bytes: Vec<u8>,
+        interrupted: bool,
+    }
+
+    impl Write for InterruptedOnceWriter {
+        fn write(&mut self, _buffer: &[u8]) -> io::Result<usize> {
+            unreachable!("control strings use vectored writes")
+        }
+
+        fn flush(&mut self) -> io::Result<()> {
+            Ok(())
+        }
+
+        fn write_vectored(&mut self, buffers: &[io::IoSlice<'_>]) -> io::Result<usize> {
+            if !self.interrupted {
+                self.interrupted = true;
+                return Err(io::Error::from(io::ErrorKind::Interrupted));
+            }
+            let length = buffers.iter().map(|buffer| buffer.len()).sum();
+            for buffer in buffers {
+                self.bytes.extend_from_slice(buffer);
+            }
+            Ok(length)
         }
     }
 
@@ -295,6 +342,37 @@ mod tests {
             .expect("text encodes");
 
         assert_eq!(output.into_inner(), b"\x1b[3;4H\x1b[?1049h\xe6\xbc\x86");
+    }
+
+    #[test]
+    fn control_strings_receive_backend_owned_framing() {
+        let mut output = AnsiWriter::new(CountingWriter::default());
+        output
+            .write_command(Command::ApplicationProgram(
+                ControlString::try_from("Ga=T;AAAA").expect("valid APC payload"),
+            ))
+            .expect("APC encodes");
+        output
+            .write_command(Command::DeviceControl(
+                ControlString::try_from("q#0;2;0;0;0").expect("valid DCS payload"),
+            ))
+            .expect("DCS encodes");
+
+        let output = output.into_inner();
+        assert_eq!(output.bytes, b"\x1b_Ga=T;AAAA\x1b\\\x1bPq#0;2;0;0;0\x1b\\");
+        assert_eq!(output.vectored_writes, 2);
+    }
+
+    #[test]
+    fn control_string_writes_retry_after_interruption() {
+        let mut output = AnsiWriter::new(InterruptedOnceWriter::default());
+        output
+            .write_command(Command::ApplicationProgram(
+                ControlString::try_from("Ga=T;AAAA").expect("valid APC payload"),
+            ))
+            .expect("interrupted APC write is retried");
+
+        assert_eq!(output.into_inner().bytes, b"\x1b_Ga=T;AAAA\x1b\\");
     }
 
     #[test]

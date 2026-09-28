@@ -22,15 +22,22 @@ pub struct TerminalInfo {
 ```
 
 `NonTerminal` is explicit rather than an absent `TerminalInfo`, so redirect
-semantics cannot be silently assigned to `None`. `TERM=dumb` remains a terminal:
-its size is available for layout, while its capability set is empty. Failure to
-query the size of a handle already identified as a terminal is an I/O error.
+semantics cannot be silently assigned to `None`. Passive inspection has no
+input path on which to receive protocol replies. It therefore reports the
+terminal's size with an empty capability set rather than interpreting `TERM`,
+`COLORTERM`, or a terminal-family name. Failure to query the size of a handle
+already identified as a terminal is an I/O error.
 
-Capabilities describe the features the detector can safely establish for the
-terminal. Unknown features remain disabled, so the reported set is a
-conservative safe set for automatic output rather than an optimistic list of
-escape sequences. The set is feature-granular: color fidelity, text attributes,
-underline shapes, underline color, and hyperlinks are independent axes.
+Capabilities describe only features positively confirmed by a bidirectional
+terminal query or supplied by an explicitly configured backend. The native
+backend queries Kitty graphics, primary device attributes for Sixel, and
+XTGETTCAP's specified `Co` and `RGB` queries for color fidelity. A missing,
+negative, malformed, or timed-out response does not enable the feature. Text
+attributes, underline variants, underline color, and hyperlinks remain disabled
+because the supported query protocols provide no portable positive answer for
+them. The set remains feature-granular so an explicitly configured backend can
+supply positive knowledge from its platform. Kitty and Sixel are independent
+flags because a terminal may support both.
 Environment preferences such as `NO_COLOR` are not capabilities.
 
 ## Selection and rendering
@@ -81,6 +88,13 @@ An arbitrary writer does not require a terminal-named wrapper. The caller uses
 and `RenderSettings`, then combines `resolve`, `render`, and `std::io::Write`.
 That lower path supports both redirected-output intents: an unbounded plain dump
 or output deliberately rendered as if it targeted a known terminal.
+
+Interactive extension protocols do not use that raw-writer path. A
+`CommandWriter` accepts validated APC and DCS payloads and its backend supplies
+the ECMA-48 framing. An extension crate therefore owns protocol encoding while
+the terminal connection remains the only owner of physical output. The exact
+graphics use of this transport is defined in
+[`terminal-graphics.md`](terminal-graphics.md).
 
 ## Boundaries
 

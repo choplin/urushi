@@ -16,8 +16,9 @@ mod style;
 mod terminal;
 
 pub use command::{
-    ClearRegion, Command, CommandWriter, CursorAppearance, CursorMove, HyperlinkParameter,
-    InvalidTerminalText, TerminalHyperlink, TerminalOutput, TerminalText,
+    ClearRegion, Command, CommandWriter, ControlString, CursorAppearance, CursorMove,
+    HyperlinkParameter, InvalidControlString, InvalidTerminalText, TerminalHyperlink,
+    TerminalOutput, TerminalText,
 };
 pub use event::{
     Event, EventSource, FocusChange, KeyCode, KeyEvent, KeyEventState, KeyKind,
@@ -107,7 +108,54 @@ impl std::ops::BitOr for UnderlineStyles {
     }
 }
 
-/// Rendering features conservatively detected for a terminal.
+/// A terminal graphics protocol that can display raster images.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum TerminalGraphicsProtocol {
+    Kitty,
+    Sixel,
+}
+
+/// A set of terminal graphics protocols supported by a terminal.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
+pub struct TerminalGraphicsProtocols(u8);
+
+impl TerminalGraphicsProtocols {
+    pub const KITTY: Self = Self(1 << 0);
+    pub const SIXEL: Self = Self(1 << 1);
+
+    const ALL_BITS: u8 = Self::KITTY.0 | Self::SIXEL.0;
+
+    pub const fn empty() -> Self {
+        Self(0)
+    }
+
+    pub const fn all() -> Self {
+        Self(Self::ALL_BITS)
+    }
+
+    pub const fn union(self, other: Self) -> Self {
+        Self(self.0 | other.0)
+    }
+
+    pub const fn contains(self, protocol: TerminalGraphicsProtocol) -> bool {
+        let selected = match protocol {
+            TerminalGraphicsProtocol::Kitty => Self::KITTY,
+            TerminalGraphicsProtocol::Sixel => Self::SIXEL,
+        };
+        self.0 & selected.0 != 0
+    }
+}
+
+impl std::ops::BitOr for TerminalGraphicsProtocols {
+    type Output = Self;
+
+    fn bitor(self, rhs: Self) -> Self::Output {
+        self.union(rhs)
+    }
+}
+
+/// Rendering features positively confirmed by a terminal query or supplied by
+/// an explicitly configured backend.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct TerminalCapabilities {
     color_level: ColorLevel,
@@ -115,6 +163,7 @@ pub struct TerminalCapabilities {
     underline_styles: UnderlineStyles,
     underline_colors: bool,
     hyperlinks: bool,
+    graphics_protocols: TerminalGraphicsProtocols,
 }
 
 impl TerminalCapabilities {
@@ -126,6 +175,7 @@ impl TerminalCapabilities {
             underline_styles: UnderlineStyles::empty(),
             underline_colors: false,
             hyperlinks: false,
+            graphics_protocols: TerminalGraphicsProtocols::empty(),
         }
     }
 
@@ -147,6 +197,14 @@ impl TerminalCapabilities {
 
     pub const fn hyperlinks(self) -> bool {
         self.hyperlinks
+    }
+
+    pub const fn graphics_protocols(self) -> TerminalGraphicsProtocols {
+        self.graphics_protocols
+    }
+
+    pub const fn supports_graphics(self, protocol: TerminalGraphicsProtocol) -> bool {
+        self.graphics_protocols.contains(protocol)
     }
 
     pub const fn with_color_level(mut self, color_level: ColorLevel) -> Self {
@@ -171,6 +229,11 @@ impl TerminalCapabilities {
 
     pub const fn with_hyperlinks(mut self, enabled: bool) -> Self {
         self.hyperlinks = enabled;
+        self
+    }
+
+    pub const fn with_graphics_protocols(mut self, protocols: TerminalGraphicsProtocols) -> Self {
+        self.graphics_protocols = protocols;
         self
     }
 }
@@ -264,114 +327,8 @@ where
         .ok_or_else(|| io::Error::other("failed to query the terminal size"))?;
     Ok(TerminalDetection::Terminal(TerminalInfo::new(
         TerminalSize::new(usize::from(columns), usize::from(rows)),
-        detect_capabilities(
-            std::env::var("TERM").ok().as_deref(),
-            std::env::var("COLORTERM").ok().as_deref(),
-        ),
+        TerminalCapabilities::none(),
     )))
-}
-
-fn detect_capabilities(term: Option<&str>, color_term: Option<&str>) -> TerminalCapabilities {
-    if term.is_some_and(|value| value.eq_ignore_ascii_case("dumb")) {
-        return TerminalCapabilities::none();
-    }
-
-    let term = term.map(str::to_ascii_lowercase);
-    let term = term.as_deref().unwrap_or_default();
-    let color_level = if is_modern_terminal(term)
-        || color_term.is_some_and(|value| {
-            value.eq_ignore_ascii_case("truecolor") || value.eq_ignore_ascii_case("24bit")
-        }) {
-        ColorLevel::TrueColor
-    } else if term.contains("256color") {
-        ColorLevel::Ansi256
-    } else if supports_ansi_colors(term) {
-        ColorLevel::Ansi16
-    } else {
-        ColorLevel::None
-    };
-
-    let mut capabilities = TerminalCapabilities::none()
-        .with_color_level(color_level)
-        .with_attributes(basic_attributes(term))
-        .with_underline_styles(if supports_basic_sgr(term) {
-            UnderlineStyles::SINGLE
-        } else {
-            UnderlineStyles::empty()
-        });
-
-    if supports_extended_sgr(term) {
-        capabilities = capabilities
-            .with_attributes(TextAttributes::all())
-            .with_underline_styles(UnderlineStyles::all())
-            .with_underline_colors(true);
-    }
-    if supports_hyperlinks(term) {
-        capabilities = capabilities.with_hyperlinks(true);
-    }
-    capabilities
-}
-
-fn supports_ansi_colors(term: &str) -> bool {
-    [
-        "ansi", "color", "cygwin", "konsole", "linux", "rxvt", "screen", "tmux", "xterm",
-    ]
-    .iter()
-    .any(|name| term.contains(name))
-        || is_modern_terminal(term)
-}
-
-fn supports_basic_sgr(term: &str) -> bool {
-    [
-        "ansi", "color", "cygwin", "konsole", "linux", "rxvt", "screen", "tmux", "vt100", "xterm",
-    ]
-    .iter()
-    .any(|name| term.contains(name))
-        || is_modern_terminal(term)
-}
-
-fn basic_attributes(term: &str) -> TextAttributes {
-    let bold_blink_reverse =
-        TextAttribute::Bold | TextAttribute::SlowBlink | TextAttribute::Reversed;
-    let xterm_attributes =
-        bold_blink_reverse | TextAttribute::Dim | TextAttribute::Italic | TextAttribute::Hidden;
-    if is_modern_terminal(term) {
-        TextAttributes::all()
-    } else if term == "linux" {
-        bold_blink_reverse | TextAttribute::Dim
-    } else if term.starts_with("screen") {
-        bold_blink_reverse
-    } else if term.starts_with("tmux") || term.contains("xterm") {
-        xterm_attributes
-    } else if term.contains("konsole") {
-        bold_blink_reverse | TextAttribute::Italic
-    } else if term.contains("ansi") {
-        bold_blink_reverse | TextAttribute::Hidden
-    } else if term.contains("cygwin") {
-        TextAttribute::Bold | TextAttribute::Reversed | TextAttribute::Hidden
-    } else if term.contains("rxvt") || term.contains("vt100") {
-        bold_blink_reverse
-    } else {
-        TextAttributes::empty()
-    }
-}
-
-fn is_modern_terminal(term: &str) -> bool {
-    !term.starts_with("screen")
-        && !term.starts_with("tmux")
-        && ["contour", "foot", "ghostty", "kitty", "rio", "wezterm"]
-            .iter()
-            .any(|name| term.contains(name))
-}
-
-fn supports_extended_sgr(term: &str) -> bool {
-    is_modern_terminal(term)
-}
-
-fn supports_hyperlinks(term: &str) -> bool {
-    // Multiplexers require version- and configuration-sensitive passthrough,
-    // so TERM alone is not enough to advertise OSC 8 through them.
-    !term.starts_with("screen") && !term.starts_with("tmux") && is_modern_terminal(term)
 }
 
 #[cfg(test)]
@@ -379,113 +336,13 @@ mod tests {
     use super::*;
 
     #[test]
-    fn dumb_terminal_has_size_but_no_rendering_features() {
-        assert_eq!(
-            detect_capabilities(Some("dumb"), Some("truecolor")),
-            TerminalCapabilities::none()
+    fn graphics_protocol_capabilities_are_independent() {
+        let both = TerminalCapabilities::none().with_graphics_protocols(
+            TerminalGraphicsProtocols::KITTY | TerminalGraphicsProtocols::SIXEL,
         );
-    }
-
-    #[test]
-    fn color_detection_uses_the_highest_advertised_level() {
-        assert_eq!(
-            detect_capabilities(Some("xterm-256color"), None).color_level(),
-            ColorLevel::Ansi256
-        );
-        assert_eq!(
-            detect_capabilities(Some("xterm-256color"), Some("truecolor")).color_level(),
-            ColorLevel::TrueColor
-        );
-        assert_eq!(
-            detect_capabilities(None, None).color_level(),
-            ColorLevel::None
-        );
-    }
-
-    #[test]
-    fn limited_terminals_do_not_advertise_extended_features() {
-        let linux = detect_capabilities(Some("linux"), None);
-
-        assert_eq!(linux.color_level(), ColorLevel::Ansi16);
-        assert_eq!(
-            linux.attributes(),
-            TextAttribute::Bold
-                | TextAttribute::Dim
-                | TextAttribute::SlowBlink
-                | TextAttribute::Reversed
-        );
-        assert_eq!(linux.underline_styles(), UnderlineStyles::SINGLE);
-        assert!(!linux.underline_colors());
-        assert!(!linux.hyperlinks());
-
-        let vt100 = detect_capabilities(Some("vt100"), None);
-        assert_eq!(vt100.color_level(), ColorLevel::None);
-        assert_eq!(vt100.underline_styles(), UnderlineStyles::SINGLE);
-        assert!(!vt100.underline_colors());
-        assert!(!vt100.hyperlinks());
-    }
-
-    #[test]
-    fn advanced_features_require_a_recognized_terminal() {
-        let xterm = detect_capabilities(Some("xterm-256color"), None);
-        assert_eq!(
-            xterm.attributes(),
-            TextAttribute::Bold
-                | TextAttribute::Dim
-                | TextAttribute::Italic
-                | TextAttribute::SlowBlink
-                | TextAttribute::Reversed
-                | TextAttribute::Hidden
-        );
-        assert_eq!(xterm.underline_styles(), UnderlineStyles::SINGLE);
-        assert!(!xterm.underline_colors());
-        assert!(!xterm.hyperlinks());
-
-        let kitty = detect_capabilities(Some("xterm-kitty"), None);
-        assert_eq!(kitty.color_level(), ColorLevel::TrueColor);
-        assert_eq!(kitty.underline_styles(), UnderlineStyles::all());
-        assert!(kitty.underline_colors());
-        assert!(kitty.hyperlinks());
-
-        let tmux = detect_capabilities(Some("tmux-256color"), None);
-        assert_eq!(tmux.attributes(), xterm.attributes());
-        assert_eq!(tmux.underline_styles(), UnderlineStyles::SINGLE);
-        assert!(!tmux.underline_colors());
-        assert!(!tmux.hyperlinks());
-
-        let screen = detect_capabilities(Some("screen.xterm-kitty-256color"), None);
-        assert_eq!(screen.color_level(), ColorLevel::Ansi256);
-        assert_eq!(screen.underline_styles(), UnderlineStyles::SINGLE);
-        assert!(!screen.underline_colors());
-        assert!(!screen.hyperlinks());
-    }
-
-    #[test]
-    fn text_attributes_follow_conservative_terminal_families() {
-        assert_eq!(
-            detect_capabilities(Some("ansi"), None).attributes(),
-            TextAttribute::Bold
-                | TextAttribute::SlowBlink
-                | TextAttribute::Reversed
-                | TextAttribute::Hidden
-        );
-        assert_eq!(
-            detect_capabilities(Some("cygwin"), None).attributes(),
-            TextAttribute::Bold | TextAttribute::Reversed | TextAttribute::Hidden
-        );
-        assert_eq!(
-            detect_capabilities(Some("rxvt"), None).attributes(),
-            TextAttribute::Bold | TextAttribute::SlowBlink | TextAttribute::Reversed
-        );
-        let screen = TextAttribute::Bold | TextAttribute::SlowBlink | TextAttribute::Reversed;
-        assert_eq!(
-            detect_capabilities(Some("screen.xterm-256color"), None).attributes(),
-            screen
-        );
-        assert_eq!(
-            detect_capabilities(Some("screen.konsole-256color"), None).attributes(),
-            screen
-        );
+        assert_eq!(both.graphics_protocols(), TerminalGraphicsProtocols::all());
+        assert!(both.supports_graphics(TerminalGraphicsProtocol::Kitty));
+        assert!(both.supports_graphics(TerminalGraphicsProtocol::Sixel));
     }
 
     #[test]

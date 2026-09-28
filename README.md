@@ -36,6 +36,7 @@ surface layers, including which parts are implemented today.
 |---|---|---|
 | [`urushi`](urushi/) | Style definitions: colors, attributes, padding, margin, borders, alignment, wrapping | Core rendering works |
 | [`urushi-cli`](urushi-cli/) | Opinionated `Summary` and `Warning` presentation for human-facing, non-interactive CLI output | Core presentations work |
+| [`urushi-graphics`](urushi-graphics/) | Image components and Kitty/Sixel terminal graphics adapters | Stateless Kitty/Sixel output works |
 | [`urushi-terminal`](urushi-terminal/) | Generic terminal commands, events, session restoration, geometry, capability inspection, and physical backends | Shared primitives, native Unix backend, and optional Crossterm adapter work |
 | [`urushi-prompt`](urushi-prompt/) | Theme-aware `Input`, `Select`, and `Confirm` fields with synchronous validation | Core prompt flow works |
 | [`urushi-tui`](urushi-tui/) | The `ratatui` adapter — style conversion, widgets, transactional buffer diffing over `urushi-terminal` — and the home of the full-screen runtime | Adapter and terminal path work; runtime entry is not implemented |
@@ -118,6 +119,70 @@ CJK-aware width and alignment:
 ```sh
 cargo run --example cjk_showcase
 ```
+
+### A terminal image
+
+Image support is isolated in `urushi-graphics`; core `urushi` remains unaware
+of image data and terminal graphics protocols:
+
+```toml
+[dependencies]
+urushi = "0.1.0"
+urushi-graphics = "0.1.0"
+urushi-terminal = "0.1.0"
+```
+
+`ImagePresentation` puts an owned image snapshot, its generic anchored region,
+and fallback text into the returned `View`. `render_view` resolves and writes
+the complete View, locates its images internally, and queries the terminal for
+positive capability evidence. It prefers Kitty, otherwise uses Sixel when
+cell-pixel geometry is also available, and otherwise leaves the fallback cells
+visible:
+
+```rust
+use std::io;
+
+use urushi::{Align, TextStyle, View};
+use urushi_graphics::{CellSize, Image, ImagePresentation, PixelSize, render_view};
+use urushi_terminal::{
+    CommandWriter, TerminalGraphicsProtocol, TerminalQuery,
+};
+
+fn logo_view() -> Result<View, Box<dyn std::error::Error>> {
+    let image = Image::rgba(
+        "logo-placement",
+        "logo-rgba",
+        PixelSize::new(1, 1),
+        [255, 0, 0, 255],
+    )?
+    .fallback("[logo]");
+    let image = ImagePresentation::new().compose(&image, CellSize::new(8, 3));
+    Ok(View::column(
+        Align::Left,
+        [View::text("Build result", TextStyle::new().bold()), image],
+    ))
+}
+
+fn draw<T: CommandWriter + TerminalQuery>(
+    terminal: &mut T,
+) -> io::Result<Option<TerminalGraphicsProtocol>> {
+    let view = logo_view().map_err(io::Error::other)?;
+    render_view(terminal, &view)
+}
+# Ok::<(), Box<dyn std::error::Error>>(())
+```
+
+`TerminalCapabilities::supports_graphics` reports Kitty and Sixel independently,
+so a terminal may support both; `render_view` deliberately chooses Kitty in
+that case. The one-shot operation is stateless and treats the terminal's
+top-left cell as the View origin. It writes backend-independent terminal
+commands rather than accessing a physical backend or raw writer. Sixel output
+resamples the prepared RGBA raster to the resolved cell rectangle, so it
+additionally needs cell-pixel geometry. A cell-only renderer keeps the fallback.
+`render_resolved_images` is the lower-level overlay API for a host that already
+owns resolution and cell output. Retained uploads, scrolling slices, deletion,
+protocol-specific repaint, and draw-failure recovery belong to the TUI or prompt
+host that opts into graphics state.
 
 ### Theme-aware plain CLI output
 

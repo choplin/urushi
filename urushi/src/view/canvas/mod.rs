@@ -192,6 +192,21 @@ impl Canvas {
         self
     }
 
+    /// Returns the directly owned items whose concrete type is `T`.
+    ///
+    /// This is the typed extension boundary for an adapter that owns a
+    /// [`CanvasItem`] implementation. Core layout remains unaware of that
+    /// item's meaning; the adapter can recover its own immutable values from
+    /// a composed [`Canvas`] without exposing `Any` or a fallible downcast.
+    pub fn items<T>(&self) -> impl Iterator<Item = &T>
+    where
+        T: CanvasItem + Clone + PartialEq,
+    {
+        self.items
+            .iter()
+            .filter_map(|item| item.0.as_any().downcast_ref::<T>())
+    }
+
     pub(in crate::view) const fn explicit_width(&self) -> Option<usize> {
         self.sizing.explicit_width()
     }
@@ -278,6 +293,34 @@ mod tests {
                 CellContribution::new().symbol(Grapheme::new("x")),
             )]);
         }
+    }
+
+    #[derive(Debug, Clone, PartialEq, Eq)]
+    struct Label(&'static str);
+
+    impl CanvasItem for Label {
+        fn draw(&self, _context: &mut CanvasContext) {}
+    }
+
+    #[derive(Debug, Clone, PartialEq, Eq)]
+    struct Marker;
+
+    impl CanvasItem for Marker {
+        fn draw(&self, _context: &mut CanvasContext) {}
+    }
+
+    #[test]
+    fn owned_items_can_be_inspected_by_their_concrete_type() {
+        let canvas = Canvas::new()
+            .item(Label("first"))
+            .item(Marker)
+            .item(Label("second"));
+
+        assert_eq!(
+            canvas.items::<Label>().collect::<Vec<_>>(),
+            [&Label("first"), &Label("second")]
+        );
+        assert_eq!(canvas.items::<Marker>().count(), 1);
     }
 
     #[test]
