@@ -37,17 +37,32 @@ line network owns that drawing in an intrinsically sized
 Every cell in a column resolves under one width, and that width is decided
 once. For each column Grid forms a claim:
 
-- its **kind** comes from the column's `Length`, and is auto when none is
-  stated;
-- its **demand** is the greatest intrinsic width among the cells in that
-  column; and
+- its **kind** comes from the column's `Length`; when none is stated, it is
+  `Fill(1)` if any cell carries an unresolved horizontal area dependency and
+  auto otherwise;
+- its **demand** is the greatest intrinsic width among cells that can be
+  measured without that unresolved dependency; and
 - its **floor** is the greatest width floor among them.
 
-Those claims divide the available width by the rule in
+Those claims divide the width constraint by the rule in
 [Area Sharing](area-sharing.md): stated sizes take their requested size, auto
-columns their intrinsic size, and `Fill` columns divide the remainder by
-weight. When claims exceed the area, they shrink in that order, each down to its
-floor.
+columns their intrinsic size, and `Fill` columns divide the remainder of the
+allocation reference by weight. When claims exceed the content cap, they shrink
+in that order, each down to its floor. On a horizontally projected axis the
+reference remains finite but the cap is absent, so claims beyond the viewport
+extent are preserved for another origin rather than shrunk away.
+
+An explicit column length takes precedence. `Cells` establishes the finite
+column width and stops a descendant dependency; `Fill(weight)` establishes the
+column's own weighted dependency. A dependency promoted through an unstated
+column uses weight one. A descendant's weight is local to the container in
+which it was stated and is not reinterpreted as an ancestor track weight.
+
+When a fill-kind column has no finite reference, its provisional demand is the
+greatest measurable demand of its other cells, or zero when there is none.
+This lets the bottom-up pass form a complete claim, but it does not make an
+unallocated Viewport measurable: validation still reports the unresolved
+finite-extent requirement after top-down allocation.
 
 A `Length` on a column has the same meaning as one on a `BlockStyle`:
 `Cells` is an absolute request, `Fill` is a share of the remainder, and an
@@ -63,6 +78,14 @@ does.
 A row's height is the greatest resolved height among its cells, as in a `Row`.
 A shorter cell is filled to that height and placed by its own vertical
 alignment.
+
+Rows have no explicit `Length` vocabulary. A row containing an unresolved
+vertical area dependency therefore makes a `Fill(1)` claim on the Grid's
+height; another row remains auto. Fill-kind rows share the reference equally,
+while auto rows take their measurable demand. Floors are still the greatest
+cell floor in each row. Each selected row height reaches every cell as both
+reference and cap. An enclosing stated height stops the propagated dependency;
+without any finite reference, validation reports the Viewport extent error.
 
 ### Cell padding
 

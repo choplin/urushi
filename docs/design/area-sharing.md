@@ -2,20 +2,26 @@
 
 How the children of a `Row` or `Column` divide the area their container hands
 them: distribution by `Length`, the remainder rule, the cross axis, shrinking
-when the children need more than the area, and how a `Fill` reaches an area
-through auto ancestors. [`view-model.md`](../view-model.md) summarizes this
-under "Sizing at a glance"; the clamp each child applies to its own share is
+when the children need more than the content cap, and how a `Fill` reaches an
+allocation reference through auto ancestors.
+[`view-model.md`](../view-model.md) summarizes this under "Sizing at a glance";
+the clamp each child applies to its own share is
 [`box-sizing.md`](box-sizing.md). A `Grid` divides its width by this same rule,
 over columns rather than over children — [`grid.md`](grid.md).
 
 ## The rule
 
-`Row` hands its available width to its children; `Column`, its height. On that
-main axis:
+`Row` hands its width constraint to its children; `Column`, its height
+constraint. The constraint distinguishes an optional **allocation reference**
+from an optional **content cap**. An ordinary finite `Available` supplies the
+same number for both. A projected axis keeps the viewport extent as its
+reference but has no child-content cap. On the main axis:
 
 - `Cells` children take their stated size.
 - Auto children take their intrinsic size.
-- `Fill` children divide what remains, in proportion to their weights.
+- `Fill` children divide what remains of the allocation reference, in
+  proportion to their weights. Without a reference they contribute their
+  intrinsic size.
 
 ```text
 Row: [ sidebar: width 20 ] [ main: fill 1 ]            -- a fixed sidebar; main takes the rest
@@ -33,8 +39,8 @@ the shares always sum to the remainder — three equal weights over ten cells
 are 3, 3, 4.
 
 On the cross axis — height in a `Row`, width in a `Column` — there is nothing
-to divide: the container passes its available extent to every child
-unchanged, and a `Fill` length there stretches to it. A fixed-width sidebar
+to divide: the container passes its constraint to every child unchanged, and a
+`Fill` length there stretches to the allocation reference. A fixed-width sidebar
 spanning the terminal's height is `width(20).height(Length::fill(1))` inside a `Row`,
 and panels stacked inside it divide that height with their own `Length`s.
 
@@ -54,7 +60,7 @@ alignment — `align`, `vertical_align`, and the `Row`/`Column` parameters — a
 the outer `Length::fill(1)` block above places the capped group.
 
 When the children's assigned sizes — stated `Cells`, intrinsic auto, `Fill`
-shares — add up to more than the area, children shrink below those sizes:
+shares — add up to more than the content cap, children shrink below those sizes:
 `Fill` children first, then auto children, then `Cells` children, each
 proportionally to size and floored at its own `max(min_width, min-content)`. A
 floor that binds freezes that child, and the shortfall falls on the rest — an
@@ -63,18 +69,33 @@ the floors exceed the area, the container resolves larger than its area and the
 degenerate safety net of [`box-sizing.md`](box-sizing.md) is what finally
 bounds it.
 
+With no content cap, that shrink step does not run merely because the claims
+exceed the allocation reference. `Cells` and auto children keep their claims;
+`Fill` still divides only the nonnegative remainder of the finite reference.
+The container may therefore resolve larger than the reference. This is how a
+`Column` inside a vertical `Viewport`, or a `Row` inside a horizontal one,
+retains later content for another origin while still giving `Fill` a finite
+meaning. Projection, not area sharing, clips the settled result; the exact
+composition is [`view-projection.md`](view-projection.md).
+
 A `Grid` column makes the same claim from a different place: its kind comes
 from an optional `Length` on the column, its demand and its floor from the
 cells beneath it. What the division and the shrink then do with that claim is
 unchanged — a column stating `Cells` shrinks last, and still shrinks when
 nothing else is left to give.
 
-A `Fill` length resolves against an area, so it needs one: an auto box with a
-`Fill` anywhere among its descendants spans its own available extent (through
-its own clamp), and so does each auto ancestor above it, until an ancestor with
-a stated `Cells` size stops the propagation and keeps that size. Under
-`measure`, where no area exists, `Fill` contributes the intrinsic size, and
-weights have no effect.
+A `Fill` length resolves against an allocation reference, so it needs one: an
+auto box with a `Fill` anywhere among its descendants spans its own available
+extent (through its own clamp), and so does each auto ancestor above it, until
+an ancestor with a stated `Cells` size stops the propagation and keeps that
+size. Under `measure`, where no area exists, `Fill` contributes the intrinsic
+size, and weights have no effect.
+
+Only the need for a finite reference propagates through an auto ancestor, not
+the descendant's weight. When an otherwise-auto container or Grid track must
+turn that dependency into its own claim, it uses `Fill(1)`. Weights compare
+siblings stated in the same sharing container; carrying one through arbitrary
+ancestors would compare unrelated levels.
 
 ## Why `Fill`, and why nothing is renegotiated
 

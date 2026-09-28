@@ -34,9 +34,10 @@ box cannot hold beside any content is dropped, leaving a silent cut rather than
 a box filled with the marker. In styled text, the marker represents the omitted
 suffix and takes the complete style of its first omitted grapheme.
 
-`overflow` governs the width axis. Height always clips inside the frame;
-clipping inside a closed frame is a viewport's behavior, so scrolling composes
-on top of this rule.
+`overflow` governs the width axis. Height always clips inside the frame.
+Selecting content from a nonzero origin is not another overflow mode; it is the
+separate [`Viewport` projection](view-projection.md), which may surround any
+subtree.
 
 The policy fits the text a block directly contains. A child that is itself a
 view absorbs its own overflow when it resolves under the area the containing
@@ -56,8 +57,9 @@ ellipsizes. What the library fixes is the invariant underneath the choice:
 the frame closes at the used size, and no overflow policy can cut it.
 
 The height axis takes less of that choice: height has no wrap analogue, and
-clipping inside a closed frame is a viewport's behavior, so height clips, and
-scrolling composes on top; a vertical marker is a possible extension.
+clipping inside a closed frame is the fixed safety rule, so height clips. A
+caller that needs another origin composes a `Viewport` around that content; a
+vertical marker is a possible extension.
 
 The marker a cut ends with is a parameter of clipping, not a third policy.
 Marking a cut does not absorb overflow differently — it is the same cut, made

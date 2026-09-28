@@ -82,13 +82,23 @@ for it.
 
 ### Renderer
 
-The renderer is a runtime-internal function, not a public type. Given the
-application's `View` and a `Frame`, it resolves the view once against the
-frame's area, writes every grapheme of the `ResolvedView` through `put`, and
+The renderer is a runtime-internal operation, not a public type. Given the
+application's `View`, a `Frame`, and the runtime's selected evaluator, it
+resolves the view once against the frame's area. The ordinary evaluator calls
+the free stateless `resolve`; an explicitly selected retained evaluator borrows
+the runtime-owned `Resolver`. The renderer owns neither evaluator's lifetime.
+It then writes every grapheme of the resulting `ResolvedView` through `put` and
 turns the view's cursor anchor into the frame's cursor request: the anchor's
-origin when the resolved view contains it, and no cursor when it does not.
-That is the whole of it; it does not own the model, scheduling, a terminal, or
-session restoration, and it does not fill any other anchored rectangle.
+exact origin when its reported zero-sized point remains visible after every
+cell-clipping stage, and no cursor otherwise. It consumes that accumulated
+result and does not recompute visibility from containment in the root
+rectangle.
+
+That is the whole rendering operation. It does not own the model, navigation
+policy, scheduling, a terminal, or session restoration, and it does not fill
+any other anchored rectangle. Evaluator ownership and the equivalence between
+the direct and retained paths are defined in
+[`resolution-reuse.md`](resolution-reuse.md).
 
 A sized anchor — a region layout places for something this crate does not
 draw, a chart say — is served by the view model and the adapter, not by the

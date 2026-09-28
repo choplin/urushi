@@ -41,7 +41,7 @@ detected maximum. `RenderSettings::default()` selects no escape-sequence
 features. `RenderSettings::from(info.capabilities())` supports the common case,
 and consuming property setters let the caller narrow individual axes.
 
-Layout and rendering are pure, stateless functions:
+The ordinary layout and rendering entry points are pure, stateless functions:
 
 ```rust
 resolve(&view, available) -> Result<ResolvedView, LayoutError>
@@ -54,6 +54,12 @@ None of these functions detects a terminal or writes bytes, and rendering never
 recomputes geometry. `render_text` deliberately bypasses geometry: it preserves
 tabs and line boundaries in the source, while `render` accepts only a rectangle
 whose tabs have already been replaced during resolution.
+
+Repeated viewport projection may instead opt into the stateful `Resolver`
+defined by [`resolution-reuse.md`](resolution-reuse.md). It has the same layout
+inputs and output as free `resolve`; only private evaluation lifetime differs.
+The standard-stream convenience path remains stateless and never constructs
+one implicitly.
 
 ## Standard-stream convenience
 

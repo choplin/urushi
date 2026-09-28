@@ -10,7 +10,9 @@ Canvas is a primitive drawing mechanism, not an application scene model. Pan,
 zoom, selection, hit testing, routing policy, and animation remain application
 or presentation state. A `CanvasItem` may capture the resulting immutable
 frame data and turn it into drawing commands after the Canvas size is known.
-The Canvas normally sizes as an independent viewport. A presentation such as
+The Canvas normally sizes from a finite parent allocation. Its existing
+`Viewport` sizing name describes that allocation mode only: Canvas has no
+scroll origin and no larger retained content space. A presentation such as
 Table may instead supply one explicit intrinsic sizing policy for the whole
 Canvas; Canvas never infers that policy from its items.
 
@@ -37,6 +39,13 @@ the Canvas width. The parent remains the allocator: intrinsic sizing supplies
 claims, not a final rectangle. Once both axes are selected, the Canvas is the
 same finite viewport as one using the default mode, and drawing beyond any
 edge is still clipped.
+
+This local Canvas boundary is distinct from the `View::Viewport` projection in
+[`view-projection.md`](view-projection.md). A Canvas always denotes one complete
+settled finite surface under its semantic contract. Placing that surface inside a
+`View::Viewport` projects it like any other child; retaining the complete
+surface or evaluating only requested parts is an optional implementation choice
+covered by [`resolution-reuse.md`](resolution-reuse.md).
 
 Intrinsic sizing is one policy for the Canvas as a whole. It is separate from
 the ordered item collection, does not enumerate or measure those items, and
@@ -172,7 +181,10 @@ The exact private mechanism used to own, erase, clone, and compare different
 item types is an implementation decision. Rust and MoonBit may use different
 wrappers to satisfy their type systems, but both implementations must expose
 the same item semantics. Commands are not part of retained View data and do not
-participate in View equality; they exist only for one resolve.
+participate in View equality. Stateless Canvas assembly records them for one
+resolve only; an optional resolver may retain equivalent private paint recipes
+across evaluations under [`resolution-reuse.md`](resolution-reuse.md) without
+turning them into View state.
 
 Every recorded command satisfies one internal rasterization contract. Given
 the final Canvas size, it returns positioned cell contributions and any
@@ -333,13 +345,17 @@ anchor's signed local origin is translated by the View command's origin and
 later by the Canvas's offset when the parent assembles it. The caller resolves
 the parent and uses the same `anchor(key)` lookup as for any other anchor.
 
-Clipping and composition do not erase anchors: an anchor reports where layout
-put its region even when its cells are clipped or overwritten. One key still
-names one region. Canvas items cannot query anchors recorded by earlier items,
-and Canvas introduces no separate arbitrary-anchor command without a use case.
-Supporting negative placement requires `AnchoredRect` origins and offset
-arithmetic to use a signed coordinate domain; containment checks consider all
-four edges of the final resolved rectangle.
+Clipping and composition do not erase an anchor's logical rectangle: it reports
+where layout put the complete region even when its cells are clipped or
+overwritten. Canvas does update the separate visible intersection against its
+local finite surface before translating both values into its parent. An anchor
+outside that local clip remains outside through ancestor translation; an
+ancestor may further intersect a visible or partially visible region but can
+never restore a discarded part. One key still names one region. Canvas items
+cannot query anchors recorded by earlier items, and Canvas introduces no
+separate arbitrary-anchor command without a use case. Supporting negative
+placement requires `AnchoredRect` origins and offset arithmetic to use a signed
+coordinate domain.
 
 ## Resolve walkthrough
 
@@ -369,9 +385,11 @@ and a minimap policy.
    surface edges while preserving wide-grapheme ownership, then releases the
    command output before rasterizing the next one.
 8. Anchors from node and popup Views are translated by their command origins.
-   Canvas returns one rectangle of cells plus those anchors; parent assembly
-   adds the Block's content offset, and the ordinary root `ResolvedView`
-   contains the final cells and anchor coordinates.
+   Their logical rectangles remain complete, while their visible intersections
+   are clipped to the 62-by-20 Canvas before both are translated onward. Canvas
+   returns one rectangle of cells plus those anchors; parent assembly adds the
+   Block's content offset and may narrow visibility further, and the ordinary
+   root `ResolvedView` contains the final cells and anchor coordinates.
 
 The same model also covers simpler cases. A popup is one `View` command, a
 timeline can combine `Text`, cell-space lines, and sparse `Cells`, and a scatter

@@ -82,6 +82,15 @@ narrower than they are and unchanged where it is wider. `Fill` is the one
 length that reads an area as a size to take, which is why a box containing one
 spans its own extent.
 
+Internally, the finite value used as an allocation reference and the cap in
+the formula above are separate constraint fields. An ordinary finite
+`Available` supplies the same value to both, so this box rule is unchanged.
+On an axis projected by a `Viewport`, the viewport extent remains available to
+`Fill` and sibling distribution as the reference while the child's automatic
+content cap is absent; projection applies the finite clip after that content
+has settled. [`view-projection.md`](view-projection.md) owns that exceptional
+composition rule.
+
 A non-empty Block title contributes another intrinsic width demand beside the
 child, but no height demand. Its exact demand and degradation inside a bounded
 top edge are defined in [`block-title.md`](block-title.md).

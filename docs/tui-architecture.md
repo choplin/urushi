@@ -20,6 +20,10 @@ the frame, and session restoration
 criterion that keeps one-frame presentation in core while leaving interaction
 in the runtime is recorded in
 [`design/tui-view-expressiveness.md`](design/tui-view-expressiveness.md).
+The general viewport operation and the optional evaluation lifetime for
+repeated projection are defined independently in
+[`design/view-projection.md`](design/view-projection.md) and
+[`design/resolution-reuse.md`](design/resolution-reuse.md).
 
 ## Goals
 
@@ -149,15 +153,19 @@ resolved rectangle the caller that knows what belongs there fills. It serves
 two uses a grapheme rectangle cannot express — where the terminal cursor
 belongs, and where a caller holding the buffer draws what this crate does not
 produce. A
-view carries no focus transition, scroll command, or redraw hint. Those are
-application behavior. It does carry whatever pure projection describes the
-current frame, such as selected styling, a visible origin, or a camera supplied
-by the application to a concrete presentation. The view model must be able to
+view carries no focus transition, scroll command, data-loading policy, or
+redraw hint. Those are application behavior. It may carry the pure,
+caller-selected origin and boundary behavior of a `Viewport`, just as it
+carries selected styling or a camera supplied to a concrete presentation. The
+node knows neither why that origin was chosen nor whether its child represents
+all or only a finite window of external data. The view model must be able to
 express that frame without application-computed final rectangles or ordinary
 content written directly into a backend. The detailed criterion and division
 between core, components, and runtime are recorded in
 [`design/tui-view-expressiveness.md`](design/tui-view-expressiveness.md); the
-anchor's rule is recorded in [`design/tui-view.md`](design/tui-view.md).
+projection rule is recorded in
+[`design/view-projection.md`](design/view-projection.md), and the anchor's rule
+is recorded in [`design/tui-view.md`](design/tui-view.md).
 
 Whatever the TUI `View` becomes, it is `urushi::view::View` or a value that
 embeds it; Urushi does not introduce a second, independent resolved render tree
@@ -253,7 +261,7 @@ physical I/O. The runtime core and the application see no backend type.
 
 | Name | Owns |
 | --- | --- |
-| `Renderer` | Resolving the view once per frame, writing the `ResolvedView` into the frame, and placing the cursor where the view's cursor anchor landed. Not the model, scheduling, a terminal, or session restoration. |
+| `Renderer` | Borrowing the runtime's selected direct or retained evaluator, resolving the view once for a frame, writing the `ResolvedView` into the frame, and placing the cursor where the view's cursor anchor remains visible. Not the evaluator's lifetime, the model, navigation policy, scheduling, a terminal, or session restoration. |
 | `Frame` | A borrowed, draw-scoped handle to the working presentation state: its area, its cells, and the cursor request. Not the previous buffer, backend, diff, output stream, or flush. |
 | `Terminal` | Working and committed presentation state, cell diffing, output, and flushing. A presentation is committed only after output succeeds. |
 | `TerminalSession` | Restoration obligations caused by entering the session — raw mode, alternate screen, the input modes, cursor visibility — on shutdown, on error, on panic, and after a partial entry. |
@@ -278,6 +286,14 @@ defined in [`design/tui-runtime-entry.md`](design/tui-runtime-entry.md).
 Cell output plus terminal graphics remains an extension boundary: the first
 implementation proves the cell-only runtime before promoting a shared graphics
 contract.
+
+Resolver reuse is a rendering choice, not application state. The runtime uses
+the direct stateless path unless its host selects a retained evaluator; in that
+case the runtime owns the `Resolver` and the renderer only borrows it for the
+frame. In either case `Application::view` returns the same `View`, and retained
+evaluation cannot produce messages or alter model behavior. The equivalence
+and invalidation rules are defined in
+[`design/resolution-reuse.md`](design/resolution-reuse.md).
 
 What each owner does at the boundary — the commit guarantee Ratatui does not
 give, cursor restoration, what a session cannot promise to restore — and the

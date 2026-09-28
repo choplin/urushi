@@ -31,9 +31,11 @@ The root flow begins with a renderer-neutral `View`, resolves it into cells,
 then serializes those cells for output.
 
 ```text
-View
+View + Available
   |
-  | resolve(Available)
+  | resolution
+  | - resolve (direct, stateless)
+  | - Resolver::resolve (optional retained evaluation)
   v
 ResolvedView
   |
@@ -48,14 +50,17 @@ std::io::Write
 
 The core [`View`](../urushi/src/view/model.rs) is a component-agnostic layout
 tree. Its built-in vocabulary is `Text`, `Block`, `Row`, `Column`, `Grid`,
-`Canvas`, and the keyed `AnchorBlock` form. Canvas carries one sizing mode and
+`Canvas`, `Viewport`, and the keyed `AnchorBlock` form. Canvas carries one sizing mode and
 ordered, comparable items that record renderer-neutral drawing commands after
 its finite size is known. The tree carries logical
 [`TextStyle`](../urushi/src/style/text.rs) and
 [`BlockStyle`](../urushi/src/style/block.rs) values rather than
 terminal-resolved ANSI strings. Component presentations stop at this boundary.
-[`resolve`](../urushi/src/view/resolve.rs) turns the tree into one `ResolvedView`
-rectangle of styled graphemes. The stateless
+The direct [`resolve`](../urushi/src/view/resolve.rs) function turns the tree
+into one `ResolvedView` rectangle of styled graphemes without retained
+evaluation state. Callers that repeatedly project structurally unchanged
+content may instead keep an optional `Resolver`, which produces the same
+rectangle while retaining private evaluation state. The stateless
 [`render`](../urushi/src/render/ansi.rs) function applies explicit
 [`RenderSettings`](../urushi/src/render/settings.rs) and serializes the result.
 A presentation either lowers component meaning into built-in nodes or
@@ -219,7 +224,7 @@ to share styling.
 | [`style`](../urushi/src/style/) | Re-exports shared terminal style primitives and builds logical `TextStyle`, border glyphs, box spacing and alignment, and geometry-bearing `BlockStyle` from them. | `text`, `urushi-terminal` |
 | [`text`](../urushi/src/text/) | Plain-text values, including grapheme-aligned `StyledText`, plus display-width measurement and cell-aware word/CJK wrapping. | `style` |
 | [`theme`](../urushi/src/theme/) | Semantic color tokens, reusable component roles, canonical component presentations, application role resolution, and explicit light/dark selection. | `style`, `component` |
-| [`view`](../urushi/src/view/) | The renderer-neutral `View` tree and the one layout pass in its three phases — width, height, and assembly — behind `measure` / `resolve` (`Size`, `Available`, `StyledGrapheme`, `ResolvedView`). Canvas assembly rasterizes and immediately composes one command at a time after sizing. | `style`, `text` |
+| [`view`](../urushi/src/view/) | The renderer-neutral `View` tree and the one layout pass in its three phases — width, height, and assembly — behind `measure`, direct `resolve`, and optional retained `Resolver::resolve` (`Size`, `Available`, `StyledGrapheme`, `ResolvedView`). Stateless Canvas assembly rasterizes and immediately composes one command at a time after sizing; a retained resolver may privately reuse equivalent evaluation artifacts. | `style`, `text` |
 | [`component`](../urushi/src/component/) | Reusable semantic data and the independent concrete presentations that compose it into primitive `View` trees. | `theme`, `view`, `text` |
 | [`render`](../urushi/src/render/) | Feature selection and translation of a `ResolvedView` to ANSI text. | `style`, `view`, `urushi-terminal` |
 | [`output`](../urushi/src/output.rs) | Standard-stream convenience: detection, width selection, rendering policy, and one static write. | `view`, `render`, `urushi-terminal` |

@@ -24,12 +24,27 @@ being covered by it. Anchors are reported in tree order, a box before what it
 encloses, and one key names one region: two anchors carrying one key are a
 contract violation rather than something layout resolves.
 
-A rectangle states where layout put the region, not what survived into the
-rows, and is never bounded by the resolved size; whether the resolved view
-contains it is reported alongside instead. Bounding it would round a cursor
-scrolled out of sight onto the last row, which is the one thing a caller
-placing a cursor must not be told, and a predicate answers the question
-bounding was meant to answer without destroying the position that raised it.
+A rectangle states where layout put the complete logical region, not what
+survived into the rows, and is never bounded or moved onto a clipping edge. A
+visible intersection is reported alongside it: the complete rectangle when
+visible, a smaller rectangle when partially clipped, and absent when outside.
+Bounding the logical rectangle would round a cursor projected out of sight onto
+the last row, which is the one thing a caller placing a cursor must not be
+told. The separate intersection answers where drawing is valid without
+destroying the position that produced it.
+
+More generally, every stage that removes cells intersects the accumulated
+visible region before parent translation: Block content clipping, Canvas and
+Viewport boundaries, and the final degenerate safety crop. The logical
+rectangle is never cut. Once a region is outside a local clip, later placement
+cannot make it visible again; ancestors may only narrow the accumulated
+intersection. `Viewport` does not introduce a special anchor rule, but makes
+this existing distinction observable at arbitrary origins.
+
+For a zero-sized cursor anchor, visibility tests the point against half-open
+cell bounds. A point on the right or bottom edge is outside; showing a cursor
+after the final grapheme therefore requires the presentation to allocate the
+cell where the cursor is to be drawn.
 
 Two things reach the frame that way:
 
@@ -50,8 +65,11 @@ containing none.
 
 A view carries no scroll command, focus transition, or redraw hint. Scrolling
 and focus stay ordinary model and message logic, while the current frame may
-carry the resulting viewport projection and focused appearance. Invalidation
-belongs to Ratatui's cell diff. The division between interaction ownership and
+carry the resulting viewport origin and boundary behavior as a pure projection,
+along with focused appearance. That projection transforms anchor rectangles
+through the same coordinates and clips as cells; its exact visibility report
+is defined in [`view-projection.md`](view-projection.md). Invalidation belongs
+to Ratatui's cell diff. The division between interaction ownership and
 one-frame expression is recorded in
 [`tui-view-expressiveness.md`](tui-view-expressiveness.md).
 
@@ -148,13 +166,13 @@ rank.
 
 ## Why scrolling and focus are not part of it
 
-A scrollable region looks like the third member of the list and is not. Its
-content *is* cells this crate produces; what it needs is an offset into them,
-which is a question about how the box model clips — height clips inside a closed
-frame, and [`overflow.md`](overflow.md) records that scrolling composes on top
-of that rule. Answering it through an anchor would hand the application a
-region the layout pass has stopped reasoning about, which is exactly what a
-viewport must not be.
+A projected region looks like the third member of the list and is not. Its
+content *is* cells this crate produces, so `Viewport` remains in the ordinary
+view tree and transforms those cells and anchors together. An anchor would
+instead hand the caller a region the layout pass has stopped painting. The
+coordinate operation is defined in
+[`view-projection.md`](view-projection.md); choosing and updating its origin is
+not part of the anchor or the viewport node.
 
 Focus is not a view property at all. A focused block differs from an unfocused
 one by the style the view function gives it, and the theme already carries

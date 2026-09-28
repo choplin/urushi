@@ -44,9 +44,9 @@ free-positioned drawing, and a rataflow-based trace visualizer.
 Across those examples, ordinary rows, columns, blocks, grids, and uniformly
 styled text cover a substantial base: split panes, headers and status bars,
 detail panels, bordered regions, simple lists, tables, trees, summaries, and
-warnings. Three recurring one-frame requirements are not adequately expressed
-by the current primitive set, and a fourth extension boundary must remain
-coherent with them:
+warnings. The evidence identified three recurring one-frame requirements for
+the primitive set, and a fourth extension boundary that must remain coherent
+with them:
 
 1. **Inline styled flow.** Syntax-highlighted source, search matches, logs,
    prompts, and status lines contain style changes inside one wrapping and
@@ -62,9 +62,10 @@ coherent with them:
 4. **Reserved foreign regions.** Third-party Ratatui widgets and terminal
    graphics still need a generic region whose geometry participates in Urushi
    layout even when its pixels or cells are produced by an adapter. The
-   existing anchor establishes the reservation and geometry report. Future
-   viewport and positioned transforms must preserve that contract, while the
-   caller or adapter that has the backend remains responsible for drawing it.
+   existing anchor establishes the reservation and geometry report. Viewport
+   preserves that contract now, and future positioned transforms must do the
+   same, while the caller or adapter that has the backend remains responsible
+   for drawing it.
 
 Zoetrope is the strongest combined boundary test. Its semantic session model
 is projected through rataflow into a graph, while one frame combines ordinary
@@ -95,19 +96,23 @@ Core owns only renderer-neutral, one-frame presentation mechanics:
   the content around them; and
 - reservation of a foreign region without naming Ratatui or another backend.
 
-The `Text`, `Block`, `Row`, `Column`, `Grid`, `Canvas`, and
+The `Text`, `Block`, `Row`, `Column`, `Grid`, `Canvas`, `Viewport`, and
 `AnchorBlock` nodes are members of this vocabulary. Canvas is a finite drawing
 surface whose default size is independent of its items. An intrinsic sizing
 value may measure the Canvas as a whole, and its items record `View`, `Text`,
 cell-space primitives, `LineNetwork`, and `Cells` commands only after the size
 is known. Its exact contract is recorded in
-[`canvas.md`](canvas.md). Viewport projection remains a separate design topic.
+[`canvas.md`](canvas.md). `Viewport` is a one-child coordinate projection, not
+a scroll model: the caller supplies its origin and boundary behavior, while
+the exact layout, clipping, nesting, and anchor rules belong to
+[`view-projection.md`](view-projection.md).
 
 Core does not gain semantic nodes such as `View::Graph`, `View::Modal`, or
 `View::SelectedRow`. It also does not gain event callbacks, focus movement, or
-backend `Rect` and `Buffer` values. `resolve` remains the only operation that
-receives the final available area; it performs any Canvas intrinsic measurement
-with the derived local constraints before invoking Canvas items.
+backend `Rect` and `Buffer` values. The resolution phase remains the only layer
+that receives the final available area. Its stateless `resolve` and optional
+stateful `Resolver::resolve` entry points apply the same rules, including any
+Canvas intrinsic measurement under derived local constraints before items draw.
 
 ### Reusable components and presentations
 
@@ -168,8 +173,9 @@ The primitive APIs must preserve these constraints:
 
 - inline runs wrap and clip as one flow rather than as independently allocated
   siblings;
-- viewport offsets affect content projection, not the ownership of interaction
-  state, and nested layout still receives only its allocated area;
+- viewport origins affect content projection, not the ownership of interaction
+  state, and do not revise the layout decisions made in child content
+  coordinates;
 - positioned descendants do not receive final backend rectangles before
   resolution;
 - overlap has deterministic ordering and clipping across all renderers;
