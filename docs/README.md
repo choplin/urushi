@@ -75,15 +75,22 @@ documents.
 
 These are not ADRs. When a decision changes, its file is rewritten in place to
 describe the current decision; the file always reads as the present rule and
-rationale, not as a dated record. The history of changes lives in the decision
-log.
+rationale, not as a dated record. The decision log preserves the superseded
+decision and why Urushi revised it.
 
-## `decision-log.md`: history
+## `decision-log.md`: design decision history
 
-[`decision-log.md`](decision-log.md) is a table of decisions over time. Each
-row is one decision made or changed, linking to the document that records it.
-Because design documents are rewritten in place, this log is the only record of
-when decisions were made and what they replaced.
+[`decision-log.md`](decision-log.md) preserves design decisions whose historical
+context would otherwise disappear when a design document is rewritten in
+place. A row records that Urushi chose or revised a durable design rule among
+meaningful alternatives, summarizes why, and links to the document that owns
+the current rule and rationale.
+
+The log does not record implementation or documentation activity. Implementing,
+completing, testing, or refactoring an existing decision does not add a row;
+neither does synchronizing documentation with code or summarizing a change or
+release. If the design rule and its rationale did not change, the log does not
+change.
 
 ## Single source of truth
 

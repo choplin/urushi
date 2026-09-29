@@ -1,8 +1,9 @@
 # Decision Log
 
-One concise record of what was decided and why, newest first. This table
-preserves decision history; linked documents are rewritten in place and
-describe the current snapshot.
+This table preserves design decisions whose historical context would otherwise
+disappear when linked documents are rewritten in place. Each row records a
+durable design rule chosen or revised among meaningful alternatives and why;
+implementation and documentation activity is not recorded. Newest first.
 
 | Date | Decision | Recorded in |
 | --- | --- | --- |
@@ -19,7 +20,6 @@ describe the current snapshot.
 | 2026-09-27 | Made `TerminalCapabilities` positive evidence rather than terminal-name heuristics: the native backend queries Kitty, Sixel device attributes, and specified XTGETTCAP color values, while passive output inspection and unqueryable features remain disabled. | [`design/terminal-output.md`](design/terminal-output.md), [`terminal-graphics.md`](terminal-graphics.md) |
 | 2026-09-27 | Added validated APC and DCS control-string transport to `urushi-terminal::CommandWriter`, so graphics encoders use the shared terminal connection without exposing a physical backend or raw writer; image data and Kitty/Sixel encoding remain in `urushi-graphics`. | [`design/terminal-graphics-boundary.md`](design/terminal-graphics-boundary.md), [`design/terminal-output.md`](design/terminal-output.md), [`design/tui-terminal-ownership.md`](design/tui-terminal-ownership.md) |
 | 2026-09-25 | Standardized terminal styling on `TextAttribute` and `TextAttributes` across `urushi-terminal`, core style builders, render settings, and adapters; `Modifier` remains only where an external API such as Ratatui uses that term or for keyboard modifiers. | [`style-model.md`](style-model.md), [`design/style-api-naming.md`](design/style-api-naming.md) |
-| 2026-09-25 | Implemented the first self-owned interactive backend as one Unix `/dev/tty` connection with ANSI output, raw-mode restoration, window and cursor queries, event decoding, and resize observation; Unix prompts use it directly while Crossterm remains the cross-platform adapter. | [`architecture.md`](architecture.md), [`design/tui-terminal-ownership.md`](design/tui-terminal-ownership.md) |
 | 2026-09-24 | Made a complete terminal backend one owner of input, output, process modes, and mutable queries; prompt renderers now receive that connection instead of owning another writer, and dependency-free ANSI output provides the first self-owned protocol implementation. | [`architecture.md`](architecture.md), [`design/tui-terminal-ownership.md`](design/tui-terminal-ownership.md) |
 | 2026-09-24 | Made terminal colors, text attributes, underlines, key events, modifiers, focus, mouse, and size values one shared vocabulary: `urushi` and `urushi-tui` re-export the primitives their users need, while surface-specific types retain only composition or TEA classification semantics. | [`architecture.md`](architecture.md), [`design/tui-terminal-ownership.md`](design/tui-terminal-ownership.md) |
 | 2026-09-24 | Restricted `urushi-terminal` to generic terminal primitives and session restoration: TUI cell writing, frame state, diffing, and transactional presentation now live under `urushi-tui::terminal`, while the Crossterm adapter only implements commands, events, queries, and raw mode. | [`architecture.md`](architecture.md), [`design/tui-terminal-ownership.md`](design/tui-terminal-ownership.md) |
@@ -75,7 +75,6 @@ describe the current snapshot.
 | 2026-08-16 | Defined the no-solver boundary as "a decided size is never revised, and no node is assembled twice" so `Column` may repeat pure measurement without revising layout. | [`design/layout-resolution.md`](design/layout-resolution.md) |
 | 2026-08-16 | Made the clip marker a parameter of `Overflow::Clip` instead of a separate `Ellipsis` policy, so the glyph and its cell cost are the application's choice. | [`design/overflow.md`](design/overflow.md) |
 | 2026-08-16 | Made available area, size bounds, and overflow inputs to layout because post-hoc cropping could not preserve closing frames and other box invariants. | [`design/box-sizing.md`](design/box-sizing.md) |
-| 2026-08-15 | Defined the inline prompt rendering architecture. | [`inline-prompt-rendering.md`](inline-prompt-rendering.md) |
 | 2026-08-15 | Split presentation into `TextStyle` and `BlockStyle` and adopted the four-node `View` tree resolving to one rectangle for all backends. | [`design/view-block-model.md`](design/view-block-model.md) |
 | 2026-08-14 | Separated component data from borrowed style and output ownership so data remains presentation-independent; the 2026-09-01 decision replaced the style naming and call shape. | [`design/component-presentation.md`](design/component-presentation.md) |
 | 2026-08-13 | Adopted an immutable, backend-neutral style value model with a closed property vocabulary and generic `add`/`remove`; no patch or inheritance. | [`design/style-value-model.md`](design/style-value-model.md) |
