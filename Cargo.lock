@@ -1157,6 +1157,8 @@ dependencies = [
 name = "urushi-tui"
 version = "0.1.0"
 dependencies = [
+ "compact_str",
+ "divan",
  "futures-core",
  "libc",
  "ratatui",

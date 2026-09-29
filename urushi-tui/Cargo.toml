@@ -8,6 +8,7 @@ keywords = ["terminal", "tui", "ratatui"]
 categories = ["command-line-interface"]
 
 [dependencies]
+compact_str = "0.9.1"
 futures-core = { version = "0.3", optional = true }
 ratatui = { version = "0.30.2", default-features = false, features = ["layout-cache", "std"] }
 tokio = { version = "1", features = ["macros", "net", "rt", "signal", "sync", "time"], optional = true }
@@ -32,3 +33,10 @@ name = "themed_ratatui"
 [[example]]
 name = "runtime_counter"
 required-features = ["runtime", "crossterm"]
+
+[[bench]]
+name = "cell_buffer"
+harness = false
+
+[dev-dependencies]
+divan = "0.1.21"
