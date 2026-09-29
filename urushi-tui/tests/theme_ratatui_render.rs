@@ -2,7 +2,7 @@ use ratatui::{
     Terminal,
     backend::TestBackend,
     buffer::Buffer,
-    layout::Rect,
+    layout::{Constraint, Layout, Rect},
     style::{Color as RatatuiColor, Modifier, Style as InnerStyle},
     widgets::Widget as _,
 };
@@ -104,6 +104,30 @@ fn one_theme_component_renders_to_plain_cli_and_ratatui() {
     assert_eq!(content.fg, RatatuiColor::White);
     assert_eq!(content.bg, RatatuiColor::Black);
     assert!(!content.modifier.contains(Modifier::BOLD));
+}
+
+#[test]
+fn native_ratatui_layout_places_an_urushi_widget() {
+    let backend = TestBackend::new(8, 1);
+    let mut terminal = Terminal::new(backend).expect("test terminal");
+
+    terminal
+        .draw(|frame| {
+            let areas = Layout::horizontal([Constraint::Length(2), Constraint::Fill(1)])
+                .split(frame.area());
+            frame.render_widget(BlockStyle::new().widget("ok"), areas[1]);
+        })
+        .expect("draw frame");
+
+    let buffer = terminal.backend().buffer();
+    assert_eq!(
+        buffer.cell((2, 0)).expect("first content cell").symbol(),
+        "o"
+    );
+    assert_eq!(
+        buffer.cell((3, 0)).expect("second content cell").symbol(),
+        "k"
+    );
 }
 
 #[test]
