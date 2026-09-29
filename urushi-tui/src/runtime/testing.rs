@@ -13,7 +13,7 @@ use futures_core::Stream;
 use urushi::StyledGrapheme;
 use urushi_terminal::{Position, TerminalSize};
 
-use crate::terminal::{Frame, Rect, Terminal};
+use crate::terminal::{Rect, RenderFrame};
 
 use super::delivery::{
     Admission, Delivery, DeliveryQueue, SendError, Sender, Sink, SourceInbox, source_inbox,
@@ -471,24 +471,13 @@ impl InMemoryTerminal {
     }
 }
 
-impl Terminal for InMemoryTerminal {
-    type Cell = StyledGrapheme;
-
-    type Frame<'a>
-        = InMemoryFrame
-    where
-        Self: 'a;
-
-    fn size(&self) -> TerminalSize {
-        self.size
-    }
-
-    fn resize(&mut self, size: TerminalSize) -> io::Result<()> {
+impl InMemoryTerminal {
+    pub(crate) fn resize(&mut self, size: TerminalSize) -> io::Result<()> {
         self.size = size;
         Ok(())
     }
 
-    fn draw(&mut self, draw: impl FnOnce(&mut Self::Frame<'_>)) -> io::Result<()> {
+    pub(crate) fn draw(&mut self, draw: impl FnOnce(&mut InMemoryFrame)) -> io::Result<()> {
         let mut frame = InMemoryFrame {
             size: self.size,
             cells: vec![InMemoryCell::Empty; self.size.columns().saturating_mul(self.size.rows())],
@@ -510,9 +499,7 @@ pub(crate) struct InMemoryFrame {
     cursor: Option<Position>,
 }
 
-impl Frame for InMemoryFrame {
-    type Cell = StyledGrapheme;
-
+impl RenderFrame for InMemoryFrame {
     fn area(&self) -> Rect {
         Rect::from_size(self.size)
     }

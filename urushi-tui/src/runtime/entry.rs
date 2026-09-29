@@ -4,7 +4,6 @@ use std::fmt;
 use std::io;
 use std::sync::{Arc, Mutex, MutexGuard};
 
-use urushi::StyledGrapheme;
 use urushi_terminal::{
     Command, CommandWriter, Event, EventSource, KeyboardEnhancementFlags, KeyboardEnhancementQuery,
     Position, RawModeControl, SessionOptions, TerminalBackend, TerminalBackground,
@@ -17,8 +16,7 @@ use super::executor::{Clock, Executor, TokioClock, TokioExecutor};
 use super::presentation::{BlockingPresentation, BlockingPresentationError};
 use super::sources::RuntimeSourceSpawner;
 use super::terminal_source::TerminalSourceSpawner;
-use crate::ratatui::RatatuiTerminal;
-use crate::terminal::Terminal;
+use crate::Screen;
 
 /// A failure to construct or drive a terminal application.
 #[derive(Debug)]
@@ -57,14 +55,6 @@ impl From<io::Error> for Error {
 #[doc(hidden)]
 pub struct DefaultTerminal;
 
-/// The marker used until a caller supplies a frame terminal.
-#[doc(hidden)]
-pub struct DefaultPresentation;
-
-/// A caller-supplied frame terminal.
-#[doc(hidden)]
-pub struct CustomTerminal<T>(T);
-
 /// A blocking full-screen application runtime.
 ///
 /// [`Runtime::new`] uses the production executor, clock, and TUI session
@@ -73,22 +63,20 @@ pub struct CustomTerminal<T>(T);
 /// [`backend`](Runtime::backend). Builders replace those boundaries or
 /// individual session choices before [`run`](Runtime::run) takes ownership and
 /// blocks the calling thread.
-pub struct Runtime<A, B = DefaultTerminal, P = DefaultPresentation> {
+pub struct Runtime<A, B = DefaultTerminal> {
     application: A,
     backend: B,
-    presentation: P,
     executor: Option<Arc<dyn Executor>>,
     clock: Option<Arc<dyn Clock>>,
     session: SessionOptions,
 }
 
-impl<A> Runtime<A, DefaultTerminal, DefaultPresentation> {
+impl<A> Runtime<A, DefaultTerminal> {
     /// Builds a runtime with production defaults.
     pub fn new(application: A) -> Self {
         Self {
             application,
             backend: DefaultTerminal,
-            presentation: DefaultPresentation,
             executor: None,
             clock: None,
             session: tui_session_options(),
@@ -111,7 +99,6 @@ impl<A> Runtime<A, DefaultTerminal, DefaultPresentation> {
         Runtime {
             application,
             backend: urushi_terminal::backend::crossterm::CrosstermBackend::new(io::stdout()),
-            presentation: DefaultPresentation,
             executor,
             clock,
             session,
@@ -120,51 +107,15 @@ impl<A> Runtime<A, DefaultTerminal, DefaultPresentation> {
     }
 }
 
-impl<A, T> Runtime<A, DefaultTerminal, CustomTerminal<T>>
-where
-    A: Application,
-    T: Terminal<Cell = StyledGrapheme> + Send + 'static,
-{
-    /// Runs with the default Crossterm backend and the supplied frame terminal.
-    #[cfg(feature = "crossterm")]
-    pub fn run(self) -> Result<A::Model, Error> {
-        Runtime {
-            application: self.application,
-            backend: urushi_terminal::backend::crossterm::CrosstermBackend::new(io::stdout()),
-            presentation: self.presentation,
-            executor: self.executor,
-            clock: self.clock,
-            session: self.session,
-        }
-        .run()
-    }
-}
-
-impl<A, B, P> Runtime<A, B, P> {
+impl<A, B> Runtime<A, B> {
     /// Replaces the physical connection used for the session, input, and queries.
-    pub fn backend<U>(self, backend: U) -> Runtime<A, U, P>
+    pub fn backend<U>(self, backend: U) -> Runtime<A, U>
     where
         U: TerminalBackend + Send + 'static,
     {
         Runtime {
             application: self.application,
             backend,
-            presentation: self.presentation,
-            executor: self.executor,
-            clock: self.clock,
-            session: self.session,
-        }
-    }
-
-    /// Replaces the terminal that receives rendered frames.
-    pub fn terminal<U>(self, terminal: U) -> Runtime<A, B, CustomTerminal<U>>
-    where
-        U: Terminal<Cell = StyledGrapheme> + Send + 'static,
-    {
-        Runtime {
-            application: self.application,
-            backend: self.backend,
-            presentation: CustomTerminal(terminal),
             executor: self.executor,
             clock: self.clock,
             session: self.session,
@@ -226,7 +177,7 @@ impl<A, B, P> Runtime<A, B, P> {
     }
 }
 
-impl<A, B> Runtime<A, B, DefaultPresentation>
+impl<A, B> Runtime<A, B>
 where
     A: Application,
     B: TerminalBackend + Send + 'static,
@@ -240,34 +191,8 @@ where
             self.clock,
             self.session,
             |shared, initial_size, sources| {
-                let terminal =
-                    RatatuiTerminal::new(shared, initial_size).map_err(Error::Terminal)?;
-                Ok(sized_presentation(terminal, initial_size, sources))
-            },
-        )
-    }
-}
-
-impl<A, B, T> Runtime<A, B, CustomTerminal<T>>
-where
-    A: Application,
-    B: TerminalBackend + Send + 'static,
-    T: Terminal<Cell = StyledGrapheme> + Send + 'static,
-{
-    /// Drives the application on the calling thread and returns its final model.
-    pub fn run(self) -> Result<A::Model, Error> {
-        run_runtime(
-            self.application,
-            self.backend,
-            self.executor,
-            self.clock,
-            self.session,
-            |_, initial_size, sources| {
-                Ok(sized_presentation(
-                    self.presentation.0,
-                    initial_size,
-                    sources,
-                ))
+                let screen = Screen::new(shared, initial_size).map_err(Error::Terminal)?;
+                Ok(sized_presentation(screen, initial_size, sources))
             },
         )
     }
@@ -351,17 +276,17 @@ impl Drop for BackgroundRuntime {
     }
 }
 
-fn sized_presentation<T, B, Message>(
-    terminal: T,
+fn sized_presentation<W, B, Message>(
+    screen: Screen<W>,
     initial_size: TerminalSize,
     sources: Arc<TerminalSourceSpawner<SharedTerminal<B>, Message>>,
 ) -> BlockingPresentation
 where
-    T: Terminal<Cell = StyledGrapheme> + Send + 'static,
+    W: CommandWriter + Send + 'static,
     B: TerminalBackend + Send + 'static,
     Message: Send + 'static,
 {
-    BlockingPresentation::spawn_sized_terminal(terminal, move || {
+    BlockingPresentation::spawn_sized_terminal(screen, move || {
         sources.presentation_size(initial_size)
     })
 }
@@ -787,34 +712,6 @@ mod tests {
     }
 
     #[test]
-    fn public_runtime_replaces_physical_backend_and_frame_terminal_independently() {
-        let observed = Arc::new(Mutex::new(ObservedTerminal {
-            events: VecDeque::from([Event::Key(KeyEvent::new(KeyCode::Enter))]),
-            event_delay_polls: 0,
-            cursor_visible: true,
-            ..ObservedTerminal::default()
-        }));
-        let size = TerminalSize::new(8, 2);
-        let backend = FakeTerminal {
-            observed: Arc::clone(&observed),
-            size,
-        };
-        let terminal = crate::runtime::testing::InMemoryTerminal::new(size);
-
-        let model = Runtime::new(ExampleApplication)
-            .backend(backend)
-            .terminal(terminal)
-            .run()
-            .expect("runtime completes");
-
-        assert_eq!(model.surface, Some(size));
-        assert!(model.effect_completed);
-        let observed = lock(&observed);
-        assert!(!observed.raw);
-        assert!(observed.cursor_visible);
-    }
-
-    #[test]
     fn shutdown_returns_while_started_blocking_work_finishes_in_the_background() {
         let observed = Arc::new(Mutex::new(ObservedTerminal {
             events: VecDeque::from([Event::Key(KeyEvent::new(KeyCode::Enter))]),
@@ -856,16 +753,6 @@ mod tests {
         exited_rx
             .recv_timeout(Duration::from_secs(1))
             .expect("background effect can finish after runtime return");
-    }
-
-    #[cfg(feature = "crossterm")]
-    #[test]
-    fn custom_frame_terminal_keeps_the_default_backend_available() {
-        let runtime = Runtime::new(ExampleApplication).terminal(
-            crate::runtime::testing::InMemoryTerminal::new(TerminalSize::new(8, 2)),
-        );
-
-        let _run_with_default_backend = || runtime.run();
     }
 
     #[test]

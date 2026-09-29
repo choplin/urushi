@@ -7,12 +7,12 @@ use std::pin::Pin;
 
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
-use urushi::{StyledGrapheme, View};
-use urushi_terminal::TerminalSize;
+use urushi::View;
+use urushi_terminal::{CommandWriter, TerminalSize};
 
 use super::evaluator::Evaluator;
 use super::renderer;
-use crate::terminal::Terminal;
+use crate::Screen;
 
 pub(crate) trait Presentation {
     type Error;
@@ -69,56 +69,54 @@ impl std::error::Error for BlockingPresentationError {}
 
 impl BlockingPresentation {
     /// Spawns the ordinary stateless terminal presenter.
-    pub(crate) fn spawn_terminal<T>(terminal: T) -> Self
+    pub(crate) fn spawn_terminal<W>(screen: Screen<W>) -> Self
     where
-        T: Terminal<Cell = StyledGrapheme> + Send + 'static,
+        W: CommandWriter + Send + 'static,
     {
-        Self::spawn_terminal_with(terminal, Evaluator::default())
+        Self::spawn_terminal_with(screen, Evaluator::default())
     }
 
     /// Spawns a terminal presenter that retains core evaluation across frames.
-    pub(crate) fn spawn_retained_terminal<T>(terminal: T) -> Self
+    pub(crate) fn spawn_retained_terminal<W>(screen: Screen<W>) -> Self
     where
-        T: Terminal<Cell = StyledGrapheme> + Send + 'static,
+        W: CommandWriter + Send + 'static,
     {
-        Self::spawn_terminal_with(terminal, Evaluator::retained())
+        Self::spawn_terminal_with(screen, Evaluator::retained())
     }
 
     /// Spawns a presenter that snapshots its frame size when a draw is admitted.
-    pub(crate) fn spawn_sized_terminal<T>(
-        terminal: T,
+    pub(crate) fn spawn_sized_terminal<W>(
+        screen: Screen<W>,
         frame_size: impl Fn() -> TerminalSize + Send + Sync + 'static,
     ) -> Self
     where
-        T: Terminal<Cell = StyledGrapheme> + Send + 'static,
+        W: CommandWriter + Send + 'static,
     {
-        Self::spawn_sized_terminal_with(terminal, Evaluator::default(), frame_size)
+        Self::spawn_sized_terminal_with(screen, Evaluator::default(), frame_size)
     }
 
-    fn spawn_terminal_with<T>(mut terminal: T, mut evaluator: Evaluator) -> Self
+    fn spawn_terminal_with<W>(mut screen: Screen<W>, mut evaluator: Evaluator) -> Self
     where
-        T: Terminal<Cell = StyledGrapheme> + Send + 'static,
+        W: CommandWriter + Send + 'static,
     {
-        Self::spawn(move |view| {
-            terminal.draw(|frame| renderer::render(&view, frame, &mut evaluator))
-        })
+        Self::spawn(move |view| screen.draw(|frame| renderer::render(&view, frame, &mut evaluator)))
     }
 
-    fn spawn_sized_terminal_with<T>(
-        mut terminal: T,
+    fn spawn_sized_terminal_with<W>(
+        mut screen: Screen<W>,
         mut evaluator: Evaluator,
         frame_size: impl Fn() -> TerminalSize + Send + Sync + 'static,
     ) -> Self
     where
-        T: Terminal<Cell = StyledGrapheme> + Send + 'static,
+        W: CommandWriter + Send + 'static,
     {
         Self::spawn_with(
             move |view, size| {
                 let size = size.expect("a sized presenter snapshots every draw");
-                if terminal.size() != size {
-                    terminal.resize(size)?;
+                if screen.size() != size {
+                    screen.resize(size)?;
                 }
-                terminal.draw(|frame| renderer::render(&view, frame, &mut evaluator))
+                screen.draw(|frame| renderer::render(&view, frame, &mut evaluator))
             },
             Some(Box::new(frame_size)),
         )
@@ -203,10 +201,23 @@ mod tests {
         BlockStyle, Canvas, CanvasContext, CanvasItem, Length, Position, Projection,
         ProjectionBoundary, Size, TextStyle, Viewport,
     };
-    use urushi_terminal::TerminalSize;
+    use urushi_terminal::{Command, TerminalOutput, TerminalSize};
 
     use super::*;
-    use crate::runtime::testing::InMemoryTerminal;
+
+    struct NullWriter;
+
+    impl TerminalOutput for NullWriter {
+        fn flush(&mut self) -> io::Result<()> {
+            Ok(())
+        }
+    }
+
+    impl CommandWriter for NullWriter {
+        fn write_command(&mut self, _command: Command<'_>) -> io::Result<()> {
+            Ok(())
+        }
+    }
 
     #[test]
     fn synchronous_presentation_runs_off_the_runtime_thread() {
@@ -244,8 +255,8 @@ mod tests {
             .unwrap();
 
         runtime.block_on(async move {
-            let terminal = InMemoryTerminal::new(TerminalSize::new(2, 1));
-            let mut presentation = BlockingPresentation::spawn_terminal(terminal);
+            let screen = Screen::new(NullWriter, TerminalSize::new(2, 1)).unwrap();
+            let mut presentation = BlockingPresentation::spawn_terminal(screen);
             for _ in 0..2 {
                 presentation.submit(view.clone()).unwrap();
                 assert!(matches!(
@@ -268,8 +279,8 @@ mod tests {
             .unwrap();
 
         runtime.block_on(async move {
-            let terminal = InMemoryTerminal::new(TerminalSize::new(2, 1));
-            let mut presentation = BlockingPresentation::spawn_retained_terminal(terminal);
+            let screen = Screen::new(NullWriter, TerminalSize::new(2, 1)).unwrap();
+            let mut presentation = BlockingPresentation::spawn_retained_terminal(screen);
             for origin in [0, 1, 0] {
                 presentation
                     .submit(viewport_canvas(origin, Arc::clone(&observed)))

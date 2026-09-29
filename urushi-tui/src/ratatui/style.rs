@@ -71,25 +71,6 @@ fn ratatui_attributes(attributes: TextAttributes) -> RatatuiModifier {
     converted
 }
 
-pub(super) fn terminal_attributes(modifier: RatatuiModifier) -> TextAttributes {
-    let mut attributes = TextAttributes::empty();
-    for (ratatui, terminal) in [
-        (RatatuiModifier::BOLD, TextAttribute::Bold),
-        (RatatuiModifier::DIM, TextAttribute::Dim),
-        (RatatuiModifier::ITALIC, TextAttribute::Italic),
-        (RatatuiModifier::SLOW_BLINK, TextAttribute::SlowBlink),
-        (RatatuiModifier::RAPID_BLINK, TextAttribute::RapidBlink),
-        (RatatuiModifier::REVERSED, TextAttribute::Reversed),
-        (RatatuiModifier::HIDDEN, TextAttribute::Hidden),
-        (RatatuiModifier::CROSSED_OUT, TextAttribute::CrossedOut),
-    ] {
-        if modifier.contains(ratatui) {
-            attributes = attributes | terminal;
-        }
-    }
-    attributes
-}
-
 impl From<RatatuiStyle> for InnerStyle {
     fn from(value: RatatuiStyle) -> Self {
         value.into_inner()
@@ -117,30 +98,6 @@ const fn ratatui_color(color: Option<Color>) -> Option<RatatuiColor> {
         Some(Color::Ansi(15)) => Some(RatatuiColor::White),
         Some(Color::Ansi(index) | Color::Ansi256(index)) => Some(RatatuiColor::Indexed(index)),
         Some(Color::Rgb(red, green, blue)) => Some(RatatuiColor::Rgb(red, green, blue)),
-    }
-}
-
-pub(super) const fn terminal_color(color: RatatuiColor) -> Option<Color> {
-    match color {
-        RatatuiColor::Reset => None,
-        RatatuiColor::Black => Some(Color::Ansi(0)),
-        RatatuiColor::Red => Some(Color::Ansi(1)),
-        RatatuiColor::Green => Some(Color::Ansi(2)),
-        RatatuiColor::Yellow => Some(Color::Ansi(3)),
-        RatatuiColor::Blue => Some(Color::Ansi(4)),
-        RatatuiColor::Magenta => Some(Color::Ansi(5)),
-        RatatuiColor::Cyan => Some(Color::Ansi(6)),
-        RatatuiColor::Gray => Some(Color::Ansi(7)),
-        RatatuiColor::DarkGray => Some(Color::Ansi(8)),
-        RatatuiColor::LightRed => Some(Color::Ansi(9)),
-        RatatuiColor::LightGreen => Some(Color::Ansi(10)),
-        RatatuiColor::LightYellow => Some(Color::Ansi(11)),
-        RatatuiColor::LightBlue => Some(Color::Ansi(12)),
-        RatatuiColor::LightMagenta => Some(Color::Ansi(13)),
-        RatatuiColor::LightCyan => Some(Color::Ansi(14)),
-        RatatuiColor::White => Some(Color::Ansi(15)),
-        RatatuiColor::Indexed(index) => Some(Color::Ansi256(index)),
-        RatatuiColor::Rgb(red, green, blue) => Some(Color::Rgb(red, green, blue)),
     }
 }
 

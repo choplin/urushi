@@ -1,10 +1,5 @@
 //! Urushi-owned cell storage and shared traversal of resolved cell rectangles.
 
-#![expect(
-    dead_code,
-    reason = "the staged buffer foundation is consumed by the Screen implementation in the next issue"
-)]
-
 use std::fmt;
 
 use compact_str::CompactString;
@@ -46,11 +41,8 @@ pub(crate) struct Buffer {
 
 impl Buffer {
     pub(crate) fn new(size: TerminalSize) -> Result<Self, BufferSizeError> {
-        let len = buffer_len(size)?;
-        Ok(Self {
-            size,
-            cells: vec![CellKind::Empty; len],
-        })
+        let cells = empty_cells(size)?;
+        Ok(Self { size, cells })
     }
 
     pub(crate) const fn size(&self) -> TerminalSize {
@@ -123,8 +115,8 @@ impl Buffer {
 
     /// Replaces the storage with an empty buffer of `size`.
     pub(crate) fn resize(&mut self, size: TerminalSize) -> Result<(), BufferSizeError> {
-        let len = buffer_len(size)?;
-        self.cells = vec![CellKind::Empty; len];
+        let cells = empty_cells(size)?;
+        self.cells = cells;
         self.size = size;
         Ok(())
     }
@@ -173,6 +165,16 @@ fn buffer_len(size: TerminalSize) -> Result<usize, BufferSizeError> {
         .ok_or(BufferSizeError { size })
 }
 
+fn empty_cells(size: TerminalSize) -> Result<Vec<CellKind>, BufferSizeError> {
+    let len = buffer_len(size)?;
+    let mut cells = Vec::new();
+    cells
+        .try_reserve_exact(len)
+        .map_err(|_| BufferSizeError { size })?;
+    cells.resize(len, CellKind::Empty);
+    Ok(cells)
+}
+
 /// The requested dimensions cannot be represented by one row-major buffer.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct BufferSizeError {
@@ -183,7 +185,7 @@ impl fmt::Display for BufferSizeError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             formatter,
-            "buffer dimensions {}x{} overflow addressable storage",
+            "cannot allocate buffer dimensions {}x{}",
             self.size.columns(),
             self.size.rows()
         )
@@ -578,6 +580,12 @@ mod tests {
             Buffer::new(TerminalSize::new(usize::MAX, 2)),
             Err(BufferSizeError {
                 size: TerminalSize::new(usize::MAX, 2)
+            })
+        );
+        assert_eq!(
+            Buffer::new(TerminalSize::new(usize::MAX, 1)),
+            Err(BufferSizeError {
+                size: TerminalSize::new(usize::MAX, 1)
             })
         );
     }

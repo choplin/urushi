@@ -1,18 +1,14 @@
 //! Resolves one application view into one terminal frame.
 
-use urushi::{Available, StyledGrapheme, View};
+use urushi::{Available, View};
 use urushi_terminal::Position;
 
 use super::evaluator::Evaluator;
 use crate::cell::visit_resolved;
-use crate::terminal::Frame;
+use crate::terminal::RenderFrame;
 
 /// Resolves and draws one view, including its cursor request.
-pub(crate) fn render(
-    view: &View,
-    frame: &mut impl Frame<Cell = StyledGrapheme>,
-    evaluator: &mut Evaluator,
-) {
+pub(crate) fn render(view: &View, frame: &mut impl RenderFrame, evaluator: &mut Evaluator) {
     let area = frame.area();
     let size = area.size();
     let resolved = evaluator
@@ -59,7 +55,6 @@ mod tests {
 
     use super::*;
     use crate::runtime::testing::{InMemoryCell, InMemoryTerminal};
-    use crate::terminal::Terminal;
 
     fn draw(view: &View, size: TerminalSize) -> InMemoryTerminal {
         let mut terminal = InMemoryTerminal::new(size);

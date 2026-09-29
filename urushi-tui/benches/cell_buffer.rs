@@ -23,6 +23,10 @@ fn main() {
 // The production module yields these cells to its terminal writer. Defining
 // the boundary locally lets this benchmark compile the private implementation
 // itself without making Buffer part of urushi-tui's public API.
+#[expect(
+    dead_code,
+    reason = "the benchmark consumes diff output opaquely through black_box"
+)]
 mod terminal {
     use urushi_terminal::TerminalStyle;
 
@@ -33,8 +37,9 @@ mod terminal {
 }
 
 #[expect(
+    dead_code,
     unused_imports,
-    reason = "the included production module's unit tests are not registered by the benchmark harness"
+    reason = "the benchmark includes the production module but exercises only its hot paths"
 )]
 #[path = "../src/cell.rs"]
 mod cell;

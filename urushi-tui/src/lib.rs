@@ -1,21 +1,26 @@
-//! Ratatui integration for Urushi.
+//! Full-screen terminal UI building blocks for Urushi.
 //!
-//! This crate provisionally owns full-screen TUI concerns. It provides the
-//! [`ratatui`] adapter — logical-style conversion and stateless widgets that
-//! draw a resolved Urushi view into a caller-owned buffer — and, behind the
-//! `runtime` feature, a blocking full-screen runtime with [`Application`],
-//! [`Effect`], [`Subscription`], and [`Runtime`]. The runtime owns effect and
-//! subscription execution, frame scheduling, terminal input and presentation,
-//! and session restoration.
+//! [`Screen`] is the synchronous presentation engine: it owns Urushi cell
+//! buffers and frame history and writes committed changes through a caller's
+//! [`urushi_terminal::CommandWriter`]. It does not own input, terminal queries,
+//! raw mode, or session restoration. Callers may drive it from their own loop
+//! without enabling the optional runtime or using Tokio.
+//!
+//! The [`ratatui`] module is an adapter for logical-style conversion and
+//! stateless widgets that draw a resolved Urushi view into a caller-owned
+//! Ratatui buffer. Behind the `runtime` feature, the crate also provides a
+//! blocking full-screen runtime with [`Application`], [`Effect`],
+//! [`Subscription`], and [`Runtime`]. The runtime owns effect and subscription
+//! execution, frame scheduling, terminal input, presentation, and session
+//! restoration.
 //!
 //! The adapter computes no geometry. The box model lives in `urushi`'s layout
 //! pass, and the adapter only translates a Ratatui `Rect` into
 //! [`Available`](urushi::Available), calls [`resolve`](urushi::resolve), and
 //! converts the resulting graphemes and logical styles into cells.
 //!
-//! [`terminal`] is the lower-level full-screen presentation layer: frame and
-//! commit contracts plus a cell writer that lowers changed cells to
-//! `urushi-terminal` commands. The optional TEA runtime is layered above it.
+//! [`terminal`] contains the lower-level [`Screen`] and [`Frame`] presentation
+//! API. The optional TEA runtime is layered above it.
 //!
 //! The runtime does not inspect terminal appearance or replace an
 //! application's theme. A caller that adapts to the terminal background opens
@@ -29,6 +34,7 @@ pub mod ratatui;
 mod runtime;
 pub mod terminal;
 
+pub use terminal::{Frame, Rect, Screen};
 pub use urushi_terminal::{Position, TerminalSize};
 
 #[cfg(feature = "crossterm")]
@@ -36,11 +42,10 @@ pub use urushi_terminal::backend::crossterm;
 
 #[cfg(feature = "runtime")]
 pub use runtime::{
-    Admission, Application, BlockingTask, CellPixels, Clock, CustomTerminal, DefaultPresentation,
-    DefaultTerminal, Effect, Error, Execution, Executor, FocusChange, Input, KeyCode, KeyEvent,
-    KeyEventState, KeyKind, MediaKeyCode, ModifierKeyCode, Modifiers, MouseButton, MouseEvent,
-    MouseKind, Runtime, SendError, Sender, Signal, Subscription, Surface, SurfaceSize, Task,
-    TokioClock, TokioExecutor,
+    Admission, Application, BlockingTask, CellPixels, Clock, DefaultTerminal, Effect, Error,
+    Execution, Executor, FocusChange, Input, KeyCode, KeyEvent, KeyEventState, KeyKind,
+    MediaKeyCode, ModifierKeyCode, Modifiers, MouseButton, MouseEvent, MouseKind, Runtime,
+    SendError, Sender, Signal, Subscription, Surface, SurfaceSize, Task, TokioClock, TokioExecutor,
 };
 
 #[cfg(all(feature = "runtime", feature = "crossterm"))]

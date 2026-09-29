@@ -1,48 +1,21 @@
-//! Low-level full-screen presentation over terminal command primitives.
+//! Lowering positioned cells and frame state to terminal commands.
 
 use std::io;
 
 use unicode_width::UnicodeWidthStr;
 use urushi_terminal::{
-    ClearRegion, Command, CommandWriter, CursorMove, Position, TerminalOutput, TerminalSize,
-    TerminalStyle, TerminalText,
+    ClearRegion, Command, CommandWriter, CursorMove, Position, TerminalOutput, TerminalStyle,
+    TerminalText,
 };
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
-pub struct Rect {
-    origin: Position,
-    size: TerminalSize,
-}
-
-impl Rect {
-    pub const fn new(origin: Position, size: TerminalSize) -> Self {
-        Self { origin, size }
-    }
-
-    pub const fn from_size(size: TerminalSize) -> Self {
-        Self::new(Position::new(0, 0), size)
-    }
-
-    pub const fn origin(self) -> Position {
-        self.origin
-    }
-
-    pub const fn size(self) -> TerminalSize {
-        self.size
-    }
-}
-
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct Cell<'a> {
+pub(crate) struct Cell<'a> {
     pub symbol: &'a str,
     pub style: TerminalStyle,
 }
 
-/// Writes positioned cells through terminal command primitives.
-///
-/// The blanket implementation coalesces adjacent cells and repeated styles
-/// before it emits backend-independent [`Command`] values.
-pub trait CellWriter: TerminalOutput {
+/// Internal command-lowering operations available to every command writer.
+pub(super) trait CellWriter: TerminalOutput {
     fn draw<'a, I>(&mut self, cells: I) -> io::Result<()>
     where
         I: Iterator<Item = (Position, Cell<'a>)>;
@@ -95,32 +68,10 @@ impl<W: CommandWriter + ?Sized> CellWriter for W {
     }
 
     fn clear(&mut self) -> io::Result<()> {
+        self.write_command(Command::ResetStyle)?;
         self.write_command(Command::Clear(ClearRegion::Screen))?;
         self.write_command(Command::MoveCursor(CursorMove::To(Position::new(0, 0))))
     }
-}
-
-/// Provides draw-scoped access without exposing presentation history or commit.
-pub trait Frame {
-    type Cell: ?Sized;
-
-    fn area(&self) -> Rect;
-
-    fn put(&mut self, column: usize, row: usize, cell: &Self::Cell);
-
-    fn set_cursor(&mut self, at: Option<Position>);
-}
-
-/// Full-screen presentation state and transactional frame commit behavior.
-pub trait Terminal {
-    type Cell: ?Sized;
-    type Frame<'a>: Frame<Cell = Self::Cell>;
-
-    fn size(&self) -> TerminalSize;
-
-    fn resize(&mut self, size: TerminalSize) -> io::Result<()>;
-
-    fn draw(&mut self, draw: impl FnOnce(&mut Self::Frame<'_>)) -> io::Result<()>;
 }
 
 #[cfg(test)]

@@ -45,7 +45,7 @@ pub use delivery::{Admission, SendError, Sender};
 pub use effect::Effect;
 #[cfg(feature = "crossterm")]
 pub use entry::run;
-pub use entry::{CustomTerminal, DefaultPresentation, DefaultTerminal, Error, Runtime};
+pub use entry::{DefaultTerminal, Error, Runtime};
 pub use executor::{BlockingTask, Clock, Execution, Executor, Task, TokioClock, TokioExecutor};
 pub use source::{
     CellPixels, FocusChange, Input, KeyCode, KeyEvent, KeyEventState, KeyKind, MediaKeyCode,

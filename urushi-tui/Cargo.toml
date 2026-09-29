@@ -1,6 +1,6 @@
 [package]
 name = "urushi-tui"
-description = "Ratatui integration and full-screen TUI runtime for urushi"
+description = "Full-screen presentation, Ratatui integration, and TUI runtime for urushi"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
