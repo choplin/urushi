@@ -32,20 +32,28 @@ boundary be supplied:
 urushi_tui::Runtime::new(app)
     .executor(executor)   // where closures and futures run
     .terminal(terminal)   // the Terminal implementation frames go to
+    .backend(backend)     // the physical session, input, and query connection
     .clock(clock)         // what timers and intervals read
     .mouse(true)          // a session option; see tui-terminal-ownership.md
     .run()?
 ```
 
 The builder is the one public surface for both a program that already has an
-executor — it passes a Tokio handle — and the test harness in
-[`tui-delivery-ordering.md`](tui-delivery-ordering.md), which passes a
-deterministic executor, an in-memory terminal, and a controllable clock. Every
-boundary has the real default — the Ratatui-backed terminal over Crossterm,
-Tokio, the system clock — and a program that supplies none gets what `run`
-gives. The session options — raw mode, alternate screen, the input modes, mouse
-capture — sit on the same builder; their defaults are in
+executor — it passes a Tokio handle — and a harness that passes a deterministic
+executor, an in-memory frame terminal, a fake physical backend, and a
+controllable clock. The split between `terminal` and `backend` preserves the
+same ownership boundary as production: a `Terminal` receives committed frames,
+while one complete `TerminalBackend` owns session modes, input, output, and
+mutable queries. Every boundary has the real default — the Ratatui-backed
+terminal over Crossterm, Tokio, the system clock — and a program that supplies
+none gets what `run` gives. The session options — raw mode, alternate screen,
+the input modes, mouse capture — sit on the same builder; their defaults are in
 [`tui-terminal-ownership.md`](tui-terminal-ownership.md).
+
+Those physical-terminal defaults are provided by the default `crossterm`
+feature. A build that enables `runtime` without `crossterm` retains the full
+runtime but must supply its physical connection with `.backend(backend)` before
+`.run()` becomes available.
 
 ### The executor boundary
 
@@ -65,6 +73,7 @@ or `Application`.
 | `Error` | When |
 | --- | --- |
 | `Terminal(io::Error)` | the terminal could not be entered, read, queried, drawn to, or restored, and no subscription took the failure |
+| `Runtime(io::Error)` | the runtime executor or its presentation worker could not be created or continue |
 
 A failure to draw a frame is delivered rather than fatal when the application
 declared `Subscription::terminal_errors(f)`: the failure reaches `update` as

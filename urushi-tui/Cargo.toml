@@ -1,6 +1,6 @@
 [package]
 name = "urushi-tui"
-description = "Ratatui integration and future full-screen TUI runtime for urushi"
+description = "Ratatui integration and full-screen TUI runtime for urushi"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -10,18 +10,25 @@ categories = ["command-line-interface"]
 [dependencies]
 futures-core = { version = "0.3", optional = true }
 ratatui = { version = "0.29", default-features = false }
-tokio = { version = "1", features = ["macros", "rt", "sync", "time"], optional = true }
+tokio = { version = "1", features = ["macros", "net", "rt", "signal", "sync", "time"], optional = true }
 urushi = { path = "../urushi", version = "=0.1.0" }
 urushi-terminal = { path = "../urushi-terminal", version = "=0.1.0" }
 unicode-width.workspace = true
 
+[target.'cfg(unix)'.dependencies]
+libc = { version = "0.2", optional = true }
+
 [features]
-default = ["runtime"]
+default = ["runtime", "crossterm"]
 # The full-screen TUI runtime: the application value, its effects and
 # subscriptions, and the machinery that drives them. A consumer that only wants
 # the Ratatui adapter sets `default-features = false`.
-runtime = ["dep:futures-core", "dep:tokio"]
+runtime = ["dep:futures-core", "dep:libc", "dep:tokio"]
 crossterm = ["urushi-terminal/crossterm"]
 
 [[example]]
 name = "themed_ratatui"
+
+[[example]]
+name = "runtime_counter"
+required-features = ["runtime", "crossterm"]

@@ -373,9 +373,7 @@ impl Presentation for ImmediatePresentation {
     type Error = Infallible;
 
     fn submit(&mut self, _view: View) -> Result<(), Self::Error> {
-        self.results_tx
-            .send(DrawResult::Completed { at: Instant::now() })
-            .unwrap();
+        self.results_tx.send(DrawResult::Completed).unwrap();
         Ok(())
     }
 
@@ -454,7 +452,6 @@ impl Presentation for FailingPresentation {
     fn submit(&mut self, _view: View) -> Result<(), Self::Error> {
         self.result = Some(DrawResult::Failed {
             error: io::Error::other("draw failed"),
-            completed_at: Instant::now(),
         });
         Ok(())
     }

@@ -39,7 +39,7 @@ surface layers, including which parts are implemented today.
 | [`urushi-graphics`](urushi-graphics/) | Image components and Kitty/Sixel terminal graphics adapters | Stateless Kitty/Sixel output works |
 | [`urushi-terminal`](urushi-terminal/) | Generic terminal commands, events, session restoration, geometry, capability inspection, and physical backends | Shared primitives, native Unix backend, and optional Crossterm adapter work |
 | [`urushi-prompt`](urushi-prompt/) | Theme-aware `Input`, `Select`, and `Confirm` fields with synchronous validation | Core prompt flow works |
-| [`urushi-tui`](urushi-tui/) | The `ratatui` adapter — style conversion, widgets, transactional buffer diffing over `urushi-terminal` — and the home of the full-screen runtime | Adapter and terminal path work; runtime entry is not implemented |
+| [`urushi-tui`](urushi-tui/) | The `ratatui` adapter — style conversion, widgets, transactional buffer diffing over `urushi-terminal` — and the full-screen runtime | Adapter and runtime entry work |
 
 ## Two ways to build a full-screen TUI
 
@@ -96,12 +96,25 @@ a ratatui `Buffer` is plain — ANSI escape sequences are not interpreted there.
 
 ### urushi owns the loop, the application describes state
 
-In development. [`docs/tui-architecture.md`](docs/tui-architecture.md) defines a
-TEA-style runtime in `urushi-tui`: the application supplies a model, an update
-function, and a view, while the runtime owns event delivery, effect execution,
-frame scheduling, and terminal lifecycle. It builds on the same view tree and
-the same cell-writing path as the adapter above, so a view written for one is a
-view for the other.
+Available today. The TEA-style runtime in `urushi-tui` takes an `Application`
+whose model is changed only by `update` and whose `view` returns an ordinary
+Urushi view tree. `urushi_tui::run(app)` supplies the production terminal,
+executor, and clock; `Runtime::new(app)` exposes the same entry point as a
+builder when a program needs to replace those boundaries or change session
+options. The runtime owns ordered delivery, effects and subscriptions, frame
+scheduling, terminal input and presentation, and restoration on every normal
+or unwinding exit. [`docs/tui-architecture.md`](docs/tui-architecture.md)
+defines the complete ownership and ordering model.
+
+Run the small runtime example in a real terminal:
+
+```sh
+cargo run -p urushi-tui --example runtime_counter
+```
+
+Any non-release key updates the model and starts one blocking effect; the
+effect completion returns as another message. Resize updates the subscribed
+surface, and `q`, Escape, or Ctrl-C shuts down and restores the session.
 
 ## Example
 
@@ -321,7 +334,7 @@ new size; expect all other visible primary-buffer content to be erased.
 - [x] Nested styles as a view tree (`View::text` / `block` / `row` / `column`) resolved in one layout pass, rather than re-styling already-rendered text
 - [x] Theme layers: reusable core components plus CLI-specific presentations derived from shared semantic tokens
 - [x] `urushi-tui`: box-model Widget and loss-aware Ratatui style conversion
-- [ ] `urushi-tui`: TEA-style full-screen runtime owning event delivery, frame scheduling, and terminal lifecycle
+- [x] `urushi-tui`: TEA-style full-screen runtime owning event delivery, frame scheduling, and terminal lifecycle
 - [x] `urushi-prompt`: themed `Form` / `Group` with `Input`, `Select`, `Confirm`, and synchronous validation
 
 ## Acknowledgments

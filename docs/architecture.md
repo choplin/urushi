@@ -242,6 +242,14 @@ to share styling.
 | [`render`](../urushi/src/render/) | Feature selection and translation of a `ResolvedView` to ANSI text. | `style`, `view`, `urushi-terminal` |
 | [`output`](../urushi/src/output.rs) | Standard-stream convenience: detection, width selection, rendering policy, and one static write. | `view`, `render`, `urushi-terminal` |
 
+## TUI module responsibilities
+
+| Module | Responsibility | Internal dependencies |
+| --- | --- | --- |
+| [`ratatui`](../urushi-tui/src/ratatui/) | Converts logical styles and resolved views to Ratatui cells; provides stateless widgets for caller-owned loops and the transactional buffer/diff terminal used by the runtime. | `urushi`, `terminal`, Ratatui |
+| [`terminal`](../urushi-tui/src/terminal.rs) | Defines draw-scoped `Frame`, committed `Terminal`, and `CellWriter` contracts above backend-independent terminal commands. | `urushi-terminal` |
+| `runtime` | Re-exports the application, effect, subscription, and admission values; owns the public blocking `Runtime` entry point, source execution, delivery ordering, frame scheduling, rendering, terminal input, and session restoration. | `urushi`, `ratatui`, `terminal`, `urushi-terminal`, Tokio |
+
 The dependency direction runs from I/O and adapters toward semantic modules:
 
 - `style` and `text` do not depend on themes, components, renderers, terminal

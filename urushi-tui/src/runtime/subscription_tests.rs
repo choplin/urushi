@@ -226,12 +226,18 @@ fn map_composes_the_function_of_a_runtime_source() {
 fn map_reaches_the_items_of_a_stream() {
     let parent = Subscription::stream("watch", Ready::new([Child::Line(1), Child::Line(2)]))
         .map(Parent::Child);
-    let SourceKind::Stream { mut stream, .. } = only(parent) else {
+    let SourceKind::Stream {
+        mut stream, map, ..
+    } = only(parent)
+    else {
         panic!("declared a stream")
     };
 
     assert_eq!(
-        drain(stream.as_mut()),
+        drain(stream.as_mut())
+            .into_iter()
+            .map(|message| map.apply(message))
+            .collect::<Vec<_>>(),
         [Parent::Child(Child::Line(1)), Parent::Child(Child::Line(2))]
     );
 }
@@ -249,12 +255,16 @@ fn map_reaches_what_an_asynchronous_source_sends() {
             .expect("the collector takes everything");
     })
     .map(Parent::Child);
-    let SourceKind::Run { start, .. } = only(parent) else {
+    let SourceKind::Run { start, map, .. } = only(parent) else {
         panic!("declared a run")
     };
 
     let collector = Collector::new();
-    block_on(start(collector.sender()));
+    block_on(start(
+        collector
+            .sender()
+            .contramap(Arc::new(move |message| map.apply(message))),
+    ));
 
     assert_eq!(
         collector.take(),
@@ -270,12 +280,16 @@ fn map_reaches_what_a_blocking_source_sends() {
             .expect("the collector takes everything");
     })
     .map(Parent::Child);
-    let SourceKind::RunBlocking { start, .. } = only(parent) else {
+    let SourceKind::RunBlocking { start, map, .. } = only(parent) else {
         panic!("declared a blocking run")
     };
 
     let collector = Collector::new();
-    start(collector.sender());
+    start(
+        collector
+            .sender()
+            .contramap(Arc::new(move |message| map.apply(message))),
+    );
 
     assert_eq!(collector.take(), [Parent::Child(Child::Line(1))]);
 }

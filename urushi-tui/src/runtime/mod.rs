@@ -8,13 +8,10 @@
 //! interprets them behind boundaries that do not appear in application types.
 
 mod application;
-#[cfg_attr(
-    not(test),
-    expect(dead_code, reason = "wired by the public runtime entry point")
-)]
 mod core;
 mod delivery;
 mod effect;
+mod entry;
 #[cfg_attr(
     not(test),
     expect(dead_code, reason = "wired by the public runtime entry point")
@@ -33,6 +30,7 @@ mod presentation;
 pub(crate) mod renderer;
 mod scheduler;
 mod source;
+mod sources;
 mod subscription;
 #[cfg_attr(
     not(test),
@@ -45,6 +43,10 @@ mod testing;
 pub use application::Application;
 pub use delivery::{Admission, SendError, Sender};
 pub use effect::Effect;
+#[cfg(feature = "crossterm")]
+pub use entry::run;
+pub use entry::{CustomTerminal, DefaultPresentation, DefaultTerminal, Error, Runtime};
+pub use executor::{BlockingTask, Clock, Execution, Executor, Task, TokioClock, TokioExecutor};
 pub use source::{
     CellPixels, FocusChange, Input, KeyCode, KeyEvent, KeyEventState, KeyKind, MediaKeyCode,
     ModifierKeyCode, Modifiers, MouseButton, MouseEvent, MouseKind, Signal, Surface, SurfaceSize,

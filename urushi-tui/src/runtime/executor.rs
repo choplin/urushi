@@ -20,41 +20,76 @@ use super::delivery::{DeliveryQueue, EffectCancellation};
 use super::effect::{Effect, EffectKind};
 use super::subscription::{Source, Subscription};
 
-pub(crate) type Task = Pin<Box<dyn Future<Output = ()> + Send + 'static>>;
-pub(crate) type BlockingTask = Box<dyn FnOnce() + Send + 'static>;
+/// Asynchronous work accepted by a runtime executor.
+pub type Task = Pin<Box<dyn Future<Output = ()> + Send + 'static>>;
+
+/// Blocking work accepted by a runtime executor.
+pub type BlockingTask = Box<dyn FnOnce() + Send + 'static>;
 
 /// A running task whose drop cancels work that has not completed yet.
-pub(crate) trait Execution: Send {}
+pub trait Execution: Send {}
 
 /// Where runtime work runs, expressed without an executor's task type.
-pub(crate) trait Executor: Send + Sync + 'static {
+pub trait Executor: Send + Sync + 'static {
+    /// Starts an asynchronous task and returns its cancellation handle.
     fn spawn(&self, task: Task) -> Box<dyn Execution>;
 
+    /// Starts blocking work off the application thread.
     fn spawn_blocking(&self, task: BlockingTask) -> Box<dyn Execution>;
 }
 
+impl<E> Executor for Arc<E>
+where
+    E: Executor + ?Sized,
+{
+    fn spawn(&self, task: Task) -> Box<dyn Execution> {
+        E::spawn(self, task)
+    }
+
+    fn spawn_blocking(&self, task: BlockingTask) -> Box<dyn Execution> {
+        E::spawn_blocking(self, task)
+    }
+}
+
 /// The source of time shared by delayed effects and interval subscriptions.
-pub(crate) trait Clock: Send + Sync + 'static {
+pub trait Clock: Send + Sync + 'static {
+    /// Returns the clock's current monotonic instant.
     fn now(&self) -> Instant;
 
+    /// Waits for `duration` and returns the firing instant.
     fn sleep(&self, duration: Duration) -> Pin<Box<dyn Future<Output = Instant> + Send + 'static>>;
+}
+
+impl<C> Clock for Arc<C>
+where
+    C: Clock + ?Sized,
+{
+    fn now(&self) -> Instant {
+        C::now(self)
+    }
+
+    fn sleep(&self, duration: Duration) -> Pin<Box<dyn Future<Output = Instant> + Send + 'static>> {
+        C::sleep(self, duration)
+    }
 }
 
 /// Tokio's task runner, kept behind Urushi's executor vocabulary.
 #[cfg_attr(test, allow(dead_code, reason = "wired by the runtime core"))]
-pub(crate) struct TokioExecutor {
+pub struct TokioExecutor {
     handle: tokio::runtime::Handle,
 }
 
 impl TokioExecutor {
     #[cfg_attr(test, allow(dead_code, reason = "wired by the runtime core"))]
-    pub(crate) fn new(handle: tokio::runtime::Handle) -> Self {
+    /// Uses `handle` for asynchronous and blocking runtime work.
+    pub fn new(handle: tokio::runtime::Handle) -> Self {
         Self { handle }
     }
 }
 
 #[cfg_attr(test, allow(dead_code, reason = "wired by the runtime core"))]
-pub(crate) struct TokioClock;
+/// The system monotonic clock driven by Tokio timers.
+pub struct TokioClock;
 
 impl Clock for TokioClock {
     fn now(&self) -> Instant {
@@ -77,6 +112,16 @@ impl Executor for TokioExecutor {
 
     fn spawn_blocking(&self, task: BlockingTask) -> Box<dyn Execution> {
         Box::new(TokioExecution(self.handle.spawn_blocking(task)))
+    }
+}
+
+impl Executor for tokio::runtime::Handle {
+    fn spawn(&self, task: Task) -> Box<dyn Execution> {
+        Box::new(TokioExecution(self.spawn(task)))
+    }
+
+    fn spawn_blocking(&self, task: BlockingTask) -> Box<dyn Execution> {
+        Box::new(TokioExecution(self.spawn_blocking(task)))
     }
 }
 
@@ -327,7 +372,12 @@ fn latest_declarations<Message>(sources: Vec<Source<Message>>) -> Vec<Source<Mes
         .filter(|source| seen.insert(source.key))
         .collect();
     declarations.reverse();
-    declarations.sort_by_key(|source| !source.kind.is_surface());
+    // Register input before surface starts the shared terminal reader. This
+    // prevents an initial key from being consumed in the short interval where
+    // a declaration contains both sources but only surface is registered.
+    // Surface still accepts its initial Sync observation before reconciliation
+    // returns and before the scheduler is first invalidated.
+    declarations.sort_by_key(|source| source.kind.is_surface());
     declarations
 }
 

@@ -138,9 +138,9 @@ where
                     }
                 }
                 result = self.presentation.completed() => match result {
-                    Ok(DrawResult::Completed { at }) => self.scheduler.draw_completed(at),
-                    Ok(DrawResult::Failed { error, completed_at }) => {
-                        self.scheduler.draw_completed(completed_at);
+                    Ok(DrawResult::Completed) => self.scheduler.draw_completed_now(),
+                    Ok(DrawResult::Failed { error }) => {
+                        self.scheduler.draw_completed_now();
                         let Some(mapper) = self.terminal_error_mapper.as_ref() else {
                             break Err(RuntimeError::Terminal(error));
                         };

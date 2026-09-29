@@ -8,10 +8,6 @@ use crate::cell::visit_resolved;
 use crate::terminal::Frame;
 
 /// Resolves and draws one view, including its cursor request.
-#[cfg_attr(
-    not(test),
-    expect(dead_code, reason = "wired by the public runtime entry point")
-)]
 pub(crate) fn render(
     view: &View,
     frame: &mut impl Frame<Cell = StyledGrapheme>,

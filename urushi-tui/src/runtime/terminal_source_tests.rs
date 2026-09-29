@@ -188,13 +188,24 @@ fn surface_keeps_only_the_latest_unaccepted_window_observation() {
     let spawner = Arc::new(
         TerminalSourceSpawner::new(terminal, harness.executor(), Arc::new(RejectSources)).unwrap(),
     );
-    let mut subscriptions = SubscriptionExecutor::new(spawner, harness.deliveries());
+    let mut subscriptions = SubscriptionExecutor::new(
+        Arc::clone(&spawner) as Arc<dyn SourceSpawner<Surface>>,
+        harness.deliveries(),
+    );
 
     subscriptions
         .reconcile(Subscription::surface(|surface| surface))
         .unwrap();
+    assert_eq!(
+        spawner.presentation_size(TerminalSize::ZERO),
+        TerminalSize::new(80, 24)
+    );
     probe.wait_for_queries(3);
     assert!(!harness.complete_effect(0));
+    assert_eq!(
+        spawner.presentation_size(TerminalSize::ZERO),
+        TerminalSize::new(120, 40)
+    );
 
     assert_eq!(
         harness.drain(),

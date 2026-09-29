@@ -69,6 +69,10 @@ impl DrawScheduler {
             timer: self.clock.sleep(delay),
         };
     }
+
+    pub(crate) fn draw_completed_now(&mut self) {
+        self.draw_completed(self.clock.now());
+    }
 }
 
 #[cfg(test)]
@@ -133,6 +137,23 @@ mod tests {
         assert!(poll_next_draw(&mut scheduler, || true).is_pending());
 
         scheduler.invalidate();
+        assert!(poll_next_draw(&mut scheduler, || true).is_ready());
+    }
+
+    #[test]
+    fn completion_now_uses_the_scheduler_clock() {
+        let interval = Duration::from_millis(33);
+        let harness = Harness::<()>::new(TerminalSize::ZERO);
+        let mut scheduler = DrawScheduler::new(interval, harness.clock());
+        scheduler.invalidate();
+        assert!(poll_next_draw(&mut scheduler, || true).is_ready());
+
+        harness.advance(Duration::from_secs(3_600));
+        scheduler.draw_completed_now();
+        scheduler.invalidate();
+        assert!(poll_next_draw(&mut scheduler, || true).is_pending());
+
+        harness.advance(interval);
         assert!(poll_next_draw(&mut scheduler, || true).is_ready());
     }
 

@@ -4,11 +4,11 @@ use std::fmt;
 use std::future::Future;
 use std::io;
 use std::pin::Pin;
-use std::time::Instant;
 
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 use urushi::{StyledGrapheme, View};
+use urushi_terminal::TerminalSize;
 
 use super::evaluator::Evaluator;
 use super::renderer;
@@ -30,17 +30,15 @@ pub(crate) trait Presentation {
 }
 
 pub(crate) enum DrawResult {
-    Completed {
-        at: Instant,
-    },
-    Failed {
-        error: io::Error,
-        completed_at: Instant,
-    },
+    Completed,
+    Failed { error: io::Error },
 }
 
 enum Command {
-    Draw(Box<View>),
+    Draw {
+        view: Box<View>,
+        size: Option<TerminalSize>,
+    },
     Shutdown,
 }
 
@@ -49,6 +47,7 @@ pub(crate) struct BlockingPresentation {
     commands: mpsc::Sender<Command>,
     results: mpsc::Receiver<DrawResult>,
     worker: Option<JoinHandle<()>>,
+    frame_size: Option<Box<dyn Fn() -> TerminalSize + Send + Sync>>,
 }
 
 #[derive(Debug)]
@@ -85,6 +84,17 @@ impl BlockingPresentation {
         Self::spawn_terminal_with(terminal, Evaluator::retained())
     }
 
+    /// Spawns a presenter that snapshots its frame size when a draw is admitted.
+    pub(crate) fn spawn_sized_terminal<T>(
+        terminal: T,
+        frame_size: impl Fn() -> TerminalSize + Send + Sync + 'static,
+    ) -> Self
+    where
+        T: Terminal<Cell = StyledGrapheme> + Send + 'static,
+    {
+        Self::spawn_sized_terminal_with(terminal, Evaluator::default(), frame_size)
+    }
+
     fn spawn_terminal_with<T>(mut terminal: T, mut evaluator: Evaluator) -> Self
     where
         T: Terminal<Cell = StyledGrapheme> + Send + 'static,
@@ -94,19 +104,43 @@ impl BlockingPresentation {
         })
     }
 
+    fn spawn_sized_terminal_with<T>(
+        mut terminal: T,
+        mut evaluator: Evaluator,
+        frame_size: impl Fn() -> TerminalSize + Send + Sync + 'static,
+    ) -> Self
+    where
+        T: Terminal<Cell = StyledGrapheme> + Send + 'static,
+    {
+        Self::spawn_with(
+            move |view, size| {
+                let size = size.expect("a sized presenter snapshots every draw");
+                if terminal.size() != size {
+                    terminal.resize(size)?;
+                }
+                terminal.draw(|frame| renderer::render(&view, frame, &mut evaluator))
+            },
+            Some(Box::new(frame_size)),
+        )
+    }
+
     pub(crate) fn spawn(mut present: impl FnMut(View) -> io::Result<()> + Send + 'static) -> Self {
+        Self::spawn_with(move |view, _size| present(view), None)
+    }
+
+    fn spawn_with(
+        mut present: impl FnMut(View, Option<TerminalSize>) -> io::Result<()> + Send + 'static,
+        frame_size: Option<Box<dyn Fn() -> TerminalSize + Send + Sync>>,
+    ) -> Self {
         let (commands, mut command_rx) = mpsc::channel(1);
         let (result_tx, results) = mpsc::channel(1);
         let worker = tokio::task::spawn_blocking(move || {
             while let Some(command) = command_rx.blocking_recv() {
                 match command {
-                    Command::Draw(view) => {
-                        let result = match present(*view) {
-                            Ok(()) => DrawResult::Completed { at: Instant::now() },
-                            Err(error) => DrawResult::Failed {
-                                error,
-                                completed_at: Instant::now(),
-                            },
+                    Command::Draw { view, size } => {
+                        let result = match present(*view, size) {
+                            Ok(()) => DrawResult::Completed,
+                            Err(error) => DrawResult::Failed { error },
                         };
                         if result_tx.blocking_send(result).is_err() {
                             break;
@@ -120,6 +154,7 @@ impl BlockingPresentation {
             commands,
             results,
             worker: Some(worker),
+            frame_size,
         }
     }
 }
@@ -128,8 +163,12 @@ impl Presentation for BlockingPresentation {
     type Error = BlockingPresentationError;
 
     fn submit(&mut self, view: View) -> Result<(), Self::Error> {
+        let size = self.frame_size.as_ref().map(|frame_size| frame_size());
         self.commands
-            .try_send(Command::Draw(Box::new(view)))
+            .try_send(Command::Draw {
+                view: Box::new(view),
+                size,
+            })
             .map_err(|_| BlockingPresentationError::WorkerClosed)
     }
 
@@ -188,7 +227,7 @@ mod tests {
                 .unwrap();
             assert!(matches!(
                 presentation.completed().await.unwrap(),
-                DrawResult::Completed { .. }
+                DrawResult::Completed
             ));
             presentation.shutdown().await.unwrap();
         });
@@ -211,7 +250,7 @@ mod tests {
                 presentation.submit(view.clone()).unwrap();
                 assert!(matches!(
                     presentation.completed().await.unwrap(),
-                    DrawResult::Completed { .. }
+                    DrawResult::Completed
                 ));
             }
             presentation.shutdown().await.unwrap();
@@ -237,7 +276,7 @@ mod tests {
                     .unwrap();
                 assert!(matches!(
                     presentation.completed().await.unwrap(),
-                    DrawResult::Completed { .. }
+                    DrawResult::Completed
                 ));
             }
             presentation.shutdown().await.unwrap();

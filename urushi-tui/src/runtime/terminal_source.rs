@@ -6,7 +6,7 @@ use std::sync::{Arc, Condvar, Mutex, MutexGuard};
 use std::thread::{self, JoinHandle};
 use std::time::Duration;
 
-use urushi_terminal::{Event, EventSource, TerminalQuery};
+use urushi_terminal::{Event, EventSource, TerminalQuery, TerminalSize};
 
 use super::delivery::{
     Admission, DeliveryQueue, Sender, SourceInboxCloser, SurfaceMessagePublisher, source_inbox,
@@ -36,6 +36,13 @@ struct Shared<T, Message> {
     sources: Mutex<Sources<Message>>,
     source_changed: Condvar,
     failure: Failure,
+    surface_sizes: Arc<Mutex<SurfaceSizes>>,
+}
+
+#[derive(Default)]
+struct SurfaceSizes {
+    pending: Option<TerminalSize>,
+    accepted: Option<TerminalSize>,
 }
 
 struct Sources<Message> {
@@ -85,6 +92,7 @@ where
                 error: Mutex::new(None),
                 notify: tokio::sync::Notify::new(),
             },
+            surface_sizes: Arc::new(Mutex::new(SurfaceSizes::default())),
         });
         let worker_shared = Arc::clone(&shared);
         let worker = thread::Builder::new()
@@ -98,6 +106,12 @@ where
             executor,
             fallback,
         })
+    }
+
+    pub(crate) fn presentation_size(&self, fallback: TerminalSize) -> TerminalSize {
+        lock(&self.owner.shared.surface_sizes)
+            .accepted
+            .unwrap_or(fallback)
     }
 
     fn start_input(
@@ -133,18 +147,24 @@ where
             let mut terminal = lock(&self.owner.shared.terminal);
             let initial = Surface::from_window_size(terminal.window_size()?);
             let id = self.register_surface(Arc::clone(&mapper), Arc::clone(&publisher));
+            let mut sizes = lock(&self.owner.shared.surface_sizes);
+            sizes.pending = Some(initial.size);
             publisher.publish(mapper(initial));
+            slot.try_accept(&deliveries);
+            sizes.accepted = sizes.pending.take();
             id
         };
         // The reader could publish a newer resize after the terminal lock is
         // released. Accepting whichever observation is then latest is correct;
         // notifying the runtime while holding the terminal lock is not.
-        slot.try_accept(&deliveries);
-
         let acceptance_deliveries = deliveries.clone();
+        let acceptance_shared = Arc::clone(&self.owner.shared);
         let acceptance = self.executor.spawn(Box::pin(async move {
             while slot.ready().await {
-                slot.try_accept(&acceptance_deliveries);
+                let mut sizes = lock(&acceptance_shared.surface_sizes);
+                if slot.try_accept(&acceptance_deliveries) {
+                    sizes.accepted = sizes.pending.take();
+                }
             }
         }));
         Ok(Box::new(RunningSurface {
@@ -362,6 +382,7 @@ enum Observation<Message> {
         surface: Surface,
         mapper: Mapper<Surface, Message>,
         publisher: Arc<SurfaceMessagePublisher<Message>>,
+        sizes: Arc<Mutex<SurfaceSizes>>,
     },
 }
 
@@ -384,7 +405,11 @@ impl<Message: Send + 'static> Observation<Message> {
                 surface,
                 mapper,
                 publisher,
+                sizes,
             } => {
+                let size = surface.size;
+                let mut sizes = lock(&sizes);
+                sizes.pending = Some(size);
                 publisher.publish(mapper(surface));
             }
         }
@@ -413,6 +438,7 @@ where
                 surface,
                 mapper,
                 publisher,
+                sizes: Arc::clone(&shared.surface_sizes),
             }))
         }
         _ => Ok(None),

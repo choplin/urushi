@@ -3,10 +3,10 @@
 //! This crate provisionally owns full-screen TUI concerns. It provides the
 //! [`ratatui`] adapter — logical-style conversion and stateless widgets that
 //! draw a resolved Urushi view into a caller-owned buffer — and, behind the
-//! `runtime` feature, the full-screen runtime's application value:
-//! [`Application`], [`Effect`], and [`Subscription`]. Frame scheduling,
-//! effect execution, and terminal lifecycle remain future work behind the same
-//! feature.
+//! `runtime` feature, a blocking full-screen runtime with [`Application`],
+//! [`Effect`], [`Subscription`], and [`Runtime`]. The runtime owns effect and
+//! subscription execution, frame scheduling, terminal input and presentation,
+//! and session restoration.
 //!
 //! The adapter computes no geometry. The box model lives in `urushi`'s layout
 //! pass, and the adapter only translates a Ratatui `Rect` into
@@ -30,7 +30,12 @@ pub use urushi_terminal::backend::crossterm;
 
 #[cfg(feature = "runtime")]
 pub use runtime::{
-    Admission, Application, CellPixels, Effect, FocusChange, Input, KeyCode, KeyEvent,
+    Admission, Application, BlockingTask, CellPixels, Clock, CustomTerminal, DefaultPresentation,
+    DefaultTerminal, Effect, Error, Execution, Executor, FocusChange, Input, KeyCode, KeyEvent,
     KeyEventState, KeyKind, MediaKeyCode, ModifierKeyCode, Modifiers, MouseButton, MouseEvent,
-    MouseKind, SendError, Sender, Signal, Subscription, Surface, SurfaceSize,
+    MouseKind, Runtime, SendError, Sender, Signal, Subscription, Surface, SurfaceSize, Task,
+    TokioClock, TokioExecutor,
 };
+
+#[cfg(all(feature = "runtime", feature = "crossterm"))]
+pub use runtime::run;

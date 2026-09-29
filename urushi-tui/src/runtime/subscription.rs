@@ -1,10 +1,11 @@
 //! What an application declares it wants to hear from.
 
+use std::any::Any;
 use std::fmt;
 use std::future::Future;
 use std::io;
 use std::pin::Pin;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex, MutexGuard};
 use std::task::{Context, Poll};
 use std::time::{Duration, Instant};
 
@@ -15,14 +16,17 @@ use super::delivery::{Admission, Sender};
 use super::effect::Mapper;
 use super::source::{Input, Signal, Surface};
 
+/// One application-defined value before its current subscription mapper runs.
+pub(crate) type ErasedMessage = Box<dyn Any + Send>;
+
 /// A stream a source is built from.
-pub(crate) type BoxStream<Message> = Pin<Box<dyn Stream<Item = Message> + Send + 'static>>;
+pub(crate) type BoxStream = Pin<Box<dyn Stream<Item = ErasedMessage> + Send + 'static>>;
 
 /// The body of an asynchronous application-defined source.
-pub(crate) type AsyncStart<Message> = Box<dyn FnOnce(Sender<Message>) -> BoxDone + Send + 'static>;
+pub(crate) type AsyncStart = Box<dyn FnOnce(Sender<ErasedMessage>) -> BoxDone + Send + 'static>;
 
 /// The body of a blocking application-defined source.
-pub(crate) type BlockingStart<Message> = Box<dyn FnOnce(Sender<Message>) + Send + 'static>;
+pub(crate) type BlockingStart = Box<dyn FnOnce(Sender<ErasedMessage>) + Send + 'static>;
 
 type BoxDone = Pin<Box<dyn Future<Output = ()> + Send + 'static>>;
 
@@ -81,16 +85,66 @@ pub(crate) enum SourceKind<Message> {
     TerminalErrors(Mapper<io::Error, Message>),
     Stream {
         admission: Admission,
-        stream: BoxStream<Message>,
+        stream: BoxStream,
+        map: DynamicMapper<Message>,
     },
     Run {
         admission: Admission,
-        start: AsyncStart<Message>,
+        start: AsyncStart,
+        map: DynamicMapper<Message>,
     },
     RunBlocking {
         admission: Admission,
-        start: BlockingStart<Message>,
+        start: BlockingStart,
+        map: DynamicMapper<Message>,
     },
+}
+
+type ErasedMapper<Message> = Arc<dyn Fn(ErasedMessage) -> Message + Send + Sync>;
+
+pub(crate) struct DynamicMapper<Message> {
+    current: Arc<Mutex<ErasedMapper<Message>>>,
+}
+
+impl<Message> Clone for DynamicMapper<Message> {
+    fn clone(&self) -> Self {
+        Self {
+            current: Arc::clone(&self.current),
+        }
+    }
+}
+
+impl<Message: 'static> DynamicMapper<Message> {
+    fn identity() -> Self {
+        Self::new(|message| {
+            *message
+                .downcast::<Message>()
+                .expect("a subscription mapper receives its source message type")
+        })
+    }
+
+    fn new(map: impl Fn(ErasedMessage) -> Message + Send + Sync + 'static) -> Self {
+        Self {
+            current: Arc::new(Mutex::new(Arc::new(map))),
+        }
+    }
+
+    pub(crate) fn apply(&self, message: ErasedMessage) -> Message {
+        let map = Arc::clone(&lock(&self.current));
+        map(message)
+    }
+
+    pub(crate) fn replace(&self, newer: &Self) {
+        let newer = Arc::clone(&lock(&newer.current));
+        *lock(&self.current) = newer;
+    }
+
+    fn map<To>(self, map: Mapper<Message, To>) -> DynamicMapper<To>
+    where
+        To: 'static,
+    {
+        DynamicMapper::new(move |message| map(self.apply(message)))
+    }
 }
 
 /// The identity of a source the runtime provides. Private, so an application's
@@ -207,6 +261,7 @@ impl<Message> Subscription<Message> {
     pub fn stream<S>(key: impl Into<Key>, stream: S) -> Self
     where
         S: Stream<Item = Message> + Send + 'static,
+        Message: Send + 'static,
     {
         Self::stream_with(key, Admission::default(), stream)
     }
@@ -215,12 +270,16 @@ impl<Message> Subscription<Message> {
     pub fn stream_with<S>(key: impl Into<Key>, admission: Admission, stream: S) -> Self
     where
         S: Stream<Item = Message> + Send + 'static,
+        Message: Send + 'static,
     {
         Self::one(
             key.into(),
             SourceKind::Stream {
                 admission,
-                stream: Box::pin(stream),
+                stream: Box::pin(EraseStream {
+                    stream: Box::pin(stream),
+                }),
+                map: DynamicMapper::identity(),
             },
         )
     }
@@ -230,6 +289,7 @@ impl<Message> Subscription<Message> {
     where
         F: FnOnce(Sender<Message>) -> Fut + Send + 'static,
         Fut: Future<Output = ()> + Send + 'static,
+        Message: Send + 'static,
     {
         Self::run_with(key, Admission::default(), f)
     }
@@ -239,9 +299,18 @@ impl<Message> Subscription<Message> {
     where
         F: FnOnce(Sender<Message>) -> Fut + Send + 'static,
         Fut: Future<Output = ()> + Send + 'static,
+        Message: Send + 'static,
     {
-        let start: AsyncStart<Message> = Box::new(move |sender| Box::pin(f(sender)));
-        Self::one(key.into(), SourceKind::Run { admission, start })
+        let start: AsyncStart =
+            Box::new(move |sender| Box::pin(f(sender.contramap(Arc::new(box_message::<Message>)))));
+        Self::one(
+            key.into(),
+            SourceKind::Run {
+                admission,
+                start,
+                map: DynamicMapper::identity(),
+            },
+        )
     }
 
     /// An application-defined blocking source, run on its own thread, under the
@@ -249,6 +318,7 @@ impl<Message> Subscription<Message> {
     pub fn run_blocking<F>(key: impl Into<Key>, f: F) -> Self
     where
         F: FnOnce(Sender<Message>) + Send + 'static,
+        Message: Send + 'static,
     {
         Self::run_blocking_with(key, Admission::default(), f)
     }
@@ -258,12 +328,16 @@ impl<Message> Subscription<Message> {
     pub fn run_blocking_with<F>(key: impl Into<Key>, admission: Admission, f: F) -> Self
     where
         F: FnOnce(Sender<Message>) + Send + 'static,
+        Message: Send + 'static,
     {
         Self::one(
             key.into(),
             SourceKind::RunBlocking {
                 admission,
-                start: Box::new(f),
+                start: Box::new(move |sender| {
+                    f(sender.contramap(Arc::new(box_message::<Message>)));
+                }),
+                map: DynamicMapper::identity(),
             },
         )
     }
@@ -304,10 +378,6 @@ impl<Message> Subscription<Message> {
     }
 
     /// The declared sources, for the runtime that reconciles them.
-    #[cfg_attr(
-        not(test),
-        expect(dead_code, reason = "read by subscription reconciliation")
-    )]
     pub(crate) fn into_sources(self) -> Vec<Source<Message>> {
         self.sources
     }
@@ -341,17 +411,32 @@ impl<Message> Source<Message> {
                 map: compose(map, f),
             },
             SourceKind::TerminalErrors(map) => SourceKind::TerminalErrors(compose(map, f)),
-            SourceKind::Stream { admission, stream } => SourceKind::Stream {
+            SourceKind::Stream {
                 admission,
-                stream: Box::pin(MapStream { stream, map: f }),
+                stream,
+                map,
+            } => SourceKind::Stream {
+                admission,
+                stream,
+                map: map.map(Arc::clone(&f)),
             },
-            SourceKind::Run { admission, start } => SourceKind::Run {
+            SourceKind::Run {
                 admission,
-                start: Box::new(move |sender| start(sender.contramap(f))),
+                start,
+                map,
+            } => SourceKind::Run {
+                admission,
+                start,
+                map: map.map(Arc::clone(&f)),
             },
-            SourceKind::RunBlocking { admission, start } => SourceKind::RunBlocking {
+            SourceKind::RunBlocking {
                 admission,
-                start: Box::new(move |sender| start(sender.contramap(f))),
+                start,
+                map,
+            } => SourceKind::RunBlocking {
+                admission,
+                start,
+                map: map.map(f),
             },
         };
         Source {
@@ -370,22 +455,34 @@ where
     Arc::new(move |value| second(first(value)))
 }
 
-/// A stream whose items pass through a function on the way out.
-struct MapStream<From, To> {
-    stream: BoxStream<From>,
-    map: Mapper<From, To>,
+fn box_message<Message: Send + 'static>(message: Message) -> ErasedMessage {
+    Box::new(message)
 }
 
-impl<From, To> Stream for MapStream<From, To> {
-    type Item = To;
+struct EraseStream<S> {
+    stream: Pin<Box<S>>,
+}
 
-    fn poll_next(self: Pin<&mut Self>, context: &mut Context<'_>) -> Poll<Option<To>> {
-        let this = self.get_mut();
-        this.stream
+impl<S, Message> Stream for EraseStream<S>
+where
+    S: Stream<Item = Message>,
+    Message: Send + 'static,
+{
+    type Item = ErasedMessage;
+
+    fn poll_next(self: Pin<&mut Self>, context: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        self.get_mut()
+            .stream
             .as_mut()
             .poll_next(context)
-            .map(|item| item.map(|item| (this.map)(item)))
+            .map(|item| item.map(box_message))
     }
+}
+
+fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
+    mutex
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
 }
 
 impl<Message> Default for Subscription<Message> {

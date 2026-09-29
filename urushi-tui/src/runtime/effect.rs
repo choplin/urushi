@@ -258,7 +258,6 @@ impl<Message> Effect<Message> {
     }
 
     /// The shape of this effect, for the runtime that interprets it.
-    #[cfg_attr(not(test), expect(dead_code, reason = "read by the effect executor"))]
     pub(crate) fn into_kind(self) -> EffectKind<Message> {
         self.kind
     }
