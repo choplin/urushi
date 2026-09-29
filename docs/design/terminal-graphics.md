@@ -32,12 +32,12 @@ ordinary caller passes only the composed View and terminal connection to
 up anchors, inspect capabilities, construct protocol commands, or access the
 physical backend itself.
 
-The simple graphics adapters are stateless. For every non-empty image whose
+The ordinary graphics adapters are stateless. For every non-empty image whose
 complete anchor survived every enclosing resolved rectangle, Kitty transmits
 the full 32-bit RGBA asset and displays it at that cell rectangle. Sixel first
 resamples that raster to the placement's pixel extent using terminal-reported
-cell geometry, then encodes and displays it. Neither adapter caches uploads nor
-deletes old placements.
+cell geometry, then encodes and displays it. These one-shot paths neither cache
+uploads nor delete old placements.
 
 The adapter accepts `urushi_terminal::CommandWriter`, not a physical backend or
 `std::io::Write`. It owns Kitty parameters and Base64 chunking, then submits
@@ -50,7 +50,7 @@ confirmed capabilities, resolves and writes the complete View, then prefers
 Kitty, followed by Sixel when cell-pixel geometry is also available. The
 already-written fallback cells remain the final representation when neither
 protocol can be used. `render_resolved_images` is the low-level overlay path for
-a host that already owns resolution, capability observation, and cell output.
+a caller that already owns resolution, capability observation, and cell output.
 Direct protocol adapters remain public for callers that have selected one.
 
 ## Why this is a separate crate
@@ -83,21 +83,49 @@ Image data and the Anchor key emitted by its presentation. Consumers compose a
 normal `View`; only `urushi-graphics` inspects its own Canvas item and performs
 the key lookup after resolution.
 
-## Deferred lifecycle
+## Kitty lifecycle
 
-Upload reuse, deletion, movement, partial source rectangles, protocol-specific
-repaint, and failure recovery require knowledge of prior frames and the selected
-terminal. Reusable protocol state machines belong in `urushi-graphics`, but the
-host that owns a redraw lifecycle owns their state: `urushi-tui-app` for a TEA
-application, a caller-owned loop for a low-level TUI, and `urushi-prompt` for a
-prompt. Each integration is optional behind that host's
-graphics feature. One-shot callers retain no state, and core `urushi`,
+`KittyLifecycle` is the opt-in retained path. `urushi-graphics` implements its
+reconciliation machinery, while the renderer that survives successive frames
+owns the value. A TUI terminal Presentation retains that Renderer and governs
+its integrated transaction and shutdown; a low-level caller or prompt retains
+the equivalent rendering state for its own loop or inline region. One terminal
+presentation has one lifecycle shared by all of its image components; the
+value is deliberately not cloneable because its protocol identifiers have a
+single owner. The lifecycle owns no terminal connection, session, scheduling,
+or application state. One-shot callers retain nothing, and core `urushi`,
 `ImagePresentation`, `View`, and `ResolvedView` remain independent of the
 lifecycle.
 
+Each presentation derives one desired scene from the current resolved anchors
+and immutable Image snapshots. Asset identity selects one terminal upload;
+placement identity selects one visible placement. Moving the same asset updates
+only its placement, hiding it deletes the placement while retaining the upload
+for reuse, and replacing its asset removes the superseded upload once no
+placement references it. Unused uploads are retained in a cache bounded by
+both upload count and total RGBA byte size, and the least recently used unused
+entries are evicted.
+
+Reconciliation is transactional at the logical state boundary. The lifecycle
+builds a candidate state, emits its upload, placement, and deletion commands,
+and commits the candidate only after the final flush succeeds. Physical output
+is not atomic. After any command or flush failure, both previously committed
+uploads and every newly allocated upload may exist in the terminal. The next
+presentation therefore deletes all possible image identifiers and reconstructs
+the complete desired Kitty scene with fresh identifiers. `clear` applies the
+same conservative set deletion for resize invalidation and normal shutdown;
+failed cleanup remains pending for a later retry. If output fails after saving
+the cursor, the lifecycle also retries and flushes cursor restoration before
+issuing another placement or cleanup command.
+
 That state is composable with, but not contained by, core `Resolver` state. A
-host may use a `Resolver` to reuse unchanged View evaluation, then pass the
+renderer may use a `Resolver` to reuse unchanged View evaluation, then pass the
 resulting anchors and the current View's immutable Image assets to its graphics
 reconciler. Clearing materialized View output and resetting terminal-side
 assets remain separate operations because they have different validity, commit,
 and recovery rules.
+
+Partial source rectangles, Sixel retained placement, automatic protocol
+selection across frames, and combined cell-plus-graphics failure recovery are
+separate contracts. Kitty lifecycle continues to omit a placement whose full
+anchor does not survive resolution rather than inventing source slicing here.

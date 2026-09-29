@@ -2,7 +2,9 @@
 //!
 //! Core `urushi` reserves and resolves image regions through its generic anchor
 //! contract. This crate owns the image data, presentation, placement lookup,
-//! and terminal-protocol adapters layered on those resolved regions.
+//! and terminal-protocol adapters layered on those resolved regions. One-shot
+//! rendering stays stateless; an interactive renderer may retain
+//! [`kitty::KittyLifecycle`] for Kitty upload and placement reuse.
 
 mod image;
 pub mod kitty;
@@ -31,7 +33,7 @@ pub use image::{
 /// available, and otherwise leaves the View's text fallbacks visible.
 ///
 /// This operation retains no graphics state after it returns. Interactive
-/// hosts that reconcile multiple frames own their caches and lifecycle state.
+/// renderers that reconcile multiple frames own their caches and lifecycle state.
 pub fn render_view(
     terminal: &mut (impl CommandWriter + TerminalQuery + ?Sized),
     view: &View,
@@ -64,7 +66,7 @@ pub fn render_view(
 
 /// Renders caller-supplied images over an already resolved View.
 ///
-/// This is the low-level path for a host that owns resolution, capability
+/// This is the low-level path for a caller that owns resolution, capability
 /// observation, and cell output. Ordinary one-shot callers use [`render_view`].
 pub fn render_resolved_images<'a>(
     view: &ResolvedView,

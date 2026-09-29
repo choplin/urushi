@@ -1,7 +1,7 @@
 use std::io;
 
 use urushi::{Align, Available, Size, TextStyle, View, resolve};
-use urushi_graphics::kitty::render_kitty;
+use urushi_graphics::kitty::{KittyLifecycle, render_kitty};
 use urushi_graphics::{CellSize, Image, ImagePresentation, InvalidRgbaRaster, PixelSize};
 use urushi_terminal::{Command, CommandWriter, CursorMove, Position, TerminalOutput};
 
@@ -201,4 +201,28 @@ fn zero_width_image_keeps_its_fallback_and_emits_no_kitty_command() {
     assert_eq!(resolved.size(), Size::new(0, 1));
     assert!(terminal.commands.is_empty());
     assert_eq!(terminal.flushes, 1);
+}
+
+#[test]
+fn renderer_can_retain_and_cleanup_kitty_lifecycle_state() {
+    let image = Image::rgba("placement", "asset", PixelSize::new(1, 1), [255, 0, 0, 255]).unwrap();
+    let view = ImagePresentation::new().compose(&image, CellSize::new(2, 1));
+    let resolved = resolve(&view, Available::NONE).unwrap();
+    let mut lifecycle = KittyLifecycle::new();
+    let mut terminal = RecordingTerminal::default();
+
+    lifecycle.present(&view, &resolved, &mut terminal).unwrap();
+    terminal.commands.clear();
+    lifecycle.present(&view, &resolved, &mut terminal).unwrap();
+
+    assert!(
+        terminal.commands.is_empty(),
+        "an unchanged frame emits no Kitty commands"
+    );
+    lifecycle.clear(&mut terminal).unwrap();
+    assert!(matches!(
+        terminal.commands.as_slice(),
+        [RecordedCommand::ApplicationProgram(payload)] if payload == "Ga=d,d=I,i=1,q=2"
+    ));
+    assert_eq!(terminal.flushes, 3);
 }
