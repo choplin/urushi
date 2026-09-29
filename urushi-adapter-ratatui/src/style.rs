@@ -1,4 +1,4 @@
-//! Conversion of logical text styles to ratatui styles.
+//! Conversion of logical text styles to Ratatui styles.
 
 use ::ratatui::style::{Color as RatatuiColor, Modifier as RatatuiModifier, Style as InnerStyle};
 

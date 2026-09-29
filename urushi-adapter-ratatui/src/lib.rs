@@ -1,4 +1,4 @@
-//! The Ratatui backend adapter.
+//! Optional Ratatui integration for Urushi.
 //!
 //! The adapter converts Urushi styles and resolved views into Ratatui
 //! representations. Stateless widgets write into a buffer the caller owns.
@@ -6,9 +6,9 @@
 //! Two entry points share one cell-writing path. [`ViewWidget`] and
 //! [`RatatuiWidget`] serve a plain Ratatui application drawing into a `Rect`
 //! it already owns; they resolve the view and discard everything but the
-//! cells. A caller that needs the resolution itself — the TUI runtime's
-//! renderer resolving once per frame — resolves under [`available`] and writes
-//! the result with [`draw_resolved`]. A caller filling a sized anchor can use
+//! cells. A caller-owned Ratatui renderer that also needs the resolution
+//! resolves under [`available`] and writes the result with [`draw_resolved`].
+//! A caller filling a sized anchor can use
 //! [`anchor_placement`] to translate its complete logical rectangle and
 //! accumulated visible intersection into a destination and source offset.
 

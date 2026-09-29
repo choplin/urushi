@@ -1,5 +1,3 @@
-//! Compares the native cell buffer with the Ratatui 0.30 buffer it replaces.
-//!
 //! `diff` measures already-built committed and working frames. `frame` measures
 //! the reusable-buffer path Screen will take: reset, write one complete frame,
 //! then consume its diff. The cases cover ordinary and large terminal areas,
@@ -8,7 +6,6 @@
 use std::fmt;
 
 use divan::{AllocProfiler, Bencher, black_box};
-use ratatui::{buffer::Buffer as RatatuiBuffer, layout::Rect};
 use urushi::{Available, StyledGrapheme, TextStyle, View, resolve};
 use urushi_terminal::TerminalSize;
 
@@ -16,7 +13,6 @@ use urushi_terminal::TerminalSize;
 static ALLOC: AllocProfiler = AllocProfiler::system();
 
 fn main() {
-    validate_change_counts();
     divan::main();
 }
 
@@ -153,13 +149,6 @@ fn native_diff(bencher: Bencher, case: DiffCase) {
         });
 }
 
-#[divan::bench(args = CASES)]
-fn ratatui_diff(bencher: Bencher, case: DiffCase) {
-    bencher
-        .with_inputs(|| ratatui_pair(case))
-        .bench_refs(|(committed, working)| black_box(committed.diff(working).len()));
-}
-
 #[divan::bench(args = SIZES)]
 fn native_frame(bencher: Bencher, size: ScreenSize) {
     bencher
@@ -181,42 +170,6 @@ fn native_frame(bencher: Bencher, size: ScreenSize) {
 fn native_create(size: ScreenSize) -> Buffer {
     let (columns, rows) = size.dimensions();
     Buffer::new(TerminalSize::new(columns, rows)).unwrap()
-}
-
-#[divan::bench(args = SIZES)]
-fn ratatui_frame(bencher: Bencher, size: ScreenSize) {
-    bencher
-        .with_inputs(|| {
-            let (columns, rows) = size.dimensions();
-            let committed = ratatui_filled(columns, rows, "a");
-            let working = ratatui_empty(columns, rows);
-            (committed, working)
-        })
-        .bench_refs(|(committed, working)| {
-            working.reset();
-            fill_ratatui(working, "b");
-            black_box(committed.diff(working).len())
-        });
-}
-
-#[divan::bench(args = SIZES)]
-fn ratatui_create(size: ScreenSize) -> RatatuiBuffer {
-    let (columns, rows) = size.dimensions();
-    ratatui_empty(columns, rows)
-}
-
-fn validate_change_counts() {
-    for case in CASES {
-        let (native_committed, native_working) = native_pair(*case);
-        let native_count = native_committed.diff(&native_working).unwrap().count();
-        let (ratatui_committed, ratatui_working) = ratatui_pair(*case);
-        let ratatui_count = ratatui_committed.diff(&ratatui_working).len();
-        assert_eq!(
-            native_count, ratatui_count,
-            "{} must compare the same number of output cells",
-            case
-        );
-    }
 }
 
 fn native_pair(case: DiffCase) -> (Buffer, Buffer) {
@@ -256,41 +209,6 @@ fn native_pair(case: DiffCase) -> (Buffer, Buffer) {
     }
 }
 
-fn ratatui_pair(case: DiffCase) -> (RatatuiBuffer, RatatuiBuffer) {
-    let (columns, rows) = case.size.dimensions();
-    match case.change {
-        Change::Unchanged => {
-            let committed = ratatui_filled(columns, rows, "a");
-            let working = committed.clone();
-            (committed, working)
-        }
-        Change::Sparse => {
-            let committed = ratatui_filled(columns, rows, "a");
-            let mut working = committed.clone();
-            for index in (0..columns * rows).step_by(100) {
-                working[(index as u16 % columns as u16, index as u16 / columns as u16)]
-                    .set_symbol("b");
-            }
-            (committed, working)
-        }
-        Change::Full => (
-            ratatui_filled(columns, rows, "a"),
-            ratatui_filled(columns, rows, "b"),
-        ),
-        Change::WideMove => {
-            let mut committed = ratatui_empty(columns, rows);
-            let mut working = committed.clone();
-            for row in 0..rows as u16 {
-                for column in (0..columns.saturating_sub(2)).step_by(4) {
-                    committed[(column as u16, row)].set_symbol("界");
-                    working[(column as u16 + 1, row)].set_symbol("界");
-                }
-            }
-            (committed, working)
-        }
-    }
-}
-
 fn native_filled(columns: usize, rows: usize, glyph: &StyledGrapheme) -> Buffer {
     let mut buffer = Buffer::new(TerminalSize::new(columns, rows)).unwrap();
     for row in 0..rows {
@@ -306,25 +224,6 @@ fn fill_native(buffer: &mut Buffer, glyph: &StyledGrapheme) {
     for row in 0..size.rows() {
         for column in 0..size.columns() {
             buffer.write(column, row, glyph).unwrap();
-        }
-    }
-}
-
-fn ratatui_empty(columns: usize, rows: usize) -> RatatuiBuffer {
-    RatatuiBuffer::empty(Rect::new(0, 0, columns as u16, rows as u16))
-}
-
-fn ratatui_filled(columns: usize, rows: usize, symbol: &str) -> RatatuiBuffer {
-    let mut buffer = ratatui_empty(columns, rows);
-    fill_ratatui(&mut buffer, symbol);
-    buffer
-}
-
-fn fill_ratatui(buffer: &mut RatatuiBuffer, symbol: &str) {
-    let area = buffer.area;
-    for row in area.top()..area.bottom() {
-        for column in area.left()..area.right() {
-            buffer[(column, row)].set_symbol(symbol);
         }
     }
 }

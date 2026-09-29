@@ -12,7 +12,7 @@ use urushi::{
     TextAttributes, TextSpan, TextStyle, Theme, UnderlineStyleSet, VerticalAlign, View, measure,
     render, resolve,
 };
-use urushi_tui::ratatui::{
+use urushi_adapter_ratatui::{
     CellWriteMode, RatatuiStyle, RatatuiStyleExt as _, ViewWidget, available,
     draw_resolved_with_mode,
 };

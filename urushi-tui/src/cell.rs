@@ -3,7 +3,7 @@
 use std::fmt;
 
 use compact_str::CompactString;
-use urushi::{ResolvedView, StyledGrapheme, TerminalTextStyle};
+use urushi::{StyledGrapheme, TerminalTextStyle};
 use urushi_terminal::{Position, TerminalSize, TerminalStyle};
 
 use crate::terminal::Cell as OutputCell;
@@ -299,22 +299,6 @@ fn visibly_equal(committed: &CellKind, working: &StoredCell) -> bool {
         CellKind::Empty => working.is_default_blank(),
         CellKind::Start(committed) => committed == working,
         CellKind::Continuation { .. } => false,
-    }
-}
-
-/// Visits every leading grapheme cell in row-major order.
-///
-/// Backend-specific coordinates and clipping stay with the caller.
-pub(crate) fn visit_resolved(
-    resolved: &ResolvedView,
-    mut visit: impl FnMut(usize, usize, &StyledGrapheme),
-) {
-    for (row, graphemes) in resolved.rows().iter().enumerate() {
-        let mut column = 0;
-        for grapheme in graphemes {
-            visit(column, row, grapheme);
-            column = column.saturating_add(grapheme.width());
-        }
     }
 }
 

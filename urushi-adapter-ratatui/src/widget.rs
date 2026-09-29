@@ -10,7 +10,6 @@
 use ::ratatui::{buffer::Buffer, layout::Rect, widgets::Widget};
 
 use super::RatatuiStyle;
-use crate::cell::visit_resolved;
 use urushi::{AnchoredRect, Available, BlockStyle, ResolvedView, StyledGrapheme, View, resolve};
 
 /// A resolved anchor translated into a caller-owned Ratatui area.
@@ -308,6 +307,17 @@ fn offset(origin: u16, cells: usize) -> Option<u16> {
     u16::try_from(cells)
         .ok()
         .and_then(|cells| origin.checked_add(cells))
+}
+
+/// Visits every leading grapheme cell in row-major order.
+fn visit_resolved(resolved: &ResolvedView, mut visit: impl FnMut(usize, usize, &StyledGrapheme)) {
+    for (row, graphemes) in resolved.rows().iter().enumerate() {
+        let mut column = 0;
+        for grapheme in graphemes {
+            visit(column, row, grapheme);
+            column = column.saturating_add(grapheme.width());
+        }
+    }
 }
 
 #[cfg(test)]

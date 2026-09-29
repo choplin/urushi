@@ -1,0 +1,15 @@
+[package]
+name = "urushi-adapter-ratatui"
+description = "Ratatui adapter for Urushi views and logical styles"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+keywords = ["terminal", "tui", "ratatui"]
+categories = ["command-line-interface"]
+
+[dependencies]
+ratatui = { version = "0.30.2", default-features = false, features = ["layout-cache", "std"] }
+urushi = { path = "../urushi", version = "=0.1.0" }
+
+[[example]]
+name = "themed_ratatui"

@@ -1,15 +1,14 @@
 [package]
 name = "urushi-tui"
-description = "Synchronous full-screen presentation and Ratatui integration for urushi"
+description = "Synchronous full-screen presentation for Urushi"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
-keywords = ["terminal", "tui", "ratatui"]
+keywords = ["terminal", "tui"]
 categories = ["command-line-interface"]
 
 [dependencies]
 compact_str = "0.9.1"
-ratatui = { version = "0.30.2", default-features = false, features = ["layout-cache", "std"] }
 urushi = { path = "../urushi", version = "=0.1.0" }
 urushi-terminal = { path = "../urushi-terminal", version = "=0.1.0" }
 unicode-width.workspace = true
@@ -17,9 +16,6 @@ unicode-width.workspace = true
 [features]
 default = ["crossterm"]
 crossterm = ["urushi-terminal/crossterm"]
-
-[[example]]
-name = "themed_ratatui"
 
 [[bench]]
 name = "cell_buffer"

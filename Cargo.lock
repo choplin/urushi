@@ -1109,6 +1109,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "urushi-adapter-ratatui"
+version = "0.1.0"
+dependencies = [
+ "ratatui",
+ "urushi",
+]
+
+[[package]]
 name = "urushi-cli"
 version = "0.1.0"
 dependencies = [
@@ -1159,7 +1167,6 @@ version = "0.1.0"
 dependencies = [
  "compact_str",
  "divan",
- "ratatui",
  "unicode-width",
  "urushi",
  "urushi-terminal",

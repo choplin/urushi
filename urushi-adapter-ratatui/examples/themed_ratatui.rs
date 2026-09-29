@@ -2,7 +2,7 @@ use std::error::Error;
 
 use ratatui::{Terminal, backend::TestBackend};
 use urushi::{Color, PanelRole, SemanticTokens, Theme, View};
-use urushi_tui::ratatui::RatatuiStyleExt as _;
+use urushi_adapter_ratatui::RatatuiStyleExt as _;
 
 fn main() -> Result<(), Box<dyn Error>> {
     let theme = Theme::from_tokens(tokens());

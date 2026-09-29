@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["urushi", "urushi-cli", "urushi-derive", "urushi-graphics", "urushi-prompt", "urushi-terminal", "urushi-tui", "urushi-tui-app"]
+members = ["urushi", "urushi-adapter-ratatui", "urushi-cli", "urushi-derive", "urushi-graphics", "urushi-prompt", "urushi-terminal", "urushi-tui", "urushi-tui-app"]
 
 [workspace.package]
 version = "0.1.0"
