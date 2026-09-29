@@ -78,9 +78,12 @@ The optional `urushi-tui-app` `graphics` feature supplies that host integration.
 Its runtime selects Kitty, Sixel, or text from positive terminal evidence and
 an explicit `GraphicsPreference`, snapshots cell-pixel geometry with the
 accepted application `Surface`, and commits cells plus graphics as one logical
-frame. A graphics failure is cleaned up and redrawn through the Image text
-fallback rather than switching protocols mid-frame. The complete transaction
-is defined in
+frame. For Kitty or Sixel, the cell layer replaces fallback glyphs in each
+visible image placement with background-preserving blanks, so transparent
+pixels do not reveal fallback text. Text selection retains the original
+fallback cells. A graphics failure is cleaned up and redraws the complete View
+through every Image text fallback rather than switching protocols or committing
+a mixed frame. The complete transaction is defined in
 [`design/tui-graphics-presentation.md`](design/tui-graphics-presentation.md).
 
 ## Ownership boundaries

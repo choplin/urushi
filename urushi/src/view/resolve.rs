@@ -143,7 +143,11 @@ impl StyledGrapheme {
         &self.style
     }
 
-    pub(super) fn space(style: TextStyle) -> Self {
+    /// Creates one cell-wide blank carrying `style`.
+    ///
+    /// Renderers use this when a presentation layer replaces a resolved glyph
+    /// while retaining cell styling such as its background color.
+    pub fn space(style: TextStyle) -> Self {
         Self::new(Grapheme::space(), style)
     }
 }

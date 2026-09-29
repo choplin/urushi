@@ -34,9 +34,16 @@ surface message.
 
 The runtime resolves the application `View` once for the selected surface.
 Image fallback cells and protocol-neutral image placements come from that same
-resolved value. `Screen::draw_with` then performs one logical transaction:
+resolved value. Text selection renders those cells unchanged. Kitty and Sixel
+selection replace every resolved glyph intersecting a visible image placement
+with one-cell blanks that retain only each cell's resolved background. A wide
+grapheme is indivisible, so intersection replaces all of its cells. Transparent
+image pixels therefore reveal the intended background rather than fallback
+text, foreground attributes, or hyperlinks.
 
-1. write the required cell changes and cursor request;
+`Screen::draw_with` then performs one logical transaction:
+
+1. write the selected text or background-only cell layer and cursor request;
 2. reconcile and write the selected graphics scene;
 3. flush; and
 4. commit the working cell buffer only after every preceding step succeeds.
@@ -75,6 +82,11 @@ general policy of returning a draw error. A cleanup or fallback-redraw failure
 is appended to the reported error without replacing the original cause.
 Protocol lifecycle state is retained after failed cleanup so the next text
 frame and shutdown can try cleanup again.
+
+The fallback switch applies to the complete presentation. A failure after any
+subset of image placements has been written does not commit a mixture of
+graphics and text placements; recovery redraws every Image from the same View
+through its text fallback.
 
 Physical output is never claimed to be atomic. These rules provide logical
 commit and deterministic convergence from any observed partial-write point.

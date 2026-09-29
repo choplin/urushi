@@ -320,7 +320,7 @@ where
         let graphics = &mut self.graphics;
         let selection = graphics.selection();
         let result = self.screen.draw_with(
-            |frame| renderer::render_resolved(&resolved, frame),
+            |frame| renderer::render_graphics_resolved(view, &resolved, frame),
             |writer| {
                 graphics
                     .present(view, &resolved, surface, writer)
@@ -650,6 +650,16 @@ mod tests {
                 Ok(())
             }
         }
+
+        fn printed_text(&self) -> String {
+            self.commands
+                .iter()
+                .filter_map(|command| match command {
+                    GraphicsRecorded::Print(text) => Some(text.as_str()),
+                    _ => None,
+                })
+                .collect()
+        }
     }
 
     #[cfg(feature = "graphics")]
@@ -700,6 +710,24 @@ mod tests {
     }
 
     #[cfg(feature = "graphics")]
+    fn two_image_view() -> View {
+        let first = Image::rgba("first", "first", PixelSize::new(1, 1), [255, 0, 0, 0])
+            .unwrap()
+            .fallback("left");
+        let second = Image::rgba("second", "second", PixelSize::new(1, 1), [0, 0, 255, 0])
+            .unwrap()
+            .fallback("last");
+        let presentation = ImagePresentation::new();
+        View::row(
+            urushi::VerticalAlign::Top,
+            [
+                presentation.compose(&first, CellSize::new(4, 1)),
+                presentation.compose(&second, CellSize::new(4, 1)),
+            ],
+        )
+    }
+
+    #[cfg(feature = "graphics")]
     fn graphics_presenter(
         selection: GraphicsSelection,
         writer: RecordingGraphicsWriter,
@@ -735,6 +763,17 @@ mod tests {
                 .iter()
                 .any(|command| matches!(command, GraphicsRecorded::Kitty))
         );
+        let printed = presenter.screen.writer().commands[..after_image]
+            .iter()
+            .filter_map(|command| match command {
+                GraphicsRecorded::Print(text) => Some(text.as_str()),
+                _ => None,
+            })
+            .collect::<String>();
+        assert!(
+            !printed.contains("fallback"),
+            "the graphics cell layer must not retain the text fallback"
+        );
         assert!(
             presenter.screen.writer().commands[after_image..]
                 .iter()
@@ -745,7 +784,7 @@ mod tests {
 
     #[cfg(feature = "graphics")]
     #[test]
-    fn sixel_frames_clear_then_redraw_cells_then_present_the_complete_scene() {
+    fn sixel_frames_clear_then_present_the_complete_scene_without_fallback_text() {
         let mut presenter =
             graphics_presenter(GraphicsSelection::Sixel, RecordingGraphicsWriter::default());
         for key in ["first", "second"] {
@@ -773,12 +812,34 @@ mod tests {
         assert_eq!(sixels.len(), 2);
         for (clear, sixel) in clears.into_iter().zip(sixels) {
             assert!(clear < sixel);
-            assert!(
-                commands[clear..sixel]
-                    .iter()
-                    .any(|command| matches!(command, GraphicsRecorded::Print(_)))
-            );
+            let printed = commands[clear..sixel]
+                .iter()
+                .filter_map(|command| match command {
+                    GraphicsRecorded::Print(text) => Some(text.as_str()),
+                    _ => None,
+                })
+                .collect::<String>();
+            assert!(!printed.contains("fallback"));
         }
+    }
+
+    #[cfg(feature = "graphics")]
+    #[test]
+    fn text_selection_draws_the_image_fallback() {
+        let mut presenter =
+            graphics_presenter(GraphicsSelection::Text, RecordingGraphicsWriter::default());
+
+        presenter
+            .present(image_view("text", "fallback"), Some(graphics_surface()))
+            .unwrap();
+
+        assert!(
+            presenter
+                .screen
+                .writer()
+                .printed_text()
+                .contains("fallback")
+        );
     }
 
     #[cfg(feature = "graphics")]
@@ -855,6 +916,23 @@ mod tests {
                 .count(),
             kitty_commands
         );
+    }
+
+    #[cfg(feature = "graphics")]
+    #[test]
+    fn graphics_failure_redraws_every_placement_as_text() {
+        let mut presenter = graphics_presenter(
+            GraphicsSelection::Kitty,
+            RecordingGraphicsWriter::failing(1),
+        );
+
+        presenter
+            .present(two_image_view(), Some(graphics_surface()))
+            .expect_err("the graphics failure is reported after complete fallback");
+
+        let printed = presenter.screen.writer().printed_text();
+        assert!(printed.contains("left"));
+        assert!(printed.contains("last"));
     }
 
     #[cfg(feature = "graphics")]

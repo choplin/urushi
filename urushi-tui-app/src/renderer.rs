@@ -1,6 +1,8 @@
 //! Resolves one application view into one terminal frame.
 
-use urushi::{Available, ResolvedView, StyledGrapheme, View};
+use urushi::{Available, ResolvedView, StyledGrapheme, TextStyle, View};
+#[cfg(feature = "graphics")]
+use urushi_graphics::image_placements;
 use urushi_terminal::{Position, TerminalSize};
 use urushi_tui::{Frame, Rect};
 
@@ -39,6 +41,59 @@ pub(crate) fn resolve(view: &View, size: TerminalSize, evaluator: &mut Evaluator
 }
 
 pub(crate) fn render_resolved(resolved: &ResolvedView, frame: &mut impl RenderFrame) {
+    render_resolved_with_masks(resolved, &[], frame);
+}
+
+#[cfg(feature = "graphics")]
+pub(crate) fn render_graphics_resolved(
+    view: &View,
+    resolved: &ResolvedView,
+    frame: &mut impl RenderFrame,
+) {
+    let masks = image_placements(view, resolved, None)
+        .into_iter()
+        .filter_map(|placement| {
+            let origin = placement.visible_origin()?;
+            let size = placement.visible_size()?;
+            Some(CellMask {
+                column: usize::try_from(origin.x).ok()?,
+                row: usize::try_from(origin.y).ok()?,
+                width: size.width(),
+                height: size.height(),
+            })
+        })
+        .collect::<Vec<_>>();
+    render_resolved_with_masks(resolved, &masks, frame);
+}
+
+#[derive(Clone, Copy)]
+struct CellMask {
+    column: usize,
+    row: usize,
+    width: usize,
+    height: usize,
+}
+
+impl CellMask {
+    fn intersects(self, column: usize, row: usize, width: usize) -> bool {
+        let Some(right) = self.column.checked_add(self.width) else {
+            return false;
+        };
+        let Some(bottom) = self.row.checked_add(self.height) else {
+            return false;
+        };
+        let Some(grapheme_right) = column.checked_add(width) else {
+            return false;
+        };
+        row >= self.row && row < bottom && column < right && grapheme_right > self.column
+    }
+}
+
+fn render_resolved_with_masks(
+    resolved: &ResolvedView,
+    masks: &[CellMask],
+    frame: &mut impl RenderFrame,
+) {
     let area = frame.area();
     let origin = area.origin();
 
@@ -48,7 +103,25 @@ pub(crate) fn render_resolved(resolved: &ResolvedView, frame: &mut impl RenderFr
         };
         let mut column_offset = 0usize;
         for grapheme in graphemes {
-            if let Some(column) = origin.column().checked_add(column_offset) {
+            let masked = masks
+                .iter()
+                .any(|mask| mask.intersects(column_offset, row - origin.row(), grapheme.width()));
+            if masked {
+                let style = grapheme
+                    .style()
+                    .get_background()
+                    .map_or_else(TextStyle::new, |color| TextStyle::new().background(color));
+                let blank = StyledGrapheme::space(style);
+                for offset in 0..grapheme.width() {
+                    if let Some(column) = origin
+                        .column()
+                        .checked_add(column_offset)
+                        .and_then(|column| column.checked_add(offset))
+                    {
+                        frame.put(column, row, &blank);
+                    }
+                }
+            } else if let Some(column) = origin.column().checked_add(column_offset) {
                 frame.put(column, row, grapheme);
             }
             column_offset = column_offset.saturating_add(grapheme.width());
@@ -80,6 +153,10 @@ mod tests {
         Align, BlockStyle, Canvas, CanvasContext, CanvasItem, Length, Position as CanvasPosition,
         Projection, ProjectionBoundary, Size, TextStyle, VerticalAlign, Viewport,
     };
+    #[cfg(feature = "graphics")]
+    use urushi::{Color, View};
+    #[cfg(feature = "graphics")]
+    use urushi_graphics::{CellSize, Image, ImagePresentation, PixelSize};
     use urushi_terminal::TerminalSize;
 
     use super::*;
@@ -92,6 +169,98 @@ mod tests {
             .draw(|frame| render(view, frame, &mut evaluator))
             .expect("in-memory draw succeeds");
         terminal
+    }
+
+    #[cfg(feature = "graphics")]
+    fn draw_graphics(view: &View, size: TerminalSize) -> InMemoryTerminal {
+        let mut terminal = InMemoryTerminal::new(size);
+        let mut evaluator = Evaluator::default();
+        let resolved = resolve(view, size, &mut evaluator);
+        terminal
+            .draw(|frame| render_graphics_resolved(view, &resolved, frame))
+            .expect("in-memory graphics cell draw succeeds");
+        terminal
+    }
+
+    #[cfg(feature = "graphics")]
+    fn image_view(
+        placement: &'static str,
+        fallback: &str,
+        cells: CellSize,
+        fallback_style: TextStyle,
+    ) -> View {
+        let image = Image::rgba(placement, placement, PixelSize::new(1, 1), [255, 0, 0, 0])
+            .unwrap()
+            .fallback(fallback);
+        ImagePresentation::new()
+            .fallback_style(fallback_style)
+            .compose(&image, cells)
+    }
+
+    #[cfg(feature = "graphics")]
+    #[test]
+    fn graphics_cells_mask_multiple_visible_fallbacks_and_keep_backgrounds() {
+        let first = image_view(
+            "first",
+            "界",
+            CellSize::new(2, 1),
+            TextStyle::new().background(Color::BLUE).italic(),
+        );
+        let second = image_view("second", "xy", CellSize::new(2, 1), TextStyle::new());
+        let view = View::row(
+            VerticalAlign::Top,
+            [first, View::text("|", TextStyle::new()), second],
+        );
+
+        let terminal = draw_graphics(&view, TerminalSize::new(5, 1));
+        let frame = &terminal.frames()[0];
+
+        for column in [0, 1] {
+            assert!(matches!(
+                frame.cell(column, 0),
+                Some(InMemoryCell::Grapheme(grapheme))
+                    if grapheme.symbol() == " "
+                        && grapheme.style().get_background() == Some(Color::BLUE)
+                        && grapheme.style().get_attributes().is_empty()
+            ));
+        }
+        assert!(matches!(
+            frame.cell(2, 0),
+            Some(InMemoryCell::Grapheme(grapheme)) if grapheme.symbol() == "|"
+        ));
+        for column in [3, 4] {
+            assert!(matches!(
+                frame.cell(column, 0),
+                Some(InMemoryCell::Grapheme(grapheme))
+                    if grapheme.symbol() == " " && grapheme.style() == &TextStyle::new()
+            ));
+        }
+    }
+
+    #[cfg(feature = "graphics")]
+    #[test]
+    fn graphics_cells_mask_only_the_clipped_visible_placement() {
+        let view = View::viewport(
+            Viewport::horizontal(Projection::new(1, ProjectionBoundary::Preserve)),
+            image_view(
+                "clipped",
+                "abc",
+                CellSize::new(3, 1),
+                TextStyle::new().background(Color::GREEN),
+            ),
+        );
+
+        let terminal = draw_graphics(&view, TerminalSize::new(2, 1));
+        let frame = &terminal.frames()[0];
+
+        for column in 0..2 {
+            assert!(matches!(
+                frame.cell(column, 0),
+                Some(InMemoryCell::Grapheme(grapheme))
+                    if grapheme.symbol() == " "
+                        && grapheme.style().get_background() == Some(Color::GREEN)
+            ));
+        }
     }
 
     #[test]

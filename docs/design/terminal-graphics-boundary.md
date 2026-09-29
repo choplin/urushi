@@ -33,6 +33,13 @@ generic anchor with no matching Image remains ordinary core geometry and is
 ignored by graphics. `ImagePresentation` creates the supported one-to-one pair;
 duplicate anchor keys violate core's rule that one key names one region.
 
+`image_placements` exposes that same discovery and pairing operation to a host
+that owns cell output. The host can therefore derive its graphics cell layer
+from the visible placement rectangles without learning the private Canvas item
+type or putting image meaning into core. In particular, the TUI host replaces
+fallback glyphs inside those rectangles with background-only blanks when a
+graphics protocol is selected.
+
 The public one-shot `render_view` operation owns that orchestration for ordinary
 callers: it queries geometry and confirmed capabilities, resolves and writes
 the cell View, then prefers Kitty over Sixel. The lower-level overlay and direct

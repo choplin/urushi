@@ -25,7 +25,7 @@ use urushi_terminal::{
 
 pub use image::{
     CellSize, GraphicPlacement, Image, ImagePresentation, InvalidRgbaRaster, PixelPosition,
-    PixelSize, RgbaRaster,
+    PixelSize, RgbaRaster, placements as image_placements,
 };
 
 /// Caller-selected policy for terminal image output.

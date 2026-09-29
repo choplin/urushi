@@ -309,6 +309,23 @@ pub(crate) fn collect(view: &View) -> Vec<&Image> {
     images
 }
 
+/// Returns the image placements embedded in `view` after layout resolution.
+///
+/// Interactive hosts use these protocol-neutral rectangles to coordinate the
+/// cell layer with a selected graphics lifecycle. An image whose anchor is not
+/// present in `resolved` is omitted; a completely clipped image remains a
+/// placement with no visible rectangle.
+pub fn placements<'a>(
+    view: &'a View,
+    resolved: &ResolvedView,
+    cell_pixels: Option<CellPixelSize>,
+) -> Vec<GraphicPlacement<'a>> {
+    collect(view)
+        .into_iter()
+        .filter_map(|image| image.placement(resolved, cell_pixels))
+        .collect()
+}
+
 fn collect_from<'a>(view: &'a View, images: &mut Vec<&'a Image>) {
     match view {
         View::Text(_) => {}
