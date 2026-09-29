@@ -12,8 +12,9 @@ use crate::{
 ///
 /// A `BlockStyle` is an immutable value, like [`TextStyle`]. Its text properties —
 /// colors and attributes — are the style of the block's own fill: padding rows,
-/// alignment gaps, and text explicitly built from [`BlockStyle::text`]. A block's style
-/// does not flow into a child view; each child carries its own complete value.
+/// alignment gaps, and text explicitly built from [`BlockStyle::text_style`]. A
+/// block's style does not flow into a child view; each child carries its own
+/// complete value.
 ///
 /// ```
 /// use urushi::{BlockStyle, Border, TextStyle, View};
