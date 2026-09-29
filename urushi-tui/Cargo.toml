@@ -1,6 +1,6 @@
 [package]
 name = "urushi-tui"
-description = "Full-screen presentation, Ratatui integration, and TUI runtime for urushi"
+description = "Synchronous full-screen presentation and Ratatui integration for urushi"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -9,34 +9,17 @@ categories = ["command-line-interface"]
 
 [dependencies]
 compact_str = "0.9.1"
-futures-core = { version = "0.3", optional = true }
 ratatui = { version = "0.30.2", default-features = false, features = ["layout-cache", "std"] }
-tokio = { version = "1", features = ["macros", "net", "rt", "signal", "sync", "time"], optional = true }
 urushi = { path = "../urushi", version = "=0.1.0" }
 urushi-terminal = { path = "../urushi-terminal", version = "=0.1.0" }
 unicode-width.workspace = true
 
-[target.'cfg(unix)'.dependencies]
-libc = { version = "0.2", optional = true }
-
 [features]
-default = ["runtime", "crossterm"]
-# The full-screen TUI runtime: the application value, its effects and
-# subscriptions, and the machinery that drives them. A consumer that only wants
-# the Ratatui adapter sets `default-features = false`.
-runtime = ["dep:futures-core", "dep:libc", "dep:tokio"]
+default = ["crossterm"]
 crossterm = ["urushi-terminal/crossterm"]
 
 [[example]]
 name = "themed_ratatui"
-
-[[example]]
-name = "runtime_counter"
-required-features = ["runtime", "crossterm"]
-
-[[example]]
-name = "adaptive_theme"
-required-features = ["runtime"]
 
 [[bench]]
 name = "cell_buffer"

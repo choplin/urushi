@@ -9,6 +9,7 @@ use urushi_terminal::{
     Position, RawModeControl, SessionOptions, TerminalBackend, TerminalBackground,
     TerminalCapabilities, TerminalOutput, TerminalQuery, TerminalSession, TerminalSize, WindowSize,
 };
+use urushi_tui::Screen;
 
 use super::application::Application;
 use super::core::{RuntimeCore, RuntimeError};
@@ -16,7 +17,6 @@ use super::executor::{Clock, Executor, TokioClock, TokioExecutor};
 use super::presentation::{BlockingPresentation, BlockingPresentationError};
 use super::sources::RuntimeSourceSpawner;
 use super::terminal_source::TerminalSourceSpawner;
-use crate::Screen;
 
 /// A failure to construct or drive a terminal application.
 #[derive(Debug)]

@@ -304,9 +304,7 @@ fn visibly_equal(committed: &CellKind, working: &StoredCell) -> bool {
 
 /// Visits every leading grapheme cell in row-major order.
 ///
-/// Backend-specific coordinates and clipping stay with the caller. Keeping the
-/// logical traversal here makes plain widgets and the runtime renderer consume
-/// a [`ResolvedView`] identically.
+/// Backend-specific coordinates and clipping stay with the caller.
 pub(crate) fn visit_resolved(
     resolved: &ResolvedView,
     mut visit: impl FnMut(usize, usize, &StyledGrapheme),

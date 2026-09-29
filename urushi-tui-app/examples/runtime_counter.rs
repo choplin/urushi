@@ -1,7 +1,7 @@
 use std::time::Duration;
 
 use urushi::{Align, Color, TextStyle, View};
-use urushi_tui::{
+use urushi_tui_app::{
     Application, Effect, Error, Input, KeyCode, KeyKind, Modifiers, Subscription, Surface,
 };
 
@@ -103,7 +103,7 @@ fn requests_quit(code: KeyCode, modifiers: Modifiers) -> bool {
 }
 
 fn main() -> Result<(), Error> {
-    let model = urushi_tui::run(Counter)?;
+    let model = urushi_tui_app::run(Counter)?;
     println!("final count: {}", model.count);
     Ok(())
 }

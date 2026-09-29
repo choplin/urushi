@@ -141,28 +141,6 @@ impl Frame<'_> {
     }
 }
 
-#[cfg(feature = "runtime")]
-pub(crate) trait RenderFrame {
-    fn area(&self) -> Rect;
-    fn put(&mut self, column: usize, row: usize, cell: &StyledGrapheme);
-    fn set_cursor(&mut self, at: Option<Position>);
-}
-
-#[cfg(feature = "runtime")]
-impl RenderFrame for Frame<'_> {
-    fn area(&self) -> Rect {
-        Frame::area(self)
-    }
-
-    fn put(&mut self, column: usize, row: usize, cell: &StyledGrapheme) {
-        Frame::put(self, column, row, cell);
-    }
-
-    fn set_cursor(&mut self, at: Option<Position>) {
-        Frame::set_cursor(self, at);
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

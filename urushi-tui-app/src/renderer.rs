@@ -1,11 +1,30 @@
 //! Resolves one application view into one terminal frame.
 
-use urushi::{Available, View};
+use urushi::{Available, StyledGrapheme, View};
 use urushi_terminal::Position;
+use urushi_tui::{Frame, Rect};
 
 use super::evaluator::Evaluator;
-use crate::cell::visit_resolved;
-use crate::terminal::RenderFrame;
+
+pub(crate) trait RenderFrame {
+    fn area(&self) -> Rect;
+    fn put(&mut self, column: usize, row: usize, cell: &StyledGrapheme);
+    fn set_cursor(&mut self, at: Option<Position>);
+}
+
+impl RenderFrame for Frame<'_> {
+    fn area(&self) -> Rect {
+        Frame::area(self)
+    }
+
+    fn put(&mut self, column: usize, row: usize, cell: &StyledGrapheme) {
+        Frame::put(self, column, row, cell);
+    }
+
+    fn set_cursor(&mut self, at: Option<Position>) {
+        Frame::set_cursor(self, at);
+    }
+}
 
 /// Resolves and draws one view, including its cursor request.
 pub(crate) fn render(view: &View, frame: &mut impl RenderFrame, evaluator: &mut Evaluator) {
@@ -16,15 +35,18 @@ pub(crate) fn render(view: &View, frame: &mut impl RenderFrame, evaluator: &mut 
         .expect("a frame area supplies finite view geometry");
     let origin = area.origin();
 
-    visit_resolved(&resolved, |column, row, grapheme| {
-        let Some(column) = origin.column().checked_add(column) else {
-            return;
-        };
+    for (row, graphemes) in resolved.rows().iter().enumerate() {
         let Some(row) = origin.row().checked_add(row) else {
-            return;
+            continue;
         };
-        frame.put(column, row, grapheme);
-    });
+        let mut column_offset = 0usize;
+        for grapheme in graphemes {
+            if let Some(column) = origin.column().checked_add(column_offset) {
+                frame.put(column, row, grapheme);
+            }
+            column_offset = column_offset.saturating_add(grapheme.width());
+        }
+    }
 
     let cursor = resolved
         .anchors()
@@ -54,7 +76,7 @@ mod tests {
     use urushi_terminal::TerminalSize;
 
     use super::*;
-    use crate::runtime::testing::{InMemoryCell, InMemoryTerminal};
+    use crate::testing::{InMemoryCell, InMemoryTerminal};
 
     fn draw(view: &View, size: TerminalSize) -> InMemoryTerminal {
         let mut terminal = InMemoryTerminal::new(size);

@@ -82,7 +82,7 @@ mod tests {
     use urushi_terminal::TerminalSize;
 
     use super::*;
-    use crate::runtime::testing::Harness;
+    use crate::testing::Harness;
 
     fn poll_next_draw(scheduler: &mut DrawScheduler, admit: impl FnOnce() -> bool) -> Poll<()> {
         let mut next = Box::pin(scheduler.next_draw(admit));

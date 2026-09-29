@@ -1,0 +1,29 @@
+[package]
+name = "urushi-tui-app"
+description = "TEA application framework for Urushi full-screen terminal interfaces"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+keywords = ["terminal", "tui", "tea"]
+categories = ["command-line-interface"]
+
+[dependencies]
+futures-core = "0.3"
+tokio = { version = "1", features = ["macros", "net", "rt", "signal", "sync", "time"] }
+urushi = { path = "../urushi", version = "=0.1.0" }
+urushi-terminal = { path = "../urushi-terminal", version = "=0.1.0" }
+urushi-tui = { path = "../urushi-tui", version = "=0.1.0", default-features = false }
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
+[features]
+default = ["crossterm"]
+crossterm = ["urushi-terminal/crossterm"]
+
+[[example]]
+name = "runtime_counter"
+required-features = ["crossterm"]
+
+[[example]]
+name = "tui_adaptive_theme"

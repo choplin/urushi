@@ -444,7 +444,7 @@ mod unix_signal {
             let status = Command::new(std::env::current_exe().unwrap())
                 .args([
                     "--exact",
-                    "runtime::sources::unix_signal::tests::dropping_listener_restores_default_termination",
+                    "sources::unix_signal::tests::dropping_listener_restores_default_termination",
                 ])
                 .env(CHILD, "1")
                 .status()
@@ -489,10 +489,10 @@ mod tests {
     use std::time::Duration;
 
     use super::*;
-    use crate::runtime::delivery::Delivery;
-    use crate::runtime::executor::{TokioClock, TokioExecutor};
-    use crate::runtime::subscription::Subscription;
-    use crate::runtime::testing::Ready;
+    use crate::delivery::Delivery;
+    use crate::executor::{TokioClock, TokioExecutor};
+    use crate::subscription::Subscription;
+    use crate::testing::Ready;
 
     #[test]
     fn production_spawner_drives_async_blocking_stream_and_interval_sources() {

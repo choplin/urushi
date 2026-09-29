@@ -3,9 +3,9 @@ use std::time::{Duration, Instant};
 use urushi::{Align, Available, TextStyle, View, resolve};
 
 use super::*;
-use crate::runtime::effect::EffectKind;
-use crate::runtime::source::{Input, KeyCode, KeyEvent};
-use crate::runtime::testing::block_on;
+use crate::effect::EffectKind;
+use crate::source::{Input, KeyCode, KeyEvent};
+use crate::testing::block_on;
 
 /// A counter, as small as an application gets: it is a value, its model is a
 /// number, and none of the four methods needs a terminal.

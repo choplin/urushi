@@ -12,14 +12,14 @@ use urushi::{TextStyle, View};
 use urushi_terminal::TerminalSize;
 
 use super::*;
-use crate::runtime::effect::Effect;
-use crate::runtime::executor::{RunningSource, SourceSpawner};
-use crate::runtime::executor::{TokioClock, TokioExecutor};
-use crate::runtime::presentation::DrawResult;
-use crate::runtime::presentation::Presentation;
-use crate::runtime::scheduler::DEFAULT_MINIMUM_INTERVAL;
-use crate::runtime::subscription::{Source, Subscription};
-use crate::runtime::testing::Harness;
+use crate::effect::Effect;
+use crate::executor::{RunningSource, SourceSpawner};
+use crate::executor::{TokioClock, TokioExecutor};
+use crate::presentation::DrawResult;
+use crate::presentation::Presentation;
+use crate::scheduler::DEFAULT_MINIMUM_INTERVAL;
+use crate::subscription::{Source, Subscription};
+use crate::testing::Harness;
 
 impl<A, P> RuntimeCore<A, P>
 where
@@ -212,7 +212,7 @@ fn sync_acceptance_fences_the_initial_draw_and_applies_its_batch_without_interme
     let presentation = RecordingPresentation::new();
     let (mut core, _harness) = runtime(Rc::clone(&views), presentation);
     let deliveries = core.deliveries();
-    let (publisher, mut slot) = crate::runtime::delivery::surface_slot();
+    let (publisher, mut slot) = crate::delivery::surface_slot();
 
     deliveries.ordinary_completion().complete(Message::Add(10));
     assert!(publisher.publish(Message::Add(1)));
@@ -241,7 +241,7 @@ fn sync_accepted_during_a_draw_fences_only_the_next_draw() {
     let presentation = RecordingPresentation::new();
     let (mut core, harness) = runtime(Rc::clone(&views), presentation);
     let deliveries = core.deliveries();
-    let (publisher, mut slot) = crate::runtime::delivery::surface_slot();
+    let (publisher, mut slot) = crate::delivery::surface_slot();
 
     core.drive_draw().unwrap();
     assert_eq!(&*views.borrow(), &[0]);

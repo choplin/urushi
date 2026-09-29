@@ -1159,13 +1159,22 @@ version = "0.1.0"
 dependencies = [
  "compact_str",
  "divan",
- "futures-core",
- "libc",
  "ratatui",
- "tokio",
  "unicode-width",
  "urushi",
  "urushi-terminal",
+]
+
+[[package]]
+name = "urushi-tui-app"
+version = "0.1.0"
+dependencies = [
+ "futures-core",
+ "libc",
+ "tokio",
+ "urushi",
+ "urushi-terminal",
+ "urushi-tui",
 ]
 
 [[package]]

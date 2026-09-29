@@ -29,7 +29,7 @@ pub(crate) type Mapper<From, To> = Arc<dyn Fn(From) -> To + Send + Sync + 'stati
 /// Building one in a test therefore costs nothing and needs no terminal.
 ///
 /// ```
-/// use urushi_tui::Effect;
+/// use urushi_tui_app::Effect;
 ///
 /// enum Message {
 ///     Loaded(usize),

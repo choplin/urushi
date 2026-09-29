@@ -3,7 +3,7 @@ use std::time::{Duration, Instant};
 use urushi::Key;
 
 use super::*;
-use crate::runtime::testing::block_on;
+use crate::testing::block_on;
 
 #[derive(Debug, PartialEq, Eq)]
 enum Child {

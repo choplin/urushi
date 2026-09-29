@@ -19,7 +19,7 @@ const DEFAULT_CAPACITY: usize = 64;
 /// them and take no admission from the application.
 ///
 /// ```
-/// use urushi_tui::Admission;
+/// use urushi_tui_app::Admission;
 ///
 /// assert_eq!(Admission::default(), Admission::bounded(64));
 /// assert_ne!(Admission::latest(), Admission::bounded(1));

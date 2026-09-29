@@ -12,8 +12,9 @@ use std::time::{Duration, Instant};
 use futures_core::Stream;
 use urushi::StyledGrapheme;
 use urushi_terminal::{Position, TerminalSize};
+use urushi_tui::Rect;
 
-use crate::terminal::{Rect, RenderFrame};
+use crate::renderer::RenderFrame;
 
 use super::delivery::{
     Admission, Delivery, DeliveryQueue, SendError, Sender, Sink, SourceInbox, source_inbox,

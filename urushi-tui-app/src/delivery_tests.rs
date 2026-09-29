@@ -1,7 +1,7 @@
 //! Cross-stage tests: source admission followed by runtime-wide acceptance.
 
 use super::*;
-use crate::runtime::testing::Harness;
+use crate::testing::Harness;
 use crate::{Input, KeyCode, KeyEvent, KeyKind};
 use urushi_terminal::TerminalSize;
 

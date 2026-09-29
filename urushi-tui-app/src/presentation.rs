@@ -9,10 +9,10 @@ use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 use urushi::View;
 use urushi_terminal::{CommandWriter, TerminalSize};
+use urushi_tui::Screen;
 
 use super::evaluator::Evaluator;
 use super::renderer;
-use crate::Screen;
 
 pub(crate) trait Presentation {
     type Error;

@@ -13,8 +13,6 @@ mod screen;
 use urushi_terminal::{Position, TerminalSize};
 
 pub(crate) use output::Cell;
-#[cfg(feature = "runtime")]
-pub(crate) use screen::RenderFrame;
 pub use screen::{Frame, Screen};
 
 /// A rectangular region in terminal cell coordinates.

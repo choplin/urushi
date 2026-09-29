@@ -23,7 +23,7 @@ use super::subscription::Subscription;
 ///
 /// ```
 /// use urushi::{TextStyle, View};
-/// use urushi_tui::{Application, Effect, Subscription};
+/// use urushi_tui_app::{Application, Effect, Subscription};
 ///
 /// struct Counter;
 ///

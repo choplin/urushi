@@ -13,16 +13,16 @@ use urushi_terminal::{
 };
 
 use super::*;
-use crate::runtime::application::Application;
-use crate::runtime::core::{RuntimeCore, RuntimeError};
-use crate::runtime::delivery::{Delivery, DeliveryQueue};
-use crate::runtime::effect::Effect;
-use crate::runtime::executor::{
+use crate::application::Application;
+use crate::core::{RuntimeCore, RuntimeError};
+use crate::delivery::{Delivery, DeliveryQueue};
+use crate::effect::Effect;
+use crate::executor::{
     Clock, RunningSource, SourceSpawner, SubscriptionExecutor, TokioClock, TokioExecutor,
 };
-use crate::runtime::presentation::{DrawResult, Presentation};
-use crate::runtime::subscription::{Source, Subscription};
-use crate::runtime::testing::Harness;
+use crate::presentation::{DrawResult, Presentation};
+use crate::subscription::{Source, Subscription};
+use crate::testing::Harness;
 
 #[test]
 fn terminal_events_become_individual_async_inputs_in_read_order() {

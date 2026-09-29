@@ -48,7 +48,7 @@ type BoxDone = Pin<Box<dyn Future<Output = ()> + Send + 'static>>;
 /// ```
 /// use std::time::Duration;
 ///
-/// use urushi_tui::{Input, Subscription};
+/// use urushi_tui_app::{Input, Subscription};
 ///
 /// enum Message {
 ///     Input(Input),

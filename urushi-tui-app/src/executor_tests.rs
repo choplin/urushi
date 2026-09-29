@@ -5,9 +5,9 @@ use super::{
     EffectControl, EffectExecutor, RunningSource, SourceSpawner, SubscriptionExecutor, TokioClock,
     TokioExecutor,
 };
-use crate::runtime::delivery::{Delivery, DeliveryQueue};
-use crate::runtime::subscription::Source;
-use crate::runtime::testing::{EffectEvent, Harness, Ready};
+use crate::delivery::{Delivery, DeliveryQueue};
+use crate::subscription::Source;
+use crate::testing::{EffectEvent, Harness, Ready};
 use crate::{Effect, Subscription};
 use urushi_terminal::TerminalSize;
 

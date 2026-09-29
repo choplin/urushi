@@ -4,9 +4,9 @@ use std::time::{Duration, Instant};
 use urushi::Key;
 
 use super::*;
-use crate::runtime::delivery::Policy;
-use crate::runtime::source::{FocusChange, KeyCode, KeyEvent};
-use crate::runtime::testing::{Collector, Ready, block_on, drain};
+use crate::delivery::Policy;
+use crate::source::{FocusChange, KeyCode, KeyEvent};
+use crate::testing::{Collector, Ready, block_on, drain};
 
 #[derive(Debug, PartialEq, Eq)]
 enum Child {

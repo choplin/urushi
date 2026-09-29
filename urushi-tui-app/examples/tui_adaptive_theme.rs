@@ -4,7 +4,7 @@
 //! Run this Unix-only example with:
 //!
 //! ```text
-//! cargo run -p urushi-tui --example adaptive_theme
+//! cargo run -p urushi-tui-app --example tui_adaptive_theme
 //! ```
 //!
 //! The caller owns the complete flow: it opens one bidirectional terminal
@@ -25,7 +25,9 @@ use urushi::{
     ThemePreset, ThemeSet, VerticalAlign, View, measure,
 };
 use urushi_terminal::TerminalQuery;
-use urushi_tui::{Application, Effect, Input, KeyCode, KeyKind, Modifiers, Runtime, Subscription};
+use urushi_tui_app::{
+    Application, Effect, Input, KeyCode, KeyKind, Modifiers, Runtime, Subscription,
+};
 
 struct AdaptiveTheme {
     light_presets: Vec<PresetTheme>,
