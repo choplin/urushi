@@ -6,22 +6,12 @@ description: User-visible limitations and incomplete paths in Urushi 0.1.0.
 Urushi 0.1.0 is an early release. The following boundaries affect application
 design.
 
-## TUI package split is not implemented yet
+## A low-level frame loop owns its session
 
-`urushi_tui::run` and `Runtime` are runnable in 0.1.0. That release still keeps
-the TEA runtime, the Ratatui-backed frame terminal, and caller-owned Ratatui
-widgets in one `urushi-tui` package. `RatatuiTerminal` uses Ratatui buffers and
-cell diffing, then writes backend-independent terminal commands through a
-`CellWriter`.
-
-The target architecture moves the TEA runtime to `urushi-tui-app`, replaces
-the runtime's frame-terminal abstraction with a concrete Urushi-owned `Screen`
-in `urushi-tui`, and moves caller-owned Ratatui widgets to
-`urushi-adapter-ratatui`. Those split packages are not yet dependency names.
-
-In both shapes, this is separate from physical terminal connections.
-`urushi-terminal` provides a native Unix backend and an optional Crossterm
-adapter behind its own `TerminalBackend` contract.
+`urushi-tui` provides synchronous frame presentation, not terminal lifecycle
+or input. A caller using `Screen` directly must enter and restore its terminal
+session, read events, handle resizes, and decide when to draw. Choose
+`urushi-tui-app` when the TEA runtime should own those responsibilities.
 
 ## Cursor placement in Ratatui
 

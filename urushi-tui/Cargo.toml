@@ -1,6 +1,7 @@
 [package]
 name = "urushi-tui"
 description = "Synchronous full-screen presentation for Urushi"
+documentation = "https://docs.rs/urushi-tui"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

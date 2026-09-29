@@ -5,7 +5,7 @@ description: Model a full-screen application with Urushi's TEA-style Application
 
 import ArchitectureDiagram from '../../../../components/ArchitectureDiagram.astro';
 
-The `urushi-tui` 0.1.0 runtime is a runnable TEA-style full-screen application
+The `urushi-tui-app` crate is a runnable TEA-style full-screen application
 framework. An application owns its domain choices; the runtime owns the live
 model, ordered message delivery, effects, subscriptions, frame scheduling, and
 the terminal session.
@@ -21,7 +21,7 @@ while it runs.
 ```rust
 use std::time::Duration;
 use urushi::{TextStyle, View};
-use urushi_tui::{Application, Effect, Subscription};
+use urushi_tui_app::{Application, Effect, Subscription};
 
 struct Counter;
 
@@ -82,13 +82,13 @@ terminal.
 
 ## Run the application
 
-`urushi_tui::run` supplies the production executor, clock, terminal backend,
+`urushi_tui_app::run` supplies the production executor, clock, terminal backend,
 full-screen presentation, and session defaults:
 
 ```rust
-let final_model = urushi_tui::run(Counter)?;
+let final_model = urushi_tui_app::run(Counter)?;
 println!("final count: {final_model}");
-# Ok::<(), urushi_tui::Error>(())
+# Ok::<(), urushi_tui_app::Error>(())
 ```
 
 The example renders `0`, delivers the delayed `Increment` message, updates the
@@ -126,17 +126,16 @@ appears and stops when it is no longer declared. Source admission policy is
 explicit; the runtime does not inspect application message variants to decide
 which events may be replaced or backpressured.
 
-## Current 0.1.0 presentation boundary
+## Presentation boundary
 
 The runtime architecture does not make Ratatui part of `Application`:
 
 <ArchitectureDiagram kind="backend" />
 
-In the current package, `Terminal` owns presentation state and commits a frame
-only after output and flush succeed. `Frame` is a borrowed, draw-scoped target
-for styled graphemes and the cursor request. `CellWriter` lowers changed cells
-into terminal commands. `RatatuiTerminal` is the 0.1.0 implementation. These
-types do not enter the `Application` model.
+The runtime resolves an application `View` and writes it through a borrowed
+`urushi_tui::Frame`. The concrete `urushi_tui::Screen` owns working and
+committed cell buffers, diffing, output commit, and failed-output recovery.
+Those presentation resources do not enter the `Application` model.
 
 Ratatui also remains available as an explicit adapter for applications that
 own their own loop. See [Use the Ratatui integration](/docs/tui/ratatui/).
@@ -153,12 +152,12 @@ own their own loop. See [Use the Ratatui integration](/docs/tui/ratatui/).
 5. resolve the latest `View` once for the selected terminal's frame; and
 6. restore the terminal session on normal exit, errors, and panic unwinding.
 
-The builder makes the physical backend, frame terminal, executor, clock, and
-session options selectable. These are runtime-owned dependencies, not fields
-added to the application model:
+The builder makes the physical backend, executor, clock, and session options
+selectable. Presentation always uses the concrete `urushi_tui::Screen`; these
+runtime-owned dependencies are not fields added to the application model:
 
 ```rust
-use urushi_tui::Runtime;
+use urushi_tui_app::Runtime;
 
 let final_model = Runtime::new(Counter)
     .mouse(true)
@@ -166,23 +165,19 @@ let final_model = Runtime::new(Counter)
     .run()?;
 
 assert_eq!(final_model, 1);
-# Ok::<(), urushi_tui::Error>(())
+# Ok::<(), urushi_tui_app::Error>(())
 ```
 
-## What 0.1.0 exposes
+## What the application crate exposes
 
 The public runtime surface includes:
 
 - `Application`, `Effect`, and `Subscription`;
 - input, surface, signal, admission, and sender values;
-- `Terminal`, `Frame`, and `CellWriter`;
-- `RatatuiTerminal` plus the adapters for caller-owned Ratatui buffers;
 - `run(app)` with the production defaults; and
-- `Runtime`, including backend, terminal, executor, clock, and session-option
+- `Runtime`, including backend, executor, clock, and session-option
   replacement.
 
-The target architecture moves the TEA framework to `urushi-tui-app`, keeps a
-concrete Urushi-owned frame engine in `urushi-tui`, and moves the caller-owned
-Ratatui path to `urushi-adapter-ratatui`. Those package names describe the
-design direction and are not 0.1.0 dependency names. See the
-[TUI overview](/docs/tui/) for that boundary.
+The synchronous `Screen` and `Frame` live in `urushi-tui`. Caller-owned
+Ratatui integration lives in `urushi-adapter-ratatui`; it is not a runtime
+backend. See the [TUI overview](/docs/tui/) for the complete boundary.

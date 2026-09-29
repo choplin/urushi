@@ -19,8 +19,9 @@ box-model layout, and terminal-aware width measurement.
 | Style text, borders, spacing, or layout | [CLI overview](/docs/cli/) | `urushi` |
 | Apply an opinionated CLI visual language | [CLI presentations](/docs/cli/presentations/) | `urushi-cli` |
 | Ask the user for input or a selection | [Prompt overview](/docs/prompts/) | `urushi-prompt` |
-| Build a full-screen application from `init`, `update`, `view`, and `subscriptions` | [TUI overview](/docs/tui/) | `urushi-tui` |
-| Add Urushi views to an existing Ratatui app | [Ratatui adapter](/docs/tui/ratatui/) | `urushi-tui` |
+| Build a full-screen application from `init`, `update`, `view`, and `subscriptions` | [TUI overview](/docs/tui/) | `urushi-tui-app` |
+| Drive a synchronous frame loop yourself | [TUI overview](/docs/tui/) | `urushi-tui` |
+| Add Urushi views to an existing Ratatui app | [Ratatui adapter](/docs/tui/ratatui/) | `urushi-adapter-ratatui` |
 | Display Kitty or Sixel images with text fallback | [Display terminal images](/docs/graphics/) | `urushi-graphics` |
 
 If you want to see the core workflow first, complete the
@@ -54,21 +55,20 @@ does not enter raw mode or start an event loop.
 
 ## Run a full-screen application
 
-The full-screen model exposed by `urushi-tui` 0.1.0 is an application framework
+The full-screen model exposed by `urushi-tui-app` is an application framework
 in the style of The Elm Architecture. An application describes its model
 through `init`, `update`, `view`, and `subscriptions`; the runtime owns
 accepted-message ordering, effects, draw scheduling, and terminal lifecycle.
 
-The 0.1.0 runtime uses Urushi's `Terminal`, `Frame`, and `CellWriter` contracts
-rather than exposing a backend type to `Application`. Ratatui supplies the
-current buffer and cell-diff implementation, and a separate adapter lets an
-existing Ratatui application keep its own loop.
+The runtime resolves each `View` into the concrete `urushi-tui` `Screen` and
+draw-scoped `Frame`. That lower crate owns cell buffers, diffing, and
+transactional output without depending on Ratatui.
 
-`urushi_tui::run(app)` starts that complete lifecycle with production defaults.
+`urushi_tui_app::run(app)` starts that complete lifecycle with production defaults.
 `Runtime::new(app)` provides the same runtime as a builder when the application
-needs to replace the terminal backend, frame terminal, executor, clock, or
-session options. The caller-owned [Ratatui adapter](/docs/tui/ratatui/) remains
-a separate integration path for applications that already have a loop.
+needs to replace the terminal backend, executor, clock, or session options.
+The caller-owned [Ratatui adapter](/docs/tui/ratatui/) is a separate crate for
+applications that already have a loop.
 
 [Build a runnable TUI →](/docs/tui/runtime/)
 

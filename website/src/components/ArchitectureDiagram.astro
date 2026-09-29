@@ -139,7 +139,7 @@ const arrowId = `${kind}-diagram-arrow`;
   {kind === 'backend' && (
     <svg class="architecture-diagram compact-diagram" viewBox="0 0 760 190" role="img" aria-labelledby="backend-title backend-desc">
       <title id="backend-title">Full-screen rendering boundary</title>
-      <desc id="backend-desc">Application view produces an Urushi View. The renderer resolves it and draws styled cells through the Terminal and borrowed Frame contracts. CellWriter lowers changed cells into physical terminal commands.</desc>
+      <desc id="backend-desc">Application view produces an Urushi View. The renderer resolves it and writes styled graphemes through a borrowed Frame. Screen owns Urushi cell buffers, diffing, and transactional terminal output.</desc>
       <defs>
         <marker id={arrowId} markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto">
           <path d="M0,0 L8,4 L0,8 Z" class="arrow-head" />
@@ -155,24 +155,24 @@ const arrowId = `${kind}-diagram-arrow`;
       <text x="368" y="86" class="node-title">Renderer</text>
       <text x="368" y="109" class="node-detail">resolve + draw</text>
       <rect x="454" y="42" width="146" height="104" class="backend-boundary" />
-      <text x="527" y="66" class="lane-label">TERMINAL CONTRACT</text>
-      <text x="527" y="94" class="node-title">Terminal::draw</text>
+      <text x="527" y="66" class="lane-label">URUSHI-TUI</text>
+      <text x="527" y="94" class="node-title">Screen::draw</text>
       <text x="527" y="119" class="node-detail">borrowed Frame</text>
       <rect x="634" y="58" width="108" height="72" class="node" />
-      <text x="688" y="86" class="node-title">CellWriter</text>
-      <text x="688" y="109" class="node-detail">commands</text>
+      <text x="688" y="86" class="node-title">CommandWriter</text>
+      <text x="688" y="109" class="node-detail">terminal output</text>
       <path d="M144 94 H170" class="arrow" marker-end={`url(#${arrowId})`} />
       <path d="M282 94 H308" class="arrow" marker-end={`url(#${arrowId})`} />
       <path d="M420 94 H446" class="arrow" marker-end={`url(#${arrowId})`} />
       <path d="M600 94 H626" class="arrow" marker-end={`url(#${arrowId})`} />
-      <text x="380" y="174" class="caption">The application and runtime do not name the concrete backend.</text>
+      <text x="380" y="174" class="caption">Screen owns frame history and commits only after output succeeds.</text>
     </svg>
   )}
 
   {kind === 'tui' && (
     <svg class="architecture-diagram" viewBox="0 0 760 430" role="img" aria-labelledby="tui-title tui-desc">
-      <title id="tui-title">TEA application loop and terminal backend boundary</title>
-      <desc id="tui-desc">Input, subscription events, and effect completions become messages. Update changes the model and can return effects. View projects the model into an Urushi View, which crosses the terminal, frame, and cell writer backend boundary.</desc>
+      <title id="tui-title">TEA application loop and native screen boundary</title>
+      <desc id="tui-desc">Input, subscription events, and effect completions become messages. Update changes the model and can return effects. View projects the model into an Urushi View, which the renderer writes through the native Screen and Frame.</desc>
       <defs>
         <marker id={arrowId} markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto">
           <path d="M0,0 L8,4 L0,8 Z" class="arrow-head" />
@@ -210,8 +210,8 @@ const arrowId = `${kind}-diagram-arrow`;
       <text x="658" y="277" class="node-detail">urushi::View</text>
 
       <rect x="240" y="344" width="496" height="62" class="backend-boundary" />
-      <text x="488" y="368" class="lane-label">PLUGGABLE PRESENTATION BOUNDARY</text>
-      <text x="488" y="390" class="node-title">Terminal  →  Frame  →  CellWriter</text>
+      <text x="488" y="368" class="lane-label">URUSHI-TUI PRESENTATION</text>
+      <text x="488" y="390" class="node-title">Screen  →  Frame  →  CommandWriter</text>
 
       <path d="M196 94 C220 94 220 124 232 132" class="arrow" marker-end={`url(#${arrowId})`} />
       <path d="M196 226 C220 226 220 160 232 148" class="arrow" marker-end={`url(#${arrowId})`} />
@@ -226,7 +226,7 @@ const arrowId = `${kind}-diagram-arrow`;
 
   {kind === 'tui-crates' && (
     <svg class="architecture-diagram" viewBox="0 0 760 300" role="img" aria-labelledby="tui-crates-title tui-crates-desc">
-      <title id="tui-crates-title">Target TUI crate boundaries</title>
+      <title id="tui-crates-title">TUI crate boundaries</title>
       <desc id="tui-crates-desc">The TEA application runtime depends on the Urushi-owned screen engine. The separate Ratatui adapter translates core Urushi views into a buffer owned by an existing Ratatui application.</desc>
       <defs>
         <marker id={arrowId} markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto">
@@ -259,7 +259,7 @@ const arrowId = `${kind}-diagram-arrow`;
       <path d="M176 168 C198 184 204 218 222 226" class="arrow" marker-end={`url(#${arrowId})`} />
       <path d="M468 232 H532" class="arrow" marker-end={`url(#${arrowId})`} />
 
-      <text x="455" y="22" class="lane-label">TARGET DEPENDENCY DIRECTION</text>
+      <text x="455" y="22" class="lane-label">CRATE LAYERS</text>
     </svg>
   )}
 </div>

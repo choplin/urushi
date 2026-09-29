@@ -94,19 +94,16 @@ boundary:
 
 <ArchitectureDiagram kind="backend" />
 
-`Terminal` and `Frame` are Urushi-owned contracts. The application and runtime
-logic do not name a backend type. A `CellWriter` lowers changed cells to
-backend-independent `urushi_terminal::Command` values for physical output.
+`urushi-tui-app` resolves the application's view and writes its styled
+graphemes through a borrowed `urushi_tui::Frame`. The concrete
+`urushi_tui::Screen` owns working and committed buffers, computes changed
+cells, lowers them to backend-independent `urushi_terminal::Command` values,
+and commits the new baseline only after output and flush succeed.
 
-`RatatuiTerminal` is the 0.1.0 terminal implementation. It uses
-Ratatui buffers for presentation state and cell diffing, but Ratatui does not
-define the application model. `urushi_tui::run(app)` assembles this complete
-runtime with production defaults; `Runtime::new(app)` exposes its replaceable
-boundaries and session options.
-
-The target architecture replaces this frame-terminal abstraction with a
-concrete Urushi-owned `Screen`, moves the TEA runtime into `urushi-tui-app`,
-and isolates the caller-owned Ratatui path in `urushi-adapter-ratatui`.
+`urushi_tui_app::run(app)` assembles the application runtime and production
+terminal integration. `Runtime::new(app)` exposes its configurable executor,
+clock, physical terminal backend, and session options. Ratatui participates
+only when a caller separately selects `urushi-adapter-ratatui`.
 
 ## Caller-owned Ratatui buffers
 

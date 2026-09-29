@@ -11,7 +11,9 @@ terminal surfaces they use.
 | `urushi` | Logical styles, themes, renderer-neutral views, components, layout, ANSI rendering, and standard-stream output. |
 | `urushi-cli` | Opinionated presentations for human-facing, non-interactive CLI output; 0.1.0 includes summaries and warnings. |
 | `urushi-prompt` | Typed input, select, and confirm fields with validation; 0.1.0 exposes inline presentation, while alternate-screen presentation is part of the target architecture. |
-| `urushi-tui` | In 0.1.0, the runnable TEA-style full-screen runtime, terminal/frame contracts, the Ratatui-backed presentation, and adapters for caller-owned Ratatui buffers. |
+| `urushi-tui` | Synchronous full-screen `Screen` and draw-scoped `Frame`, with Urushi-owned cell buffers, diffing, and transactional output. |
+| `urushi-tui-app` | TEA-style `Application` and `Runtime`, including effects, subscriptions, delivery, drawing, input, and terminal-session ownership. |
+| `urushi-adapter-ratatui` | Stateless style, view, cell, and anchor adapters for a buffer owned by an existing Ratatui application. |
 | `urushi-graphics` | Image components plus Kitty and Sixel terminal graphics adapters. |
 | `urushi-terminal` | Shared terminal commands, events, geometry, capabilities, and session restoration. |
 | `urushi-derive` | Derive support used by the Urushi crates. |
@@ -49,19 +51,28 @@ Existing Ratatui application:
 [dependencies]
 ratatui = "0.30"
 urushi = "0.1.0"
-urushi-tui = { version = "0.1.0", default-features = false }
+urushi-adapter-ratatui = "0.1.0"
+```
+
+Caller-owned synchronous frame loop:
+
+```toml
+[dependencies]
+urushi = "0.1.0"
+urushi-tui = "0.1.0"
 ```
 
 Full-screen Urushi application model:
 
 ```toml
 [dependencies]
-urushi-tui = "0.1.0"
+urushi = "0.1.0"
+urushi-tui-app = "0.1.0"
 ```
 
-The default features expose the complete application runtime and its production
-Crossterm backend. `urushi_tui::run(app)` starts it with production defaults;
-`Runtime::new(app)` provides the configurable builder.
+`urushi_tui_app::run(app)` starts the TEA runtime with production defaults;
+`Runtime::new(app)` provides the configurable builder. Applications that drive
+their own loop can instead construct `urushi_tui::Screen` directly.
 
 ## Cargo features
 
@@ -69,23 +80,25 @@ Crossterm backend. `urushi_tui::run(app)` starts it with production defaults;
 
 | Feature | Default | Purpose |
 |---|---:|---|
-| `runtime` | Yes | Exposes the TEA-style `Application`, `Effect`, `Subscription`, and related runtime model types. |
-| `crossterm` | Yes | Supplies and re-exports the production Crossterm terminal backend. |
+| `crossterm` | Yes | Re-exports the Crossterm command-writer implementation for a caller-owned frame loop. |
 
-Disable default features when an existing Ratatui application only needs the
-stateless widgets and style adapter.
+Disable default features when the caller supplies another
+`urushi_terminal::CommandWriter`. The crate contains no application runtime,
+Tokio dependency, terminal input, or Ratatui integration.
 
-The `runtime` feature alone does not select a physical backend. The default
-feature set enables both `runtime` and `crossterm`, which is why the short
-`run(app)` entry point is available with an ordinary dependency. The current
-full-screen presentation implementation, `RatatuiTerminal`, uses Ratatui for
-buffers and cell diffing; the `Application` model does not expose a Ratatui
-backend type.
+### `urushi-tui-app`
 
-The target architecture splits this package into the synchronous `urushi-tui`
-frame engine, the `urushi-tui-app` TEA runtime, and
-`urushi-adapter-ratatui`. Those package names describe the intended boundary
-and are not available as 0.1.0 dependencies.
+| Feature | Default | Purpose |
+|---|---:|---|
+| `crossterm` | Yes | Enables the production terminal backend and the short `run(app)` entry point. |
+
+With default features disabled, the application model, effects,
+subscriptions, and configurable `Runtime` remain available; a caller must
+provide the physical terminal integration it uses. The crate depends on
+`urushi-tui` with its default features disabled and does not depend on Ratatui.
+
+`urushi-adapter-ratatui` has no feature flags. Choosing that dependency is the
+explicit opt-in to Ratatui, independently of either Urushi TUI crate.
 
 ### `urushi-terminal`
 

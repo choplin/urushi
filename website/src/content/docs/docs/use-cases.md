@@ -50,25 +50,25 @@ urushi-prompt = "0.1.0"
 
 ## Build a full-screen application
 
-`urushi-tui` is designed around a TEA-style application runtime. The
+`urushi-tui-app` provides a TEA-style application runtime. The
 application supplies `init`, `update`, `view`, and `subscriptions`; the runtime
 owns the live model, ordered delivery, effects, frame scheduling, and terminal
 lifecycle. Focus, navigation, key bindings, and other application semantics
 remain ordinary model and message logic.
 
-The runtime does not expose a backend type to `Application`. In 0.1.0 it draws
-through Urushi-owned `Terminal` and `Frame` contracts, with physical I/O behind
-`CellWriter` and `urushi_terminal::TerminalBackend`. Ratatui provides the
-current buffer and cell-diff implementation, not the application model.
+The runtime does not expose a backend type to `Application`. It resolves views
+into the concrete `urushi-tui` `Screen` and draw-scoped `Frame`; that lower
+crate owns cell buffers, diffing, and transactional output without Ratatui.
 
 ```toml
 [dependencies]
-urushi-tui = "0.1.0"
+urushi = "0.1.0"
+urushi-tui-app = "0.1.0"
 ```
 
-Call `urushi_tui::run(app)` for the production defaults. Use
+Call `urushi_tui_app::run(app)` for the production defaults. Use
 `Runtime::new(app)` when the application needs to replace the terminal backend,
-frame terminal, executor, clock, or session options.
+executor, clock, or session options.
 
 [Build a full-screen application →](/docs/tui/runtime/)
 
@@ -77,13 +77,12 @@ frame terminal, executor, clock, or session options.
 Use the separate Ratatui adapter when the application already owns a Ratatui
 `Terminal`, event loop, state, and frame timing. `ViewWidget` draws a complete
 Urushi view into a Ratatui `Rect`; `RatatuiStyleExt` adapts one themed block.
-This integration path is available in 0.1.0 and does not require the runtime
-feature.
+This integration path does not depend on either Urushi TUI crate.
 
 ```toml
 [dependencies]
 urushi = "0.1.0"
-urushi-tui = { version = "0.1.0", default-features = false }
+urushi-adapter-ratatui = "0.1.0"
 ```
 
 [Use the Ratatui adapter →](/docs/tui/ratatui/)

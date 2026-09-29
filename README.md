@@ -17,7 +17,8 @@ output, interactive prompts, and full TUIs. `urushi` aims to fill that gap:
 - **Standalone first.** A `View` resolves independently from output and renders
   to a `String`; `urushi::print_view` and `urushi::println_view` handle ordinary terminal
   output without raw mode or an event loop.
-- **Ride the ratatui ecosystem via an adapter.** The `urushi-tui` crate draws
+- **Ride the ratatui ecosystem via an adapter.** The
+  `urushi-adapter-ratatui` crate draws
   urushi styles and view trees into a ratatui `Buffer`, mapping the
   foreground, background, and attribute subset onto `ratatui::style::Style` and
   keeping the box model
@@ -39,7 +40,9 @@ surface layers, including which parts are implemented today.
 | [`urushi-graphics`](urushi-graphics/) | Image components and Kitty/Sixel terminal graphics adapters | Stateless Kitty/Sixel output works |
 | [`urushi-terminal`](urushi-terminal/) | Generic terminal commands, events, session restoration, geometry, capability inspection, and physical backends | Shared primitives, native Unix backend, and optional Crossterm adapter work |
 | [`urushi-prompt`](urushi-prompt/) | Theme-aware `Input`, `Select`, and `Confirm` fields with synchronous validation | Core prompt flow works |
-| [`urushi-tui`](urushi-tui/) | The `ratatui` adapter — style conversion, widgets, transactional buffer diffing over `urushi-terminal` — and the full-screen runtime | Adapter and runtime entry work |
+| [`urushi-tui`](urushi-tui/) | Synchronous `Screen` and draw-scoped `Frame` with Urushi-owned cell buffers, diffing, and transactional output | Frame engine works |
+| [`urushi-tui-app`](urushi-tui-app/) | TEA-style application runtime owning delivery, effects, subscriptions, drawing, and terminal lifecycle | Runtime and examples work |
+| [`urushi-adapter-ratatui`](urushi-adapter-ratatui/) | Stateless style, view, and anchor adapters for caller-owned Ratatui buffers | Adapter and example work |
 
 ## Two ways to build a full-screen TUI
 
@@ -64,7 +67,7 @@ Draw a whole view tree with `ViewWidget`, or a single themed block with the
 widgets that write only to the buffer they are handed:
 
 ```rust
-use urushi_tui::ratatui::{RatatuiStyleExt as _, ViewWidget};
+use urushi_adapter_ratatui::{RatatuiStyleExt as _, ViewWidget};
 
 terminal.draw(|frame| {
     frame.render_widget(ViewWidget::new(&view), frame.area());
@@ -84,7 +87,7 @@ more than once — resolves under `available` and writes the result with
 
 ```rust
 use urushi::resolve;
-use urushi_tui::ratatui::{available, draw_resolved};
+use urushi_adapter_ratatui::{available, draw_resolved};
 
 let resolved = resolve(&view, available(area))?;
 draw_resolved(&resolved, area, frame.buffer_mut());
@@ -96,9 +99,9 @@ a ratatui `Buffer` is plain — ANSI escape sequences are not interpreted there.
 
 ### urushi owns the loop, the application describes state
 
-Available today. The TEA-style runtime in `urushi-tui` takes an `Application`
+Available today. The TEA-style runtime in `urushi-tui-app` takes an `Application`
 whose model is changed only by `update` and whose `view` returns an ordinary
-Urushi view tree. `urushi_tui::run(app)` supplies the production terminal,
+Urushi view tree. `urushi_tui_app::run(app)` supplies the production terminal,
 executor, and clock; `Runtime::new(app)` exposes the same entry point as a
 builder when a program needs to replace those boundaries or change session
 options. The runtime owns ordered delivery, effects and subscriptions, frame
@@ -109,7 +112,7 @@ defines the complete ownership and ordering model.
 Run the small runtime example in a real terminal:
 
 ```sh
-cargo run -p urushi-tui --example runtime_counter
+cargo run -p urushi-tui-app --example runtime_counter
 ```
 
 Any non-release key updates the model and starts one blocking effect; the
@@ -237,7 +240,7 @@ Depend on the adapter when the application also uses ratatui:
 ```toml
 [dependencies]
 urushi = "0.1.0"
-urushi-tui = "0.1.0"
+urushi-adapter-ratatui = "0.1.0"
 ```
 
 Resolve a component from the same `Theme` used by plain output, then pass its
@@ -245,7 +248,7 @@ widget adapter to a ratatui frame. Colors and attributes stay logical in the
 Theme; Ratatui performs its own backend conversion.
 
 ```rust
-use urushi_tui::ratatui::RatatuiStyleExt as _;
+use urushi_adapter_ratatui::RatatuiStyleExt as _;
 
 let panel = theme.block_style(PanelRole::PanelFocused);
 frame.render_widget(panel.widget("保存しました"), frame.area());
@@ -258,7 +261,7 @@ because a `TextStyle` has none.
 Run the complete Theme → plain CLI / ratatui example with:
 
 ```sh
-cargo run -p urushi-tui --example themed_ratatui
+cargo run -p urushi-adapter-ratatui --example themed_ratatui
 ```
 
 ### The same Theme in interactive prompts
@@ -333,8 +336,9 @@ new size; expect all other visible primary-buffer content to be erased.
 - [ ] Adaptive colors (light/dark terminal backgrounds)
 - [x] Nested styles as a view tree (`View::text` / `block` / `row` / `column`) resolved in one layout pass, rather than re-styling already-rendered text
 - [x] Theme layers: reusable core components plus CLI-specific presentations derived from shared semantic tokens
-- [x] `urushi-tui`: box-model Widget and loss-aware Ratatui style conversion
-- [x] `urushi-tui`: TEA-style full-screen runtime owning event delivery, frame scheduling, and terminal lifecycle
+- [x] `urushi-tui`: native synchronous frame engine with transactional cell diffing
+- [x] `urushi-tui-app`: TEA-style full-screen runtime owning event delivery, frame scheduling, and terminal lifecycle
+- [x] `urushi-adapter-ratatui`: box-model widgets and loss-aware Ratatui style conversion
 - [x] `urushi-prompt`: themed `Form` / `Group` with `Input`, `Select`, `Confirm`, and synchronous validation
 
 ## Acknowledgments

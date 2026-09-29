@@ -28,8 +28,8 @@ their loop.
 ## Renderer-neutral views
 
 A `View` describes presentation before the destination is chosen. It can resolve
-to ANSI output for an ordinary CLI, into the current full-screen runtime, or
-into a caller-owned Ratatui `Buffer` through the 0.1.0 adapter.
+to ANSI output for an ordinary CLI, into the full-screen runtime, or into a
+caller-owned Ratatui `Buffer` through the optional adapter.
 
 That boundary keeps components reusable while allowing each renderer to preserve
 its own rules and capabilities.
@@ -47,16 +47,11 @@ live model, effect execution, ordered delivery, frame scheduling, and terminal
 restoration. Application code does not own those resources and does not depend
 on a backend type.
 
-In 0.1.0, `urushi_tui::run` assembles and runs the end-to-end TEA lifecycle.
-The package currently exposes `Terminal`, `Frame`, and `CellWriter` contracts;
-its `RatatuiTerminal` uses Ratatui buffers and cell diffing. Stateless Ratatui
-widgets remain a separate path for a caller-owned buffer.
-
-The target architecture sharpens those ownership boundaries into three crates:
-a concrete `urushi-tui` `Screen` and `Frame`, the TEA runtime in
-`urushi-tui-app`, and the caller-owned Ratatui integration in
-`urushi-adapter-ratatui`. That split removes Ratatui from the runtime's frame
-engine. The target crate names are not 0.1.0 dependency names.
+`urushi_tui_app::run` assembles and runs the end-to-end TEA lifecycle. It draws
+through the concrete `urushi-tui` `Screen` and `Frame`, whose Urushi-owned cell
+buffers provide diffing and transactional output. The caller-owned Ratatui path
+lives independently in `urushi-adapter-ratatui`; neither the frame engine nor
+the application runtime depends on Ratatui.
 
 ## Semantic themes
 

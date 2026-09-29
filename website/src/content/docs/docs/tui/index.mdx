@@ -5,8 +5,8 @@ description: Understand Urushi's TEA application framework, backend boundary, an
 
 import ArchitectureDiagram from '../../../../components/ArchitectureDiagram.astro';
 
-`urushi-tui` 0.1.0 contains Urushi's runnable full-screen application framework
-and its Ratatui integration. The application model follows The Elm Architecture
+`urushi-tui-app` contains Urushi's runnable full-screen application framework.
+The application model follows The Elm Architecture
 (TEA): an application describes its state, messages, updates, view, effects,
 and subscriptions, while the runtime owns event delivery, drawing, and terminal
 resources.
@@ -32,9 +32,10 @@ and the current model is redrawn.
 - **Runtime ownership.** The runtime orders accepted messages, reconciles
   subscriptions, coalesces physical draws without dropping model transitions,
   and restores the terminal session on every exit path.
-- **A production entry point.** `urushi_tui::run(app)` supplies the default
+- **A production entry point.** `urushi_tui_app::run(app)` supplies the default
   executor, clock, terminal connection, presentation, and session profile.
-  `Runtime::new(app)` makes those boundaries configurable.
+  `Runtime::new(app)` makes the physical backend, executor, clock, and session
+  options configurable; presentation remains the concrete `urushi-tui` screen.
 
 Focus movement, modal stacks, key maps, commands, and navigation rules remain
 ordinary application state and messages. Urushi provides the application and
@@ -86,39 +87,29 @@ messages and pass through the same ordered update path.
 
 [Build an application with the runtime model →](/docs/tui/runtime/)
 
-## The current 0.1.0 package
+## The native frame engine
 
-The current full-screen presentation path exposes three contracts:
+`urushi-tui` exposes a concrete `Screen` and a `Frame` borrowed for one draw.
+The screen owns working and committed Urushi cell buffers, computes their diff,
+writes terminal commands, and adopts the new frame only after every output step
+succeeds. A caller can drive it synchronously without the application runtime.
 
-- `Terminal` owns working and committed presentation state;
-- `Frame` is borrowed for one draw and accepts styled cells and a cursor
-  request; and
-- `CellWriter` turns changed, positioned cells into physical terminal output.
+`Application` remains written against Urushi types, not a presentation backend.
+The runtime resolves its `View` and writes the resulting graphemes through the
+same `Frame` API.
 
-`Application` is written against Urushi types, not a Ratatui backend.
-`RatatuiTerminal` is the implementation shipped in 0.1.0: it uses
-Ratatui buffers for cell diffing, then sends the changed cells through a
-`CellWriter`. A different terminal implementation can sit behind the same
-runtime boundary without changing application types.
+## Ratatui is an optional adapter
 
-## Ratatui has two roles
-
-Ratatui currently participates in two distinct ways:
-
-1. `RatatuiTerminal` supplies the current buffer-and-diff implementation behind
-   Urushi's `Terminal` trait.
-2. `ViewWidget` and related adapters let an application that already owns a
-   Ratatui loop draw Urushi views into its own buffer.
-
-The second path is an integration option for an application that already owns
-its loop.
+`urushi-adapter-ratatui` supplies `ViewWidget` and related adapters for an
+application that already owns a Ratatui loop and buffer. Neither `urushi-tui`
+nor `urushi-tui-app` depends on Ratatui.
 
 [Use Urushi inside an existing Ratatui application →](/docs/tui/ratatui/)
 
-## Target crate boundaries
+## Crate boundaries
 
-The target architecture separates the three independently useful full-screen
-surfaces into package boundaries:
+The three independently useful full-screen surfaces have separate package
+boundaries:
 
 <ArchitectureDiagram kind="tui-crates" />
 
@@ -129,8 +120,6 @@ surfaces into package boundaries:
 - `urushi-adapter-ratatui` owns stateless conversion into a caller-owned
   Ratatui buffer.
 
-In that design, the low-level frame engine is a concrete Urushi `Screen`, not a
-replaceable Ratatui-backed `Terminal`, and Ratatui is not a runtime dependency.
-The separate packages are the intended boundary, not dependency names that are
-available in 0.1.0. Until the split lands, use `urushi-tui` for both the runtime
-and the caller-owned Ratatui adapter.
+The low-level frame engine is a concrete Urushi `Screen`, not a replaceable
+Ratatui-backed terminal, and Ratatui is not a runtime dependency. Choose only
+the package whose ownership model the application needs.
