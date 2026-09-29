@@ -69,7 +69,8 @@ mod tokens;
 pub use component_theme::ComponentTheme;
 pub use definition::{ColorScheme, Theme, ThemeMode, ThemeSet};
 pub use role::{
-    BlockThemeRole, ComponentRole, ListRole, PanelRole, TableRole, TextThemeRole, TreeRole,
+    BlockThemeRole, ComponentRole, ListRole, PanelRole, ScrollbarRole, TableRole, TextThemeRole,
+    TreeRole,
 };
 pub use tokens::SemanticTokens;
 

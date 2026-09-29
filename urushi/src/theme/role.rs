@@ -93,6 +93,32 @@ impl TextThemeRole for TreeRole {
     }
 }
 
+/// A semantic style role used by the Scrollbar component.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum ScrollbarRole {
+    Thumb,
+    Track,
+    Begin,
+    End,
+}
+
+impl ScrollbarRole {
+    pub(crate) const fn index(self) -> usize {
+        match self {
+            Self::Thumb => 0,
+            Self::Track => 1,
+            Self::Begin => 2,
+            Self::End => 3,
+        }
+    }
+}
+
+impl TextThemeRole for ScrollbarRole {
+    fn resolve(self, theme: &Theme) -> TextStyle {
+        theme.components().get_scrollbar_style(self).clone()
+    }
+}
+
 /// A semantic cell role used by the Table component.
 ///
 /// A table cell is a block: it aligns its content inside a column width, which

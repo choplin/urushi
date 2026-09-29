@@ -118,13 +118,13 @@ Canvas intrinsic measurement under derived local constraints before items draw.
 
 Components own semantic data and concrete ways to lower it to primitive views
 or bound Canvas items.
-List, Tree, and Table remain the canonical core components. `urushi-cli` owns
-the opinionated Summary and Warning models and presentations on the same View
-foundation.
-Graphs, charts, sparklines, gauges, tabs, scrollbars, modal frames, and text-field
-visuals are component or presentation candidates when they add reusable
-semantic or visual policy; they are not reasons to add corresponding semantic
-`View` variants.
+List, Tree, Table, and Scrollbar remain the canonical core components.
+`urushi-cli` owns the opinionated Summary and Warning models and presentations
+on the same View foundation. Scrollbar's selectable presentation lowers finite
+viewport metrics to a one-cell-cross-axis Canvas. Graphs, charts, sparklines,
+gauges, tabs, modal frames, and text-field visuals are component or presentation
+candidates when they add reusable semantic or visual policy; they are not
+reasons to add corresponding semantic `View` variants.
 
 A presentation may borrow a component-specific, immutable snapshot needed to
 describe this frame — for example the selected identity, expanded identities,

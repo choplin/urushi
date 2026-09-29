@@ -83,13 +83,13 @@ property pair. The block forwards ordinary fill configuration through
 name the accessor must yield.
 
 Canonical component and CLI presentations follow this boundary. A
-`ComponentTheme` exposes `list()`, `tree()`, and `table()`, but does not accept
-a complete Presentation back into itself. Likewise, a `CliTheme` exposes its
-canonical Summary and Warning presentations but does not replace them. A caller
-that needs another policy clones the canonical presentation or owns a separate
-one and calls `compose`; the Theme remains the stable owner of its canonical
-shortcut. Theme role styles remain configurable because selecting those shared
-styles is part of the Theme's responsibility.
+`ComponentTheme` exposes `list()`, `tree()`, `table()`, and `scrollbar()`, but
+does not accept a complete Presentation back into itself. Likewise, a
+`CliTheme` exposes its canonical Summary and Warning presentations but does not
+replace them. A caller that needs another policy clones the canonical
+presentation or owns a separate one and calls `compose`; the Theme remains the
+stable owner of its canonical shortcut. Theme role styles remain configurable
+because selecting those shared styles is part of the Theme's responsibility.
 
 ## Rejected alternatives
 

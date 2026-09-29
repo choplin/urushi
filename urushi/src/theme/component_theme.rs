@@ -1,8 +1,11 @@
 //! Canonical presentations and shared role styles for reusable components.
 
-use crate::{BlockStyle, Border, ListPresentation, TablePresentation, TextStyle, TreePresentation};
+use crate::{
+    BlockStyle, Border, ListPresentation, ScrollbarPresentation, TablePresentation, TextStyle,
+    TreePresentation,
+};
 
-use super::{ComponentRole, ListRole, SemanticTokens, TableRole, TreeRole};
+use super::{ComponentRole, ListRole, ScrollbarRole, SemanticTokens, TableRole, TreeRole};
 
 const COMPONENT_ROLE_COUNT: usize = 15;
 
@@ -15,6 +18,7 @@ pub struct ComponentTheme {
     list: ListPresentation,
     tree: TreePresentation,
     table: TablePresentation,
+    scrollbar: ScrollbarPresentation,
 }
 
 impl ComponentTheme {
@@ -70,6 +74,10 @@ impl ComponentTheme {
                 BlockStyle::new().foreground(tokens.text),
                 TextStyle::new().foreground(tokens.border),
             ),
+            scrollbar: ScrollbarPresentation::new(
+                TextStyle::new().foreground(tokens.accent),
+                TextStyle::new().foreground(tokens.border),
+            ),
         }
     }
 
@@ -102,6 +110,11 @@ impl ComponentTheme {
         self.table.get_style(role)
     }
 
+    /// Returns the style assigned to one Scrollbar-specific role.
+    pub fn get_scrollbar_style(&self, role: ScrollbarRole) -> &TextStyle {
+        self.scrollbar.get_style(role)
+    }
+
     /// Returns the default presentation policy for lists.
     pub fn list(&self) -> &ListPresentation {
         &self.list
@@ -115,6 +128,11 @@ impl ComponentTheme {
     /// Returns the default presentation policy for tables.
     pub fn table(&self) -> &TablePresentation {
         &self.table
+    }
+
+    /// Returns the default presentation policy for scrollbars.
+    pub fn scrollbar(&self) -> &ScrollbarPresentation {
+        &self.scrollbar
     }
 
     #[must_use]
@@ -155,6 +173,13 @@ impl ComponentTheme {
     #[must_use]
     pub fn table_style(mut self, role: TableRole, style: BlockStyle) -> Self {
         self.table = self.table.style(role, style);
+        self
+    }
+
+    /// Replaces the style assigned to one Scrollbar-specific role.
+    #[must_use]
+    pub fn scrollbar_style(mut self, role: ScrollbarRole, style: TextStyle) -> Self {
+        self.scrollbar = self.scrollbar.style(role, style);
         self
     }
 }

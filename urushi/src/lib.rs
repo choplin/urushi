@@ -37,8 +37,9 @@ mod theme;
 mod view;
 
 pub use component::{
-    List, ListEnumerator, ListItem, ListItemPresentation, ListPosition, ListPresentation, Table,
-    TableBorder, TableCell, TablePresentation, TableRow, TableRowCells, TableRowPosition,
+    List, ListEnumerator, ListItem, ListItemPresentation, ListPosition, ListPresentation,
+    Scrollbar, ScrollbarGlyphs, ScrollbarOrientation, ScrollbarPresentation, ScrollbarThumbSizing,
+    Table, TableBorder, TableCell, TablePresentation, TableRow, TableRowCells, TableRowPosition,
     TableRowPresentation, TextTable, TextTableRow, Tree, TreeNode, TreeNodePresentation,
     TreePosition, TreePresentation, alphabet_enumerator, arabic_enumerator, asterisk_enumerator,
     bullet_enumerator, dash_enumerator, roman_enumerator,
@@ -58,7 +59,7 @@ pub use text::{
     TabPolicy, TextSpan,
 };
 pub use theme::{
-    BlockThemeRole, ColorScheme, ComponentRole, ComponentTheme, ListRole, PanelRole,
+    BlockThemeRole, ColorScheme, ComponentRole, ComponentTheme, ListRole, PanelRole, ScrollbarRole,
     SemanticTokens, TableRole, TextThemeRole, Theme, ThemeMode, ThemeSet, TreeRole,
 };
 pub use urushi_derive::TableRow;

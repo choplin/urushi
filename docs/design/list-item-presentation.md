@@ -108,8 +108,8 @@ without turning the semantic List into presentation state.
   general-purpose `Display` spelling is absent or inappropriate for this view.
 - **Parameterize `ListPresentation` by the formatter or item type.** That makes
   the Theme-owned List-wide value change type for an item-formatting concern and
-  breaks the uniform `components().list()` / `tree()` / `table()`
-  access shape.
+  breaks the uniform `components().list()` / `tree()` / `table()` /
+  `scrollbar()` access shape.
 - **Require a public presenter trait.** Formatting and style selection are
   ordinary functions of `&T` and `ListPosition`; asking every application to
   name and implement a strategy type adds ceremony without expressing another

@@ -1,5 +1,5 @@
 use crate::test_support::{render_block, render_style};
-use crate::{BlockStyle, Color, TerminalBackground, TextStyle};
+use crate::{BlockStyle, Color, ScrollbarRole, TerminalBackground, TextStyle};
 
 use super::*;
 
@@ -67,6 +67,20 @@ fn component_theme_follows_the_token_mapping() {
         render_style(components.get_tree_style(TreeRole::Connector), "x"),
         "\x1b[32mx\x1b[0m"
     );
+    assert_eq!(
+        render_style(components.get_scrollbar_style(ScrollbarRole::Thumb), "x"),
+        "\x1b[35mx\x1b[0m"
+    );
+    for role in [
+        ScrollbarRole::Track,
+        ScrollbarRole::Begin,
+        ScrollbarRole::End,
+    ] {
+        assert_eq!(
+            render_style(components.get_scrollbar_style(role), "x"),
+            "\x1b[92mx\x1b[0m"
+        );
+    }
     assert_eq!(
         render_block(components.get_table_style(TableRole::Header), "x"),
         "\x1b[1;31mx\x1b[0m"

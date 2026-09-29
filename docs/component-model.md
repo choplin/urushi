@@ -127,11 +127,11 @@ semantic component data. `TextStyle`, `BlockStyle`, and `GridStyle` configure
 the primitives they are attached to.
 
 A type that interprets semantic data and constructs primitives is named
-`...Presentation`. Core provides `ListPresentation`, `TreePresentation`, and
-`TablePresentation`; `ComponentTheme` stores their theme-derived defaults
-alongside shared component role styles. `urushi-cli` provides
-`SummaryPresentation` and `WarningPresentation`, stored with their CLI roles in
-`CliTheme`.
+`...Presentation`. Core provides `ListPresentation`, `TreePresentation`,
+`TablePresentation`, and `ScrollbarPresentation`; `ComponentTheme` stores their
+theme-derived defaults alongside shared component role styles. `urushi-cli`
+provides `SummaryPresentation` and `WarningPresentation`, stored with their CLI
+roles in `CliTheme`.
 
 Each presentation is an independent concrete type. `compose` is a naming and
 responsibility convention, not a shared trait or universal signature. Internal
@@ -175,6 +175,7 @@ use:
 theme.list(&list);
 theme.tree(&tree);
 theme.table(&table);
+theme.scrollbar(&scrollbar);
 
 let cli = CliTheme::from_theme(&theme);
 cli.summary(&summary);
@@ -188,11 +189,11 @@ Named alternate presentations and local customization stay explicit through
 
 ## Component classification
 
-`List`, `Tree`, and `Table` are core semantic data. `Summary` and `Warning` are
-semantic data owned by `urushi-cli`, where their rails, glyphs, hierarchy, and
-role assignments form one CLI visual language. Every presentation type owns
-its conversion into `View`, including the current canonical visual structure.
-A table header is Table meaning until
+`List`, `Tree`, `Table`, and `Scrollbar` are core semantic data. `Summary` and
+`Warning` are semantic data owned by `urushi-cli`, where their rails, glyphs,
+hierarchy, and role assignments form one CLI visual language. Every
+presentation type owns its conversion into `View`, including the current
+canonical visual structure. A table header is Table meaning until
 `TablePresentation` lowers it; a list marker and a tree branch are presentation
 policy until their presentation expresses them as generic primitives.
 
@@ -213,6 +214,15 @@ Canvas size is final. Tree branches remain presentation policy rather than
 [`design/tree-lowering.md`](design/tree-lowering.md), and its intrinsic sizing
 contract is recorded separately in
 [`design/tree-width-resolution.md`](design/tree-width-resolution.md).
+
+Scrollbar retains orientation and finite-viewport metrics as semantic data.
+Its presentation selects proportional-thumb or one-cell-marker geometry,
+orientation-specific glyphs, optional track and endpoints, and complete styles
+for each part. It binds those choices into a viewport-sized Canvas item whose
+main axis comes from final layout and whose cross axis is one cell. Placement
+on a parent's left, right, top, or bottom remains ordinary View composition;
+navigation and viewport updates remain application state. The exact contract
+is recorded in [`design/scrollbar.md`](design/scrollbar.md).
 
 Presentations that need no specialized area-dependent algorithm continue to
 compose ordinary primitive trees.

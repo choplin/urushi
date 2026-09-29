@@ -221,12 +221,12 @@ the detailed data and style contract is in
 
 ## Consequences
 
-Core owns `ListPresentation`, `TreePresentation`, and `TablePresentation` in
-`ComponentTheme`. The separate `urushi-cli` crate owns `SummaryPresentation`
-and `WarningPresentation` in `CliTheme`, because their rails, glyphs,
-hierarchy, and role mapping form an opinionated CLI visual language. The
-`...Style` suffix remains reserved for declarative values, and each owning theme
-keeps its canonical calls short.
+Core owns `ListPresentation`, `TreePresentation`, `TablePresentation`, and
+`ScrollbarPresentation` in `ComponentTheme`. The separate `urushi-cli` crate
+owns `SummaryPresentation` and `WarningPresentation` in `CliTheme`, because
+their rails, glyphs, hierarchy, and role mapping form an opinionated CLI visual
+language. The `...Style` suffix remains reserved for declarative values, and
+each owning theme keeps its canonical calls short.
 
 This is a deliberate pre-alpha source break rather than a deprecation cycle.
 The implementation issues remove the old names and methods when they introduce

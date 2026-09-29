@@ -4,7 +4,7 @@ use std::fmt;
 
 use urushi_terminal::TerminalBackground;
 
-use crate::{BlockStyle, List, Table, TextStyle, Tree, View};
+use crate::{BlockStyle, List, Scrollbar, Table, TextStyle, Tree, View};
 
 use super::{BlockThemeRole, ComponentTheme, SemanticTokens, TextThemeRole};
 
@@ -128,6 +128,11 @@ impl Theme {
         T: crate::TableRow,
     {
         self.components.table().compose(table)
+    }
+
+    /// Composes a scrollbar with this theme's canonical presentation.
+    pub fn scrollbar(&self, scrollbar: &Scrollbar) -> View {
+        self.components.scrollbar().compose(scrollbar)
     }
 
     /// Resolves one role against this theme.
