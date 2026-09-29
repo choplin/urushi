@@ -137,7 +137,7 @@ core application API therefore has no `request_draw`, `plan_draw`, public
 through its model, effects, and view.
 
 The initial runtime also does not require `View` equality as a prerequisite for
-skipping a draw. `Terminal` already compares cell buffers and emits only
+skipping a draw. `Screen` already compares cell buffers and emits only
 changed cells. Caching or equality checks above that layer should be introduced
 only after measurement identifies a material benefit and a correct ownership
 boundary.
@@ -174,7 +174,7 @@ it subscribed to terminal errors, fatal otherwise.
 
 This barrier guarantees agreement among the delivered environment facts, the
 model after `update`, and the logical rendering-environment snapshot used to
-build the frame. `Terminal` therefore does not let the backend resize the frame
+build the frame. `Screen` therefore does not let the backend resize the frame
 on its own at draw time: a size change the backend reports while drawing is
 not applied to that draw but enters admission as a `Sync` delivery, so the next
 barrier draws with a snapshot and a frame that agree. It does not freeze the
@@ -183,7 +183,7 @@ claim that terminal output is an atomic transaction.
 
 ### How surface information reaches the application
 
-The runtime, terminal, Ratatui, and backend handle physical rendering
+The runtime, `Screen`, and terminal backend handle physical rendering
 constraints. An application only needs surface information when that
 information affects application semantics, such as layout choices or a viewport
 measured in cells.
@@ -219,11 +219,11 @@ delivery. Initial `Async` deliveries need no staging; they retain their normal
 accepted positions, and any one processed before the initial `Sync` still
 cannot cause a draw while that fence is pending.
 
-### A lightweight Ratatui application
+### A lightweight TUI application
 
-For a lightweight Ratatui application, every accepted key event advances the
+For a lightweight TUI application, every accepted key event advances the
 model. The runtime may process many such updates before the next draw, at which
-point `view` reflects the latest model, and Ratatui emits the cell diff.
+point `view` reflects the latest model, and `Screen` emits the cell diff.
 Filesystem work or syntax highlighting runs as effects, so key handling does
 not wait for them.
 
@@ -239,10 +239,10 @@ not wait for them.
 | Startup | Tests proving `init` and the known initial surface `Sync` are reflected in the first view through the ordinary fence |
 
 The runtime test harness should provide deterministic message sources, a
-controllable clock, a deterministic presentation boundary backed where needed
-by an in-memory `Terminal`, and observable effect scheduling. Tests should
-assert externally meaningful ordering and presentation behavior, not private
-task structure.
+controllable clock, a deterministic presentation boundary, and observable
+effect scheduling. `Screen` behavior is tested separately in `urushi-tui`.
+Tests should assert externally meaningful ordering and presentation behavior,
+not private task structure.
 
 ## Why `Delivery` and its variants stay internal
 

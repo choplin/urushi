@@ -228,7 +228,7 @@ model.
 
 ## Rejected designs
 
-- **One implicit root viewport in `urushi-tui`.** It cannot express independent
+- **One implicit root viewport in the TUI framework.** It cannot express independent
   nested regions and is unavailable to callers using the Ratatui widget or
   another renderer.
 - **Always clamp.** It assigns application intent to a coordinate operation and

@@ -63,8 +63,9 @@ data, Base64, Kitty, Sixel, or a graphics lifecycle.
 
 Kitty and Sixel are alternate encodings of the same resolved image placement,
 not TUI concepts. They therefore share `urushi-graphics`; neither belongs to
-the Ratatui adapter and runtime in `urushi-tui`. Terminal observation and the
-capability vocabulary remain in `urushi-terminal`. `TerminalCapabilities`
+`urushi-tui-app`, the frame engine in `urushi-tui`, or
+`urushi-adapter-ratatui`. Terminal observation and the capability vocabulary
+remain in `urushi-terminal`. `TerminalCapabilities`
 reports protocols independently through `supports_graphics` only after the
 terminal answers the corresponding Kitty or primary-device-attributes query;
 `TERM` and terminal-family names are not evidence. The graphics layer decides
@@ -87,8 +88,9 @@ the key lookup after resolution.
 Upload reuse, deletion, movement, partial source rectangles, protocol-specific
 repaint, and failure recovery require knowledge of prior frames and the selected
 terminal. Reusable protocol state machines belong in `urushi-graphics`, but the
-host that owns a redraw lifecycle owns their state: `urushi-tui` for a TUI and
-`urushi-prompt` for a prompt. Each integration is optional behind that host's
+host that owns a redraw lifecycle owns their state: `urushi-tui-app` for a TEA
+application, a caller-owned loop for a low-level TUI, and `urushi-prompt` for a
+prompt. Each integration is optional behind that host's
 graphics feature. One-shot callers retain no state, and core `urushi`,
 `ImagePresentation`, `View`, and `ResolvedView` remain independent of the
 lifecycle.

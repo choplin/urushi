@@ -69,17 +69,18 @@ carry the resulting viewport origin and boundary behavior as a pure projection,
 along with focused appearance. That projection transforms anchor rectangles
 through the same coordinates and clips as cells; its exact visibility report
 is defined in [`view-projection.md`](view-projection.md). Invalidation belongs
-to Ratatui's cell diff. The division between interaction ownership and
-one-frame expression is recorded in
+to `urushi-tui::Screen` and its cell diff. The division between interaction
+ownership and one-frame expression is recorded in
 [`tui-view-expressiveness.md`](tui-view-expressiveness.md).
 
-The runtime's `Renderer` consumes `ResolvedView` and its anchored rectangles
-directly rather than going through `ViewWidget`, because it needs them from the
-same resolution that produced the cells and resolves exactly once per frame. `ViewWidget` and `RatatuiWidget` stay public: a plain Ratatui
+The `urushi-tui-app` `Renderer` consumes `ResolvedView` and its anchored
+rectangles directly rather than going through `ViewWidget`, because it needs
+them from the same resolution that produced the cells and resolves exactly
+once per frame. `ViewWidget` and `RatatuiWidget` stay public: a plain Ratatui
 application drawing an Urushi view into a `Rect` it already owns is an audience
 this design names, and it has no runtime to ask. The public surface of
-`urushi-tui` therefore grows with the runtime rather than shrinking into it,
-and the cell-writing path is shared between the widget and the `Renderer`.
+`urushi-adapter-ratatui` serves that audience independently; both paths consume
+the same `ResolvedView` semantics without sharing a foreign buffer type.
 
 ## Why the anchor is a keyed box rather than a node of its own
 
@@ -113,8 +114,8 @@ An earlier revision of that document set the type aside, on the ground that it
 was a line-oriented collection of styled spans and so could not be a
 full-screen layout tree. The premise is gone: `View` is a rectangle tree, its
 area is an input to layout rather than a crop applied afterwards, and the ANSI
-backend and the Ratatui backend already consume the one `ResolvedView` it
-produces. What remained was not a reason but its residue.
+backend, the full-screen `Screen`, and the Ratatui adapter already consume the
+one `ResolvedView` it produces. What remained was not a reason but its residue.
 
 What the choice turns on now is what a second tree would cost. One layout model
 spans plain output, prompts, and full-screen applications, so a component —
@@ -181,7 +182,7 @@ what is selected, what a key does next — inside a value whose whole purpose is
 to describe a rectangle.
 
 Partial redraw hints are refused on the same ground as the public damage model:
-Ratatui diffs cell buffers, and a view that carried invalidation would be
+`Screen` diffs cell buffers, and a view that carried invalidation would be
 describing the draw rather than the frame.
 
 ## Why the runtime draws the resolved view itself
@@ -193,6 +194,7 @@ runtime, which needs the anchored rectangles from that same resolution and must 
 exactly once per frame; going through the widget would mean resolving twice, or
 resolving and then discarding what the cursor depends on.
 
-So the `Renderer` consumes `ResolvedView` and its placements, and the widget
-stays public rather than being absorbed. The two share a cell-writing path
-rather than a resolution.
+So the `Renderer` consumes `ResolvedView` and its placements, while the widget
+stays public in `urushi-adapter-ratatui` rather than being absorbed into the
+application framework. Each output boundary translates the same resolution;
+neither owns a second layout pass or view tree.

@@ -1,7 +1,7 @@
 # TUI View Expressiveness
 
 [`tui-architecture.md`](../tui-architecture.md) makes the application `Model`
-and its transitions the responsibility of `urushi-tui`, while
+and its transitions the responsibility of the application, while
 [`view-model.md`](../view-model.md) makes `urushi::View` the renderer-neutral
 description of one frame. This document states how to judge whether that one
 view model is expressive enough for full-screen applications and allocates the
@@ -134,16 +134,22 @@ changes it nor decides what an event means. The exact input type and inherent
 method signature follow the needs of that component, as
 [`component-presentation.md`](component-presentation.md) records.
 
-### `urushi-tui`
+### The application and `urushi-tui-app`
 
-`urushi-tui` owns time and interaction:
+The application owns interaction meaning and current state:
 
-- the TEA `Model`, `Message`, `update`, effects, and subscriptions;
+- the TEA `Model`, `Message`, and `update`;
 - focus, selection, expansion, navigation, modal stacks, and command mapping;
 - scroll offsets, pan and zoom cameras, hit testing, clicking, and dragging;
-- animation clocks, timeline playback, asynchronous I/O, and redraw policy;
-- terminal cursor execution; and
-- adapter support for callers that execute foreign widgets or graphics.
+- timeline playback and the meaning of asynchronous results; and
+- immutable presentation inputs derived for the current frame.
+
+`urushi-tui-app` owns their execution:
+
+- effect and subscription lifecycles;
+- animation clocks, asynchronous I/O, delivery, and redraw scheduling;
+- selection of the terminal cursor request from the resolved cursor anchor; and
+- orchestration of optional graphics state owned by the application host.
 
 The runtime lends the current model to the application's `view` function. The
 application selects or derives the immutable presentation inputs for that
@@ -164,7 +170,7 @@ event -> update(Model) -> current Model snapshot
                               v
                          ResolvedView
                               |
-                  urushi-tui backend adapter
+                    urushi-tui Frame
 ```
 
 ## Invariants
@@ -181,8 +187,8 @@ The primitive APIs must preserve these constraints:
 - overlap has deterministic ordering and clipping across all renderers;
 - anchors and other keyed placements are transformed and clipped with their
   containing viewport or positioned scene;
-- foreign-region reservation stays renderer-neutral, while executing the
-  foreign renderer stays in `urushi-tui`; and
+- foreign-region reservation stays renderer-neutral, while executing a
+  foreign renderer stays with the caller or its explicit adapter; and
 - Urushi and Noctui adopt equivalent types, invariants, defaults, and
   operations once those contracts are decided.
 

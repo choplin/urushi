@@ -47,7 +47,7 @@ primitives or bind an owned frame into a Canvas item with one Canvas-wide
 intrinsic sizing value. `compose` names the lowering responsibility, not one
 shared signature: a component that needs
 selection, a visible origin, or another fact about the current frame may borrow
-an additional component-specific presentation input. `urushi-tui` owns and
+an additional component-specific presentation input. The application owns and
 updates that state; composition only reads its current value.
 
 ## The four layers

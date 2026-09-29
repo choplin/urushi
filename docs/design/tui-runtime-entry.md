@@ -11,7 +11,7 @@ own — a failed draw or a panic in `update`.
 ### The entry point
 
 ```rust
-let model = urushi_tui::run(app)?;
+let model = urushi_tui_app::run(app)?;
 ```
 
 `run` takes an `Application`, drives it on the calling thread until it shuts
@@ -29,9 +29,8 @@ Tokio's blocking pool, so neither stops delivery processing.
 boundary be supplied:
 
 ```rust
-urushi_tui::Runtime::new(app)
+urushi_tui_app::Runtime::new(app)
     .executor(executor)   // where closures and futures run
-    .terminal(terminal)   // the Terminal implementation frames go to
     .backend(backend)     // the physical session, input, and query connection
     .clock(clock)         // what timers and intervals read
     .mouse(true)          // a session option; see tui-terminal-ownership.md
@@ -40,27 +39,26 @@ urushi_tui::Runtime::new(app)
 
 The builder is the one public surface for both a program that already has an
 executor — it passes a Tokio handle — and a harness that passes a deterministic
-executor, an in-memory frame terminal, a fake physical backend, and a
-controllable clock. The split between `terminal` and `backend` preserves the
-same ownership boundary as production: a `Terminal` receives committed frames,
-while one complete `TerminalBackend` owns session modes, input, output, and
-mutable queries. Every boundary has the real default — the Ratatui-backed
-terminal over Crossterm, Tokio, the system clock — and a program that supplies
-none gets what `run` gives. The session options — raw mode, alternate screen,
-the input modes, mouse capture — sit on the same builder; their defaults are in
-[`tui-terminal-ownership.md`](tui-terminal-ownership.md).
+executor, a fake physical backend, a runtime-internal presentation double, and
+a controllable clock. One complete `TerminalBackend` owns session modes, input,
+output, and mutable queries; the runtime gives its shared output side to an
+`urushi_tui::Screen`. Every public boundary has the real default — the default
+physical backend, Urushi's `Screen`, Tokio, and the system clock — and a program
+that supplies none gets what `run` gives. The session options — raw mode,
+alternate screen, the input modes, mouse capture — sit on the same builder;
+their defaults are in [`tui-terminal-ownership.md`](tui-terminal-ownership.md).
 
-Those physical-terminal defaults are provided by the default `crossterm`
-feature. A build that enables `runtime` without `crossterm` retains the full
-runtime but must supply its physical connection with `.backend(backend)` before
-`.run()` becomes available.
+The default physical terminal is provided by the default `crossterm` feature.
+A build of `urushi-tui-app` without `crossterm` retains the full application
+framework but must supply its physical connection with `.backend(backend)`
+before `.run()` becomes available.
 
 ### The executor boundary
 
 `Executor` is a runtime-owned trait with the shape effects need and nothing
 more: run a blocking closure off the update thread, drive a future, and return
 for each a handle the runtime drops to replace the work. Tokio is the one
-implementation the runtime ships behind the `runtime` feature; the trait
+implementation the application crate ships; the trait
 exists so that a test can substitute a deterministic executor and so that
 another executor can be supplied later without a change to any application
 type. No executor's task or handle type appears in `Effect`, `Subscription`,

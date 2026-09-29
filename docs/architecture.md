@@ -5,8 +5,8 @@ the workspace and module responsibilities, the dependency direction between
 them, the rendering flows, terminal ownership, and the invariants those
 boundaries rest on.
 
-Urushi spans plain CLI output, blocking interactive prompts, and a full-screen
-TUI runtime layered on Ratatui. The [`README`](../README.md#concept) explains
+Urushi spans plain CLI output, blocking interactive prompts, and full-screen
+TUI applications. The [`README`](../README.md#concept) explains
 why one library covers all three; this document explains how those surfaces
 share a foundation without being forced into one rendering model or one
 terminal lifecycle. Each surface's own design is a separate document:
@@ -108,7 +108,8 @@ Composition happens in `View` before layout. Rendered strings do not re-enter
 the layout model. The reasoning behind the view/block boundary is recorded in
 [`design/view-block-model.md`](design/view-block-model.md).
 
-Ratatui integration sits outside these semantic types:
+The optional `urushi-adapter-ratatui` integration sits outside these semantic
+types:
 
 ```text
 Resolved TextStyle   --> RatatuiStyle
@@ -116,7 +117,7 @@ View + Rect          --> ViewWidget    --> caller-owned Ratatui Buffer
 BlockStyle + text    --> RatatuiWidget --> ViewWidget's path
 ```
 
-The Ratatui adapter computes no geometry. A target `Rect` becomes `Available`,
+The adapter computes no geometry. A target `Rect` becomes `Available`,
 `resolve` runs the same layout pass inside that area, and the adapter converts
 each grapheme and its logical style into cells, so the two backends cannot
 disagree about a rectangle.
@@ -168,7 +169,9 @@ The surfaces above the foundation, and the layer Urushi provides for each, are:
 | --- | --- | --- |
 | Plain CLI output | Core `View`, `resolve`, `render`, and static-write helpers; [`urushi-cli`](cli-presentation.md) adds opinionated Summary and Warning presentation | The application owns its command workflow. Standard-stream convenience functions own only one static write. |
 | Interactive prompt | `Form` / `Group`; typed `Input`, `Select`, and `Confirm`; synchronous validation; selectable inline or alternate-screen presentation; terminal session setup and cleanup | `urushi-prompt` owns the blocking prompt session and the resources it acquires. The application owns when the form runs and what submitted values mean. |
-| Full-screen TUI | `urushi-tui`: the runtime and its `ratatui` adapter — logical-style conversion, widgets that resolve a `View` and draw it into a Ratatui `Buffer`, and the cell-writing path the runtime's renderer takes with a view it resolved itself | The `urushi-tui` runtime owns event delivery, frame scheduling, terminal entry and restoration. The application owns its model, update, and view. |
+| Full-screen frame presentation | `urushi-tui`: a synchronous `Screen` and draw-scoped `Frame` over Urushi-owned cell buffers and diffing | The caller owns the loop and terminal session; `Screen` owns working and committed frame state and one output transaction. |
+| Full-screen application | `urushi-tui-app`: the TEA application value and runtime above `urushi-tui` | The application runtime owns event delivery, frame scheduling, terminal entry and restoration. The application owns its model, update, and view. |
+| Ratatui integration | `urushi-adapter-ratatui`: style conversion and widgets that resolve a `View` into a caller-owned Ratatui `Buffer` | The Ratatui application owns its loop, buffer, terminal, and session. |
 
 The surfaces are intentionally partial. Sharing the foundation does not require
 one surface to adopt another's application model or lifecycle, so the flows are
@@ -198,8 +201,9 @@ SemanticTokens --> Theme --> ComponentTheme / logical styles
 This split prevents visual consistency from turning into lifecycle coupling.
 For example, a prompt and a Ratatui screen may resolve the same
 `PromptOptionSelected` role and use the same CJK width rules, but the prompt
-still owns validation and its selected terminal surface, while the full-screen
-application runtime owns event processing and frame rendering. Likewise, plain
+still owns validation and its selected terminal surface, while
+`urushi-tui-app` owns event processing and frame rendering for a TEA
+application. Likewise, plain
 CLI output can use the same theme without entering raw mode or starting an
 event loop.
 
@@ -224,7 +228,9 @@ a role are documented with the extension point itself, in
 | [`urushi-cli`](../urushi-cli/) | Opinionated semantic summaries and warnings for human-facing, non-interactive CLI output. | `urushi` |
 | [`urushi-graphics`](../urushi-graphics/) | Image data and presentations, resolved anchor-to-image placement, terminal graphics encoders, and reusable graphics lifecycle machinery. Retaining that state belongs to an opted-in host runtime. | `urushi`, `urushi-terminal` |
 | [`urushi-prompt`](../urushi-prompt/) | Typed input, select, and confirm forms; prompt state transitions; inline and alternate-screen presentations; terminal session setup and cleanup. | `urushi`, `urushi-terminal` |
-| [`urushi-tui`](../urushi-tui/) | The Ratatui backend adapter in [`ratatui`](../urushi-tui/src/ratatui/) — style conversion, widgets, and the cell-writing path they share with the renderer — and the full-screen TUI runtime behind the default-on `runtime` Cargo feature. | `urushi`, `urushi-terminal` |
+| [`urushi-tui`](../urushi-tui/) | Synchronous full-screen cell presentation: draw-scoped frames, Urushi-owned buffers and diffing, transactional output, and failed-output recovery. | `urushi`, `urushi-terminal` |
+| `urushi-tui-app` | TEA-style full-screen applications: model ownership, delivery, effects, subscriptions, scheduling, rendering into `urushi-tui`, terminal input, and session restoration. | `urushi`, `urushi-terminal`, `urushi-tui` |
+| `urushi-adapter-ratatui` | Optional Ratatui integration: logical-style conversion, stateless widgets, resolved-cell writing, and anchor translation for a caller-owned Ratatui buffer. | `urushi` |
 
 `urushi-prompt` owns interactive prompt behavior. The core crate must not gain
 prompt-specific navigation, validation, cursor, or form-submission policy merely
@@ -242,13 +248,20 @@ to share styling.
 | [`render`](../urushi/src/render/) | Feature selection and translation of a `ResolvedView` to ANSI text. | `style`, `view`, `urushi-terminal` |
 | [`output`](../urushi/src/output.rs) | Standard-stream convenience: detection, width selection, rendering policy, and one static write. | `view`, `render`, `urushi-terminal` |
 
-## TUI module responsibilities
+## TUI crate responsibilities
 
-| Module | Responsibility | Internal dependencies |
+| Crate | Responsibility | Internal dependencies |
 | --- | --- | --- |
-| [`ratatui`](../urushi-tui/src/ratatui/) | Converts logical styles and resolved views to Ratatui cells; provides stateless widgets for caller-owned loops and the transactional buffer/diff terminal used by the runtime. | `urushi`, `terminal`, Ratatui |
-| [`terminal`](../urushi-tui/src/terminal.rs) | Defines draw-scoped `Frame`, committed `Terminal`, and `CellWriter` contracts above backend-independent terminal commands. | `urushi-terminal` |
-| `runtime` | Re-exports the application, effect, subscription, and admission values; owns the public blocking `Runtime` entry point, source execution, delivery ordering, frame scheduling, rendering, terminal input, and session restoration. | `urushi`, `ratatui`, `terminal`, `urushi-terminal`, Tokio |
+| `urushi-tui` | Defines `Screen` and draw-scoped `Frame`; owns cell storage, wide-grapheme ownership, committed and working buffers, diffing, output commit, and recovery. | `urushi`, `urushi-terminal` |
+| `urushi-tui-app` | Exposes the application, effect, subscription, admission, and blocking runtime values; owns source execution, delivery ordering, frame scheduling, view resolution, terminal input, and session restoration. | `urushi`, `urushi-terminal`, `urushi-tui`, Tokio |
+| `urushi-adapter-ratatui` | Converts logical styles and resolved views to Ratatui cells and provides stateless widgets for caller-owned Ratatui loops. | `urushi`, Ratatui |
+
+The reason these are package boundaries rather than Cargo features is that they
+serve three independent consumers. A caller-owned full-screen loop needs the
+synchronous frame engine without an async executor; a TEA application needs
+the application runtime; and a Ratatui application needs only the foreign
+buffer adapter. The detailed ownership and rejected combined forms are defined
+in [`design/tui-crate-boundaries.md`](design/tui-crate-boundaries.md).
 
 The dependency direction runs from I/O and adapters toward semantic modules:
 
@@ -259,8 +272,9 @@ The dependency direction runs from I/O and adapters toward semantic modules:
 - `view` does not choose a renderer or own terminal state;
 - renderers translate Urushi values into a backend representation and do not
   own application workflows;
-- `output` owns one static standard-stream write, while prompt and TUI runtimes
-  own the interactive terminal resources and redraw lifecycles they acquire;
+- `output` owns one static standard-stream write, while prompt and
+  `urushi-tui-app` own the interactive terminal resources and redraw
+  lifecycles they acquire;
 - prompt and application code compose these capabilities at their own entry
   points.
 
@@ -360,13 +374,13 @@ surface-specific positioning options do not mix.
 contracts and the default inline rendering path; its linked design topics hold
 the exact resize and ownership rules.
 
-### External backends stay behind adapters
+### Physical terminals, frame presentation, and adapters stay distinct
 
 The backend-independent command, event, query, raw-mode, session-restoration,
 and terminal-geometry contracts live in `urushi-terminal`. It contains no
-frame, buffer, cell-diff, or presentation model. `urushi-tui::terminal` owns
-`Cell`, `CellWriter`, `Frame`, `Terminal`, and `Rect`; its Ratatui terminal owns
-buffers and diffing, and its cell writer lowers positioned cells to
+frame, buffer, cell-diff, or presentation model. `urushi-tui` owns `Screen`,
+`Frame`, its cells and rectangles, and the working and committed buffers. A
+`Screen` computes its own diff and lowers changed cells to
 `urushi_terminal::Command` values. `TerminalBackend` describes one interactive
 connection that owns input, output, process modes, and queries; its component
 traits remain usable independently for tests and non-interactive output.
@@ -424,8 +438,9 @@ changed deliberately and this document is updated in the same change:
    strings are not a layout input.
 6. Workspace-independent terminal contracts and target-specific inspection are
    centralized in `urushi-terminal`.
-7. `urushi-tui` widgets write only to the buffer supplied by the caller;
-   terminal lifecycle, event delivery, and frame scheduling belong to the
-   runtime, never to a widget.
+7. `urushi-tui` owns backend-independent full-screen frame state and diffing;
+   `urushi-tui-app` owns terminal lifecycle, event delivery, and frame
+   scheduling; `urushi-adapter-ratatui` writes only to the Ratatui buffer its
+   caller supplies.
 8. Prompt-specific state, cursor behavior, and terminal cleanup remain in
     `urushi-prompt`, not the core component model.

@@ -391,7 +391,7 @@ returns a final `String`, and that string does not re-enter the view tree.
 - `render_text` serializes a `StyledText` directly under explicit
   `RenderSettings`; it performs no layout and preserves source tabs and line
   boundaries.
-- `urushi-tui`'s `ViewWidget` derives `Available` from the target `Rect`,
+- `urushi-adapter-ratatui`'s `ViewWidget` derives `Available` from the target `Rect`,
   resolves the view, converts each grapheme's logical `TextStyle` through
   `RatatuiStyle`, and writes cells. `RatatuiWidget` draws a single `BlockStyle`
   through the same path.

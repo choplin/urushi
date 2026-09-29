@@ -223,7 +223,7 @@ Renderers consume the values present in one `TextStyle`.
   parameter order so that one style always spells one sequence. It emits a
   hyperlink as an OSC 8 scope around the styled run and closes the scope before
   a line boundary.
-- The `urushi-tui` adapter maps the active attribute set to Ratatui's
+- The `urushi-adapter-ratatui` adapter maps the active attribute set to Ratatui's
   `add_modifier`; it does not populate `sub_modifier`. Its default cell-writing
   mode therefore follows Ratatui's patch semantics, while the explicit
   `CellWriteMode::Replace` resets each cell the view writes before applying its

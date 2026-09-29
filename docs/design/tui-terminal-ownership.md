@@ -1,9 +1,9 @@
 # TUI Rendering and Terminal Ownership
 
-What each name in the runtime's rendering vocabulary — `Renderer`, `Frame`,
-`Terminal`, `TerminalSession`, `CellWriter`, `Clock` — owns and does not own, the
-Rust shape each has, the commit guarantee the terminal gives, and what a
-session can and cannot promise to restore.
+What each name in the application framework's rendering vocabulary —
+`Renderer`, `Frame`, `Screen`, `TerminalSession`, `CommandWriter`, `Clock` —
+owns and does not own, the Rust shape each has, the commit guarantee the screen
+gives, and what a session can and cannot promise to restore.
 [`tui-architecture.md`](../tui-architecture.md) summarizes the ownership under
 "Rendering and runtime ownership"; this file holds the exact boundaries.
 
@@ -16,37 +16,46 @@ and terminal geometry used by those operations. Core `urushi` re-exports its
 color, attribute, and underline primitives and uses them inside `TextStyle`;
 surfaces do not maintain equivalent style types. The terminal crate owns no
 frame, cell buffer, diff, or presentation transaction.
-`urushi-tui::terminal` owns `Terminal`, `Frame`, `CellWriter`, and `Rect`, and
-binds a frame's associated cell to `StyledGrapheme`. Its `RatatuiTerminal` uses
-Ratatui for the working buffer and cell diff, then sends changed cells through
-a `CellWriter` that lowers them to `urushi_terminal::Command` values. Replacing
-the command backend changes no runtime type and no application.
 
-### Terminal
+`urushi-tui` owns `Screen`, `Frame`, `Rect`, its cell representation, and the
+working and committed buffers. It writes changed cells through
+`urushi_terminal::CommandWriter`; replacing the command backend changes no
+frame type and no application. `urushi-tui-app` owns the application runtime,
+renderer, input sources, clock, and session orchestration above that
+synchronous layer. The full package boundary is defined in
+[`tui-crate-boundaries.md`](tui-crate-boundaries.md).
+
+### Screen
 
 ```rust
-pub trait Terminal {
-    type Cell: ?Sized;
-    type Frame<'a>: Frame<Cell = Self::Cell>;
-
+impl<W: CommandWriter> Screen<W> {
     fn size(&self) -> TerminalSize;
     fn resize(&mut self, size: TerminalSize) -> io::Result<()>;
-    fn draw(&mut self, draw: impl FnOnce(&mut Self::Frame<'_>)) -> io::Result<()>;
+    fn draw(&mut self, draw: impl FnOnce(&mut Frame<'_>)) -> io::Result<()>;
 }
 ```
 
-`Terminal` owns working and committed presentation state, cell diffing,
+`Screen` owns working and committed presentation state, cell diffing,
 output, and flushing. `draw` lends a frame over the working state, diffs it
 against the committed state, writes the difference and the cursor request, and
 flushes; only when every step has succeeded does the working state become the
 committed state. A failed output leaves the committed state as it was but marks
 the physical surface unknown, because an arbitrary prefix may have arrived.
 The next `draw` clears that surface and redraws its complete working state from
-a blank baseline before it may commit. What the runtime does with the failure itself
-— deliver it to an application that subscribed to terminal errors, or end the
-run — is defined in [`tui-runtime-entry.md`](tui-runtime-entry.md).
+a blank baseline before it may commit. What the runtime does with the failure
+itself — deliver it to an application that subscribed to terminal errors, or
+end the run — is defined in
+[`tui-runtime-entry.md`](tui-runtime-entry.md).
 
-`Terminal` does not resize itself at draw time. Its size changes only through
+Each buffer cell is empty, the start of one measured grapheme, or a continuation
+owned by that start. Writing a grapheme updates its complete width without
+leaving an independently drawable continuation. Diffing treats the two
+terminal-default blank representations as visibly equal and emits only owners;
+shrinking, removing, or moving a wide grapheme still clears every cell it
+previously painted. These states and results are equivalent to Noctui's buffer
+and diff model.
+
+`Screen` does not resize itself at draw time. Its size changes only through
 `resize`, which the runtime calls when a surface observation has been applied
 through the `Sync` barrier of
 [`tui-delivery-ordering.md`](tui-delivery-ordering.md), so the frame the
@@ -55,30 +64,23 @@ renderer draws into and the size the model reflects are the same size.
 Cursor position and visibility requested for one frame belong to the frame and
 terminal path. They are not application effects. Where drawing a frame changes
 terminal state — hiding the cursor for a frame that requests none — restoring
-it is `Terminal`'s or `TerminalSession`'s obligation, never the application's.
+it is `Screen`'s or `TerminalSession`'s obligation, never the application's.
 
 ### Frame
 
 ```rust
-pub trait Frame {
-    type Cell: ?Sized;
-
+impl Frame<'_> {
     fn area(&self) -> Rect;
-    fn put(&mut self, column: usize, row: usize, cell: &Self::Cell);
+    fn put(&mut self, column: usize, row: usize, cell: &StyledGrapheme);
     fn set_cursor(&mut self, at: Option<Position>);
 }
 ```
 
-A `Frame` is a borrowed, draw-scoped handle to the terminal's working
+A `Frame` is a borrowed, draw-scoped handle to the screen's working
 presentation state: its area, the cells, and the cursor request for that draw.
-Its associated `Cell` keeps the terminal contract independent of the
-presentation crate. The TUI runtime requires `Cell = StyledGrapheme`; `put`
-therefore places one styled grapheme at a cell and claims the cells its width
+`put` places one styled grapheme at a cell and claims the cells its width
 covers. The frame does not own the previous buffer, the diff, the output
-stream, or the flush; it cannot commit. A backend's frame may expose its own
-cell buffer beside this trait for a caller that holds the backend's types — the
-Ratatui-backed frame exposes its `Buffer` — and nothing in the runtime reaches
-for it.
+stream, or the flush; it cannot commit. It exposes no foreign buffer type.
 
 ### Renderer
 
@@ -95,7 +97,7 @@ result and does not recompute visibility from containment in the root
 rectangle.
 
 That is the whole rendering operation. It does not own the model, navigation
-policy, scheduling, a terminal, or session restoration, and it does not fill
+policy, scheduling, a `Screen`, or session restoration, and it does not fill
 any other anchored rectangle. Evaluator ownership and the equivalence between
 the direct and retained paths are defined in
 [`resolution-reuse.md`](resolution-reuse.md).
@@ -144,16 +146,14 @@ alternate screen did not protect, restoration after `panic = "abort"`, `kill
 -9`, or a signal the application did not declare. That limitation is part of
 the public contract.
 
-### CellWriter
+### Command output
 
-`CellWriter` is the low-level full-screen drawing SPI in
-`urushi-tui::terminal`. `RatatuiTerminal<W: CellWriter>` owns the working and
-committed Ratatui `Buffer` values and calls `Buffer::diff`, then passes changed
-positions, graphemes, resolved terminal styles, cursor state, clear, and flush
-to `W`. The blanket implementation for `CommandWriter` coalesces adjacent
-positions and repeated styles before emitting backend-independent commands.
-The optional Crossterm adapter only serializes those primitive commands; it
-does not know about cells, Ratatui buffers, frame history, or diffing.
+`Screen<W: CommandWriter>` owns Urushi's working and committed `Buffer` values,
+calls the Urushi diff operation, and lowers changed positions, graphemes,
+resolved terminal styles, cursor state, clear, and flush to backend-independent
+commands. It coalesces adjacent positions and repeated styles before emitting
+them. The optional Crossterm adapter only serializes those primitive commands;
+it does not know about cells, buffers, frame history, or diffing.
 
 ### Backend capability model
 
@@ -209,21 +209,21 @@ synchronous terminal groups that the boundary does own.
 ### Clock
 
 `Clock` is the runtime's one source of time — what `Subscription::interval`
-and `Effect::after` read, and what they wait on. It belongs to `urushi-tui`, not
-the terminal foundation: time is an execution boundary rather than a terminal
-contract. It is backed by Tokio's time by default and by a clock the test
-advances by hand in the harness. An application never reads it directly.
+and `Effect::after` read, and what they wait on. It belongs to
+`urushi-tui-app`, not the terminal foundation: time is an execution boundary
+rather than a terminal contract. It is backed by Tokio's time by default and
+by a clock the test advances by hand in the harness. An application never
+reads it directly.
 
 ### Replaceable in tests
 
 The test harness of [`tui-delivery-ordering.md`](tui-delivery-ordering.md)
-replaces the terminal layer at two levels. The runtime core — delivery,
-scheduling, barriers — runs against an in-memory implementation of the
-`urushi_tui::terminal::Terminal` contract, which records every committed frame
-and cursor request and depends on no backend. The Ratatui-backed terminal is
-tested on its own over a recording `CellWriter`. A harness that needed a physical
-adapter to test the runtime would bind the runtime's tests to an implementation
-detail the runtime is built to outgrow.
+replaces the runtime-internal asynchronous presentation coordinator to observe
+submitted views and draw completion without a physical terminal. `urushi-tui`
+tests `Screen` separately over a recording `CommandWriter`, including buffer
+diffs and failures at clear, changed-cell output, cursor, and flush. A harness
+that needed a physical adapter to test delivery ordering would bind the
+application tests to an unrelated implementation detail.
 
 ### Cell output and terminal graphics
 
@@ -243,34 +243,26 @@ not pay for or manage graphics state. The package boundary is defined in
 
 | Guarantee | Required evidence |
 | --- | --- |
-| Terminal failures | Tests at draw, cursor, clear, and flush proving committed state advances only after successful output and failed frames are retried |
+| Screen failures | Tests at draw, cursor, clear, and flush proving committed state advances only after successful output and failed frames are retried |
 | Session restoration | Tests for normal exit, each partial setup failure, multiple cleanup failures, and panic unwinding |
 
-## Why the terminal is Urushi's trait and not an adapted one
+## Why `Screen` is Urushi's concrete frame engine
 
-Two rules above are rules about what the terminal layer does: that a frame is
+Two rules above are rules about what the screen layer does: that a frame is
 committed only after output succeeds, and that the frame's size changes only
-through the `Sync` barrier. An adapted terminal — the one Ratatui ships — does
+through the `Sync` barrier. Ratatui's terminal does
 neither: it autoresizes at the start of every draw, and it swaps its buffers
 before it flushes, so a failed flush leaves it believing the frame was shown.
-Wrapping it would mean pinning its viewport to stop the first and keeping a
-"redraw everything next time" flag to paper over the second, and both would be
-workarounds for a contract the wrapper does not hold. A terminal of Urushi's
-own over a backend's draw-and-flush holds the contract directly: it diffs, it
-writes, it flushes, and it commits last, in about the code the workarounds
-would have cost.
+Wrapping it would preserve a foreign frame engine behind an abstraction after
+Urushi already needs different commit semantics. `Screen` therefore owns the
+buffer and diff directly: it writes, flushes, and commits last.
 
-That the trait is in `urushi-tui::terminal` rather than a backend module follows
-from [`architecture.md`](../architecture.md): the runtime core should see no
-backend type, but a presentation transaction is still a TUI concern rather
-than a generic terminal primitive. The associated cell type expresses "place
-this cell value here" while the TUI binds it to `StyledGrapheme`, the value a
-`ResolvedView` holds. The renderer is written once against that binding, and
-the cell writer converts changed graphemes into commands.
-
-Rejected: wrapping `ratatui::Terminal` behind the trait anyway. Possible, but
-the contract violations above remain under the wrapper, and the wrapper is
-larger than the terminal it would hide.
+`Screen` is concrete rather than a public `Terminal` or `FrameTarget` trait.
+The target design has one frame engine, and the external substitution points
+are the physical `CommandWriter` and the runtime-internal presentation
+coordinator used in scheduling tests. Publishing a trait solely for the
+removed Ratatui implementation would make the obsolete implementation choice
+part of the permanent API.
 
 ## Why the runtime does not embed foreign widgets
 
@@ -295,9 +287,10 @@ not ask to see; keyboard enhancement makes Escape and modifier combinations
 unambiguous where the terminal supports it and is probed first so an
 unsupporting terminal is unchanged. Mouse capture is the one default that
 takes something from the user — the terminal's own text selection — so it is
-off until an application asks. Those choices form the `urushi-tui` full-screen
-profile rather than a generic-library default. `urushi-prompt` independently
-selects raw mode and bracketed paste while retaining the primary screen.
+off until an application asks. Those choices form the `urushi-tui-app`
+full-screen profile rather than a generic-library default. `urushi-prompt`
+independently selects raw mode and bracketed paste while retaining the primary
+screen.
 
 Signals are subscriptions because that is how every other source is declared
 and because a handler the runtime installed unasked would collide with one the
@@ -306,11 +299,10 @@ size change already has its source.
 
 ## Why `Renderer` is not a public type
 
-Its work is fixed by the view model and the frame trait — resolve once, put
-every grapheme, place the cursor — and nothing varies by backend, since the
-trait absorbs the variation. A public type would invite a replacement for
-which there is no reason; the name stays in the vocabulary as the owner of that
-work.
+Its work is fixed by the view model and `Frame` — resolve once, put every
+grapheme, place the cursor — and nothing varies by backend. A public type would
+invite a replacement for which there is no reason; the name stays in the
+vocabulary as the owner of that work.
 
 ## Open representation choices
 

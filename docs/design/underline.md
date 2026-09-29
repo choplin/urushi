@@ -43,7 +43,7 @@ At the output boundary:
   has no reset spelling, and the reset closing every painted scope already
   restores the default.
 - Ratatui has no underline shape, so every underline degrades to Ratatui's
-  `Modifier::UNDERLINED` in the `urushi-tui` adapter, and the underline color
+  `Modifier::UNDERLINED` in `urushi-adapter-ratatui`, and the underline color
   is dropped — reaching it would require the `underline-color` feature, which
   pulls in a backend the adapter does not depend on.
 - An underline survives `RenderSettings` with `ColorLevel::None` when its shape

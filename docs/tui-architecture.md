@@ -1,15 +1,18 @@
 # TUI Runtime Architecture
 
-This document defines the architecture of Urushi's full-screen TUI runtime,
-the subsystem [`architecture.md`](architecture.md) places in `urushi-tui`.
+This document defines the architecture of Urushi's full-screen TEA application
+framework, the subsystem [`architecture.md`](architecture.md) places in
+`urushi-tui-app`.
 
-The runtime adds an application framework in the style of The Elm Architecture
-(TEA) above Ratatui while leaving Ratatui responsible for widgets, layout,
-buffers, backends, and cell-level diffing. It extends the `urushi-tui` Ratatui
-adapter without making the renderer-neutral view model depend on Ratatui.
+The framework adds an application model in the style of The Elm Architecture
+(TEA) above the synchronous `urushi-tui` frame engine. `urushi-tui` owns its
+cell buffers, diffing, and transactional presentation without depending on
+Ratatui. Optional integration with a caller-owned Ratatui application lives in
+`urushi-adapter-ratatui`; neither the framework nor its renderer depends on it.
 
-Four topics have files under [`design/`](design/), linked from the sections
-that summarize them: what the TUI view is
+Five topics have files under [`design/`](design/), linked from the sections
+that summarize them: how the crates divide responsibility
+([`design/tui-crate-boundaries.md`](design/tui-crate-boundaries.md)); what the TUI view is
 ([`design/tui-view.md`](design/tui-view.md)); how messages are admitted,
 ordered, and drawn, including the `Sync` and startup barriers
 ([`design/tui-delivery-ordering.md`](design/tui-delivery-ordering.md)); how
@@ -38,8 +41,8 @@ The TUI subsystem must provide:
 - coordinated logical surface updates and rendering;
 - one owner for frame scheduling, terminal output, and session restoration;
 - deterministic tests for application logic and runtime ordering; and
-- enough extension points for both ordinary Ratatui applications and future
-  applications that combine cell output with terminal graphics.
+- enough extension points for caller-owned frame loops and future applications
+  that combine cell output with terminal graphics.
 
 The initial design does not provide application semantics such as focus,
 navigation, modal stacks, key bindings, or commands. Those remain ordinary
@@ -47,27 +50,34 @@ model and message logic.
 
 ## Relationship to the rest of the architecture
 
-Three boundaries in [`architecture.md`](architecture.md) constrain the TUI
+Four boundaries in [`architecture.md`](architecture.md) constrain the TUI
 subsystem.
 
 First, `style`, `text`, `theme`, `view`, and reusable components are semantic
 modules without terminal lifecycle ownership. The TUI runtime may consume their
 values, but they must not depend on the runtime.
 
-Second, the adapter modules in [`urushi-tui`](../urushi-tui/) are output
-adapters. They convert Urushi styles and box-model values into Ratatui
-representations and draw into a supplied buffer. The runtime orchestrates those
-adapters; the adapters do not acquire application state, event handling, or
-terminal ownership.
+Second, [`urushi-tui`](../urushi-tui/) is the synchronous full-screen
+presentation layer. It accepts styled graphemes through a borrowed frame and
+owns cell storage, diffing, output commit, and failure recovery. The application
+runtime orchestrates that layer but does not own its buffer semantics.
 
-Third, [`urushi-prompt`](../urushi-prompt/) is a prompt-specific crate. Its
+Third, `urushi-adapter-ratatui` is an optional output adapter. It converts
+Urushi styles and resolved views into Ratatui representations and draws into a
+buffer supplied by a Ratatui caller. It acquires no application state, event
+handling, terminal output, or session ownership.
+
+Fourth, [`urushi-prompt`](../urushi-prompt/) is a prompt-specific crate. Its
 line-oriented editing, submission, viewport, cursor, and cleanup policy do not
 become the default policy for full-screen applications. Sharing lower-level
 terminal facilities in the future must not merge the two interaction models,
 prompt-style line editing and full-screen application.
 
-`urushi-tui` is the crate boundary for this subsystem. Its internal modules may
-be refined without moving Ratatui concerns back into the core `urushi` crate.
+`urushi-tui-app` is the crate boundary for the application framework. Its
+internal modules may be refined without moving application behavior into
+`urushi-tui` or foreign-adapter concerns into either TUI crate. The complete
+package split is defined in
+[`design/tui-crate-boundaries.md`](design/tui-crate-boundaries.md).
 
 ## From event to terminal output
 
@@ -95,7 +105,7 @@ subscription events ---> admission policies ----+              |
                                                      Renderer
                                                         |
                                                         v
-                                      Terminal.draw(borrowed Frame) --> CellWriter --> CommandWriter
+                                      Screen.draw(borrowed Frame) --> CommandWriter
 ```
 
 `Application` and `Runtime` are deliberately separate. An application can be
@@ -138,7 +148,8 @@ current model — terminal input and surface facts among them. The runtime
 reconciles the declaration with running sources and delivers their events
 through the same admission and ordering path as other messages.
 
-`view` returns a declarative value that a renderer can draw with Ratatui. It
+`view` returns a declarative value that the runtime renderer draws through an
+`urushi-tui` frame. It
 must be cheap enough to evaluate at a normal drawing opportunity; expensive
 preparation belongs in effects.
 
@@ -177,8 +188,8 @@ is recorded in [`design/tui-view.md`](design/tui-view.md).
 
 Whatever the TUI `View` becomes, it is `urushi::view::View` or a value that
 embeds it; Urushi does not introduce a second, independent resolved render tree
-beside the one `resolve` already produces merely because Ratatui or another TUI
-framework has one.
+beside the one `resolve` already produces merely because an output adapter has
+one.
 
 ## Admission, delivery, and drawing
 
@@ -258,22 +269,22 @@ rule, and the representative flows are defined in
 
 ## Rendering and runtime ownership
 
-The shared rendering vocabulary is `View`, `Renderer`, `Frame`, `Terminal`,
-`TerminalSession`, `CellWriter`, and `Clock`. `urushi-terminal` owns generic
+The shared rendering vocabulary is `View`, `Renderer`, `Frame`, `Screen`,
+`TerminalSession`, `CommandWriter`, and `Clock`. `urushi-terminal` owns generic
 terminal commands, events, queries, raw-mode control, and the reusable
-`TerminalSession` guard. `urushi-tui::terminal` owns `Frame`, `Terminal`,
-`CellWriter`, and their presentation geometry; `urushi-tui::runtime` owns the
-runtime's `Clock`. Ratatui supplies the buffer and cell diff, `CellWriter`
-lowers changed cells to terminal commands, and a backend adapter performs the
-physical I/O. The runtime core and the application see no backend type.
+`TerminalSession` guard. `urushi-tui` owns `Frame`, `Screen`, its cell model,
+and presentation geometry; `urushi-tui-app` owns the runtime's `Clock`.
+`Screen` supplies the buffers and cell diff and lowers changed cells to
+terminal commands; a terminal backend performs the physical I/O. The runtime
+core and the application see no backend type.
 
 | Name | Owns |
 | --- | --- |
 | `Renderer` | Borrowing the runtime's selected direct or retained evaluator, resolving the view once for a frame, writing the `ResolvedView` into the frame, and placing the cursor where the view's cursor anchor remains visible. Not the evaluator's lifetime, the model, navigation policy, scheduling, a terminal, or session restoration. |
 | `Frame` | A borrowed, draw-scoped handle to the working presentation state: its area, its cells, and the cursor request. Not the previous buffer, backend, diff, output stream, or flush. |
-| `Terminal` | Working and committed presentation state, cell diffing, output, and flushing. A presentation is committed only after output succeeds. |
+| `Screen` | Working and committed presentation state, cell diffing, output, and flushing. A presentation is committed only after output succeeds. |
 | `TerminalSession` | Restoration obligations caused by entering the session — raw mode, alternate screen, the input modes, cursor visibility — on shutdown, on error, on panic, and after a partial entry. |
-| `CellWriter` | The low-level TUI drawing SPI behind `Terminal`; coalesces positioned styled cells into backend-independent terminal commands. |
+| `CommandWriter` | The backend-independent terminal command sink through which `Screen` emits changed cells, cursor state, clear, and flush. |
 | `Clock` | The runtime's one source of time, behind a trait; replaceable in tests. |
 
 The runtime itself owns the live model; source admission and the accepted
@@ -316,8 +327,8 @@ Graphics reconciliation and animation scheduling remain separate retained
 capabilities owned by the same host; neither is registered inside the core
 resolver.
 
-What each owner does at the boundary — the commit guarantee Ratatui does not
-give, cursor restoration, what a session cannot promise to restore — and the
+What each owner does at the boundary — the `Screen` commit guarantee, cursor
+restoration, what a session cannot promise to restore — and the
 representation choices left open are defined in
 [`design/tui-terminal-ownership.md`](design/tui-terminal-ownership.md).
 
@@ -342,11 +353,11 @@ Implementation of the TUI subsystem must preserve these invariants:
    subscription message and is retained in the model when needed.
 9. The framework does not expose draw planning or a universal damage model as
    an application responsibility.
-10. `Frame` is borrowed and draw-scoped; terminal presentation history and
-    output remain terminal-owned.
+10. `Frame` is borrowed and draw-scoped; presentation history and output
+    commit remain `Screen`-owned.
 11. Session setup and restoration have one explicit owner.
-12. Existing semantic modules and `urushi-tui` adapters keep the dependency
-    direction documented in [`architecture.md`](architecture.md).
+12. `urushi-tui-app`, `urushi-tui`, and `urushi-adapter-ratatui` keep the
+    dependency direction documented in [`architecture.md`](architecture.md).
 
 The architecture fixes responsibilities and semantics but leaves the concrete
 Rust API open until implementation planning; each design file lists the

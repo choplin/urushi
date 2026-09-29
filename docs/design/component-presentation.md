@@ -125,7 +125,8 @@ interactive graph UI uses them, and they do not enter a Canvas primitive merely
 because that UI draws onto one.
 
 That separation does not make the current camera or selection invisible to the
-presentation. `urushi-tui` owns and updates those values; a Graph presentation
+presentation. An application — including one driven by `urushi-tui-app` — owns
+and updates those values; a Graph presentation
 may borrow their immutable snapshot to compose the frame that results. It
 cannot mutate them, interpret input events, or prescribe their transitions.
 The general one-frame expressiveness rule is recorded in
