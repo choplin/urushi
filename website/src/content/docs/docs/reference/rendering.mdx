@@ -1,0 +1,116 @@
+---
+title: Rendering behavior
+description: Reference for layout resolution, ANSI rendering, capability degradation, and output destinations.
+---
+
+import ArchitectureDiagram from '../../../../components/ArchitectureDiagram.astro';
+
+## Rendering pipeline
+
+<ArchitectureDiagram kind="rendering" />
+
+`View` is renderer-neutral. `ResolvedView` is a rectangular collection of
+styled graphemes plus reported anchor rectangles. `RenderSettings` selects
+which terminal styling features may reach ANSI output.
+
+Semantic components are lowered into `View` by concrete presentations before
+this pipeline begins. The resolver does not know whether a primitive tree came
+from a list, table, tree, CLI summary, or application-specific component.
+
+## Available area
+
+| Value | Meaning |
+|---|---|
+| `Available::NONE` | No width or height bound |
+| `Available::columns(n)` | Width is limited to `n` cells |
+| Adapter-derived area | Width and height come from the target rectangle |
+
+`measure` is intrinsic resolution under `Available::NONE`. `try_measure`
+returns layout errors for content that requires a finite extent.
+
+## Direct and retained resolution
+
+The free `resolve` function is the ordinary stateless path. Keep a `Resolver`
+when a host evaluates successive immutable view snapshots and wants to reuse
+unchanged materialized subtree output:
+
+```rust
+use urushi::{Available, Resolver, resolve};
+
+let mut resolver = Resolver::new();
+let available = Available::size(80, 24);
+let _first = resolver.resolve(&first_view, available)?;
+let next = resolver.resolve(&next_view, available)?;
+
+assert_eq!(next, resolve(&next_view, available)?);
+# Ok::<(), urushi::LayoutError>(())
+```
+
+`Resolver::resolve` has the same observable result as `resolve`. The current
+`View` and `Available` area remain the complete layout input. Changed content
+or settled layout invalidates the affected retained artifact; moving a
+`Viewport` can reuse unchanged child output. Call `clear()` to discard all
+retained evaluation state.
+
+## Render settings
+
+`RenderSettings` controls these axes independently:
+
+- color level: none, ANSI 16, ANSI 256, or true color;
+- text attributes;
+- supported underline styles;
+- underline colors; and
+- OSC 8 hyperlinks.
+
+`RenderSettings::default()` enables none of these features and produces plain
+text. `RenderSettings::from(capabilities)` selects the detected maximum.
+`RenderSettings::all()` preserves all logical features and is intended for a
+serializer whose input is already known to be supported.
+
+## Capability degradation
+
+Unsupported features are narrowed at render time:
+
+- true colors are quantized to the selected color level;
+- unsupported text attributes are removed;
+- unsupported underline shapes are removed;
+- underline colors fall back to the foreground when disabled; and
+- hyperlinks are omitted when unavailable.
+
+The logical `TextStyle` and `View` values are unchanged, so the same values can
+be rendered again for a different destination.
+
+## Standard streams
+
+The standard-stream helpers detect terminal width and capabilities. A
+non-terminal destination uses `Available::NONE` and default plain
+`RenderSettings`. See [Output behavior](/docs/cli/output-behavior/) for the
+stdout, stderr, redirection, and `NO_COLOR` rules.
+
+## Full-screen TUI rendering
+
+The TUI runtime uses the same resolution pass through a different output
+boundary:
+
+<ArchitectureDiagram kind="backend" />
+
+`Terminal` and `Frame` are Urushi-owned contracts. The application and runtime
+logic do not name a backend type. A `CellWriter` lowers changed cells to
+backend-independent `urushi_terminal::Command` values for physical output.
+
+`RatatuiTerminal` is the 0.1.0 terminal implementation. It uses
+Ratatui buffers for presentation state and cell diffing, but Ratatui does not
+define the application model. `urushi_tui::run(app)` assembles this complete
+runtime with production defaults; `Runtime::new(app)` exposes its replaceable
+boundaries and session options.
+
+The target architecture replaces this frame-terminal abstraction with a
+concrete Urushi-owned `Screen`, moves the TEA runtime into `urushi-tui-app`,
+and isolates the caller-owned Ratatui path in `urushi-adapter-ratatui`.
+
+## Caller-owned Ratatui buffers
+
+The separate Ratatui adapter serves an application that already owns its
+Ratatui terminal and event loop. It does not serialize ANSI. It maps resolved
+Urushi styles to Ratatui cells and writes within the supplied `Rect`. ANSI
+escape sequences in text are not interpreted.

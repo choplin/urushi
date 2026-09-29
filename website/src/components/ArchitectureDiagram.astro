@@ -1,0 +1,265 @@
+---
+interface Props {
+  kind: 'backend' | 'cli' | 'prompt' | 'rendering' | 'tui' | 'tui-crates';
+}
+
+const { kind } = Astro.props;
+const arrowId = `${kind}-diagram-arrow`;
+---
+
+<div class="diagram-scroll">
+  {kind === 'cli' && (
+    <svg class="architecture-diagram" viewBox="0 0 760 300" role="img" aria-labelledby="cli-title cli-desc">
+      <title id="cli-title">CLI presentation and output pipeline</title>
+      <desc id="cli-desc">Application content enters either core Urushi composition or opinionated CLI presentations. Both produce a View, which is resolved for the output destination and written to a terminal or redirected stream.</desc>
+      <defs>
+        <marker id={arrowId} markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto">
+          <path d="M0,0 L8,4 L0,8 Z" class="arrow-head" />
+        </marker>
+      </defs>
+
+      <text x="106" y="28" class="lane-label">APPLICATION</text>
+      <rect x="24" y="46" width="164" height="72" class="node" />
+      <text x="106" y="76" class="node-title">Content and meaning</text>
+      <text x="106" y="99" class="node-detail">text · data · command result</text>
+
+      <text x="334" y="28" class="lane-label">PRESENTATION</text>
+      <rect x="232" y="46" width="204" height="72" class="node" />
+      <text x="334" y="73" class="node-title">urushi</text>
+      <text x="334" y="96" class="node-detail">styles · layout · components</text>
+      <rect x="232" y="154" width="204" height="72" class="node accent-node" />
+      <text x="334" y="181" class="node-title">urushi-cli</text>
+      <text x="334" y="204" class="node-detail">Summary · Warning</text>
+
+      <rect x="480" y="100" width="112" height="72" class="node strong-node" />
+      <text x="536" y="130" class="node-title">View</text>
+      <text x="536" y="153" class="node-detail">renderer-neutral</text>
+
+      <text x="682" y="28" class="lane-label">OUTPUT</text>
+      <rect x="628" y="46" width="108" height="72" class="node" />
+      <text x="682" y="74" class="node-title">Terminal</text>
+      <text x="682" y="97" class="node-detail">width + ANSI</text>
+      <rect x="628" y="154" width="108" height="72" class="node" />
+      <text x="682" y="182" class="node-title">Redirect</text>
+      <text x="682" y="205" class="node-detail">plain text</text>
+
+      <path d="M188 82 H224" class="arrow" marker-end={`url(#${arrowId})`} />
+      <path d="M188 82 C210 82 210 190 224 190" class="arrow" marker-end={`url(#${arrowId})`} />
+      <path d="M436 82 C458 82 458 122 472 128" class="arrow" marker-end={`url(#${arrowId})`} />
+      <path d="M436 190 C458 190 458 150 472 144" class="arrow" marker-end={`url(#${arrowId})`} />
+      <path d="M592 124 C612 116 612 82 620 82" class="arrow" marker-end={`url(#${arrowId})`} />
+      <path d="M592 148 C612 156 612 190 620 190" class="arrow" marker-end={`url(#${arrowId})`} />
+
+      <text x="536" y="264" class="caption">resolve with destination width and capabilities</text>
+    </svg>
+  )}
+
+  {kind === 'prompt' && (
+    <svg class="architecture-diagram" viewBox="0 0 760 330" role="img" aria-labelledby="prompt-title prompt-desc">
+      <title id="prompt-title">Blocking prompt lifecycle</title>
+      <desc id="prompt-desc">A configured form opens an inline terminal session. The active field handles input and validation until the form returns either typed submitted values or cancellation, then restores the terminal session.</desc>
+      <defs>
+        <marker id={arrowId} markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto">
+          <path d="M0,0 L8,4 L0,8 Z" class="arrow-head" />
+        </marker>
+      </defs>
+
+      <text x="111" y="28" class="lane-label">CONFIGURE</text>
+      <rect x="24" y="46" width="174" height="88" class="node" />
+      <text x="111" y="74" class="node-title">Form</text>
+      <text x="111" y="97" class="node-detail">groups · typed fields</text>
+      <text x="111" y="117" class="node-detail">theme · placement</text>
+
+      <text x="351" y="28" class="lane-label">BLOCKING SESSION</text>
+      <rect x="244" y="46" width="214" height="88" class="node accent-node" />
+      <text x="351" y="74" class="node-title">Active field</text>
+      <text x="351" y="97" class="node-detail">edit · choose · confirm</text>
+      <text x="351" y="117" class="node-detail">help + focused presentation</text>
+
+      <rect x="244" y="184" width="214" height="72" class="node" />
+      <text x="351" y="212" class="node-title">Validation</text>
+      <text x="351" y="235" class="node-detail">keep value + show message</text>
+
+      <text x="625" y="28" class="lane-label">OUTCOME</text>
+      <rect x="514" y="46" width="222" height="72" class="node strong-node" />
+      <text x="625" y="74" class="node-title">Submitted</text>
+      <text x="625" y="97" class="node-detail">FormValues + FieldKey&lt;T&gt;</text>
+      <rect x="514" y="154" width="222" height="72" class="node" />
+      <text x="625" y="182" class="node-title">Cancelled / failed</text>
+      <text x="625" y="205" class="node-detail">no partial values</text>
+
+      <path d="M198 90 H236" class="arrow" marker-end={`url(#${arrowId})`} />
+      <path d="M351 134 V176" class="arrow" marker-end={`url(#${arrowId})`} />
+      <path d="M244 220 C214 220 214 110 236 106" class="arrow" marker-end={`url(#${arrowId})`} />
+      <text x="204" y="174" class="edge-label">invalid</text>
+      <path d="M458 82 H506" class="arrow" marker-end={`url(#${arrowId})`} />
+      <text x="472" y="70" class="edge-label">complete</text>
+      <path d="M458 106 C486 116 486 190 506 190" class="arrow" marker-end={`url(#${arrowId})`} />
+      <text x="466" y="156" class="edge-label">esc / error</text>
+
+      <path d="M72 286 H688" class="session-line" />
+      <text x="380" y="310" class="caption">Form::run owns input, redraw, cursor placement, and restoration for this interval</text>
+      <path d="M72 276 V296 M688 276 V296" class="session-line" />
+    </svg>
+  )}
+
+  {kind === 'rendering' && (
+    <svg class="architecture-diagram compact-diagram" viewBox="0 0 760 180" role="img" aria-labelledby="rendering-title rendering-desc">
+      <title id="rendering-title">Renderer-neutral view pipeline</title>
+      <desc id="rendering-desc">Semantic data and a theme are composed by a presentation into a View. Resolve applies an available area to produce a ResolvedView. Render applies output settings and serializes the result.</desc>
+      <defs>
+        <marker id={arrowId} markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto">
+          <path d="M0,0 L8,4 L0,8 Z" class="arrow-head" />
+        </marker>
+      </defs>
+      <rect x="18" y="54" width="132" height="72" class="node" />
+      <text x="84" y="82" class="node-title">Data + Theme</text>
+      <text x="84" y="105" class="node-detail">semantic input</text>
+      <rect x="184" y="54" width="132" height="72" class="node" />
+      <text x="250" y="82" class="node-title">Presentation</text>
+      <text x="250" y="105" class="node-detail">compose</text>
+      <rect x="350" y="54" width="104" height="72" class="node strong-node" />
+      <text x="402" y="82" class="node-title">View</text>
+      <text x="402" y="105" class="node-detail">layout intent</text>
+      <rect x="488" y="54" width="116" height="72" class="node" />
+      <text x="546" y="82" class="node-title">ResolvedView</text>
+      <text x="546" y="105" class="node-detail">styled cells</text>
+      <rect x="638" y="54" width="104" height="72" class="node" />
+      <text x="690" y="82" class="node-title">String</text>
+      <text x="690" y="105" class="node-detail">plain / ANSI</text>
+      <path d="M150 90 H176" class="arrow" marker-end={`url(#${arrowId})`} />
+      <path d="M316 90 H342" class="arrow" marker-end={`url(#${arrowId})`} />
+      <path d="M454 90 H480" class="arrow" marker-end={`url(#${arrowId})`} />
+      <path d="M604 90 H630" class="arrow" marker-end={`url(#${arrowId})`} />
+      <text x="467" y="39" class="edge-label">resolve(available)</text>
+      <text x="617" y="39" class="edge-label">render(settings)</text>
+    </svg>
+  )}
+
+  {kind === 'backend' && (
+    <svg class="architecture-diagram compact-diagram" viewBox="0 0 760 190" role="img" aria-labelledby="backend-title backend-desc">
+      <title id="backend-title">Full-screen rendering boundary</title>
+      <desc id="backend-desc">Application view produces an Urushi View. The renderer resolves it and draws styled cells through the Terminal and borrowed Frame contracts. CellWriter lowers changed cells into physical terminal commands.</desc>
+      <defs>
+        <marker id={arrowId} markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto">
+          <path d="M0,0 L8,4 L0,8 Z" class="arrow-head" />
+        </marker>
+      </defs>
+      <rect x="18" y="58" width="126" height="72" class="node" />
+      <text x="81" y="86" class="node-title">Application</text>
+      <text x="81" y="109" class="node-detail">view(&amp;Model)</text>
+      <rect x="178" y="58" width="104" height="72" class="node strong-node" />
+      <text x="230" y="86" class="node-title">View</text>
+      <text x="230" y="109" class="node-detail">renderer-neutral</text>
+      <rect x="316" y="58" width="104" height="72" class="node" />
+      <text x="368" y="86" class="node-title">Renderer</text>
+      <text x="368" y="109" class="node-detail">resolve + draw</text>
+      <rect x="454" y="42" width="146" height="104" class="backend-boundary" />
+      <text x="527" y="66" class="lane-label">TERMINAL CONTRACT</text>
+      <text x="527" y="94" class="node-title">Terminal::draw</text>
+      <text x="527" y="119" class="node-detail">borrowed Frame</text>
+      <rect x="634" y="58" width="108" height="72" class="node" />
+      <text x="688" y="86" class="node-title">CellWriter</text>
+      <text x="688" y="109" class="node-detail">commands</text>
+      <path d="M144 94 H170" class="arrow" marker-end={`url(#${arrowId})`} />
+      <path d="M282 94 H308" class="arrow" marker-end={`url(#${arrowId})`} />
+      <path d="M420 94 H446" class="arrow" marker-end={`url(#${arrowId})`} />
+      <path d="M600 94 H626" class="arrow" marker-end={`url(#${arrowId})`} />
+      <text x="380" y="174" class="caption">The application and runtime do not name the concrete backend.</text>
+    </svg>
+  )}
+
+  {kind === 'tui' && (
+    <svg class="architecture-diagram" viewBox="0 0 760 430" role="img" aria-labelledby="tui-title tui-desc">
+      <title id="tui-title">TEA application loop and terminal backend boundary</title>
+      <desc id="tui-desc">Input, subscription events, and effect completions become messages. Update changes the model and can return effects. View projects the model into an Urushi View, which crosses the terminal, frame, and cell writer backend boundary.</desc>
+      <defs>
+        <marker id={arrowId} markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto">
+          <path d="M0,0 L8,4 L0,8 Z" class="arrow-head" />
+        </marker>
+      </defs>
+
+      <text x="110" y="28" class="lane-label">EVENT SOURCES</text>
+      <rect x="24" y="46" width="172" height="96" class="node" />
+      <text x="110" y="73" class="node-title">Subscriptions</text>
+      <text x="110" y="96" class="node-detail">input · surface · timers</text>
+      <text x="110" y="117" class="node-detail">signals · custom streams</text>
+
+      <rect x="24" y="190" width="172" height="72" class="node" />
+      <text x="110" y="218" class="node-title">Effect results</text>
+      <text x="110" y="241" class="node-detail">work · future · delay</text>
+
+      <rect x="240" y="104" width="126" height="72" class="node strong-node" />
+      <text x="303" y="134" class="node-title">Message</text>
+      <text x="303" y="157" class="node-detail">ordered delivery</text>
+
+      <rect x="410" y="104" width="126" height="72" class="node accent-node" />
+      <text x="473" y="134" class="node-title">update</text>
+      <text x="473" y="157" class="node-detail">&amp;mut Model</text>
+
+      <rect x="410" y="224" width="126" height="72" class="node" />
+      <text x="473" y="254" class="node-title">Model</text>
+      <text x="473" y="277" class="node-detail">application state</text>
+
+      <rect x="580" y="104" width="156" height="72" class="node" />
+      <text x="658" y="134" class="node-title">Effect</text>
+      <text x="658" y="157" class="node-detail">runtime executes</text>
+
+      <rect x="580" y="224" width="156" height="72" class="node" />
+      <text x="658" y="254" class="node-title">view(&amp;Model)</text>
+      <text x="658" y="277" class="node-detail">urushi::View</text>
+
+      <rect x="240" y="344" width="496" height="62" class="backend-boundary" />
+      <text x="488" y="368" class="lane-label">PLUGGABLE PRESENTATION BOUNDARY</text>
+      <text x="488" y="390" class="node-title">Terminal  →  Frame  →  CellWriter</text>
+
+      <path d="M196 94 C220 94 220 124 232 132" class="arrow" marker-end={`url(#${arrowId})`} />
+      <path d="M196 226 C220 226 220 160 232 148" class="arrow" marker-end={`url(#${arrowId})`} />
+      <path d="M366 140 H402" class="arrow" marker-end={`url(#${arrowId})`} />
+      <path d="M473 176 V216" class="arrow" marker-end={`url(#${arrowId})`} />
+      <path d="M536 128 H572" class="arrow" marker-end={`url(#${arrowId})`} />
+      <path d="M658 104 C658 48 303 48 303 96" class="arrow" marker-end={`url(#${arrowId})`} />
+      <path d="M536 260 H572" class="arrow" marker-end={`url(#${arrowId})`} />
+      <path d="M658 296 V336" class="arrow" marker-end={`url(#${arrowId})`} />
+    </svg>
+  )}
+
+  {kind === 'tui-crates' && (
+    <svg class="architecture-diagram" viewBox="0 0 760 300" role="img" aria-labelledby="tui-crates-title tui-crates-desc">
+      <title id="tui-crates-title">Target TUI crate boundaries</title>
+      <desc id="tui-crates-desc">The TEA application runtime depends on the Urushi-owned screen engine. The separate Ratatui adapter translates core Urushi views into a buffer owned by an existing Ratatui application.</desc>
+      <defs>
+        <marker id={arrowId} markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto">
+          <path d="M0,0 L8,4 L0,8 Z" class="arrow-head" />
+        </marker>
+      </defs>
+
+      <rect x="24" y="112" width="152" height="76" class="node strong-node" />
+      <text x="100" y="141" class="node-title">urushi</text>
+      <text x="100" y="165" class="node-detail">Theme · View · layout</text>
+
+      <rect x="230" y="38" width="192" height="84" class="node accent-node" />
+      <text x="326" y="68" class="node-title">urushi-tui</text>
+      <text x="326" y="92" class="node-detail">Screen · Frame · buffers</text>
+
+      <rect x="494" y="38" width="238" height="84" class="node" />
+      <text x="613" y="68" class="node-title">urushi-tui-app</text>
+      <text x="613" y="92" class="node-detail">Application · Runtime · effects</text>
+
+      <rect x="230" y="190" width="238" height="84" class="node" />
+      <text x="349" y="220" class="node-title">urushi-adapter-ratatui</text>
+      <text x="349" y="244" class="node-detail">caller-owned Buffer</text>
+
+      <rect x="540" y="190" width="192" height="84" class="backend-boundary" />
+      <text x="636" y="220" class="node-title">Ratatui application</text>
+      <text x="636" y="244" class="node-detail">loop · terminal · frame</text>
+
+      <path d="M176 132 C198 118 204 92 222 86" class="arrow" marker-end={`url(#${arrowId})`} />
+      <path d="M422 80 H486" class="arrow" marker-end={`url(#${arrowId})`} />
+      <path d="M176 168 C198 184 204 218 222 226" class="arrow" marker-end={`url(#${arrowId})`} />
+      <path d="M468 232 H532" class="arrow" marker-end={`url(#${arrowId})`} />
+
+      <text x="455" y="22" class="lane-label">TARGET DEPENDENCY DIRECTION</text>
+    </svg>
+  )}
+</div>

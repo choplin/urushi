@@ -1,0 +1,33 @@
+---
+import ConceptLayout from '../../layouts/ConceptLayout.astro';
+---
+
+<ConceptLayout concept="raden" title="Urushi concept 03 — Raden">
+  <header class="concept-nav shell">
+    <a class="concept-brand" href="/">urushi<span class="raden-dot"></span></a>
+    <nav aria-label="Primary navigation"><a href="#spectrum">Spectrum</a><a href="/docs/">Docs</a><a class="nav-mark" href="/docs/">Install ↗</a></nav>
+  </header>
+  <main>
+    <section class="raden-hero shell">
+      <div class="raden-copy">
+        <p class="concept-kicker">03 / Raden / 螺鈿</p>
+        <h1>One visual language.<br /><em>Every terminal surface.</em></h1>
+        <p>A shared presentation model for Rust—from a single styled line to a complete interactive interface.</p>
+        <div class="concept-actions"><a class="spectral-action" href="/docs/">Enter the docs →</a><code>$ cargo add urushi</code></div>
+      </div>
+      <div class="raden-orbit" aria-hidden="true"><span>THEME</span><span>VIEW</span><span>LAYOUT</span><div></div></div>
+      <div class="raden-terminal" aria-label="Urushi surface spectrum preview">
+        <header><span>urushi / surface.preview</span><span>● ● ●</span></header>
+        <div class="raden-screen"><p><b>✓</b> Shared presentation ready</p><div><span>surface</span><strong>full-screen TUI</strong></div><div><span>renderer</span><strong>ratatui</strong></div><div><span>theme</span><strong>midnight</strong></div><footer>Components → View → Layout</footer></div>
+      </div>
+    </section>
+    <section class="raden-spectrum" id="spectrum"><div class="shell"><p>THE SURFACE SPECTRUM</p><h2>Text <i>→</i> CLI <i>→</i> Prompt <i>→</i> TUI</h2><span>Different interaction models. One presentation foundation.</span></div></section>
+    <section class="raden-grid shell">
+      <article class="raden-main-card"><p>SHARED / 01</p><h2>Meaning survives the surface.</h2><p>Semantic roles keep success, warning, focus, and selection coherent without coupling each interface to the same runtime.</p><div class="role-row"><span>success</span><span>warning</span><span>focus</span><span>muted</span></div></article>
+      <article><p>COMPOSE / 02</p><h2>Components become views.</h2><code>component.view(&theme)</code></article>
+      <article><p>LAYOUT / 03</p><h2>Width means terminal width.</h2><code>layout.resolve(area)</code></article>
+    </section>
+    <section class="raden-end shell"><p>Build the interface that fits.</p><h2>Keep the language<br />that connects it.</h2><a class="spectral-action" href="/docs/">Start with Urushi →</a></section>
+  </main>
+  <footer class="concept-footer shell"><span>urushi</span><p>Concept 03 / Raden</p><a href="/designs/kuro/">Back to concept 01 ↺</a></footer>
+</ConceptLayout>

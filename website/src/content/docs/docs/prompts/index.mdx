@@ -1,0 +1,130 @@
+---
+title: Prompt overview
+description: Build typed, validated, blocking terminal forms that preserve the surrounding command output.
+---
+
+import ArchitectureDiagram from '../../../../components/ArchitectureDiagram.astro';
+
+`urushi-prompt` is for short decisions made while a command is running: asking
+for text, choosing from known values, confirming an action, or combining those
+steps into a form. A form temporarily owns terminal interaction, then returns
+submitted typed values or cancellation to the command.
+
+Prefer flags and arguments when the complete operation can be specified before
+execution. Use a prompt when the user needs context from the running command to
+make the decision.
+
+## Install the prompt surface
+
+```sh
+cargo add urushi-prompt
+```
+
+The crate re-exports `urushi` for styling, so a prompt-only application does
+not need a separate direct dependency on the core crate.
+
+## What a form can do
+
+- **Collect typed values.** `Input` returns a `String`, `Select<T>` keeps the
+  visible label separate from its typed value, and `Confirm` records both the
+  yes-or-no answer and whether a configured default supplied it.
+- **Build a guided flow.** Fields carry questions, descriptions, placeholders,
+  and contextual help. Non-empty groups add a title and description, and a
+  form runs its groups and fields in order with forward and backward
+  navigation.
+- **Validate before advancing.** Inputs can be required and can run synchronous
+  validators. Validation and unanswered-confirmation messages appear with the
+  field while its current value remains visible.
+- **Handle longer choices.** Select fields support keyboard navigation,
+  filtering, a bounded visible row count, and a configurable no-match message.
+- **Return an all-or-nothing result.** `FieldKey<T>` retrieves submitted values
+  with their Rust type. Cancellation exposes no partial value collection.
+- **Fit into existing command output.** The current inline surface can start on
+  a new line, at the current line, or at a caller-supplied column, and its width
+  can be capped without taking over the full screen.
+- **Reuse a caller-owned terminal.** `Form::run_with_terminal` runs the complete
+  prompt session on one `TerminalBackend`. The caller can query that connection
+  first, select a light or dark theme, and then pass both to the form.
+
+<ArchitectureDiagram kind="prompt" />
+
+## A representative form
+
+The form model, field behavior, validation, and theme are configured together:
+
+```rust
+use urushi_prompt::{
+    FieldKey, Form, Group, Input, Select, SelectOption,
+};
+
+let name_key = FieldKey::<String>::new("name");
+let style_key = FieldKey::<String>::new("style");
+
+let group = Group::builder()
+    .title("Greeting setup")
+    .description("Choose how the greeting should be generated.")
+    .field(
+        Input::new(name_key.clone(), "What is your name?", "")?
+            .placeholder("e.g. Alex")
+            .required(),
+    )
+    .field(Select::new(
+        style_key.clone(),
+        "Choose a greeting style",
+        vec![
+            SelectOption::new("Friendly", "friendly".to_owned()),
+            SelectOption::new("Formal", "formal".to_owned()),
+        ],
+    )?)
+    .build()?;
+
+let form = Form::builder().group(group).build()?;
+let outcome = form.run(&theme)?;
+# let _ = outcome;
+# Ok::<(), Box<dyn std::error::Error>>(())
+```
+
+When the form opens, the active field is marked by the focused gutter and the
+remaining fields stay visible as space allows:
+
+```text title="Initial prompt"
+Greeting setup
+Choose how the greeting should be generated.
+
+┃ What is your name?
+┃ › e.g. Alex
+
+  Choose a greeting style
+  › Friendly
+    Formal
+
+  enter continue • shift+tab back • esc cancel
+```
+
+`FormOutcome::Submitted` contains the typed values addressed by the two keys;
+`FormOutcome::Cancelled` contains no partial values.
+
+## Presentation and terminal ownership
+
+`Form::run` is blocking. It owns input, redraws, cursor placement, and terminal
+session restoration until the form is submitted, cancelled, resized beyond
+the selected policy, or fails. The supplied core `Theme` determines its visual
+roles, so prompts can match the application's static output.
+
+The default inline presentation keeps surrounding output in the primary
+buffer and leaves the answered form in scrollback. Its origin, width, and
+resize policy are explicit because terminal reflow can make a previously drawn
+region impossible to locate safely.
+
+`Form::run` opens the default connection for a convenient inline prompt.
+`Form::run_with_terminal` is the public caller-owned path for applications that
+already opened an interactive connection. Both use the inline presentation in
+0.1.0. The prompt architecture also defines an alternate-screen presentation
+that shares the same form and field model, but selecting that presentation is
+not yet public.
+
+## Continue by task
+
+- [Build and read a complete form](/docs/prompts/form/)
+- [Configure fields and validation](/docs/prompts/fields/)
+- [Choose inline placement and resize behavior](/docs/prompts/placement/)

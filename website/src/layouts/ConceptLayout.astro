@@ -1,0 +1,31 @@
+---
+import '../styles/concepts.css';
+
+interface Props {
+  concept: 'kuro' | 'shiro' | 'raden';
+  title: string;
+}
+
+const { concept, title } = Astro.props;
+---
+
+<!doctype html>
+<html lang="en" class={`concept-${concept}`}>
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width" />
+    <meta name="description" content="An Urushi homepage design concept." />
+    <meta name="theme-color" content={concept === 'shiro' ? '#f2f0e8' : '#080a0b'} />
+    <title>{title}</title>
+  </head>
+  <body class={`concept-body concept-${concept}`}>
+    <aside class="concept-switcher" aria-label="Design concepts">
+      <a href="/designs/">Designs</a>
+      <span aria-hidden="true">/</span>
+      <a class:list={[{ active: concept === 'kuro' }]} href="/designs/kuro/">01</a>
+      <a class:list={[{ active: concept === 'shiro' }]} href="/designs/shiro/">02</a>
+      <a class:list={[{ active: concept === 'raden' }]} href="/designs/raden/">03</a>
+    </aside>
+    <slot />
+  </body>
+</html>

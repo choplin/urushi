@@ -1,0 +1,35 @@
+---
+import Default from '@astrojs/starlight/components/Header.astro';
+---
+
+<div class="docs-site-banner">
+  <a href="/" aria-label="Urushi home">Urushi</a>
+  <span>Documentation</span>
+</div>
+<Default />
+
+<style>
+  .docs-site-banner {
+    align-items: center;
+    background: #111110;
+    border-bottom: 1px solid rgba(183, 154, 96, 0.22);
+    color: #f4f2ed;
+    display: flex;
+    font: 600 0.75rem/1.2 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    gap: 0.8rem;
+    justify-content: center;
+    letter-spacing: 0.08em;
+    min-height: 2rem;
+    text-transform: uppercase;
+  }
+
+  .docs-site-banner a {
+    color: #dc5947;
+    font-weight: 800;
+    text-decoration: none;
+  }
+
+  .docs-site-banner span {
+    opacity: 0.72;
+  }
+</style>

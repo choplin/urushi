@@ -1,0 +1,183 @@
+---
+import SiteLayout from '../layouts/SiteLayout.astro';
+---
+
+<SiteLayout
+  title="Urushi — One visual language. Every terminal surface."
+  description="A shared presentation foundation for styled output, interactive prompts, and full-screen applications in Rust."
+>
+  <section class="hero section-shell">
+    <div class="hero-copy">
+      <p class="eyebrow"><b>01</b><span></span> Rust terminal UI library</p>
+      <h1>One visual<br />language.<br /><em>Every terminal surface.</em></h1>
+      <p class="hero-lede">
+        <strong>Urushi is a UI library for Rust terminals.</strong> Style plain
+        output, build interactive prompts, or build a full-screen TUI on one
+        shared presentation foundation.
+      </p>
+      <ul class="hero-surfaces" aria-label="Supported terminal interfaces">
+        <li>Styled text</li>
+        <li>CLI</li>
+        <li>Prompts</li>
+        <li>Full-screen TUI</li>
+      </ul>
+      <div class="hero-actions">
+        <a class="button button-primary" href="/docs/">Get started <span aria-hidden="true">→</span></a>
+        <a class="button button-secondary" href="#foundation">Explore the foundation</a>
+      </div>
+    </div>
+
+    <div class="terminal-stage" aria-label="Urushi terminal presentation example">
+      <div class="terminal-chrome">
+        <div class="terminal-label"><span>URUSHI</span> / Rust UI preview</div>
+        <div class="terminal-status">80 × 24</div>
+      </div>
+      <div class="terminal-screen">
+        <div class="command"><span class="kw">use</span> urushi_cli::&#123;CliTheme, Summary&#125;;</div>
+        <div class="terminal-gap"></div>
+        <div class="summary-box">
+          <div class="summary-title"><span class="success-mark">✓</span> Build complete</div>
+          <div class="summary-row"><span>Target</span><strong>aarch64-apple-darwin</strong></div>
+          <div class="summary-row"><span>Profile</span><strong>release</strong></div>
+          <div class="summary-row"><span>Output</span><strong>target/release/app</strong></div>
+        </div>
+        <div class="terminal-foot"><span>Theme</span><span>→</span><span>View</span><span>→</span><span>stdout</span></div>
+      </div>
+      <div class="layer layer-one"></div>
+      <div class="layer layer-two"></div>
+    </div>
+  </section>
+
+  <section class="hero-statement" aria-label="Urushi proposition">
+    <p>Different interfaces.</p>
+    <strong>One underlying model.</strong>
+  </section>
+
+  <section class="surface-section section-shell" aria-labelledby="surface-heading">
+    <div class="section-intro">
+      <p class="section-index">01 / SURFACES</p>
+      <h2 id="surface-heading">Different interfaces.<br />One underlying model.</h2>
+      <p>
+        Choose the surface that fits the application. Urushi keeps styling,
+        composition, and terminal behavior coherent across all of them.
+      </p>
+    </div>
+
+    <div class="surface-map">
+      <article class="surface-card">
+        <span class="surface-number">01</span>
+        <h3>Styled text</h3>
+        <p>Color, emphasis, links, and terminal-aware rendering without an event loop.</p>
+        <pre aria-label="Styled text example"><code><span class="code-keyword">let</span> text = StyledText::new(
+    <span class="code-string">"Build complete"</span>,
+    TextStyle::new().bold(),
+);
+urushi::println(&text)?;</code></pre>
+      </article>
+      <article class="surface-card">
+        <span class="surface-number">02</span>
+        <h3>CLI presentation</h3>
+        <p>Opinionated CLI presentations, beginning with structured summaries and warnings.</p>
+        <pre aria-label="CLI presentation example"><code><span class="code-keyword">let</span> view = cli.summary(
+    &Summary::new(<span class="code-string">"Done"</span>)
+        .field(
+            <span class="code-string">"Output"</span>,
+            <span class="code-string">"app"</span>,
+        ),
+);</code></pre>
+      </article>
+      <article class="surface-card">
+        <span class="surface-number">03</span>
+        <h3>Interactive prompts</h3>
+        <p>Theme-aware input, selection, confirmation, and validation flows.</p>
+        <pre aria-label="Interactive prompt example"><code><span class="code-keyword">let</span> field = Input::new(
+    FieldKey::new(<span class="code-string">"name"</span>),
+    <span class="code-string">"What is your name?"</span>,
+    <span class="code-string">""</span>,
+)?;</code></pre>
+      </article>
+      <article class="surface-card">
+        <span class="surface-number">04</span>
+        <h3>Full-screen TUI</h3>
+        <p>A runnable TEA-style application runtime, plus a separate adapter for applications that already own a Ratatui loop.</p>
+        <pre aria-label="TUI application view example"><code><span class="code-keyword">fn</span> view(
+    &self,
+    model: &Model,
+) -&gt; View &#123;
+    status_view(model)
+&#125;</code></pre>
+      </article>
+      <div class="foundation-line">
+        <span>Shared foundation</span>
+        <strong>Theme</strong><i>·</i><strong>View</strong><i>·</i><strong>Layout</strong><i>·</i><strong>Terminal</strong>
+      </div>
+    </div>
+  </section>
+
+  <section class="foundation-section" id="foundation" aria-labelledby="foundation-heading">
+    <div class="section-shell foundation-grid">
+      <div class="foundation-copy">
+        <p class="section-index">02 / FOUNDATION</p>
+        <h2 id="foundation-heading">Share presentation.<br />Not control flow.</h2>
+        <p>
+          Plain output, prompts, and TUIs own different kinds of interaction.
+          Urushi keeps their lifecycle ownership distinct while sharing the
+          presentation decisions that should stay consistent.
+        </p>
+        <ul class="principles">
+          <li><span>01</span><div><strong>One semantic theme</strong><p>Success, warning, focus, and other roles mean the same thing on every surface.</p></div></li>
+          <li><span>02</span><div><strong>One composition model</strong><p>Components produce renderer-neutral views instead of terminal-specific output.</p></div></li>
+          <li><span>03</span><div><strong>One layout pass</strong><p>The same box model and CJK-aware width rules resolve each view.</p></div></li>
+        </ul>
+      </div>
+
+      <div class="foundation-diagram" aria-label="Shared and surface-specific responsibilities">
+        <div class="diagram-region diagram-specific">
+          <div class="diagram-label">
+            <span>Surface-specific</span>
+            <small>Who controls the terminal</small>
+          </div>
+          <div class="diagram-columns">
+            <div><strong>CLI output</strong><span>Static write</span></div>
+            <div><strong>Prompt</strong><span>Blocking form</span></div>
+            <div><strong>TUI</strong><span>TEA runtime</span></div>
+          </div>
+        </div>
+
+        <div class="diagram-join"><span>shares presentation through</span></div>
+
+        <div class="diagram-region diagram-shared">
+          <div class="diagram-label">
+            <span>Shared foundation</span>
+            <small>What the interface means and how it lays out</small>
+          </div>
+          <div class="diagram-flow">
+            <strong>Theme</strong><i>→</i><strong>Components</strong><i>→</i><strong>View</strong><i>→</i><strong>Layout</strong>
+          </div>
+          <div class="diagram-terminal">
+            <span>Backend-independent terminal</span>
+            <span>Commands</span>
+            <span>Geometry</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="start-section section-shell">
+    <p class="section-index">03 / START</p>
+    <div class="start-copy">
+      <h2>Use only the surface you need.</h2>
+      <p>
+        Begin with the core crate, then add CLI presentation, prompts, graphics,
+        or full-screen support as the application requires. Run a TEA application
+        with <code>urushi_tui::run</code>, or add Urushi views to an existing
+        Ratatui loop through the adapter.
+      </p>
+      <a class="button button-primary" href="/docs/">Read the documentation <span aria-hidden="true">→</span></a>
+    </div>
+    <div class="install-command">
+      <span>$</span><code>cargo add urushi</code>
+    </div>
+  </section>
+</SiteLayout>

@@ -1,0 +1,37 @@
+---
+import ConceptLayout from '../../layouts/ConceptLayout.astro';
+---
+
+<ConceptLayout concept="kuro" title="Urushi concept 01 — Kuro-ro">
+  <header class="concept-nav shell">
+    <a class="concept-brand" href="/">urushi</a>
+    <nav aria-label="Primary navigation"><a href="#surfaces">Surfaces</a><a href="/docs/">Docs</a><a class="nav-mark" href="/docs/">Start →</a></nav>
+  </header>
+  <main>
+    <section class="kuro-hero shell">
+      <div class="kuro-copy">
+        <p class="concept-kicker"><span>01</span> Black lacquer / 黒呂色</p>
+        <h1>One visual<br />language.<br /><em>Every surface.</em></h1>
+        <p>Presentation infrastructure for Rust terminal applications—from styled output to full-screen interfaces.</p>
+        <div class="concept-actions"><a class="solid-action" href="/docs/">Get started →</a><code>cargo add urushi</code></div>
+      </div>
+      <div class="kuro-terminal" aria-label="CLI presentation preview">
+        <div class="terminal-bar"><span>URUSHI / SUMMARY</span><span>80 × 24</span></div>
+        <div class="terminal-body">
+          <p><b>use</b> urushi_cli::&#123;CliTheme, Summary&#125;;</p>
+          <section><h2><i>✓</i> Build complete</h2><dl><dt>Target</dt><dd>aarch64-apple-darwin</dd><dt>Profile</dt><dd>release</dd><dt>Output</dt><dd>target/release/app</dd></dl></section>
+          <footer><span>Theme</span>→<span>View</span>→<span>stdout</span></footer>
+        </div>
+      </div>
+    </section>
+    <section class="kuro-statement"><p>Different interfaces.</p><strong>One underlying model.</strong></section>
+    <section class="kuro-surfaces shell" id="surfaces">
+      <article><span>01</span><h2>Styled text</h2><p>Color and emphasis without an event loop.</p><code>StyledText::new("Done", style)</code></article>
+      <article><span>02</span><h2>CLI presentation</h2><p>Semantic summaries, warnings, and progress.</p><code>cli.summary(&Summary::new("Done"))</code></article>
+      <article><span>03</span><h2>Interactive prompts</h2><p>Theme-aware input and validation flows.</p><code>Input::new(key, "Name?", "")</code></article>
+      <article><span>04</span><h2>Full-screen TUI</h2><p>Renderer-neutral views with a Ratatui adapter.</p><code>ViewWidget::new(&view)</code></article>
+    </section>
+    <section class="kuro-foundation shell"><p>SHARED FOUNDATION</p><div><span>Theme</span><i>→</i><span>Components</span><i>→</i><span>View</span><i>→</i><span>Layout</span></div></section>
+  </main>
+  <footer class="concept-footer shell"><span>urushi</span><p>Concept 01 / Kuro-ro</p><a href="/designs/shiro/">Next concept →</a></footer>
+</ConceptLayout>

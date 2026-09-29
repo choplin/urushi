@@ -1,0 +1,83 @@
+---
+title: CLI overview
+description: Build terminal-aware static command output, structured components, and opinionated CLI presentations.
+---
+
+import ArchitectureDiagram from '../../../../components/ArchitectureDiagram.astro';
+
+Urushi's CLI surface is for output that is written once and then returns
+control to the command. It ranges from styling one line to composing a complete
+result from panels, lists, tables, trees, and CLI-specific presentations.
+
+It does not enter raw mode or install an event loop. Use
+[`urushi-prompt`](/docs/prompts/) when the command must ask for input, and
+[`urushi-tui`](/docs/tui/) when it owns a continuously redrawn screen.
+
+## What you can build
+
+- **Styled text:** apply logical colors, emphasis, underlines, and hyperlinks
+  without embedding ANSI sequences in content.
+- **Adaptive layouts:** compose rows, columns, grids, bordered blocks, titles,
+  padding, alignment, fixed or filling dimensions, wrapping, and clipping.
+- **Structured output:** present lists, tables, and trees through reusable,
+  theme-derived presentations.
+- **A CLI visual language:** use `urushi-cli` for semantic summaries and
+  warnings with consistent rails, glyphs, hierarchy, and roles. In 0.1.0,
+  `Summary` and `Warning` are the shipped presentations.
+- **Terminal-aware delivery:** write to stdout or stderr with terminal width
+  and capability detection, while redirected output remains plain text without
+  ANSI styling.
+
+All of these paths produce either `StyledText` or a renderer-neutral `View`.
+That keeps layout and meaning separate from the final terminal capabilities.
+
+<ArchitectureDiagram kind="cli" />
+
+## A representative result
+
+This example uses the opinionated layer to turn semantic result data into a
+view, then sends that view through the ordinary static-output path:
+
+```rust
+use urushi_cli::{CliTheme, Summary};
+
+let cli = CliTheme::from_theme(&theme);
+let view = cli.summary(
+    &Summary::new("Build complete")
+        .field("Target", "aarch64-apple-darwin")
+        .field("Profile", "release")
+        .field("Output", "target/release/app"),
+);
+
+urushi::println_view(&view)?;
+# Ok::<(), std::io::Error>(())
+```
+
+```text title="Rendered output"
+│
+◇  Build complete
+│  Target   aarch64-apple-darwin
+│  Profile  release
+│  Output   target/release/app
+```
+
+The same output pipeline can render a view assembled directly from core layout
+primitives or from a reusable list, table, or tree presentation.
+
+## Choose the layer you need
+
+Use `urushi` directly when the application's structure is specific to its
+domain. It supplies styles, themes, layout, components, measurement, rendering,
+and standard-stream helpers without imposing a product vocabulary.
+
+Add `urushi-cli` when multiple commands should share a recognizable
+human-facing language. Its semantic data remains independent of color and
+width, and its presentations still return ordinary `View` values that can be
+combined with core layouts.
+
+## Continue by task
+
+- [Style text and box-model views](/docs/cli/styled-output/)
+- [Compose blocks and layouts](/docs/cli/layout/)
+- [Use opinionated CLI presentations](/docs/cli/presentations/)
+- [Understand terminal and redirected output](/docs/cli/output-behavior/)

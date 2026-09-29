@@ -1,0 +1,43 @@
+---
+import '../styles/home.css';
+
+interface Props {
+  title: string;
+  description: string;
+}
+
+const { title, description } = Astro.props;
+---
+
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width" />
+    <meta name="description" content={description} />
+    <meta name="theme-color" content="#090909" />
+    <title>{title}</title>
+  </head>
+  <body>
+    <header class="site-header">
+      <a class="brand" href="/" aria-label="Urushi home">
+        <span>urushi</span>
+      </a>
+      <nav aria-label="Primary navigation">
+        <a href="/docs/">Docs</a>
+        <a href="/docs/reference/crates/">Crates</a>
+        <a class="nav-cta" href="/docs/">Get started <span aria-hidden="true">↗</span></a>
+      </nav>
+    </header>
+    <main>
+      <slot />
+    </main>
+    <footer class="site-footer">
+      <a class="brand footer-brand" href="/">
+        <span>urushi</span>
+      </a>
+      <p>Presentation infrastructure for Rust terminal applications.</p>
+      <p class="footer-meta">MIT or Apache-2.0</p>
+    </footer>
+  </body>
+</html>

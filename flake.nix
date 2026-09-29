@@ -61,7 +61,11 @@
 
           devShells.default = pkgs.devshell.mkShell {
             imports = [ (pkgs.devshell.importTOML ./devshell.toml) ];
-            packages = [ rustToolchain ];
+            packages = [
+              rustToolchain
+              pkgs.nodejs_24
+              pkgs.pnpm
+            ];
           };
         };
     };

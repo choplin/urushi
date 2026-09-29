@@ -1,0 +1,188 @@
+---
+title: TUI runtime
+description: Model a full-screen application with Urushi's TEA-style Application, Effect, and Subscription values.
+---
+
+import ArchitectureDiagram from '../../../../components/ArchitectureDiagram.astro';
+
+The `urushi-tui` 0.1.0 runtime is a runnable TEA-style full-screen application
+framework. An application owns its domain choices; the runtime owns the live
+model, ordered message delivery, effects, subscriptions, frame scheduling, and
+the terminal session.
+
+The application layer contains no Ratatui types. It returns the same Urushi
+`View` used by other presentation surfaces.
+
+## Define an application
+
+An application separates the program description from the model that changes
+while it runs.
+
+```rust
+use std::time::Duration;
+use urushi::{TextStyle, View};
+use urushi_tui::{Application, Effect, Subscription};
+
+struct Counter;
+
+enum Message {
+    Increment,
+}
+
+impl Application for Counter {
+    type Model = i32;
+    type Message = Message;
+
+    fn init(&self) -> (Self::Model, Effect<Self::Message>) {
+        (
+            0,
+            Effect::after(Duration::from_millis(500), |_| Message::Increment),
+        )
+    }
+
+    fn update(
+        &self,
+        model: &mut Self::Model,
+        message: Self::Message,
+    ) -> Effect<Self::Message> {
+        match message {
+            Message::Increment => *model += 1,
+        }
+        Effect::shutdown()
+    }
+
+    fn view(&self, model: &Self::Model) -> View {
+        View::text(model.to_string(), TextStyle::new())
+    }
+
+    fn subscriptions(
+        &self,
+        _model: &Self::Model,
+    ) -> Subscription<Self::Message> {
+        Subscription::none()
+    }
+}
+```
+
+Because `view` returns the current model as text, the complete frame before and
+after an `Increment` message is:
+
+```text title="Initial frame"
+0
+```
+
+```text title="After Increment"
+1
+```
+
+Only `update` receives the model mutably. Terminal input, timer ticks, effect
+results, and other external events all become messages before they reach it.
+This keeps application transitions directly testable without opening a
+terminal.
+
+## Run the application
+
+`urushi_tui::run` supplies the production executor, clock, terminal backend,
+full-screen presentation, and session defaults:
+
+```rust
+let final_model = urushi_tui::run(Counter)?;
+println!("final count: {final_model}");
+# Ok::<(), urushi_tui::Error>(())
+```
+
+The example renders `0`, delivers the delayed `Increment` message, updates the
+model to `1`, and shuts down. After restoring the terminal session, `run`
+returns that final model and the program prints:
+
+```text title="Output after the full-screen session closes"
+final count: 1
+```
+
+## Return effects instead of performing work in `update`
+
+An `Effect<Message>` describes work for the runtime to interpret. It supports
+blocking work, futures, delays, latest-only keyed work, batches, and shutdown.
+The completed value returns as another message, so it cannot mutate the model
+out of order.
+
+Use an effect for filesystem or network I/O and for expensive preparation that
+would make input handling or `view` slow. Keep `update` focused on state
+transitions and keep `view` cheap enough to evaluate for a frame.
+
+## Declare ongoing sources as subscriptions
+
+`subscriptions(&Model)` returns the sources that should be active for the
+current model. Public subscription constructors cover:
+
+- terminal input;
+- surface changes such as terminal dimensions;
+- intervals and process signals;
+- terminal draw errors; and
+- custom streams, asynchronous producers, and blocking producers.
+
+The runtime reconciles this declaration after updates. A source starts when it
+appears and stops when it is no longer declared. Source admission policy is
+explicit; the runtime does not inspect application message variants to decide
+which events may be replaced or backpressured.
+
+## Current 0.1.0 presentation boundary
+
+The runtime architecture does not make Ratatui part of `Application`:
+
+<ArchitectureDiagram kind="backend" />
+
+In the current package, `Terminal` owns presentation state and commits a frame
+only after output and flush succeed. `Frame` is a borrowed, draw-scoped target
+for styled graphemes and the cursor request. `CellWriter` lowers changed cells
+into terminal commands. `RatatuiTerminal` is the 0.1.0 implementation. These
+types do not enter the `Application` model.
+
+Ratatui also remains available as an explicit adapter for applications that
+own their own loop. See [Use the Ratatui integration](/docs/tui/ratatui/).
+
+## Configure the runtime
+
+`Runtime::new(app)` exposes the same blocking runtime as a builder. A run:
+
+1. create and own the live model;
+2. admit input, subscription events, and effect completions into one ordered
+   delivery path;
+3. apply every accepted message through `update`;
+4. coalesce physical draws without skipping logical model transitions;
+5. resolve the latest `View` once for the selected terminal's frame; and
+6. restore the terminal session on normal exit, errors, and panic unwinding.
+
+The builder makes the physical backend, frame terminal, executor, clock, and
+session options selectable. These are runtime-owned dependencies, not fields
+added to the application model:
+
+```rust
+use urushi_tui::Runtime;
+
+let final_model = Runtime::new(Counter)
+    .mouse(true)
+    .focus_change(true)
+    .run()?;
+
+assert_eq!(final_model, 1);
+# Ok::<(), urushi_tui::Error>(())
+```
+
+## What 0.1.0 exposes
+
+The public runtime surface includes:
+
+- `Application`, `Effect`, and `Subscription`;
+- input, surface, signal, admission, and sender values;
+- `Terminal`, `Frame`, and `CellWriter`;
+- `RatatuiTerminal` plus the adapters for caller-owned Ratatui buffers;
+- `run(app)` with the production defaults; and
+- `Runtime`, including backend, terminal, executor, clock, and session-option
+  replacement.
+
+The target architecture moves the TEA framework to `urushi-tui-app`, keeps a
+concrete Urushi-owned frame engine in `urushi-tui`, and moves the caller-owned
+Ratatui path to `urushi-adapter-ratatui`. Those package names describe the
+design direction and are not 0.1.0 dependency names. See the
+[TUI overview](/docs/tui/) for that boundary.
