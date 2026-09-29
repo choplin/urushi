@@ -60,7 +60,7 @@ pub use text::{
 };
 pub use theme::{
     BlockThemeRole, ColorScheme, ComponentRole, ComponentTheme, ListRole, PanelRole, ScrollbarRole,
-    SemanticTokens, TableRole, TextThemeRole, Theme, ThemeMode, ThemeSet, TreeRole,
+    SemanticTokens, TableRole, TextThemeRole, Theme, ThemeMode, ThemePreset, ThemeSet, TreeRole,
 };
 pub use urushi_derive::TableRow;
 pub use urushi_terminal::{ColorLevel, TerminalBackground, TerminalCapabilities, TerminalStyle};

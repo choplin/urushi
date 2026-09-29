@@ -34,6 +34,10 @@ name = "themed_ratatui"
 name = "runtime_counter"
 required-features = ["runtime", "crossterm"]
 
+[[example]]
+name = "adaptive_theme"
+required-features = ["runtime"]
+
 [[bench]]
 name = "cell_buffer"
 harness = false

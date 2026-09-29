@@ -272,10 +272,10 @@ impl NativeTerminal {
         }
         let mut buffer = [0_u8; 4096];
         match self.file_mut().read(&mut buffer) {
-            Ok(0) => Err(io::Error::new(
-                io::ErrorKind::UnexpectedEof,
-                "controlling terminal reached end of input",
-            )),
+            // Raw mode uses VMIN=0, so zero bytes means that no input became
+            // available before the read completed. wait_readable rejects a
+            // hangup once the endpoint is no longer a valid terminal.
+            Ok(0) => Ok(false),
             Ok(length) => {
                 self.input.extend_from_slice(&buffer[..length]);
                 Ok(true)
@@ -312,6 +312,10 @@ impl RawModeControl for NativeTerminal {
         // Matches POSIX cfmakeraw while retaining the exact original value for
         // restoration rather than trying to reconstruct it later.
         unsafe { libc::cfmakeraw(&mut raw) };
+        // poll owns the wait. Keeping read nonblocking prevents an input worker
+        // from holding the shared terminal connection after stale readiness.
+        raw.c_cc[libc::VMIN] = 0;
+        raw.c_cc[libc::VTIME] = 0;
         set_termios(self.file(), &raw)?;
         self.original_termios = Some(original);
         Ok(())
@@ -577,8 +581,16 @@ fn wait_readable(file: &File, timeout: Duration) -> io::Result<bool> {
         } else {
             Err(error)
         }
+    } else if result == 0 {
+        Ok(false)
+    } else if descriptor.revents & libc::POLLIN != 0 {
+        Ok(true)
+    } else if descriptor.revents & (libc::POLLERR | libc::POLLHUP | libc::POLLNVAL) != 0 {
+        get_termios(file)?;
+        std::thread::sleep(timeout);
+        Ok(true)
     } else {
-        Ok(result > 0)
+        Ok(false)
     }
 }
 
@@ -1303,6 +1315,9 @@ mod tests {
 
         terminal.enable_raw_mode().expect("raw mode is enabled");
         assert!(terminal.raw_mode_enabled().expect("raw mode is inspected"));
+        let raw = get_termios(terminal.file()).expect("raw mode is readable");
+        assert_eq!(raw.c_cc[libc::VMIN], 0);
+        assert_eq!(raw.c_cc[libc::VTIME], 0);
 
         peer.write_all(b"\x1b[1;5A").expect("input is written");
         assert_eq!(

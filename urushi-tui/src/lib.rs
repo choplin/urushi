@@ -16,6 +16,12 @@
 //! [`terminal`] is the lower-level full-screen presentation layer: frame and
 //! commit contracts plus a cell writer that lowers changed cells to
 //! `urushi-terminal` commands. The optional TEA runtime is layered above it.
+//!
+//! The runtime does not inspect terminal appearance or replace an
+//! application's theme. A caller that adapts to the terminal background opens
+//! its terminal backend first, uses [`urushi_terminal::TerminalQuery`] to
+//! select a stable [`urushi::Theme`], constructs the application with that
+//! theme, and supplies the same backend to [`Runtime::backend`].
 
 mod cell;
 pub mod ratatui;
