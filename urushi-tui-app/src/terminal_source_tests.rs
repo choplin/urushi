@@ -197,14 +197,20 @@ fn surface_keeps_only_the_latest_unaccepted_window_observation() {
         .reconcile(Subscription::surface(|surface| surface))
         .unwrap();
     assert_eq!(
-        spawner.presentation_size(TerminalSize::ZERO),
-        TerminalSize::new(80, 24)
+        spawner.presentation_surface(Surface::default()),
+        Surface {
+            size: TerminalSize::new(80, 24),
+            cell_pixels: Some(PixelSize::new(8, 16)),
+        }
     );
     probe.wait_for_queries(3);
     assert!(!harness.complete_effect(0));
     assert_eq!(
-        spawner.presentation_size(TerminalSize::ZERO),
-        TerminalSize::new(120, 40)
+        spawner.presentation_surface(Surface::default()),
+        Surface {
+            size: TerminalSize::new(120, 40),
+            cell_pixels: Some(PixelSize::new(8, 16)),
+        }
     );
 
     assert_eq!(
@@ -228,6 +234,152 @@ fn surface_keeps_only_the_latest_unaccepted_window_observation() {
     );
     subscriptions.stop();
     assert!(!harness.complete_effect(0));
+}
+
+#[test]
+fn resize_without_a_surface_subscription_updates_presentation_and_requests_redraw() {
+    let (terminal, probe) = FakeTerminal::new(
+        [Ok(Event::Resize(TerminalSize::new(100, 30)))],
+        [Ok(window(100, 30, 800, 600))],
+    );
+    let harness: Harness<Surface> = Harness::new(TerminalSize::ZERO);
+    let spawner =
+        TerminalSourceSpawner::new(terminal, harness.executor(), Arc::new(RejectSources)).unwrap();
+    let deliveries = DeliveryQueue::<Surface>::new();
+
+    spawner.attach_runtime(deliveries.clone());
+    probe.wait_for_queries(1);
+    let deadline = Instant::now() + Duration::from_secs(2);
+    while deliveries.try_next().is_none() {
+        assert!(Instant::now() < deadline, "redraw request was not accepted");
+        std::thread::yield_now();
+    }
+
+    assert_eq!(
+        spawner.presentation_surface(Surface::default()),
+        Surface {
+            size: TerminalSize::new(100, 30),
+            cell_pixels: Some(PixelSize::new(8, 20)),
+        }
+    );
+}
+
+#[test]
+fn resize_after_surface_unsubscription_still_updates_presentation() {
+    let (terminal, probe) = FakeTerminal::new([], [Ok(window(80, 24, 640, 384))]);
+    let harness: Harness<Surface> = Harness::new(TerminalSize::ZERO);
+    let spawner = Arc::new(
+        TerminalSourceSpawner::new(terminal, harness.executor(), Arc::new(RejectSources)).unwrap(),
+    );
+    let deliveries = harness.deliveries();
+    spawner.attach_runtime(deliveries.clone());
+    let mut subscriptions = SubscriptionExecutor::new(
+        Arc::clone(&spawner) as Arc<dyn SourceSpawner<Surface>>,
+        deliveries.clone(),
+    );
+    subscriptions
+        .reconcile(Subscription::surface(|surface| surface))
+        .unwrap();
+    assert!(matches!(deliveries.try_next(), Some(Delivery::Sync { .. })));
+    subscriptions.stop();
+
+    probe.push_window(Ok(window(120, 40, 960, 800)));
+    probe.push_event(Ok(Event::Resize(TerminalSize::new(120, 40))));
+    probe.wait_for_queries(2);
+    let deadline = Instant::now() + Duration::from_secs(2);
+    loop {
+        if matches!(deliveries.try_next(), Some(Delivery::Redraw)) {
+            break;
+        }
+        assert!(Instant::now() < deadline, "redraw request was not accepted");
+        std::thread::yield_now();
+    }
+
+    assert_eq!(
+        spawner.presentation_surface(Surface::default()),
+        Surface {
+            size: TerminalSize::new(120, 40),
+            cell_pixels: Some(PixelSize::new(8, 20)),
+        }
+    );
+}
+
+#[test]
+fn resize_observed_before_unsubscription_becomes_presentation_only_after_it() {
+    let (terminal, _probe) = FakeTerminal::new([], [Ok(window(80, 24, 640, 384))]);
+    let harness: Harness<Surface> = Harness::new(TerminalSize::ZERO);
+    let spawner = Arc::new(
+        TerminalSourceSpawner::new(terminal, harness.executor(), Arc::new(RejectSources)).unwrap(),
+    );
+    let deliveries = harness.deliveries();
+    spawner.attach_runtime(deliveries.clone());
+    let mut subscriptions = SubscriptionExecutor::new(
+        Arc::clone(&spawner) as Arc<dyn SourceSpawner<Surface>>,
+        deliveries.clone(),
+    );
+    subscriptions
+        .reconcile(Subscription::surface(|surface| surface))
+        .unwrap();
+    assert!(matches!(deliveries.try_next(), Some(Delivery::Sync { .. })));
+
+    let (endpoint_id, mapper, publisher) =
+        surface_endpoint(&spawner.owner.shared).expect("surface endpoint is registered");
+    let observed = Surface {
+        size: TerminalSize::new(120, 40),
+        cell_pixels: Some(PixelSize::new(8, 20)),
+    };
+    let observation = Observation::Surface {
+        endpoint_id,
+        surface: observed,
+        mapper,
+        publisher,
+        sizes: Arc::clone(&spawner.owner.shared.surface_sizes),
+        sources: Arc::clone(&spawner.owner.shared.sources),
+    };
+
+    subscriptions.stop();
+    observation.deliver();
+
+    assert_eq!(spawner.presentation_surface(Surface::default()), observed);
+    assert_eq!(deliveries.try_next(), Some(Delivery::Redraw));
+}
+
+#[test]
+fn presentation_only_resize_observed_before_subscription_cannot_replace_its_initial_surface() {
+    let newer = Surface {
+        size: TerminalSize::new(120, 40),
+        cell_pixels: Some(PixelSize::new(8, 20)),
+    };
+    let (terminal, _probe) = FakeTerminal::new([], [Ok(window(120, 40, 960, 800))]);
+    let harness: Harness<Surface> = Harness::new(TerminalSize::ZERO);
+    let spawner = Arc::new(
+        TerminalSourceSpawner::new(terminal, harness.executor(), Arc::new(RejectSources)).unwrap(),
+    );
+    let deliveries = harness.deliveries();
+    spawner.attach_runtime(deliveries.clone());
+    let old_observation = Observation::PresentationSurface {
+        surface: Surface {
+            size: TerminalSize::new(100, 30),
+            cell_pixels: Some(PixelSize::new(8, 20)),
+        },
+        sizes: Arc::clone(&spawner.owner.shared.surface_sizes),
+        sources: Arc::clone(&spawner.owner.shared.sources),
+    };
+
+    let mut subscriptions = SubscriptionExecutor::new(
+        Arc::clone(&spawner) as Arc<dyn SourceSpawner<Surface>>,
+        deliveries.clone(),
+    );
+    subscriptions
+        .reconcile(Subscription::surface(|surface| surface))
+        .unwrap();
+    assert!(matches!(deliveries.try_next(), Some(Delivery::Sync { .. })));
+
+    old_observation.deliver();
+
+    assert_eq!(spawner.presentation_surface(Surface::default()), newer);
+    assert!(deliveries.try_next().is_none());
+    subscriptions.stop();
 }
 
 #[test]

@@ -71,6 +71,9 @@ where
                 .map_err(RuntimeError::Terminal)?;
             mapper
         };
+        if !stopping {
+            source_spawner.attach_runtime(deliveries.clone());
+        }
         let mut scheduler = DrawScheduler::new(DEFAULT_MINIMUM_INTERVAL, Arc::clone(&clock));
         if !stopping {
             scheduler.invalidate();
@@ -110,6 +113,7 @@ where
                 }
                 self.deliveries.complete_sync();
             }
+            Delivery::Redraw => self.scheduler.invalidate(),
         }
         Ok(())
     }

@@ -198,12 +198,14 @@ message source and decides whether an incoming item is accepted, delayed with
 backpressure, replaced, or rejected; the runtime never inspects application
 message variants to infer it. Once accepted, a **delivery** receives one
 position in a single runtime-wide order. An ordinary delivery contains exactly
-one message; the exceptional rendering barrier contains a non-empty batch:
+one message; the exceptional rendering barrier contains a non-empty batch. A
+coalesced internal redraw request contains no message:
 
 ```text
 Delivery<Message> =
   Async(Message)
   | Sync(NonEmpty<Message>)
+  | Redraw
 ```
 
 Application-defined sources use their declared `Admission` through a generic
@@ -212,9 +214,11 @@ replaceable `latest` policy. The runtime-owned surface producer instead owns a
 dedicated latest-observation slot. It applies the current subscription mapper
 when each observation occurs, then keeps the resulting application message in
 that slot until acceptance. Surface is the only source that produces `Sync`.
+When no surface subscription exists, a resize instead updates only the
+presentation snapshot and produces one coalesced `Redraw`.
 
 Deliveries from all sources are processed in the runtime-wide accepted order; a
-`Sync` delivery does not overtake an earlier accepted `Async` one.
+`Sync` or `Redraw` delivery does not overtake an earlier accepted item.
 
 `Async` is the default. The runtime processes accepted messages independently
 of physical drawing. After each `update`, the runtime marks the draw scheduler
@@ -240,6 +244,12 @@ is released and before the next delivery. A draw already in progress is not
 interrupted. The first frame uses the same rule: the runtime accepts the known
 initial surface delivery before its first scheduling decision, so the ordinary
 Sync fence delays that decision until the model contains the initial surface.
+
+`Redraw` changes no model and calls no application code. It marks the scheduler
+dirty after the newest presentation-only surface geometry has been accepted;
+repeated requests coalesce until the runtime accepts one. A resize query
+failure remains a terminal error in either the subscribed `Sync` path or this
+presentation-only path.
 
 Surface information reaches the application only through a subscription as a
 message, retained in the model when needed; `view` receives no implicit
@@ -302,15 +312,14 @@ which is how tests replace them and how a backend is replaced. The entry point,
 the executor boundary, and what the runtime does with an error of its own are
 defined in [`design/tui-runtime-entry.md`](design/tui-runtime-entry.md).
 
-Cell output plus terminal graphics remains an extension boundary. The separate
-`urushi-graphics` crate pairs Image assets with resolved anchors and may supply
-reusable protocol state machines, but the cell-only runtime does not retain or
-commit them. A future optional graphics integration makes the TUI renderer own
-that state and combine it with its existing frame commit; applications without
-the feature keep the cell-only path. The requirements for adding that lifecycle
-are defined in
-[`design/tui-terminal-ownership.md`](design/tui-terminal-ownership.md), while
-the component-to-output boundary is defined in
+Cell output plus terminal graphics is an optional host capability. With the
+`graphics` feature, the runtime owns one selected Kitty, Sixel, or text path,
+uses the accepted `Surface` for both cell and pixel geometry, and writes
+graphics inside the same logical `Screen` commit as cells. Applications without
+the feature keep the cell-only path. Selection, ordering, and recovery are
+defined in
+[`design/tui-graphics-presentation.md`](design/tui-graphics-presentation.md),
+while the component-to-output boundary is defined in
 [`terminal-graphics.md`](terminal-graphics.md).
 
 Resolver reuse is a rendering choice, not application state. The runtime uses
@@ -346,7 +355,8 @@ Implementation of the TUI subsystem must preserve these invariants:
 5. Expensive preparation and external I/O enter through effects and return
    through messages.
 6. `Async` is the default; `Sync` is reserved for a logical rendering-environment
-   barrier.
+   barrier, and message-free `Redraw` is reserved for runtime-owned physical
+   presentation invalidation.
 7. An accepted `Sync` fences new draw admission until its complete batch has
    updated the model; the scheduler is then evaluated before later delivery.
 8. Application-visible surface information reaches `update` through a

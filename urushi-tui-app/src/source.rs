@@ -41,10 +41,8 @@ pub enum Input {
 /// reach `update` as a message and are read from the model by `view`, which
 /// receives no surface input of its own.
 ///
-/// What the terminal can do with graphics is not here. Cell output plus
-/// terminal graphics is an extension boundary the cell-only runtime is proven
-/// before, and a capability an application cannot yet act on would be a fact
-/// with no reader.
+/// What the terminal can do with graphics is not here. Protocol capabilities
+/// select a runtime presentation strategy; they are not application state.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
 pub struct Surface {
     /// The drawable area, in cells.
@@ -65,13 +63,7 @@ impl Surface {
 
     pub(crate) fn from_window_size(window: WindowSize) -> Self {
         let size = window.cells();
-        // Backends report whole-window pixels. Surface exposes one cell's
-        // integer pixel extent so applications do not repeat this conversion.
-        let cell_pixels = window.pixels().and_then(|pixels| {
-            let width = pixels.width().checked_div(size.columns())?;
-            let height = pixels.height().checked_div(size.rows())?;
-            (width > 0 && height > 0).then(|| CellPixels::new(width, height))
-        });
+        let cell_pixels = window.cell_pixels();
         Self { size, cell_pixels }
     }
 }

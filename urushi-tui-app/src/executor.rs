@@ -305,6 +305,8 @@ pub(crate) trait SourceSpawner<Message>: Send + Sync + 'static {
     fn failure(&self) -> Pin<Box<dyn Future<Output = io::Error> + Send + '_>> {
         Box::pin(std::future::pending())
     }
+
+    fn attach_runtime(&self, _deliveries: DeliveryQueue<Message>) {}
 }
 
 /// One running source. Refreshing changes its declaration without restarting it.

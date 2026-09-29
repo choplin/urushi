@@ -1,7 +1,7 @@
 //! Resolves one application view into one terminal frame.
 
-use urushi::{Available, StyledGrapheme, View};
-use urushi_terminal::Position;
+use urushi::{Available, ResolvedView, StyledGrapheme, View};
+use urushi_terminal::{Position, TerminalSize};
 use urushi_tui::{Frame, Rect};
 
 use super::evaluator::Evaluator;
@@ -28,11 +28,18 @@ impl RenderFrame for Frame<'_> {
 
 /// Resolves and draws one view, including its cursor request.
 pub(crate) fn render(view: &View, frame: &mut impl RenderFrame, evaluator: &mut Evaluator) {
-    let area = frame.area();
-    let size = area.size();
-    let resolved = evaluator
+    let resolved = resolve(view, frame.area().size(), evaluator);
+    render_resolved(&resolved, frame);
+}
+
+pub(crate) fn resolve(view: &View, size: TerminalSize, evaluator: &mut Evaluator) -> ResolvedView {
+    evaluator
         .resolve(view, Available::size(size.columns(), size.rows()))
-        .expect("a frame area supplies finite view geometry");
+        .expect("a terminal surface supplies finite view geometry")
+}
+
+pub(crate) fn render_resolved(resolved: &ResolvedView, frame: &mut impl RenderFrame) {
+    let area = frame.area();
     let origin = area.origin();
 
     for (row, graphemes) in resolved.rows().iter().enumerate() {

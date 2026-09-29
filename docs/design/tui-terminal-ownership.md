@@ -30,8 +30,20 @@ synchronous layer. The full package boundary is defined in
 ```rust
 impl<W: CommandWriter> Screen<W> {
     fn size(&self) -> TerminalSize;
+    fn writer(&self) -> &W;
+    fn into_inner(self) -> W;
     fn resize(&mut self, size: TerminalSize) -> io::Result<()>;
+    fn invalidate(&mut self);
+    fn modify_surface(
+        &mut self,
+        output: impl FnOnce(&mut W) -> io::Result<()>,
+    ) -> io::Result<()>;
     fn draw(&mut self, draw: impl FnOnce(&mut Frame<'_>)) -> io::Result<()>;
+    fn draw_with(
+        &mut self,
+        draw: impl FnOnce(&mut Frame<'_>),
+        present: impl FnOnce(&mut W) -> io::Result<()>,
+    ) -> io::Result<()>;
 }
 ```
 
@@ -56,10 +68,13 @@ previously painted. These states and results are equivalent to Noctui's buffer
 and diff model.
 
 `Screen` does not resize itself at draw time. Its size changes only through
-`resize`, which the runtime calls when a surface observation has been applied
-through the `Sync` barrier of
+`resize`. When the application subscribes to `Surface`, the runtime applies
+the observation through the `Sync` barrier of
 [`tui-delivery-ordering.md`](tui-delivery-ordering.md), so the frame the
-renderer draws into and the size the model reflects are the same size.
+renderer draws into and the size the model reflects are the same size. Without
+that subscription, the terminal source still accepts resize geometry for
+presentation and requests a redraw without manufacturing an application
+message.
 
 Cursor position and visibility requested for one frame belong to the frame and
 terminal path. They are not application effects. Where drawing a frame changes
@@ -227,16 +242,23 @@ application tests to an unrelated implementation detail.
 
 ### Cell output and terminal graphics
 
-Cell output plus terminal graphics remains an extension boundary. The separate
-`urushi-graphics` crate uses resolved core anchors and emits validated APC or
-DCS payloads through `urushi-terminal::CommandWriter`; it does not open a
-backend or write a physical stream directly. This stateless command path does
-not give the cell-only runtime a graphics lifecycle. A runtime that retains
-terminal graphics owns the corresponding `urushi-graphics` state behind an
-optional feature and must design asset lifetime, cell-and-graphics commit,
-partial-output recovery, and fallback together before making graphics part of
-its committed frame state. Applications that do not enable that integration do
-not pay for or manage graphics state. The package boundary is defined in
+The separate `urushi-graphics` crate uses resolved core anchors and emits
+validated APC or DCS payloads through `urushi-terminal::CommandWriter`; it does
+not open a backend or write a physical stream directly. The optional
+`urushi-tui-app` graphics integration owns the selected protocol lifecycle and
+runs frame output through `Screen::draw_with` after cells and before cell
+commit. That extension must not clear or replace the cell layer. Cleanup and
+other direct physical changes instead use `Screen::modify_surface`, which
+invalidates the cell baseline before exposing the writer. `Screen` remains
+protocol-agnostic: additional output and the final flush must succeed before
+the working cell buffer is committed.
+
+The runtime owns selection, resize invalidation, protocol cleanup, failure
+fallback, and shutdown cleanup. The Image component owns none of them.
+Applications without the feature do not acquire graphics dependencies or
+state. The exact transaction is defined in
+[`tui-graphics-presentation.md`](tui-graphics-presentation.md); the package and
+transport boundary is defined in
 [`terminal-graphics-boundary.md`](terminal-graphics-boundary.md).
 
 ## Verification
@@ -303,8 +325,3 @@ Its work is fixed by the view model and `Frame` — resolve once, put every
 grapheme, place the cursor — and nothing varies by backend. A public type would
 invite a replacement for which there is no reason; the name stays in the
 vocabulary as the owner of that work.
-
-## Open representation choices
-
-- retained graphics commit and recovery details beyond the anchored placement
-  contract.

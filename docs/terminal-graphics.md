@@ -74,6 +74,15 @@ presentation. Kitty's retained-state rules are defined in
 Sixel's redraw and cache rules are defined in
 [`design/terminal-graphics-sixel-lifecycle.md`](design/terminal-graphics-sixel-lifecycle.md).
 
+The optional `urushi-tui-app` `graphics` feature supplies that host integration.
+Its runtime selects Kitty, Sixel, or text from positive terminal evidence and
+an explicit `GraphicsPreference`, snapshots cell-pixel geometry with the
+accepted application `Surface`, and commits cells plus graphics as one logical
+frame. A graphics failure is cleaned up and redrawn through the Image text
+fallback rather than switching protocols mid-frame. The complete transaction
+is defined in
+[`design/tui-graphics-presentation.md`](design/tui-graphics-presentation.md).
+
 ## Ownership boundaries
 
 `urushi-graphics` owns Image data, presentation, placement lookup, protocol

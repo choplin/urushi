@@ -73,4 +73,11 @@ fn a_surface_derives_each_cell_size_from_window_geometry() {
         )),
         Surface::new(0, 0)
     );
+    assert_eq!(
+        Surface::from_window_size(WindowSize::new(
+            SurfaceSize::new(80, 24),
+            Some(PixelSize::new(801, 480)),
+        )),
+        Surface::new(80, 24)
+    );
 }

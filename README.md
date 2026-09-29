@@ -119,6 +119,25 @@ Any non-release key updates the model and starts one blocking effect; the
 effect completion returns as another message. Resize updates the subscribed
 surface, and `q`, Escape, or Ctrl-C shuts down and restores the session.
 
+Enable the `graphics` feature to let the runtime present `Image` components
+through the same terminal owner as its cell frame. Automatic selection uses
+positively confirmed Kitty support first, then Sixel when uniform cell-pixel
+geometry is available, and otherwise leaves the Image text fallback visible.
+An explicit override is available for compatibility and diagnostics:
+
+```rust
+use urushi_tui_app::{GraphicsPreference, Runtime};
+
+let model = Runtime::new(application)
+    .graphics(GraphicsPreference::Sixel)
+    .run()?;
+```
+
+An unavailable explicit protocol returns a diagnostic error. If selected
+graphics later fails, the runtime attempts protocol cleanup, redraws the View's
+text fallback as a complete cell frame, and reports the original terminal error
+through the runtime's existing terminal-error path.
+
 ## Example
 
 Run the English showcase to see one labeled example per styling feature. Each

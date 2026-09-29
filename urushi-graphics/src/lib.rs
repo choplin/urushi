@@ -11,6 +11,7 @@ mod image;
 pub mod kitty;
 pub mod sixel;
 
+use std::fmt;
 use std::io;
 
 use urushi::{
@@ -26,6 +27,82 @@ pub use image::{
     CellSize, GraphicPlacement, Image, ImagePresentation, InvalidRgbaRaster, PixelPosition,
     PixelSize, RgbaRaster,
 };
+
+/// Caller-selected policy for terminal image output.
+///
+/// Automatic selection prefers Kitty, then Sixel when character-cell pixel
+/// geometry is available, and finally the Image component's text fallback.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub enum GraphicsPreference {
+    /// Choose the strongest positively confirmed usable protocol.
+    #[default]
+    Auto,
+    /// Require Kitty graphics.
+    Kitty,
+    /// Require Sixel graphics and character-cell pixel geometry.
+    Sixel,
+    /// Always use the Image component's text fallback.
+    Text,
+}
+
+/// The graphics path selected for one terminal presentation.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum GraphicsSelection {
+    Kitty,
+    Sixel,
+    Text,
+}
+
+/// Why an explicitly requested graphics path cannot be used.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum GraphicsUnavailable {
+    UnsupportedProtocol(TerminalGraphicsProtocol),
+    MissingCellPixelGeometry,
+}
+
+impl fmt::Display for GraphicsUnavailable {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::UnsupportedProtocol(TerminalGraphicsProtocol::Kitty) => {
+                formatter.write_str("Kitty graphics were requested, but the terminal did not confirm support")
+            }
+            Self::UnsupportedProtocol(TerminalGraphicsProtocol::Sixel) => {
+                formatter.write_str("Sixel graphics were requested, but the terminal did not confirm support")
+            }
+            Self::MissingCellPixelGeometry => formatter.write_str(
+                "Sixel graphics were requested, but the terminal did not report uniform character-cell pixel geometry",
+            ),
+        }
+    }
+}
+
+impl std::error::Error for GraphicsUnavailable {}
+
+/// Selects the graphics path from caller policy and positive terminal evidence.
+pub fn select_graphics(
+    preference: GraphicsPreference,
+    capabilities: TerminalCapabilities,
+    cell_pixels: Option<CellPixelSize>,
+) -> Result<GraphicsSelection, GraphicsUnavailable> {
+    let kitty = capabilities.supports_graphics(TerminalGraphicsProtocol::Kitty);
+    let sixel = capabilities.supports_graphics(TerminalGraphicsProtocol::Sixel);
+    match preference {
+        GraphicsPreference::Auto if kitty => Ok(GraphicsSelection::Kitty),
+        GraphicsPreference::Auto if sixel && cell_pixels.is_some() => Ok(GraphicsSelection::Sixel),
+        GraphicsPreference::Auto | GraphicsPreference::Text => Ok(GraphicsSelection::Text),
+        GraphicsPreference::Kitty if kitty => Ok(GraphicsSelection::Kitty),
+        GraphicsPreference::Kitty => Err(GraphicsUnavailable::UnsupportedProtocol(
+            TerminalGraphicsProtocol::Kitty,
+        )),
+        GraphicsPreference::Sixel if !sixel => Err(GraphicsUnavailable::UnsupportedProtocol(
+            TerminalGraphicsProtocol::Sixel,
+        )),
+        GraphicsPreference::Sixel if cell_pixels.is_none() => {
+            Err(GraphicsUnavailable::MissingCellPixelGeometry)
+        }
+        GraphicsPreference::Sixel => Ok(GraphicsSelection::Sixel),
+    }
+}
 
 /// Resolves and renders one complete View at the terminal's top-left cell.
 ///
@@ -77,17 +154,24 @@ pub fn render_resolved_images<'a>(
     cell_pixels: Option<CellPixelSize>,
     terminal: &mut (impl CommandWriter + ?Sized),
 ) -> io::Result<Option<TerminalGraphicsProtocol>> {
-    if capabilities.supports_graphics(TerminalGraphicsProtocol::Kitty) {
-        kitty::render_kitty(view, images, cell_pixels, terminal)?;
-        return Ok(Some(TerminalGraphicsProtocol::Kitty));
-    }
-    if capabilities.supports_graphics(TerminalGraphicsProtocol::Sixel)
-        && let Some(cell_pixels) = cell_pixels
+    match select_graphics(GraphicsPreference::Auto, capabilities, cell_pixels)
+        .expect("automatic graphics selection is always available")
     {
-        sixel::render_sixel(view, images, cell_pixels, terminal)?;
-        return Ok(Some(TerminalGraphicsProtocol::Sixel));
+        GraphicsSelection::Kitty => {
+            kitty::render_kitty(view, images, cell_pixels, terminal)?;
+            Ok(Some(TerminalGraphicsProtocol::Kitty))
+        }
+        GraphicsSelection::Sixel => {
+            sixel::render_sixel(
+                view,
+                images,
+                cell_pixels.expect("Sixel selection requires cell-pixel geometry"),
+                terminal,
+            )?;
+            Ok(Some(TerminalGraphicsProtocol::Sixel))
+        }
+        GraphicsSelection::Text => Ok(None),
     }
-    Ok(None)
 }
 
 fn write_cells(
@@ -218,6 +302,35 @@ mod tests {
             None
         );
         assert!(fallback_output.into_inner().is_empty());
+    }
+
+    #[test]
+    fn explicit_selection_reports_missing_protocol_or_geometry() {
+        let both = TerminalCapabilities::none().with_graphics_protocols(
+            TerminalGraphicsProtocols::KITTY | TerminalGraphicsProtocols::SIXEL,
+        );
+        assert_eq!(
+            select_graphics(
+                GraphicsPreference::Sixel,
+                both,
+                Some(CellPixelSize::new(8, 16)),
+            ),
+            Ok(GraphicsSelection::Sixel)
+        );
+        assert_eq!(
+            select_graphics(GraphicsPreference::Sixel, both, None),
+            Err(GraphicsUnavailable::MissingCellPixelGeometry)
+        );
+        assert_eq!(
+            select_graphics(
+                GraphicsPreference::Kitty,
+                TerminalCapabilities::none(),
+                None,
+            ),
+            Err(GraphicsUnavailable::UnsupportedProtocol(
+                TerminalGraphicsProtocol::Kitty
+            ))
+        );
     }
 
     struct QueryingTerminal {

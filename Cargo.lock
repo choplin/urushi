@@ -1180,6 +1180,7 @@ dependencies = [
  "libc",
  "tokio",
  "urushi",
+ "urushi-graphics",
  "urushi-terminal",
  "urushi-tui",
 ]

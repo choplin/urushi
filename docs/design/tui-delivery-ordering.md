@@ -30,7 +30,8 @@ sources are processed in the runtime-wide accepted order. A `Sync` delivery
 does not overtake an earlier accepted `Async` delivery.
 
 `Delivery` and its variants are runtime-internal. `Async` contains exactly one
-message; only `Sync` contains a non-empty batch. An application-defined source
+message; only `Sync` contains a non-empty batch. `Redraw` is a coalesced
+runtime control item and contains no application message. An application-defined source
 (`Subscription::stream`, `run`, `run_blocking` in
 [`tui-application.md`](tui-application.md)) is always `Async`; only the
 runtime's own `surface` source produces `Sync` deliveries. What an application
@@ -59,9 +60,9 @@ sources whose accepted messages are ordinary `Async` deliveries.
 
 The runtime reads one backend-independent `urushi-terminal` connection through
 `EventSource` and `TerminalQuery`; a Crossterm or native event type never enters
-the TUI runtime. A polling reader runs off the application thread while either
-the input or surface subscription is declared. Dropping both declarations parks
-the reader, and runtime shutdown stops and joins it.
+the TUI runtime. A polling reader runs off the application thread for the
+runtime lifetime so presentation resize remains correct independently of
+application subscriptions. Runtime shutdown stops and joins it.
 
 `Key`, `Paste`, `Focus`, and `Mouse` events use the mapper current when the
 reader observes them, then enter the input source's default bounded inbox. The
@@ -72,11 +73,13 @@ delivery.
 
 `Resize` is not input. When the surface subscription is declared, it causes a
 fresh `WindowSize` query. The window's cell dimensions become `Surface::size`;
-when the backend also reports whole-window pixel dimensions, dividing them by
-the corresponding non-zero cell dimensions produces `Surface::cell_pixels`.
+when the backend also reports whole-window pixel dimensions exactly divisible
+by the corresponding non-zero cell dimensions, the quotient becomes
+`Surface::cell_pixels`.
 The current surface mapper is applied before publication into the dedicated
-latest slot. If no surface subscription is declared, resize events are ignored
-without querying the window.
+latest slot. If no surface subscription is declared, the runtime accepts the
+new presentation geometry directly and enqueues one coalesced `Redraw` control
+item without manufacturing an application message.
 
 Starting a surface subscription queries and accepts its current observation
 synchronously. During startup this happens before the scheduler is invalidated,
@@ -93,7 +96,7 @@ The delivery implementation uses these synchronization paths:
 | --- | --- | --- | --- |
 | Application source inbox | Unaccepted FIFO, endpoint closure, receiver Waker, and blocked async-sender Wakers | An async sender stores a Waker when a bounded inbox is full; a blocking sender waits on a condition variable. Accepting a value wakes both forms after releasing locks. | The inbox lock remains held while the oldest message is appended to the global queue as `Async`. |
 | Surface slot | One replaceable mapped message, endpoint closure, and receiver Waker | Publication never waits. It replaces the slot and wakes the runtime after releasing the slot lock. | The slot lock remains held while the message is appended to the global queue as `Sync`. |
-| Delivery queue | The runtime-wide FIFO and its async receiver Waker | The async runtime waits with a Waker; a blocking runtime waits on a condition variable. Insertion takes the Waker, releases the queue lock, then signals both forms. | Insertion under the queue mutex assigns the global delivery position. |
+| Delivery queue | The runtime-wide FIFO, one pending-redraw bit, and its async receiver Waker | The async runtime waits with a Waker; a blocking runtime waits on a condition variable. Insertion takes the Waker, releases the queue lock, then signals both forms. | Insertion under the queue mutex assigns the global delivery position; repeated `Redraw` requests coalesce until acceptance. |
 | Latest-only effect | Whether one execution is pending, accepted, or canceled | Neither completion nor cancellation waits for capacity. Runtime notification happens after the freshness lock is released. | Cancellation and queue insertion are ordered by the freshness mutex, so an accepted completion cannot be removed retroactively. |
 
 When a transition needs both a producer-local mutex and the delivery-queue
@@ -175,11 +178,13 @@ it subscribed to terminal errors, fatal otherwise.
 This barrier guarantees agreement among the delivered environment facts, the
 model after `update`, and the logical rendering-environment snapshot used to
 build the frame. `Screen` therefore does not let the backend resize the frame
-on its own at draw time: a size change the backend reports while drawing is
-not applied to that draw but enters admission as a `Sync` delivery, so the next
-barrier draws with a snapshot and a frame that agree. It does not freeze the
-operating system's physical terminal surface during the draw and does not
-claim that terminal output is an atomic transaction.
+on its own at draw time. A size change reported while drawing does not alter
+that admitted draw. With a surface subscription it enters admission as a
+`Sync` delivery and fences the next draw; without one it updates the
+presentation snapshot and requests the next draw through `Redraw`. In either
+case that next frame uses one accepted snapshot consistently. This does not
+freeze the operating system's physical terminal surface during the draw and
+does not claim that terminal output is an atomic transaction.
 
 ### How surface information reaches the application
 

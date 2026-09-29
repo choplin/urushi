@@ -110,6 +110,7 @@ fn take_one<Message>(deliveries: &DeliveryQueue<Message>) -> Option<Message> {
     deliveries.try_next().map(|delivery| match delivery {
         Delivery::Async(message) => message,
         Delivery::Sync { .. } => panic!("source was accepted as an ordinary delivery"),
+        Delivery::Redraw => panic!("source was accepted as a redraw request"),
     })
 }
 

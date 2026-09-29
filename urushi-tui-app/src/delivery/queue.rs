@@ -33,6 +33,7 @@ use std::task::{Context, Poll, Waker};
 pub(crate) enum Delivery<Message> {
     Async(Message),
     Sync { first: Message, rest: Vec<Message> },
+    Redraw,
 }
 
 impl<Message> Delivery<Message> {
@@ -58,6 +59,7 @@ struct Shared<Message> {
 struct State<Message> {
     accepted: VecDeque<Delivery<Message>>,
     pending_sync: usize,
+    pending_redraw: bool,
     receiver_waker: Option<Waker>,
 }
 
@@ -68,6 +70,7 @@ impl<Message> DeliveryQueue<Message> {
                 state: Mutex::new(State {
                     accepted: VecDeque::new(),
                     pending_sync: 0,
+                    pending_redraw: false,
                     receiver_waker: None,
                 }),
                 available: Condvar::new(),
@@ -90,6 +93,12 @@ impl<Message> DeliveryQueue<Message> {
         if matches!(delivery, Delivery::Sync { .. }) {
             state.pending_sync += 1;
         }
+        if matches!(delivery, Delivery::Redraw) {
+            if state.pending_redraw {
+                return None;
+            }
+            state.pending_redraw = true;
+        }
         state.accepted.push_back(delivery);
         state.receiver_waker.take()
     }
@@ -104,9 +113,14 @@ impl<Message> DeliveryQueue<Message> {
         self.accept(Delivery::Async(message));
     }
 
+    /// Wakes the runtime to redraw without delivering an application message.
+    pub(crate) fn request_redraw(&self) {
+        self.accept(Delivery::Redraw);
+    }
+
     /// Removes the earliest accepted delivery without waiting.
     pub(crate) fn try_next(&self) -> Option<Delivery<Message>> {
-        lock(&self.shared.state).accepted.pop_front()
+        pop_next(&mut lock(&self.shared.state))
     }
 
     /// Whether a draw may be admitted at this linearization point.
@@ -134,7 +148,7 @@ impl<Message> DeliveryQueue<Message> {
     pub(crate) fn blocking_next(&self) -> Delivery<Message> {
         let mut state = lock(&self.shared.state);
         loop {
-            if let Some(delivery) = state.accepted.pop_front() {
+            if let Some(delivery) = pop_next(&mut state) {
                 return delivery;
             }
             state = wait(&self.shared.available, state);
@@ -186,13 +200,21 @@ impl<Message> Future for Next<'_, Message> {
 
     fn poll(self: Pin<&mut Self>, context: &mut Context<'_>) -> Poll<Self::Output> {
         let mut state = lock(&self.queue.shared.state);
-        if let Some(delivery) = state.accepted.pop_front() {
+        if let Some(delivery) = pop_next(&mut state) {
             Poll::Ready(delivery)
         } else {
             replace_waker(&mut state.receiver_waker, context.waker());
             Poll::Pending
         }
     }
+}
+
+fn pop_next<Message>(state: &mut State<Message>) -> Option<Delivery<Message>> {
+    let delivery = state.accepted.pop_front()?;
+    if matches!(delivery, Delivery::Redraw) {
+        state.pending_redraw = false;
+    }
+    Some(delivery)
 }
 
 /// The receiving end of one effect execution.

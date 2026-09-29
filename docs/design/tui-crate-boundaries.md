@@ -12,7 +12,7 @@ The four responsibilities have four package owners:
 | --- | --- | --- |
 | `urushi-terminal` | Commands, events, queries, raw-mode control, session restoration, and one physical interactive terminal connection | Views, frames, cell buffers, diffing, or application scheduling |
 | `urushi-tui` | A synchronous `Screen`, draw-scoped `Frame`, cell buffers, wide-grapheme ownership, diffing, transactional output, and failed-output recovery | Application state, an event loop, effects, subscriptions, terminal input, session entry, or a foreign buffer representation |
-| `urushi-tui-app` | `Application`, `Runtime`, effects, subscriptions, delivery ordering, draw scheduling, view resolution, terminal input, and session ownership | Cell-buffer semantics, physical terminal protocols, or foreign widget types |
+| `urushi-tui-app` | `Application`, `Runtime`, effects, subscriptions, delivery ordering, draw scheduling, view resolution, terminal input, session ownership, and optional cell-plus-graphics orchestration | Cell-buffer semantics, graphics encoding, physical terminal protocols, or foreign widget types |
 | `urushi-adapter-ratatui` | Conversion of Urushi styles and resolved cells into a caller-owned Ratatui `Buffer`, stateless widgets, and anchor translation | Frame history, cell diffing, a runtime, terminal I/O, or session ownership |
 
 The dependency direction follows those owners:
@@ -26,8 +26,10 @@ urushi-terminal <- urushi <- urushi-tui <- urushi-tui-app
 
 `urushi-tui` also depends directly on `urushi-terminal` for output commands and
 terminal geometry. `urushi-tui-app` depends directly on `urushi-terminal` for
-input, queries, and session restoration. The Ratatui adapter needs neither TUI
-crate for its ordinary caller-owned-buffer path.
+input, queries, and session restoration, and its optional `graphics` feature
+depends on `urushi-graphics` for protocol selection and lifecycle state. The
+Ratatui adapter needs neither TUI crate for its ordinary caller-owned-buffer
+path.
 
 ## Why these are crate boundaries
 

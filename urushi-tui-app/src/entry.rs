@@ -4,6 +4,8 @@ use std::fmt;
 use std::io;
 use std::sync::{Arc, Mutex, MutexGuard};
 
+#[cfg(feature = "graphics")]
+use urushi_graphics::{GraphicsPreference, GraphicsSelection, select_graphics};
 use urushi_terminal::{
     Command, CommandWriter, Event, EventSource, KeyboardEnhancementFlags, KeyboardEnhancementQuery,
     Position, RawModeControl, SessionOptions, TerminalBackend, TerminalBackground,
@@ -14,7 +16,10 @@ use urushi_tui::Screen;
 use super::application::Application;
 use super::core::{RuntimeCore, RuntimeError};
 use super::executor::{Clock, Executor, TokioClock, TokioExecutor};
+#[cfg(feature = "graphics")]
+use super::presentation::spawn_graphics_terminal;
 use super::presentation::{BlockingPresentation, BlockingPresentationError};
+use super::source::Surface;
 use super::sources::RuntimeSourceSpawner;
 use super::terminal_source::TerminalSourceSpawner;
 
@@ -69,6 +74,13 @@ pub struct Runtime<A, B = DefaultTerminal> {
     executor: Option<Arc<dyn Executor>>,
     clock: Option<Arc<dyn Clock>>,
     session: SessionOptions,
+    presentation: PresentationOptions,
+}
+
+#[derive(Clone, Copy, Debug, Default)]
+struct PresentationOptions {
+    #[cfg(feature = "graphics")]
+    graphics: GraphicsPreference,
 }
 
 impl<A> Runtime<A, DefaultTerminal> {
@@ -80,6 +92,7 @@ impl<A> Runtime<A, DefaultTerminal> {
             executor: None,
             clock: None,
             session: tui_session_options(),
+            presentation: PresentationOptions::default(),
         }
     }
 
@@ -94,6 +107,7 @@ impl<A> Runtime<A, DefaultTerminal> {
             executor,
             clock,
             session,
+            presentation,
             ..
         } = self;
         Runtime {
@@ -102,6 +116,7 @@ impl<A> Runtime<A, DefaultTerminal> {
             executor,
             clock,
             session,
+            presentation,
         }
         .run()
     }
@@ -119,6 +134,7 @@ impl<A, B> Runtime<A, B> {
             executor: self.executor,
             clock: self.clock,
             session: self.session,
+            presentation: self.presentation,
         }
     }
 
@@ -131,6 +147,13 @@ impl<A, B> Runtime<A, B> {
     /// Replaces the clock used by effects and frame scheduling.
     pub fn clock(mut self, clock: impl Clock) -> Self {
         self.clock = Some(Arc::new(clock));
+        self
+    }
+
+    /// Selects terminal image output for this runtime.
+    #[cfg(feature = "graphics")]
+    pub const fn graphics(mut self, preference: GraphicsPreference) -> Self {
+        self.presentation.graphics = preference;
         self
     }
 
@@ -190,9 +213,10 @@ where
             self.executor,
             self.clock,
             self.session,
-            |shared, initial_size, sources| {
-                let screen = Screen::new(shared, initial_size).map_err(Error::Terminal)?;
-                Ok(sized_presentation(screen, initial_size, sources))
+            self.presentation,
+            |shared, context, sources| {
+                let screen = Screen::new(shared, context.surface.size).map_err(Error::Terminal)?;
+                Ok(sized_presentation(screen, context, sources))
             },
         )
     }
@@ -204,9 +228,10 @@ fn run_runtime<A, B>(
     executor: Option<Arc<dyn Executor>>,
     clock: Option<Arc<dyn Clock>>,
     session_options: SessionOptions,
+    presentation_options: PresentationOptions,
     build_presentation: impl FnOnce(
         SharedTerminal<B>,
-        TerminalSize,
+        PresentationContext,
         Arc<TerminalSourceSpawner<SharedTerminal<B>, A::Message>>,
     ) -> Result<BlockingPresentation, Error>,
 ) -> Result<A::Model, Error>
@@ -214,6 +239,8 @@ where
     A: Application,
     B: TerminalBackend + Send + 'static,
 {
+    #[cfg(not(feature = "graphics"))]
+    let _ = presentation_options;
     let tokio = BackgroundRuntime::new()?;
     let executor = executor.unwrap_or_else(|| {
         Arc::new(TokioExecutor::new(tokio.handle().clone())) as Arc<dyn Executor>
@@ -224,11 +251,43 @@ where
     let mut session = TerminalSession::enter(&mut session_control, session_options)
         .map_err(|error| Error::Terminal(io::Error::other(error)))?;
 
-    let initial_size = match session.control_mut().window_size() {
-        Ok(size) => size.cells(),
+    let initial_window = match session.control_mut().window_size() {
+        Ok(size) => size,
         Err(error) => {
             return finish_with_restore(Err(Error::Terminal(error)), session.restore());
         }
+    };
+    let initial_surface = Surface::from_window_size(initial_window);
+    #[cfg(feature = "graphics")]
+    let graphics = {
+        let capabilities = if presentation_options.graphics == GraphicsPreference::Text {
+            TerminalCapabilities::none()
+        } else {
+            match session.control_mut().terminal_capabilities() {
+                Ok(capabilities) => capabilities,
+                Err(error) => {
+                    return finish_with_restore(Err(Error::Terminal(error)), session.restore());
+                }
+            }
+        };
+        match select_graphics(
+            presentation_options.graphics,
+            capabilities,
+            initial_surface.cell_pixels,
+        ) {
+            Ok(selection) => selection,
+            Err(error) => {
+                return finish_with_restore(
+                    Err(Error::Terminal(io::Error::other(error))),
+                    session.restore(),
+                );
+            }
+        }
+    };
+    let context = PresentationContext {
+        surface: initial_surface,
+        #[cfg(feature = "graphics")]
+        graphics,
     };
     let runtime_result = tokio.block_on(async move {
         let fallback = Arc::new(RuntimeSourceSpawner::new(
@@ -239,7 +298,7 @@ where
             TerminalSourceSpawner::new(shared.clone(), Arc::clone(&executor), fallback)
                 .map_err(Error::Terminal)?,
         );
-        let presentation = build_presentation(shared, initial_size, Arc::clone(&sources))?;
+        let presentation = build_presentation(shared, context, Arc::clone(&sources))?;
         let core = RuntimeCore::new(application, executor, clock, sources, presentation)
             .map_err(runtime_error)?;
         core.run().await.map_err(runtime_error)
@@ -276,9 +335,16 @@ impl Drop for BackgroundRuntime {
     }
 }
 
+#[derive(Clone, Copy, Debug)]
+struct PresentationContext {
+    surface: Surface,
+    #[cfg(feature = "graphics")]
+    graphics: GraphicsSelection,
+}
+
 fn sized_presentation<W, B, Message>(
     screen: Screen<W>,
-    initial_size: TerminalSize,
+    context: PresentationContext,
     sources: Arc<TerminalSourceSpawner<SharedTerminal<B>, Message>>,
 ) -> BlockingPresentation
 where
@@ -286,9 +352,18 @@ where
     B: TerminalBackend + Send + 'static,
     Message: Send + 'static,
 {
-    BlockingPresentation::spawn_sized_terminal(screen, move || {
-        sources.presentation_size(initial_size)
-    })
+    #[cfg(feature = "graphics")]
+    {
+        spawn_graphics_terminal(screen, context.graphics, move || {
+            sources.presentation_surface(context.surface)
+        })
+    }
+    #[cfg(not(feature = "graphics"))]
+    {
+        BlockingPresentation::spawn_sized_terminal(screen, move || {
+            sources.presentation_surface(context.surface)
+        })
+    }
 }
 
 /// Runs an application with the production defaults.
@@ -447,7 +522,9 @@ mod tests {
     use std::time::Duration;
 
     use urushi::{TextStyle, View};
-    use urushi_terminal::{KeyCode, KeyEvent};
+    #[cfg(feature = "graphics")]
+    use urushi_terminal::TerminalGraphicsProtocols;
+    use urushi_terminal::{KeyCode, KeyEvent, PixelSize};
 
     use super::*;
     use crate::{Effect, Input, Subscription, Surface};
@@ -470,6 +547,8 @@ mod tests {
         cursor_visible: bool,
         flushes: usize,
         fail_window_query: bool,
+        window_pixels: Option<PixelSize>,
+        capabilities: Option<TerminalCapabilities>,
     }
 
     struct FakeTerminal {
@@ -555,14 +634,21 @@ mod tests {
         }
 
         fn window_size(&mut self) -> io::Result<WindowSize> {
-            if lock(&self.observed).fail_window_query {
+            let observed = lock(&self.observed);
+            if observed.fail_window_query {
                 return Err(io::Error::other("window query failed"));
             }
-            Ok(WindowSize::new(self.size, None))
+            Ok(WindowSize::new(self.size, observed.window_pixels))
         }
 
         fn raw_mode_enabled(&mut self) -> io::Result<bool> {
             Ok(lock(&self.observed).raw)
+        }
+
+        fn terminal_capabilities(&mut self) -> io::Result<TerminalCapabilities> {
+            Ok(lock(&self.observed)
+                .capabilities
+                .unwrap_or_else(TerminalCapabilities::none))
         }
     }
 
@@ -709,6 +795,70 @@ mod tests {
         assert!(!observed.keyboard_enhancement);
         assert!(observed.cursor_visible);
         assert!(observed.flushes >= 2);
+    }
+
+    #[cfg(feature = "graphics")]
+    #[test]
+    fn unavailable_explicit_graphics_preference_is_diagnostic_and_restores_the_session() {
+        let observed = Arc::new(Mutex::new(ObservedTerminal {
+            cursor_visible: true,
+            ..ObservedTerminal::default()
+        }));
+        let terminal = FakeTerminal {
+            observed: Arc::clone(&observed),
+            size: TerminalSize::new(8, 2),
+        };
+
+        let error = Runtime::new(ExampleApplication)
+            .backend(terminal)
+            .graphics(GraphicsPreference::Kitty)
+            .run()
+            .expect_err("an unsupported explicit protocol is rejected");
+
+        assert!(
+            error.to_string().contains(
+                "Kitty graphics were requested, but the terminal did not confirm support"
+            )
+        );
+        let observed = lock(&observed);
+        assert!(!observed.raw);
+        assert!(!observed.alternate_screen);
+        assert!(!observed.bracketed_paste);
+        assert!(!observed.focus_change);
+        assert!(!observed.keyboard_enhancement);
+        assert!(observed.cursor_visible);
+    }
+
+    #[cfg(feature = "graphics")]
+    #[test]
+    fn explicit_sixel_rejects_non_uniform_window_pixel_geometry() {
+        let observed = Arc::new(Mutex::new(ObservedTerminal {
+            cursor_visible: true,
+            window_pixels: Some(PixelSize::new(801, 480)),
+            capabilities: Some(
+                TerminalCapabilities::none()
+                    .with_graphics_protocols(TerminalGraphicsProtocols::SIXEL),
+            ),
+            ..ObservedTerminal::default()
+        }));
+        let terminal = FakeTerminal {
+            observed: Arc::clone(&observed),
+            size: TerminalSize::new(80, 24),
+        };
+
+        let error = Runtime::new(ExampleApplication)
+            .backend(terminal)
+            .graphics(GraphicsPreference::Sixel)
+            .run()
+            .expect_err("non-uniform cell pixels cannot support Sixel");
+
+        assert!(error.to_string().contains(
+            "Sixel graphics were requested, but the terminal did not report uniform character-cell pixel geometry"
+        ));
+        let observed = lock(&observed);
+        assert!(!observed.raw);
+        assert!(!observed.alternate_screen);
+        assert!(observed.cursor_visible);
     }
 
     #[test]

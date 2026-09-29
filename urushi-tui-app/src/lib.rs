@@ -58,3 +58,5 @@ pub use source::{
     ModifierKeyCode, Modifiers, MouseButton, MouseEvent, MouseKind, Signal, Surface, SurfaceSize,
 };
 pub use subscription::Subscription;
+#[cfg(feature = "graphics")]
+pub use urushi_graphics::GraphicsPreference;

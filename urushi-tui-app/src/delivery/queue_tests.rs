@@ -87,6 +87,19 @@ fn an_accepted_sync_fences_draws_until_the_runtime_completes_it() {
 }
 
 #[test]
+fn repeated_redraw_requests_coalesce_until_the_runtime_accepts_one() {
+    let deliveries = DeliveryQueue::<()>::new();
+
+    deliveries.request_redraw();
+    deliveries.request_redraw();
+    assert_eq!(deliveries.try_next(), Some(Delivery::Redraw));
+    assert!(deliveries.try_next().is_none());
+
+    deliveries.request_redraw();
+    assert_eq!(deliveries.try_next(), Some(Delivery::Redraw));
+}
+
+#[test]
 fn the_queue_wakes_an_async_or_blocking_runtime_driver() {
     let deliveries = DeliveryQueue::new();
     let mut next = Box::pin(deliveries.next());

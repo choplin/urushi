@@ -65,12 +65,51 @@ impl<W: CommandWriter> Screen<W> {
         Ok(())
     }
 
+    /// Invalidates the physical cell baseline without changing frame size.
+    ///
+    /// The next draw clears the surface and emits the complete working frame.
+    /// Hosts use this when another presentation layer, such as immediate-mode
+    /// terminal graphics, can leave pixels that a cell diff cannot remove.
+    pub fn invalidate(&mut self) {
+        self.needs_clear = true;
+    }
+
+    /// Runs direct physical output and invalidates the cell baseline.
+    ///
+    /// This is for output such as presentation-layer cleanup that can change
+    /// what is physically visible independently of the committed cell buffer.
+    /// The next draw clears the surface and reconstructs every cell, whether
+    /// `output` succeeds or fails.
+    pub fn modify_surface(
+        &mut self,
+        output: impl FnOnce(&mut W) -> io::Result<()>,
+    ) -> io::Result<()> {
+        self.needs_clear = true;
+        output(&mut self.writer)
+    }
+
     /// Builds and presents one frame synchronously.
     ///
     /// The closure may only change the working cells and cursor request through
     /// its borrowed [`Frame`]. Presentation history and commit remain owned by
     /// the screen.
     pub fn draw(&mut self, draw: impl FnOnce(&mut Frame<'_>)) -> io::Result<()> {
+        self.draw_with(draw, |_| Ok(()))
+    }
+
+    /// Builds one cell frame and presents additional terminal output before commit.
+    ///
+    /// `present` runs after changed cells and the cursor request have been
+    /// written, but before the final flush and cell-baseline commit. If either
+    /// closure, output, or flushing fails, the next draw reconstructs the full
+    /// cell frame from a cleared physical surface. `present` must not clear or
+    /// otherwise replace the cell layer; use [`Screen::modify_surface`] for
+    /// direct output that does.
+    pub fn draw_with(
+        &mut self,
+        draw: impl FnOnce(&mut Frame<'_>),
+        present: impl FnOnce(&mut W) -> io::Result<()>,
+    ) -> io::Result<()> {
         self.working.reset();
         let mut frame = Frame {
             buffer: &mut self.working,
@@ -94,6 +133,7 @@ impl<W: CommandWriter> Screen<W> {
             }
             self.writer.draw(changes)?;
             self.writer.set_cursor(cursor)?;
+            present(&mut self.writer)?;
             self.writer.flush()
         })();
 
@@ -311,6 +351,72 @@ mod tests {
             assert_eq!(prints, ["a", "c"], "{failure:?}");
             assert_eq!(screen.writer().clear_count(), 2, "{failure:?}");
         }
+    }
+
+    #[test]
+    fn extension_failure_prevents_cell_commit_and_forces_complete_repair() {
+        let mut screen = Screen::new(RecordingCommands::default(), TerminalSize::new(2, 1))
+            .expect("screen size is valid");
+        let a = grapheme("a");
+        let b = grapheme("b");
+
+        let error = screen
+            .draw_with(
+                |frame| {
+                    frame.put(0, 0, &a);
+                    frame.put(1, 0, &b);
+                },
+                |_| Err(io::Error::other("planned extension failure")),
+            )
+            .expect_err("extension failure aborts the transaction");
+        assert_eq!(error.to_string(), "planned extension failure");
+
+        let repair = screen.writer().commands.len();
+        screen
+            .draw(|frame| {
+                frame.put(0, 0, &a);
+                frame.put(1, 0, &b);
+            })
+            .expect("the complete cell frame is retried");
+
+        assert!(
+            screen.writer().commands[repair..]
+                .starts_with(&[Recorded::ResetStyle, Recorded::Clear])
+        );
+        let prints = screen.writer().commands[repair..]
+            .iter()
+            .filter_map(|command| match command {
+                Recorded::Print(symbol) => Some(symbol.as_str()),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(prints, ["a", "b"]);
+    }
+
+    #[test]
+    fn direct_surface_output_forces_the_next_draw_to_reconstruct_cells() {
+        let mut screen = Screen::new(RecordingCommands::default(), TerminalSize::new(2, 1))
+            .expect("screen size is valid");
+        let a = grapheme("a");
+        let b = grapheme("b");
+        draw_pair(&mut screen, &a, &b).expect("baseline frame succeeds");
+
+        screen
+            .modify_surface(|writer| writer.clear())
+            .expect("direct output succeeds");
+        let repair = screen.writer().commands.len();
+        draw_pair(&mut screen, &a, &b).expect("unchanged cells are reconstructed");
+
+        let repaired = &screen.writer().commands[repair..];
+        assert!(repaired.starts_with(&[Recorded::ResetStyle, Recorded::Clear]));
+        let prints = repaired
+            .iter()
+            .filter_map(|command| match command {
+                Recorded::Print(symbol) => Some(symbol.as_str()),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(prints, ["a", "b"]);
     }
 
     #[test]

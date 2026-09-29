@@ -6,7 +6,7 @@ use std::sync::{Arc, Condvar, Mutex, MutexGuard};
 use std::thread::{self, JoinHandle};
 use std::time::Duration;
 
-use urushi_terminal::{Event, EventSource, TerminalQuery, TerminalSize};
+use urushi_terminal::{Event, EventSource, TerminalQuery};
 
 use super::delivery::{
     Admission, DeliveryQueue, Sender, SourceInboxCloser, SurfaceMessagePublisher, source_inbox,
@@ -33,7 +33,7 @@ struct Owner<T, Message> {
 
 struct Shared<T, Message> {
     terminal: Mutex<T>,
-    sources: Mutex<Sources<Message>>,
+    sources: Arc<Mutex<Sources<Message>>>,
     source_changed: Condvar,
     failure: Failure,
     surface_sizes: Arc<Mutex<SurfaceSizes>>,
@@ -41,13 +41,14 @@ struct Shared<T, Message> {
 
 #[derive(Default)]
 struct SurfaceSizes {
-    pending: Option<TerminalSize>,
-    accepted: Option<TerminalSize>,
+    pending: Option<Surface>,
+    accepted: Option<Surface>,
 }
 
 struct Sources<Message> {
     input: Option<InputEndpoint<Message>>,
     surface: Option<SurfaceEndpoint<Message>>,
+    presentation: Option<DeliveryQueue<Message>>,
     next_id: usize,
     stopping: bool,
 }
@@ -81,12 +82,13 @@ where
     ) -> io::Result<Self> {
         let shared = Arc::new(Shared {
             terminal: Mutex::new(terminal),
-            sources: Mutex::new(Sources {
+            sources: Arc::new(Mutex::new(Sources {
                 input: None,
                 surface: None,
+                presentation: None,
                 next_id: 0,
                 stopping: false,
-            }),
+            })),
             source_changed: Condvar::new(),
             failure: Failure {
                 error: Mutex::new(None),
@@ -108,7 +110,7 @@ where
         })
     }
 
-    pub(crate) fn presentation_size(&self, fallback: TerminalSize) -> TerminalSize {
+    pub(crate) fn presentation_surface(&self, fallback: Surface) -> Surface {
         lock(&self.owner.shared.surface_sizes)
             .accepted
             .unwrap_or(fallback)
@@ -148,7 +150,7 @@ where
             let initial = Surface::from_window_size(terminal.window_size()?);
             let id = self.register_surface(Arc::clone(&mapper), Arc::clone(&publisher));
             let mut sizes = lock(&self.owner.shared.surface_sizes);
-            sizes.pending = Some(initial.size);
+            sizes.pending = Some(initial);
             publisher.publish(mapper(initial));
             slot.try_accept(&deliveries);
             sizes.accepted = sizes.pending.take();
@@ -161,7 +163,14 @@ where
         let acceptance_shared = Arc::clone(&self.owner.shared);
         let acceptance = self.executor.spawn(Box::pin(async move {
             while slot.ready().await {
+                let sources = lock(&acceptance_shared.sources);
+                if sources.surface.as_ref().map(|surface| surface.id) != Some(id) {
+                    break;
+                }
                 let mut sizes = lock(&acceptance_shared.surface_sizes);
+                // Owning both locks linearizes this acceptance before endpoint
+                // removal; release Sources before waking the runtime.
+                drop(sources);
                 if slot.try_accept(&acceptance_deliveries) {
                     sizes.accepted = sizes.pending.take();
                 }
@@ -170,7 +179,7 @@ where
         Ok(Box::new(RunningSurface {
             shared: Arc::clone(&self.owner.shared),
             id,
-            _acceptance: acceptance,
+            acceptance: Some(acceptance),
         }))
     }
 
@@ -240,6 +249,11 @@ where
     fn failure(&self) -> Pin<Box<dyn std::future::Future<Output = io::Error> + Send + '_>> {
         Box::pin(self.owner.shared.failure.wait())
     }
+
+    fn attach_runtime(&self, deliveries: DeliveryQueue<Message>) {
+        lock(&self.owner.shared.sources).presentation = Some(deliveries);
+        self.owner.shared.source_changed.notify_all();
+    }
 }
 
 impl<T, Message> Drop for Owner<T, Message> {
@@ -300,7 +314,7 @@ impl<T, Message> Drop for RunningInput<T, Message> {
 struct RunningSurface<T, Message> {
     shared: Arc<Shared<T, Message>>,
     id: usize,
-    _acceptance: Box<dyn Execution>,
+    acceptance: Option<Box<dyn Execution>>,
 }
 
 impl<T, Message> RunningSource<Message> for RunningSurface<T, Message>
@@ -323,6 +337,7 @@ where
 
 impl<T, Message> Drop for RunningSurface<T, Message> {
     fn drop(&mut self) {
+        drop(self.acceptance.take());
         let mut sources = lock(&self.shared.sources);
         if sources
             .surface
@@ -330,6 +345,21 @@ impl<T, Message> Drop for RunningSurface<T, Message> {
             .is_some_and(|surface| surface.id == self.id)
         {
             sources.surface = None;
+            let redraw = sources.presentation.clone();
+            let pending = {
+                let mut sizes = lock(&self.shared.surface_sizes);
+                let pending = sizes.pending.take();
+                if let Some(surface) = pending {
+                    sizes.accepted = Some(surface);
+                }
+                pending
+            };
+            drop(sources);
+            if pending.is_some()
+                && let Some(redraw) = redraw
+            {
+                redraw.request_redraw();
+            }
         }
     }
 }
@@ -379,14 +409,22 @@ enum Observation<Message> {
         sender: Sender<Message>,
     },
     Surface {
+        endpoint_id: usize,
         surface: Surface,
         mapper: Mapper<Surface, Message>,
         publisher: Arc<SurfaceMessagePublisher<Message>>,
         sizes: Arc<Mutex<SurfaceSizes>>,
+        sources: Arc<Mutex<Sources<Message>>>,
+    },
+    PresentationSurface {
+        surface: Surface,
+        sizes: Arc<Mutex<SurfaceSizes>>,
+        sources: Arc<Mutex<Sources<Message>>>,
     },
 }
 
 type SurfaceDeliveryEndpoint<Message> = (
+    usize,
     Mapper<Surface, Message>,
     Arc<SurfaceMessagePublisher<Message>>,
 );
@@ -402,15 +440,48 @@ impl<Message: Send + 'static> Observation<Message> {
                 let _ = sender.blocking_send(mapper(input));
             }
             Self::Surface {
+                endpoint_id,
                 surface,
                 mapper,
                 publisher,
                 sizes,
+                sources,
             } => {
-                let size = surface.size;
+                let sources = lock(&sources);
+                if sources.surface.as_ref().map(|endpoint| endpoint.id) != Some(endpoint_id) {
+                    let redraw = sources
+                        .surface
+                        .is_none()
+                        .then(|| sources.presentation.clone())
+                        .flatten();
+                    if redraw.is_some() {
+                        lock(&sizes).accepted = Some(surface);
+                    }
+                    drop(sources);
+                    if let Some(redraw) = redraw {
+                        redraw.request_redraw();
+                    }
+                    return;
+                }
                 let mut sizes = lock(&sizes);
-                sizes.pending = Some(size);
+                sizes.pending = Some(surface);
                 publisher.publish(mapper(surface));
+            }
+            Self::PresentationSurface {
+                surface,
+                sizes,
+                sources,
+            } => {
+                let sources = lock(&sources);
+                if sources.surface.is_some() {
+                    return;
+                }
+                let redraw = sources.presentation.clone();
+                lock(&sizes).accepted = Some(surface);
+                drop(sources);
+                if let Some(redraw) = redraw {
+                    redraw.request_redraw();
+                }
             }
         }
     }
@@ -430,16 +501,25 @@ where
         Event::Focus(change) => Ok(input_observation(shared, Input::Focus(change))),
         Event::Mouse(event) => Ok(input_observation(shared, Input::Mouse(event))),
         Event::Resize(_) => {
-            let Some((mapper, publisher)) = surface_endpoint(shared) else {
-                return Ok(None);
-            };
             let surface = Surface::from_window_size(terminal.window_size()?);
-            Ok(Some(Observation::Surface {
-                surface,
-                mapper,
-                publisher,
-                sizes: Arc::clone(&shared.surface_sizes),
-            }))
+            if let Some((endpoint_id, mapper, publisher)) = surface_endpoint(shared) {
+                Ok(Some(Observation::Surface {
+                    endpoint_id,
+                    surface,
+                    mapper,
+                    publisher,
+                    sizes: Arc::clone(&shared.surface_sizes),
+                    sources: Arc::clone(&shared.sources),
+                }))
+            } else {
+                Ok(
+                    presentation_endpoint(shared).map(|_| Observation::PresentationSurface {
+                        surface,
+                        sizes: Arc::clone(&shared.surface_sizes),
+                        sources: Arc::clone(&shared.sources),
+                    }),
+                )
+            }
         }
         _ => Ok(None),
     }
@@ -463,17 +543,28 @@ fn surface_endpoint<T, Message>(
     let sources = lock(&shared.sources);
     sources.surface.as_ref().map(|endpoint| {
         (
+            endpoint.id,
             Arc::clone(&endpoint.mapper),
             Arc::clone(&endpoint.publisher),
         )
     })
 }
 
+fn presentation_endpoint<T, Message>(
+    shared: &Shared<T, Message>,
+) -> Option<DeliveryQueue<Message>> {
+    lock(&shared.sources).presentation.clone()
+}
+
 fn wait_for_source<'a, T, Message>(
     shared: &'a Shared<T, Message>,
 ) -> MutexGuard<'a, Sources<Message>> {
     let mut sources = lock(&shared.sources);
-    while !sources.stopping && sources.input.is_none() && sources.surface.is_none() {
+    while !sources.stopping
+        && sources.input.is_none()
+        && sources.surface.is_none()
+        && sources.presentation.is_none()
+    {
         sources = shared
             .source_changed
             .wait(sources)
