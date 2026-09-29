@@ -1,6 +1,9 @@
 use std::io;
 
-use urushi::{Align, Available, Size, TextStyle, View, resolve};
+use urushi::{
+    Align, Available, Canvas, CanvasContext, CanvasItem, Position as ViewPosition, Size, TextStyle,
+    View, resolve,
+};
 use urushi_graphics::kitty::{KittyLifecycle, render_kitty};
 use urushi_graphics::{CellSize, Image, ImagePresentation, InvalidRgbaRaster, PixelSize};
 use urushi_terminal::{Command, CommandWriter, CursorMove, Position, TerminalOutput};
@@ -67,14 +70,65 @@ fn image_composes_fallback_cells_and_placement_from_one_resolution() {
     );
 
     let resolved = resolve(&view, Available::NONE).unwrap();
-    let placement = image.placement(&resolved).unwrap();
+    let placement = image
+        .placement(&resolved, Some(urushi_terminal::PixelSize::new(8, 16)))
+        .unwrap();
 
     assert_eq!(resolved.size(), Size::new(5, 3));
     assert_eq!(symbols(&resolved), ["title", "cover", "     "]);
-    assert_eq!(placement.origin(), urushi::Position::new(0, 1));
-    assert_eq!(placement.size(), Size::new(5, 2));
+    assert_eq!(placement.logical_origin(), urushi::Position::new(0, 1));
+    assert_eq!(placement.logical_size(), Size::new(5, 2));
+    assert_eq!(
+        placement.visible_origin(),
+        Some(urushi::Position::new(0, 1))
+    );
+    assert_eq!(placement.visible_size(), Some(Size::new(5, 2)));
     assert_eq!(placement.raster().key(), urushi::Key::from("cover-asset"));
-    assert!(placement.is_within_resolved_view());
+}
+
+#[test]
+fn placement_keeps_logical_clip_source_and_cell_pixel_geometry() {
+    #[derive(Debug, Clone, PartialEq)]
+    struct ClippedImage(View);
+
+    impl CanvasItem for ClippedImage {
+        fn draw(&self, context: &mut CanvasContext) {
+            context.view(ViewPosition::new(-1, -2), self.0.clone(), Some(4), Some(4));
+        }
+    }
+
+    let image = Image::rgba(
+        "placement",
+        "asset",
+        PixelSize::new(4, 4),
+        vec![255; 4 * 4 * 4],
+    )
+    .unwrap();
+    let image_view = ImagePresentation::new().compose(&image, CellSize::new(4, 4));
+    let view = View::canvas(
+        Canvas::new()
+            .extent(Size::new(2, 2))
+            .item(ClippedImage(image_view)),
+    );
+    let resolved = resolve(&view, Available::NONE).unwrap();
+
+    let placement = image
+        .placement(&resolved, Some(urushi_terminal::PixelSize::new(8, 16)))
+        .unwrap();
+
+    assert_eq!(placement.logical_origin(), ViewPosition::new(-1, -2));
+    assert_eq!(placement.logical_size(), Size::new(4, 4));
+    assert_eq!(placement.visible_origin(), Some(ViewPosition::new(0, 0)));
+    assert_eq!(placement.visible_size(), Some(Size::new(2, 2)));
+    assert_eq!(
+        placement.source_offset(),
+        Some(urushi_graphics::PixelPosition::new(1, 2))
+    );
+    assert_eq!(placement.source_size(), Some(PixelSize::new(2, 2)));
+    assert_eq!(
+        placement.visible_pixels(),
+        Some(urushi_terminal::PixelSize::new(16, 32))
+    );
 }
 
 #[test]
@@ -103,8 +157,8 @@ fn placement_and_asset_identities_are_independent() {
     );
 
     let resolved = resolve(&view, Available::NONE).unwrap();
-    let first = first.placement(&resolved).unwrap();
-    let second = second.placement(&resolved).unwrap();
+    let first = first.placement(&resolved, None).unwrap();
+    let second = second.placement(&resolved, None).unwrap();
 
     assert_ne!(first.key(), second.key());
     assert_eq!(first.raster().key(), second.raster().key());
@@ -147,13 +201,19 @@ fn fallback_content_never_expands_the_requested_cell_rectangle() {
     let zero = presentation.compose(&zero_width, CellSize::new(0, 1));
     let zero = resolve(&zero, Available::NONE).unwrap();
     assert_eq!(zero.size(), Size::new(0, 1));
-    assert_eq!(zero_width.placement(&zero).unwrap().size(), Size::new(0, 1));
+    assert_eq!(
+        zero_width.placement(&zero, None).unwrap().logical_size(),
+        Size::new(0, 1)
+    );
 
     let narrow = presentation.compose(&wide_fallback, CellSize::new(1, 1));
     let narrow = resolve(&narrow, Available::NONE).unwrap();
     assert_eq!(narrow.size(), Size::new(1, 1));
     assert_eq!(
-        wide_fallback.placement(&narrow).unwrap().size(),
+        wide_fallback
+            .placement(&narrow, None)
+            .unwrap()
+            .logical_size(),
         Size::new(1, 1)
     );
 }
@@ -170,7 +230,12 @@ fn kitty_uses_the_public_terminal_command_contract() {
         resolved: &urushi::ResolvedView,
         image: &Image,
     ) -> io::Result<()> {
-        render_kitty(resolved, [image], terminal)
+        render_kitty(
+            resolved,
+            [image],
+            Some(urushi_terminal::PixelSize::new(8, 16)),
+            terminal,
+        )
     }
 
     render_through_trait_object(&mut terminal, &resolved, &image).unwrap();
@@ -181,7 +246,7 @@ fn kitty_uses_the_public_terminal_command_contract() {
             RecordedCommand::SaveCursor,
             RecordedCommand::Move(Position::new(0, 0)),
             RecordedCommand::ApplicationProgram(
-                "Ga=T,f=32,s=1,v=1,c=2,r=1,C=1,q=2,m=0;/wAA/w==".to_owned(),
+                "Ga=T,f=32,s=1,v=1,x=0,y=0,w=1,h=1,c=2,r=1,C=1,q=2,m=0;/wAA/w==".to_owned(),
             ),
             RecordedCommand::RestoreCursor,
         ]
@@ -196,7 +261,13 @@ fn zero_width_image_keeps_its_fallback_and_emits_no_kitty_command() {
     let resolved = resolve(&view, Available::NONE).unwrap();
     let mut terminal = RecordingTerminal::default();
 
-    render_kitty(&resolved, [&image], &mut terminal).unwrap();
+    render_kitty(
+        &resolved,
+        [&image],
+        Some(urushi_terminal::PixelSize::new(8, 16)),
+        &mut terminal,
+    )
+    .unwrap();
 
     assert_eq!(resolved.size(), Size::new(0, 1));
     assert!(terminal.commands.is_empty());
@@ -211,9 +282,23 @@ fn renderer_can_retain_and_cleanup_kitty_lifecycle_state() {
     let mut lifecycle = KittyLifecycle::new();
     let mut terminal = RecordingTerminal::default();
 
-    lifecycle.present(&view, &resolved, &mut terminal).unwrap();
+    lifecycle
+        .present(
+            &view,
+            &resolved,
+            Some(urushi_terminal::PixelSize::new(8, 16)),
+            &mut terminal,
+        )
+        .unwrap();
     terminal.commands.clear();
-    lifecycle.present(&view, &resolved, &mut terminal).unwrap();
+    lifecycle
+        .present(
+            &view,
+            &resolved,
+            Some(urushi_terminal::PixelSize::new(8, 16)),
+            &mut terminal,
+        )
+        .unwrap();
 
     assert!(
         terminal.commands.is_empty(),

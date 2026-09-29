@@ -5,12 +5,34 @@ use urushi::{
     BlockStyle, Canvas, CanvasContext, CanvasItem, Key, Length, Position, ResolvedView, Size,
     TextStyle, Theme, View,
 };
+use urushi_terminal::PixelSize as CellPixelSize;
 
 /// Pixel dimensions of a prepared raster.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct PixelSize {
     width: u32,
     height: u32,
+}
+
+/// Pixel coordinates within a prepared raster.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct PixelPosition {
+    x: u32,
+    y: u32,
+}
+
+impl PixelPosition {
+    pub const fn new(x: u32, y: u32) -> Self {
+        Self { x, y }
+    }
+
+    pub const fn x(self) -> u32 {
+        self.x
+    }
+
+    pub const fn y(self) -> u32 {
+        self.y
+    }
 }
 
 /// Terminal-cell dimensions requested for one image placement.
@@ -175,14 +197,21 @@ impl Image {
     }
 
     /// Locates this image in an already resolved Urushi view.
-    pub fn placement<'a>(&'a self, view: &ResolvedView) -> Option<GraphicPlacement<'a>> {
+    pub fn placement<'a>(
+        &'a self,
+        view: &ResolvedView,
+        cell_pixels: Option<CellPixelSize>,
+    ) -> Option<GraphicPlacement<'a>> {
         let region = view.anchor(self.key)?;
+        let visible = region.visible();
         Some(GraphicPlacement {
             key: self.key,
             raster: &self.raster,
-            origin: Position::new(region.x(), region.y()),
-            size: Size::new(region.width(), region.height()),
-            within_resolved_view: region.is_within_resolved_view(),
+            logical_origin: Position::new(region.x(), region.y()),
+            logical_size: Size::new(region.width(), region.height()),
+            visible_origin: visible.map(|visible| Position::new(visible.x(), visible.y())),
+            visible_size: visible.map(|visible| Size::new(visible.width(), visible.height())),
+            cell_pixels,
         })
     }
 }
@@ -307,9 +336,11 @@ fn collect_from<'a>(view: &'a View, images: &mut Vec<&'a Image>) {
 pub struct GraphicPlacement<'a> {
     key: Key,
     raster: &'a RgbaRaster,
-    origin: Position,
-    size: Size,
-    within_resolved_view: bool,
+    logical_origin: Position,
+    logical_size: Size,
+    visible_origin: Option<Position>,
+    visible_size: Option<Size>,
+    cell_pixels: Option<CellPixelSize>,
 }
 
 impl<'a> GraphicPlacement<'a> {
@@ -321,15 +352,82 @@ impl<'a> GraphicPlacement<'a> {
         self.raster
     }
 
-    pub const fn origin(&self) -> Position {
-        self.origin
+    /// Returns the unclipped rectangle's origin in resolved-view cells.
+    pub const fn logical_origin(&self) -> Position {
+        self.logical_origin
     }
 
-    pub const fn size(&self) -> Size {
-        self.size
+    /// Returns the unclipped rectangle's size in cells.
+    pub const fn logical_size(&self) -> Size {
+        self.logical_size
     }
 
-    pub const fn is_within_resolved_view(&self) -> bool {
-        self.within_resolved_view
+    /// Returns the origin of the rectangle that survived every enclosing clip.
+    pub const fn visible_origin(&self) -> Option<Position> {
+        self.visible_origin
+    }
+
+    /// Returns the size of the rectangle that survived every enclosing clip.
+    pub const fn visible_size(&self) -> Option<Size> {
+        self.visible_size
+    }
+
+    /// Returns the observed dimensions of one terminal cell, when available.
+    pub const fn cell_pixels(&self) -> Option<CellPixelSize> {
+        self.cell_pixels
+    }
+
+    /// Returns the visible rectangle's offset within the source raster.
+    pub fn source_offset(&self) -> Option<PixelPosition> {
+        let (x, y, _, _) = self.source_bounds()?;
+        Some(PixelPosition::new(x, y))
+    }
+
+    /// Returns the visible rectangle's extent within the source raster.
+    pub fn source_size(&self) -> Option<PixelSize> {
+        let (left, top, right, bottom) = self.source_bounds()?;
+        Some(PixelSize::new(right - left, bottom - top))
+    }
+
+    /// Returns the visible output extent in terminal pixels.
+    pub fn visible_pixels(&self) -> Option<CellPixelSize> {
+        let visible = self.visible_size?;
+        let cell = self.cell_pixels?;
+        Some(CellPixelSize::new(
+            visible.width().checked_mul(cell.width())?,
+            visible.height().checked_mul(cell.height())?,
+        ))
+    }
+
+    fn source_bounds(&self) -> Option<(u32, u32, u32, u32)> {
+        let visible_origin = self.visible_origin?;
+        let visible_size = self.visible_size?;
+        if self.logical_size.is_empty() || visible_size.is_empty() {
+            return None;
+        }
+        let offset_x = u128::try_from(visible_origin.x.checked_sub(self.logical_origin.x)?).ok()?;
+        let offset_y = u128::try_from(visible_origin.y.checked_sub(self.logical_origin.y)?).ok()?;
+        let logical_width = self.logical_size.width() as u128;
+        let logical_height = self.logical_size.height() as u128;
+        let raster_width = u128::from(self.raster.size().width());
+        let raster_height = u128::from(self.raster.size().height());
+        let visible_right = offset_x.checked_add(visible_size.width() as u128)?;
+        let visible_bottom = offset_y.checked_add(visible_size.height() as u128)?;
+        let left = raster_width.checked_mul(offset_x)? / logical_width;
+        let top = raster_height.checked_mul(offset_y)? / logical_height;
+        let right = raster_width
+            .checked_mul(visible_right)?
+            .div_ceil(logical_width)
+            .min(raster_width);
+        let bottom = raster_height
+            .checked_mul(visible_bottom)?
+            .div_ceil(logical_height)
+            .min(raster_height);
+        Some((
+            left.try_into().ok()?,
+            top.try_into().ok()?,
+            right.try_into().ok()?,
+            bottom.try_into().ok()?,
+        ))
     }
 }

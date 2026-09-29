@@ -76,8 +76,8 @@ List, Table, Tree, or future Graph.
 Terminal graphics use that same core without entering it. `urushi-graphics`
 owns Image data and presentations, composes fallback cells inside generic
 anchored regions, then pairs the resolved anchors with Image assets for Kitty
-or Sixel output. The exact boundary is defined in
-[`design/terminal-graphics.md`](design/terminal-graphics.md).
+or Sixel output. [`terminal-graphics.md`](terminal-graphics.md) defines that
+subsystem and links to its exact design contracts.
 
 Primitive styling splits in two, and geometry belongs to only one half: a
 `TextStyle` is everything a terminal can express about a run of text, and a

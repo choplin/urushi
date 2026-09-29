@@ -4,7 +4,8 @@
 //! contract. This crate owns the image data, presentation, placement lookup,
 //! and terminal-protocol adapters layered on those resolved regions. One-shot
 //! rendering stays stateless; an interactive renderer may retain
-//! [`kitty::KittyLifecycle`] for Kitty upload and placement reuse.
+//! [`kitty::KittyLifecycle`] for Kitty upload and placement reuse or
+//! [`sixel::SixelLifecycle`] for encoded Sixel band reuse.
 
 mod image;
 pub mod kitty;
@@ -22,7 +23,8 @@ use urushi_terminal::{
 };
 
 pub use image::{
-    CellSize, GraphicPlacement, Image, ImagePresentation, InvalidRgbaRaster, PixelSize, RgbaRaster,
+    CellSize, GraphicPlacement, Image, ImagePresentation, InvalidRgbaRaster, PixelPosition,
+    PixelSize, RgbaRaster,
 };
 
 /// Resolves and renders one complete View at the terminal's top-left cell.
@@ -76,7 +78,7 @@ pub fn render_resolved_images<'a>(
     terminal: &mut (impl CommandWriter + ?Sized),
 ) -> io::Result<Option<TerminalGraphicsProtocol>> {
     if capabilities.supports_graphics(TerminalGraphicsProtocol::Kitty) {
-        kitty::render_kitty(view, images, terminal)?;
+        kitty::render_kitty(view, images, cell_pixels, terminal)?;
         return Ok(Some(TerminalGraphicsProtocol::Kitty));
     }
     if capabilities.supports_graphics(TerminalGraphicsProtocol::Sixel)

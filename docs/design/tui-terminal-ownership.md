@@ -237,7 +237,7 @@ optional feature and must design asset lifetime, cell-and-graphics commit,
 partial-output recovery, and fallback together before making graphics part of
 its committed frame state. Applications that do not enable that integration do
 not pay for or manage graphics state. The package boundary is defined in
-[`terminal-graphics.md`](terminal-graphics.md).
+[`terminal-graphics-boundary.md`](terminal-graphics-boundary.md).
 
 ## Verification
 

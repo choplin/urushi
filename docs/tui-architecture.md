@@ -311,7 +311,7 @@ the feature keep the cell-only path. The requirements for adding that lifecycle
 are defined in
 [`design/tui-terminal-ownership.md`](design/tui-terminal-ownership.md), while
 the component-to-output boundary is defined in
-[`design/terminal-graphics.md`](design/terminal-graphics.md).
+[`terminal-graphics.md`](terminal-graphics.md).
 
 Resolver reuse is a rendering choice, not application state. The runtime uses
 the direct stateless path unless its host selects a retained evaluator; in that

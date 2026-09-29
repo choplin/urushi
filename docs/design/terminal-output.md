@@ -100,7 +100,7 @@ Interactive extension protocols do not use that raw-writer path. A
 the ECMA-48 framing. An extension crate therefore owns protocol encoding while
 the terminal connection remains the only owner of physical output. The exact
 graphics use of this transport is defined in
-[`terminal-graphics.md`](terminal-graphics.md).
+[`terminal-graphics-boundary.md`](terminal-graphics-boundary.md).
 
 ## Boundaries
 

@@ -8,10 +8,11 @@ use base64::Engine;
 use base64::engine::general_purpose::STANDARD;
 use urushi::{Key, Position, ResolvedView, Size, View};
 use urushi_terminal::{
-    Command, CommandWriter, ControlString, CursorMove, Position as TerminalPosition, TerminalOutput,
+    Command, CommandWriter, ControlString, CursorMove, PixelSize as CellPixelSize,
+    Position as TerminalPosition, TerminalOutput,
 };
 
-use crate::{GraphicPlacement, Image, RgbaRaster};
+use crate::{GraphicPlacement, Image, PixelPosition, PixelSize, RgbaRaster};
 
 const RAW_CHUNK_BYTES: usize = 3_072;
 const MAX_UPLOADED_IMAGES: usize = 64;
@@ -59,17 +60,19 @@ impl KittyLifecycle {
     /// the Image snapshots embedded in that View and matches their keys to the
     /// resolved anchors without requiring a parallel image list.
     ///
-    /// Images without a complete, non-empty resolved placement are absent from
-    /// the desired frame. Their previous Kitty placements are deleted while
-    /// their uploads may remain cached for later reuse.
+    /// Images without a visible, non-empty resolved placement are absent from
+    /// the desired frame. A partial placement keeps the same upload and
+    /// placement identities while its source crop and visible cell rectangle
+    /// change. Hidden uploads may remain cached for later reuse.
     pub fn present(
         &mut self,
         view: &View,
         resolved: &ResolvedView,
+        cell_pixels: Option<CellPixelSize>,
         terminal: &mut (impl CommandWriter + ?Sized),
     ) -> io::Result<()> {
         self.restore_cursor(terminal)?;
-        let desired = DesiredFrame::new(resolved, crate::image::collect(view));
+        let desired = DesiredFrame::new(resolved, crate::image::collect(view), cell_pixels);
         let mut operations = Vec::new();
         let mut candidate = if self.needs_reset {
             let mut image_ids = self.possible_image_ids();
@@ -396,6 +399,8 @@ struct DesiredPlacement {
     asset_key: Key,
     origin: Position,
     size: Size,
+    source_offset: PixelPosition,
+    source_size: PixelSize,
 }
 
 struct DesiredFrame<'a> {
@@ -404,13 +409,23 @@ struct DesiredFrame<'a> {
 }
 
 impl<'a> DesiredFrame<'a> {
-    fn new(view: &ResolvedView, images: impl IntoIterator<Item = &'a Image>) -> Self {
+    fn new(
+        view: &ResolvedView,
+        images: impl IntoIterator<Item = &'a Image>,
+        cell_pixels: Option<CellPixelSize>,
+    ) -> Self {
         let mut assets = HashMap::new();
         let mut placements = Vec::new();
         for image in images {
-            let Some(placement) = image.placement(view).filter(|placement| {
-                placement.is_within_resolved_view() && !placement.size().is_empty()
-            }) else {
+            let Some(placement) = image.placement(view, cell_pixels) else {
+                continue;
+            };
+            let (Some(origin), Some(size), Some(source_offset), Some(source_size)) = (
+                placement.visible_origin(),
+                placement.visible_size(),
+                placement.source_offset(),
+                placement.source_size(),
+            ) else {
                 continue;
             };
             assets
@@ -419,8 +434,10 @@ impl<'a> DesiredFrame<'a> {
             placements.push(DesiredPlacement {
                 key: placement.key(),
                 asset_key: placement.raster().key(),
-                origin: placement.origin(),
-                size: placement.size(),
+                origin,
+                size,
+                source_offset,
+                source_size,
             });
         }
         Self { assets, placements }
@@ -447,21 +464,26 @@ enum KittyOperation {
     },
 }
 
-/// Queues every fully visible image through a terminal command connection.
+/// Queues every visible image through a terminal command connection.
 ///
 /// This is the stateless first-frame path: each call transmits the complete
-/// RGBA asset with the Kitty graphics protocol and displays it in the anchor
-/// resolved with the fallback cells. The terminal backend owns APC framing and
-/// physical output.
+/// RGBA asset with the Kitty graphics protocol and displays the visible source
+/// crop in the anchor resolved with the fallback cells. The terminal backend
+/// owns APC framing and physical output.
 pub fn render_kitty<'a>(
     view: &ResolvedView,
     images: impl IntoIterator<Item = &'a Image>,
+    cell_pixels: Option<CellPixelSize>,
     terminal: &mut (impl CommandWriter + ?Sized),
 ) -> io::Result<()> {
     for placement in images
         .into_iter()
-        .filter_map(|image| image.placement(view))
-        .filter(|placement| placement.is_within_resolved_view() && !placement.size().is_empty())
+        .filter_map(|image| image.placement(view, cell_pixels))
+        .filter(|placement| {
+            placement
+                .visible_size()
+                .is_some_and(|size| !size.is_empty())
+        })
     {
         write_placement(placement, terminal)?;
     }
@@ -475,13 +497,31 @@ fn write_placement(
     let raster = placement.raster();
     let mut chunks = raster.bytes().chunks(RAW_CHUNK_BYTES).peekable();
     let mut payload = String::with_capacity(RAW_CHUNK_BYTES / 3 * 4 + 128);
-    let column = usize::try_from(placement.origin().x).map_err(|_| {
+    let origin = placement.visible_origin().ok_or_else(|| {
+        io::Error::new(io::ErrorKind::InvalidInput, "a Kitty image must be visible")
+    })?;
+    let size = placement.visible_size().ok_or_else(|| {
+        io::Error::new(io::ErrorKind::InvalidInput, "a Kitty image must be visible")
+    })?;
+    let source_offset = placement.source_offset().ok_or_else(|| {
+        io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "a Kitty source crop must be non-empty",
+        )
+    })?;
+    let source_size = placement.source_size().ok_or_else(|| {
+        io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "a Kitty source crop must be non-empty",
+        )
+    })?;
+    let column = usize::try_from(origin.x).map_err(|_| {
         io::Error::new(
             io::ErrorKind::InvalidInput,
             "a Kitty image column cannot be negative",
         )
     })?;
-    let row = usize::try_from(placement.origin().y).map_err(|_| {
+    let row = usize::try_from(origin.y).map_err(|_| {
         io::Error::new(
             io::ErrorKind::InvalidInput,
             "a Kitty image row cannot be negative",
@@ -499,11 +539,15 @@ fn write_placement(
         if first {
             write!(
                 payload,
-                "Ga=T,f=32,s={},v={},c={},r={},C=1,q=2,m={more};",
+                "Ga=T,f=32,s={},v={},x={},y={},w={},h={},c={},r={},C=1,q=2,m={more};",
                 raster.size().width(),
                 raster.size().height(),
-                placement.size().width(),
-                placement.size().height(),
+                source_offset.x(),
+                source_offset.y(),
+                source_size.width(),
+                source_size.height(),
+                size.width(),
+                size.height(),
             )
             .map_err(io::Error::other)?;
         } else {
@@ -617,7 +661,11 @@ fn write_retained_placement(
         .and_then(|()| {
             write_application_program(
                 &format!(
-                    "Ga=p,i={image_id},p={placement_id},c={},r={},C=1,q=2",
+                    "Ga=p,i={image_id},p={placement_id},x={},y={},w={},h={},c={},r={},C=1,q=2",
+                    placement.source_offset.x(),
+                    placement.source_offset.y(),
+                    placement.source_size.width(),
+                    placement.source_size.height(),
                     placement.size.width(),
                     placement.size.height(),
                 ),
@@ -652,7 +700,8 @@ fn write_application_program(
 #[cfg(test)]
 mod tests {
     use urushi::{
-        Available, Canvas, CanvasContext, CanvasItem, Position, Size, TextStyle, View, resolve,
+        Available, Canvas, CanvasContext, CanvasItem, Position, Projection, ProjectionBoundary,
+        Size, TextStyle, View, Viewport, resolve,
     };
     use urushi_terminal::{CommandWriter, TerminalOutput, backend::ansi::AnsiWriter};
 
@@ -742,7 +791,7 @@ mod tests {
         terminal: &mut (impl CommandWriter + ?Sized),
     ) -> io::Result<()> {
         let (view, resolved) = image_view(image, column);
-        lifecycle.present(&view, &resolved, terminal)
+        lifecycle.present(&view, &resolved, Some(CellPixelSize::new(8, 16)), terminal)
     }
 
     fn present_empty(
@@ -750,7 +799,7 @@ mod tests {
         terminal: &mut (impl CommandWriter + ?Sized),
     ) -> io::Result<()> {
         let (view, resolved) = empty_view();
-        lifecycle.present(&view, &resolved, terminal)
+        lifecycle.present(&view, &resolved, Some(CellPixelSize::new(8, 16)), terminal)
     }
 
     #[test]
@@ -767,17 +816,23 @@ mod tests {
         let resolved = resolve(&view, Available::NONE).unwrap();
         let mut output = AnsiWriter::new(Vec::new());
 
-        render_kitty(&resolved, [&image], &mut output).unwrap();
+        render_kitty(
+            &resolved,
+            [&image],
+            Some(CellPixelSize::new(8, 16)),
+            &mut output,
+        )
+        .unwrap();
 
         let output = String::from_utf8(output.into_inner()).unwrap();
         assert!(output.starts_with("\x1b7\x1b[1;1H\x1b_G"));
-        assert!(output.contains("a=T,f=32,s=2,v=1,c=3,r=2,C=1,q=2,m=0;"));
+        assert!(output.contains("a=T,f=32,s=2,v=1,x=0,y=0,w=2,h=1,c=3,r=2,C=1,q=2,m=0;"));
         assert!(output.ends_with("\x1b\\\x1b8"));
         assert!(output.contains(&STANDARD.encode(image.raster().bytes())));
     }
 
     #[test]
-    fn omits_an_image_whose_anchor_is_outside_the_resolved_view() {
+    fn renders_the_visible_crop_of_an_image_crossing_the_view_edge() {
         #[derive(Debug, Clone, PartialEq)]
         struct PartlyVisibleImage(View);
 
@@ -803,13 +858,21 @@ mod tests {
         let resolved = resolve(&view, Available::size(1, 1)).unwrap();
         let mut output = AnsiWriter::new(Vec::new());
 
-        render_kitty(&resolved, [&image], &mut output).unwrap();
+        render_kitty(
+            &resolved,
+            [&image],
+            Some(CellPixelSize::new(8, 16)),
+            &mut output,
+        )
+        .unwrap();
 
-        assert!(output.into_inner().is_empty());
+        let output = String::from_utf8(output.into_inner()).unwrap();
+        assert!(output.starts_with("\x1b7\x1b[1;1H"));
+        assert!(output.contains("x=0,y=0,w=1,h=1,c=1,r=1"));
     }
 
     #[test]
-    fn omits_an_image_clipped_by_a_nested_canvas_after_its_anchor_is_shifted() {
+    fn renders_the_accumulated_visible_crop_after_a_nested_shift() {
         #[derive(Debug, Clone, PartialEq)]
         struct PartlyVisibleImage(View);
 
@@ -837,15 +900,26 @@ mod tests {
             [View::text("x", TextStyle::new()), clipped],
         );
         let resolved = resolve(&view, Available::NONE).unwrap();
-        let placement = image.placement(&resolved).unwrap();
+        let placement = image
+            .placement(&resolved, Some(CellPixelSize::new(8, 16)))
+            .unwrap();
         let mut output = AnsiWriter::new(Vec::new());
 
-        assert_eq!(placement.origin(), Position::new(0, 0));
-        assert_eq!(placement.size(), Size::new(2, 2));
-        assert!(!placement.is_within_resolved_view());
-        render_kitty(&resolved, [&image], &mut output).unwrap();
+        assert_eq!(placement.logical_origin(), Position::new(0, 0));
+        assert_eq!(placement.logical_size(), Size::new(2, 2));
+        assert_eq!(placement.visible_origin(), Some(Position::new(1, 0)));
+        assert_eq!(placement.visible_size(), Some(Size::new(1, 2)));
+        render_kitty(
+            &resolved,
+            [&image],
+            Some(CellPixelSize::new(8, 16)),
+            &mut output,
+        )
+        .unwrap();
 
-        assert!(output.into_inner().is_empty());
+        let output = String::from_utf8(output.into_inner()).unwrap();
+        assert!(output.starts_with("\x1b7\x1b[1;2H"));
+        assert!(output.contains("x=0,y=0,w=1,h=1,c=1,r=2"));
     }
 
     #[test]
@@ -861,7 +935,13 @@ mod tests {
         let resolved = resolve(&view, Available::NONE).unwrap();
         let mut output = AnsiWriter::new(Vec::new());
 
-        render_kitty(&resolved, [&image], &mut output).unwrap();
+        render_kitty(
+            &resolved,
+            [&image],
+            Some(CellPixelSize::new(8, 16)),
+            &mut output,
+        )
+        .unwrap();
 
         assert!(output.into_inner().is_empty());
     }
@@ -874,7 +954,13 @@ mod tests {
         let resolved = resolve(&view, Available::NONE).unwrap();
         let mut output = AnsiWriter::new(Vec::new());
 
-        render_kitty(&resolved, [&image], &mut output).unwrap();
+        render_kitty(
+            &resolved,
+            [&image],
+            Some(CellPixelSize::new(8, 16)),
+            &mut output,
+        )
+        .unwrap();
 
         let output = String::from_utf8(output.into_inner()).unwrap();
         assert!(output.contains("m=1;"));
@@ -957,6 +1043,47 @@ mod tests {
     }
 
     #[test]
+    fn lifecycle_reuses_the_upload_when_viewport_scrolling_changes_the_source_crop() {
+        let image =
+            Image::rgba("placement", "asset", PixelSize::new(1, 4), vec![255; 4 * 4]).unwrap();
+        let frame = |origin| {
+            let view = View::viewport(
+                Viewport::vertical(Projection::new(origin, ProjectionBoundary::Preserve)),
+                ImagePresentation::new().compose(&image, CellSize::new(1, 4)),
+            );
+            let resolved = resolve(&view, Available::size(1, 3)).unwrap();
+            (view, resolved)
+        };
+        let mut lifecycle = KittyLifecycle::new();
+        let (first, first_resolved) = frame(0);
+        lifecycle
+            .present(
+                &first,
+                &first_resolved,
+                Some(CellPixelSize::new(1, 1)),
+                &mut RecordingTerminal::default(),
+            )
+            .unwrap();
+        let (scrolled, scrolled_resolved) = frame(1);
+        let mut output = RecordingTerminal::default();
+
+        lifecycle
+            .present(
+                &scrolled,
+                &scrolled_resolved,
+                Some(CellPixelSize::new(1, 1)),
+                &mut output,
+            )
+            .unwrap();
+
+        let payloads = output.application_programs().collect::<Vec<_>>();
+        assert!(!payloads.iter().any(|payload| payload.contains("a=t")));
+        assert_eq!(payloads.len(), 1);
+        assert!(payloads[0].contains("a=p,i=1,p=1"));
+        assert!(payloads[0].contains("x=0,y=1,w=1,h=2,c=1,r=2"));
+    }
+
+    #[test]
     fn lifecycle_replaces_an_asset_and_deletes_the_superseded_upload() {
         let first = Image::rgba(
             "placement",
@@ -1029,7 +1156,14 @@ mod tests {
         let mut lifecycle = KittyLifecycle::new();
         let mut terminal = RecordingTerminal::default();
 
-        lifecycle.present(&view, &resolved, &mut terminal).unwrap();
+        lifecycle
+            .present(
+                &view,
+                &resolved,
+                Some(CellPixelSize::new(8, 16)),
+                &mut terminal,
+            )
+            .unwrap();
 
         let payloads = terminal.application_programs().collect::<Vec<_>>();
         assert_eq!(
@@ -1262,12 +1396,18 @@ mod tests {
             .present(
                 &initial,
                 &initial_resolved,
+                Some(CellPixelSize::new(8, 16)),
                 &mut RecordingTerminal::default(),
             )
             .unwrap();
         let mut replacement_frame = RecordingTerminal::default();
         lifecycle
-            .present(&replaced, &replaced_resolved, &mut replacement_frame)
+            .present(
+                &replaced,
+                &replaced_resolved,
+                Some(CellPixelSize::new(8, 16)),
+                &mut replacement_frame,
+            )
             .unwrap();
         assert!(
             !replacement_frame
@@ -1320,6 +1460,8 @@ mod tests {
             asset_key,
             origin: Position::new(x, 0),
             size: Size::new(1, 1),
+            source_offset: PixelPosition::new(0, 0),
+            source_size: PixelSize::new(1, 1),
         };
         let mut state = KittyState::new();
         state.uploaded.insert(
@@ -1411,6 +1553,8 @@ mod tests {
             asset_key,
             origin: Position::new(x, 0),
             size: Size::new(1, 1),
+            source_offset: PixelPosition::new(0, 0),
+            source_size: PixelSize::new(1, 1),
         };
         let mut state = KittyState::new();
         for (asset_key, image_id) in [(first_asset_key, 1), (second_asset_key, 2)] {
@@ -1471,6 +1615,8 @@ mod tests {
             asset_key: visible_key,
             origin: Position::new(0, 0),
             size: Size::new(1, 1),
+            source_offset: PixelPosition::new(0, 0),
+            source_size: PixelSize::new(1, 1),
         };
         let mebibytes = 1024 * 1024;
         let mut state = KittyState::new();
