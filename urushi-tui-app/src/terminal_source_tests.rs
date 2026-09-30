@@ -413,11 +413,23 @@ fn surface_observations_use_the_mapper_current_when_the_resize_arrives() {
     probe.push_window(Ok(window(100, 25, 800, 400)));
     probe.push_event(Ok(Event::Resize(TerminalSize::new(100, 25))));
     probe.wait_for_queries(2);
-    assert!(!harness.complete_effect(0));
+
+    let deadline = Instant::now() + Duration::from_secs(2);
+    let delivery = loop {
+        assert!(!harness.complete_effect(0));
+        if let Some(delivery) = harness.next() {
+            break delivery;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "surface observation was not delivered"
+        );
+        std::thread::yield_now();
+    };
 
     assert_eq!(
-        harness.next(),
-        Some(Delivery::sync(
+        delivery,
+        Delivery::sync(
             (
                 2,
                 Surface {
@@ -426,7 +438,7 @@ fn surface_observations_use_the_mapper_current_when_the_resize_arrives() {
                 }
             ),
             [],
-        ))
+        )
     );
     subscriptions.stop();
     assert!(!harness.complete_effect(0));
