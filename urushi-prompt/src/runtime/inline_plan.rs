@@ -401,10 +401,9 @@ fn plan_clear_owned_rows(previous: &InlinePresentation) -> Vec<InlineCommand> {
 
 #[cfg(test)]
 mod tests {
-    use super as inline_plan;
     use super::*;
     use crate::runtime::{
-        LineKind, PromptStyles, PromptView, ViewCursor, terminal::Renderer,
+        LineKind, PromptStyles, PromptView, ViewCursor, inline_plan, terminal::Renderer,
         terminal_backend::TerminalRenderer, test_styles, view::tests::*,
     };
     use urushi::RenderSettings;

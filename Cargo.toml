@@ -5,7 +5,9 @@ members = ["urushi", "urushi-adapter-ratatui", "urushi-cli", "urushi-derive", "u
 [workspace.package]
 version = "0.1.0"
 edition = "2024"
-license = "MIT OR Apache-2.0"
+rust-version = "1.90"
+license = "MIT"
+repository = "https://github.com/choplin/urushi"
 
 [workspace.dependencies]
 unicode-segmentation = "1.13"

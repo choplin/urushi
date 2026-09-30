@@ -1,9 +1,13 @@
 [package]
 name = "urushi-cli"
 description = "Human-facing non-interactive CLI presentations built on urushi"
+documentation = "https://docs.rs/urushi-cli"
+readme = "README.md"
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
 license.workspace = true
+repository.workspace = true
 keywords = ["cli", "terminal", "style", "ansi"]
 categories = ["command-line-interface"]
 

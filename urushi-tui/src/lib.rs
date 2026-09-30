@@ -7,6 +7,12 @@
 //! Callers drive it synchronously from their own loop.
 //!
 //! [`terminal`] contains the [`Screen`] and [`Frame`] presentation API.
+//!
+//! # Cargo features
+//!
+//! - `crossterm` is enabled by default and re-exports the portable Crossterm
+//!   backend. Disable default features when the caller supplies another
+//!   [`urushi_terminal::CommandWriter`].
 
 mod cell;
 pub mod terminal;

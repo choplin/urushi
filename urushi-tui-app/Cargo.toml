@@ -2,9 +2,12 @@
 name = "urushi-tui-app"
 description = "TEA application framework for Urushi full-screen terminal interfaces"
 documentation = "https://docs.rs/urushi-tui-app"
+readme = "README.md"
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
 license.workspace = true
+repository.workspace = true
 keywords = ["terminal", "tui", "tea"]
 categories = ["command-line-interface"]
 

@@ -91,11 +91,18 @@ Tokio dependency, terminal input, or Ratatui integration.
 | Feature | Default | Purpose |
 |---|---:|---|
 | `crossterm` | Yes | Enables the production terminal backend and the short `run(app)` entry point. |
+| `graphics` | No | Integrates Kitty or Sixel image presentation and exposes `GraphicsPreference`; applications construct images through a direct `urushi-graphics` dependency. |
 
 With default features disabled, the application model, effects,
 subscriptions, and configurable `Runtime` remain available; a caller must
 provide the physical terminal integration it uses. The crate depends on
 `urushi-tui` with its default features disabled and does not depend on Ratatui.
+
+The `graphics` feature makes the runtime own image protocol selection, Kitty
+upload retention, Sixel encoded-band caching and full-scene repaint, recovery,
+and cleanup alongside its cell frames. It does not make image construction part
+of the application crate, so image-bearing applications also depend on
+`urushi-graphics`.
 
 `urushi-adapter-ratatui` has no feature flags. Choosing that dependency is the
 explicit opt-in to Ratatui, independently of either Urushi TUI crate.

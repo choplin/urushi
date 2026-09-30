@@ -2,9 +2,12 @@
 name = "urushi-adapter-ratatui"
 description = "Ratatui adapter for Urushi views and logical styles"
 documentation = "https://docs.rs/urushi-adapter-ratatui"
+readme = "README.md"
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
 license.workspace = true
+repository.workspace = true
 keywords = ["terminal", "tui", "ratatui"]
 categories = ["command-line-interface"]
 

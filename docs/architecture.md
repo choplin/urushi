@@ -223,14 +223,19 @@ a role are documented with the extension point itself, in
 
 | Crate | Responsibility | Dependencies within the workspace |
 | --- | --- | --- |
+| [`urushi-derive`](../urushi-derive/) | Procedural derives for typed component data. | None within the workspace |
 | [`urushi-terminal`](../urushi-terminal/) | Workspace-independent terminal contracts and inspection: style and geometry primitives, commands, events, queries, session restoration, terminal/non-terminal classification, visible size, and capabilities. | None within the workspace |
-| [`urushi`](../urushi/) | Logical styles, themes, renderer-neutral views and components, layout, ANSI serialization, and standard-stream output convenience. | `urushi-terminal` |
+| [`urushi`](../urushi/) | Logical styles, themes, renderer-neutral views and components, layout, ANSI serialization, and standard-stream output convenience. | `urushi-derive`, `urushi-terminal` |
 | [`urushi-cli`](../urushi-cli/) | Opinionated semantic summaries and warnings for human-facing, non-interactive CLI output. | `urushi` |
 | [`urushi-graphics`](../urushi-graphics/) | Image data and presentations, resolved anchor-to-image placement, terminal graphics encoders, and reusable graphics lifecycle machinery. Retaining that state belongs to an opted-in host runtime. | `urushi`, `urushi-terminal` |
 | [`urushi-prompt`](../urushi-prompt/) | Typed input, select, and confirm forms; prompt state transitions; inline and alternate-screen presentations; terminal session setup and cleanup. | `urushi`, `urushi-terminal` |
 | [`urushi-tui`](../urushi-tui/) | Synchronous full-screen cell presentation: draw-scoped frames, Urushi-owned buffers and diffing, transactional output, and failed-output recovery. | `urushi`, `urushi-terminal` |
 | `urushi-tui-app` | TEA-style full-screen applications: model ownership, delivery, effects, subscriptions, scheduling, rendering into `urushi-tui`, terminal input, session restoration, and optional graphics presentation. | `urushi`, `urushi-terminal`, `urushi-tui`; optionally `urushi-graphics` |
 | `urushi-adapter-ratatui` | Optional Ratatui integration: logical-style conversion, stateless widgets, resolved-cell writing, and anchor translation for a caller-owned Ratatui buffer. | `urushi` |
+
+The packages share one release version and are published in dependency order;
+[`design/release-packaging.md`](design/release-packaging.md) defines that
+release boundary and its verification gates.
 
 `urushi-prompt` owns interactive prompt behavior. The core crate must not gain
 prompt-specific navigation, validation, cursor, or form-submission policy merely

@@ -3,7 +3,11 @@ name = "urushi"
 description = "Composable styling, components, and terminal rendering for Rust CLIs"
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
 license.workspace = true
+repository.workspace = true
+documentation = "https://docs.rs/urushi"
+readme = "README.md"
 keywords = ["cli", "terminal", "style", "ansi", "tui"]
 categories = ["command-line-interface"]
 

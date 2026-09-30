@@ -93,4 +93,23 @@ Use `urushi-graphics` for an image region with text fallback. The renderer uses
 Kitty when positively detected, otherwise Sixel when both protocol support and
 cell-pixel geometry are available.
 
+For one-shot output:
+
+```toml
+[dependencies]
+urushi = "0.1.0"
+urushi-graphics = "0.1.0"
+urushi-terminal = "0.1.0"
+```
+
+For images owned by the full-screen runtime, depend on the image model directly
+and enable its runtime integration:
+
+```toml
+[dependencies]
+urushi = "0.1.0"
+urushi-graphics = "0.1.0"
+urushi-tui-app = { version = "0.1.0", features = ["graphics"] }
+```
+
 [Display terminal images →](/docs/graphics/)

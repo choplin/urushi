@@ -12,6 +12,17 @@
 //! frame commit stay in `urushi-tui`; this crate owns application state,
 //! delivery ordering, effects, subscriptions, drawing policy, terminal input,
 //! and session restoration.
+//!
+//! # Cargo features
+//!
+//! - `crossterm` is enabled by default and provides the production terminal
+//!   backend used by [`run`] and [`Runtime::run`]. With default features
+//!   disabled, supply a backend through [`Runtime::backend`].
+//! - `graphics` integrates Kitty or Sixel presentation and re-exports
+//!   `GraphicsPreference` for runtime selection. The runtime retains Kitty
+//!   uploads and caches encoded Sixel bands while redrawing each complete
+//!   Sixel scene. Applications construct image views with a direct
+//!   `urushi-graphics` dependency.
 
 mod application;
 mod core;

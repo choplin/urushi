@@ -1,9 +1,13 @@
 [package]
 name = "urushi-derive"
 description = "Derive macros for urushi component data"
+documentation = "https://docs.rs/urushi-derive"
+readme = "README.md"
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
 license.workspace = true
+repository.workspace = true
 
 [lib]
 proc-macro = true

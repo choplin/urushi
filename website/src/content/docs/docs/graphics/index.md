@@ -77,8 +77,40 @@ Urushi applies this order:
 A terminal may report both protocols; Kitty wins. The one-shot renderer is
 stateless and treats the terminal's top-left cell as the view origin.
 
-Retained uploads, deletion, scrolling slices, protocol-specific repaint, and
-draw-failure recovery require a redraw lifecycle. Their reusable protocol state
-belongs in `urushi-graphics`, while the interactive host that opts in owns that
-state. The 0.1.0 public API shown here is the stateless, one-shot path and does
-not yet manage those retained operations.
+## Use images in the Urushi TUI runtime
+
+The full-screen runtime can own image presentation across frames alongside its
+cell output. Depend on the image model directly and enable the integration
+feature:
+
+```toml
+[dependencies]
+urushi = "0.1.0"
+urushi-graphics = "0.1.0"
+urushi-tui-app = { version = "0.1.0", features = ["graphics"] }
+```
+
+An application still returns an ordinary `View` containing an
+`ImagePresentation`. Select automatic or explicit protocol behavior on the
+runtime:
+
+```rust
+use urushi_tui_app::{GraphicsPreference, Runtime};
+
+let final_model = Runtime::new(application)
+    .graphics(GraphicsPreference::Auto)
+    .run()?;
+# let _ = final_model;
+# Ok::<(), urushi_tui_app::Error>(())
+```
+
+For Kitty, the runtime retains uploads and placements between frames. Sixel is
+immediate-mode terminal output: the runtime caches encoded cell-row bands but
+emits the complete visible image scene on every successful presentation. The
+same terminal owner coordinates repaint, recovery, and cleanup for either
+protocol and restores the full-screen session. An explicit Kitty or Sixel
+preference returns an error when the selected protocol cannot be used.
+
+Hosts outside `urushi-tui-app` can own the public `kitty::KittyLifecycle` or
+`sixel::SixelLifecycle` values themselves. They remain responsible for deciding
+when to prepare, present, repaint, scroll, and clean up retained protocol state.

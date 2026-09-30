@@ -2,9 +2,12 @@
 name = "urushi-tui"
 description = "Synchronous full-screen presentation for Urushi"
 documentation = "https://docs.rs/urushi-tui"
+readme = "README.md"
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
 license.workspace = true
+repository.workspace = true
 keywords = ["terminal", "tui"]
 categories = ["command-line-interface"]
 

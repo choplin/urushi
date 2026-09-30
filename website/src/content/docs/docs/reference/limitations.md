@@ -38,11 +38,14 @@ The prompt architecture supports choosing between an inline region and an
 alternate-screen viewport without changing the form or field model. In 0.1.0,
 only the inline presentation is exposed through the public form API.
 
-## Graphics are stateless
+## Graphics need a lifecycle owner
 
-The one-shot graphics path supports Kitty and Sixel output with fallback text.
-It does not own retained uploads, deletion, scrolling slices, repaint policy,
-or recovery from protocol-specific draw failures.
+The one-shot `render_view` path is stateless and supports Kitty and Sixel output
+with fallback text. Presentation across frames requires a host to own Kitty
+uploads and placements or Sixel's cached encoding and complete-scene redraw,
+plus recovery and cleanup policy. `urushi-tui-app` provides that owner when its
+`graphics` feature is enabled; other prompt, low-level TUI, or Ratatui hosts
+must drive the public Kitty or Sixel lifecycle themselves.
 
 ## Terminal feature support varies
 

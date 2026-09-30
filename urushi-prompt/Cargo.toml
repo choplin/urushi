@@ -1,9 +1,13 @@
 [package]
 name = "urushi-prompt"
 description = "Interactive terminal prompts styled with urushi"
+documentation = "https://docs.rs/urushi-prompt"
+readme = "README.md"
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
 license.workspace = true
+repository.workspace = true
 
 [dependencies]
 unicode-segmentation.workspace = true

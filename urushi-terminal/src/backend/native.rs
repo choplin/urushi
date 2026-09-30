@@ -869,7 +869,7 @@ fn decode_hex_decimal(value: &[u8]) -> Option<u16> {
         return None;
     }
     let mut decoded = Vec::with_capacity(value.len() / 2);
-    for pair in value.chunks_exact(2) {
+    for pair in value.as_chunks::<2>().0 {
         let pair = std::str::from_utf8(pair).ok()?;
         decoded.push(u8::from_str_radix(pair, 16).ok()?);
     }
@@ -1381,6 +1381,7 @@ mod tests {
         let background = terminal
             .terminal_background()
             .expect("background query succeeds");
+        assert!(!terminal.raw_mode_enabled().expect("raw mode is restored"));
         release_peer.send(()).expect("responder remains available");
         responder.join().expect("responder completes");
         assert_eq!(
@@ -1391,7 +1392,6 @@ mod tests {
             terminal.read_event().expect("queued event is retained"),
             Event::Key(KeyEvent::new(KeyCode::Char('x')))
         );
-        assert!(!terminal.raw_mode_enabled().expect("raw mode is restored"));
     }
 
     #[test]
@@ -1470,11 +1470,11 @@ mod tests {
                 .expect("timeout is not an I/O error"),
             None
         );
-        release_peer.send(()).expect("silent peer is released");
-        silent_responder.join().expect("silent responder completes");
         silent_terminal
             .disable_raw_mode()
             .expect("raw mode is restored");
+        release_peer.send(()).expect("silent peer is released");
+        silent_responder.join().expect("silent responder completes");
     }
 
     #[test]
@@ -1514,9 +1514,9 @@ mod tests {
             terminal.read_event().expect("event reading resumes"),
             Event::Key(KeyEvent::new(KeyCode::Char('x')))
         );
+        terminal.disable_raw_mode().expect("raw mode is restored");
         release_peer.send(()).expect("responder remains available");
         responder.join().expect("responder completes");
-        terminal.disable_raw_mode().expect("raw mode is restored");
     }
 
     #[test]
@@ -1551,9 +1551,9 @@ mod tests {
             terminal.read_event().expect("event reading resumes"),
             Event::Key(KeyEvent::new(KeyCode::Char('x')))
         );
+        terminal.disable_raw_mode().expect("raw mode is restored");
         release_peer.send(()).expect("responder remains available");
         responder.join().expect("responder completes");
-        terminal.disable_raw_mode().expect("raw mode is restored");
     }
 
     #[test]
@@ -1588,9 +1588,9 @@ mod tests {
             terminal.read_event().expect("event reading resumes"),
             Event::Key(KeyEvent::new(KeyCode::Char('x')))
         );
+        terminal.disable_raw_mode().expect("raw mode is restored");
         release_peer.send(()).expect("responder remains available");
         responder.join().expect("responder completes");
-        terminal.disable_raw_mode().expect("raw mode is restored");
     }
 
     #[test]
@@ -1655,6 +1655,7 @@ mod tests {
         let capabilities = terminal
             .terminal_capabilities()
             .expect("capabilities are queried");
+        assert!(!terminal.raw_mode_enabled().expect("raw mode is restored"));
         release_peer.send(()).expect("responder remains available");
         responder.join().expect("responder completes");
 
@@ -1676,7 +1677,6 @@ mod tests {
             terminal.read_event().expect("queued event is retained"),
             Event::Key(KeyEvent::new(KeyCode::Char('x')))
         );
-        assert!(!terminal.raw_mode_enabled().expect("raw mode is restored"));
     }
 
     fn terminal_pair() -> (File, NativeTerminal) {

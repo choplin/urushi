@@ -4,6 +4,11 @@
 //! This crate owns vocabulary shared by terminal surfaces without depending on
 //! another Urushi workspace crate.
 //! It does not choose rendering policy, perform layout, or render a view.
+//!
+//! # Cargo features
+//!
+//! - `crossterm` enables the portable Crossterm backend. The native backend is
+//!   available without a feature on Unix only.
 
 use std::io::{self, IsTerminal};
 

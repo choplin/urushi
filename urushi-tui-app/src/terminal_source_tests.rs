@@ -426,7 +426,6 @@ fn surface_observations_use_the_mapper_current_when_the_resize_arrives() {
         );
         std::thread::yield_now();
     };
-
     assert_eq!(
         delivery,
         Delivery::sync(

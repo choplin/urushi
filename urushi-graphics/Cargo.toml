@@ -1,9 +1,13 @@
 [package]
 name = "urushi-graphics"
 description = "Image components and terminal graphics adapters for urushi"
+documentation = "https://docs.rs/urushi-graphics"
+readme = "README.md"
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
 license.workspace = true
+repository.workspace = true
 keywords = ["terminal", "graphics", "kitty", "sixel"]
 categories = ["command-line-interface", "graphics"]
 

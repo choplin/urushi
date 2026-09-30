@@ -1,9 +1,13 @@
 [package]
 name = "urushi-terminal"
 description = "Workspace-independent terminal contracts and inspection for the Urushi ecosystem"
+documentation = "https://docs.rs/urushi-terminal"
+readme = "README.md"
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
 license.workspace = true
+repository.workspace = true
 keywords = ["cli", "terminal", "tty"]
 categories = ["command-line-interface"]
 

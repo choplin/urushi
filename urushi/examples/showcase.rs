@@ -338,7 +338,7 @@ fn table_sample() -> View {
 /// A style the strategy returns replaces the role default rather than layering
 /// over it, so it restates the foreground it wants.
 fn checkerboard_style(row: Option<usize>, column: usize) -> BlockStyle {
-    let parity = row.map_or(1, |row| row) + column;
+    let parity = row.unwrap_or(1) + column;
     // Both shades must differ from the surrounding backdrop, or the board reads
     // as detached blocks instead of alternating squares.
     let shade = if parity.is_multiple_of(2) {

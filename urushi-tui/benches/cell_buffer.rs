@@ -19,7 +19,7 @@ fn main() {
 // The production module yields these cells to its terminal writer. Defining
 // the boundary locally lets this benchmark compile the private implementation
 // itself without making Buffer part of urushi-tui's public API.
-#[expect(
+#[allow(
     dead_code,
     reason = "the benchmark consumes diff output opaquely through black_box"
 )]
