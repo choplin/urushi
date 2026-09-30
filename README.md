@@ -19,15 +19,82 @@ while each surface keeps its own interaction and terminal lifecycle.
 - **Treat terminal width as UI geometry.** Layout, wrapping, borders, and
   alignment account for grapheme clusters and East Asian wide characters.
 
+## Choose a terminal surface
+
+Pick the interaction model your application needs. Themes, styles, components,
+and renderer-neutral views remain shared across all three surfaces.
+
+| Surface | What it gives you | Start with |
+| --- | --- | --- |
+| **Command output** | Composable layouts and semantic presentations that degrade safely when redirected | [`urushi`](website/src/content/docs/docs/cli/styled-output.md) or [`urushi-cli`](website/src/content/docs/docs/cli/presentations.md) |
+| **Interactive prompts** | Typed input, validation, selection, and confirmation in a blocking session | [`urushi-prompt`](website/src/content/docs/docs/prompts/index.mdx) |
+| **Full-screen applications** | State, updates, effects, subscriptions, drawing, and terminal lifecycle | [`urushi-tui-app`](website/src/content/docs/docs/tui/runtime.mdx) |
+
+### Command output
+
+Compose terminal-aware output without owning a UI loop.
+
+- Semantic themes and reusable `View` composition
+- Grapheme- and CJK-aware layout, wrapping, borders, and alignment
+- ANSI capability detection and redirect-safe output
+
+<p align="center">
+  <img src="assets/readme/release-dashboard.png" width="100%" alt="Urushi release-readiness dashboard with semantic status panels, metrics, and terminal-aware layout">
+</p>
+
+<p align="center"><em>A representative release fixture rendered by the core crate; it does not report live CI results.</em></p>
+
+### Interactive prompts
+
+Collect structured input while Urushi manages a temporary terminal session.
+
+- Typed fields with validation and error feedback
+- Filtered selection and explicit confirmation
+- Terminal restoration after completion or cancellation
+
+<p align="center">
+  <img src="assets/readme/release-wizard.gif" width="100%" alt="Urushi release wizard validating a semantic version, filtering release targets, confirming the plan, and restoring the terminal">
+</p>
+
+<p align="center"><em>The wizard produces a local plan only; it does not publish or change remote state.</em></p>
+
+### Full-screen applications
+
+Run stateful TUIs with a TEA-style application runtime.
+
+- State, message, update, and view separation
+- Asynchronous effects and event subscriptions
+- Live redraw, restartable flows, and terminal restoration
+
+<p align="center">
+  <img src="assets/readme/release-monitor.gif" width="100%" alt="Urushi release monitor advancing an animated four-stage pipeline to completion and then exiting cleanly">
+</p>
+
+<p align="center"><em>The monitor uses simulated delayed effects; it does not read live CI state.</em></p>
+
+### Other integration paths
+
+| Requirement | Use |
+| --- | --- |
+| Own the input, timing, and terminal session | [`urushi-tui`](urushi-tui/) for a synchronous frame loop |
+| Render inside an existing Ratatui application | [`urushi-adapter-ratatui`](website/src/content/docs/docs/tui/ratatui.md) |
+| Present Kitty or Sixel images with text fallback | [`urushi-graphics`](website/src/content/docs/docs/graphics/index.md) |
+
+[Choose by use case](website/src/content/docs/docs/use-cases.md) maps each
+surface to its dependency set and first task.
+
 ## Quickstart
 
-Urushi 0.1.0 requires Rust 1.90 or newer. Add the core crate:
+Urushi 0.1.0 requires Rust 1.90 or newer. Create a small application and add
+the core crate:
 
 ```sh
+cargo new urushi-quickstart
+cd urushi-quickstart
 cargo add urushi
 ```
 
-Build a bordered status view and write it to stdout:
+Replace `src/main.rs` with a bordered status view that writes to stdout:
 
 ```rust
 use urushi::{BlockStyle, Border, Color, TextStyle, View};
@@ -72,24 +139,6 @@ attributes.
 For a guided explanation of this example, follow the
 [quickstart](website/src/content/docs/docs/quickstart.md).
 
-## Choose a terminal surface
-
-Every surface uses the same presentation foundation, but each keeps the
-interaction and terminal lifecycle appropriate to its job.
-
-| What you are building | Start with | Who owns control flow |
-| --- | --- | --- |
-| Styled command output and reusable layouts | `urushi` | Your program writes a view and continues. |
-| Opinionated summaries and warnings | `urushi-cli` | Your program writes semantic CLI presentations. |
-| Input, selection, and confirmation forms | `urushi-prompt` | The prompt temporarily owns a blocking terminal session. |
-| A TEA-style full-screen application | `urushi-tui-app` | Urushi owns delivery, effects, drawing, and terminal restoration. |
-| A caller-driven synchronous frame loop | `urushi-tui` | Your application owns input, timing, and the terminal session. |
-| UI inside an existing Ratatui application | `urushi-adapter-ratatui` | Your application keeps its Ratatui terminal and event loop. |
-| Kitty or Sixel images with text fallback | `urushi-graphics` | Your CLI, prompt, or TUI host owns when images are presented. |
-
-See [Choose by use case](website/src/content/docs/docs/use-cases.md) for the
-dependency set and first task for each surface.
-
 ## How the shared model works
 
 Urushi shares presentation, not control flow:
@@ -111,24 +160,38 @@ for the complete model.
 
 ## Run the examples
 
-From a checkout of this repository, the smallest visual catalog is:
+From a checkout of this repository, render a release dashboard that combines
+semantic color, composition, panels, and terminal-aware layout:
+
+```sh
+cargo run -p urushi --example release_dashboard
+```
+
+Explore the complete style, layout, and component catalog:
 
 ```sh
 cargo run -p urushi --example showcase
 ```
 
-The CJK catalog exercises East Asian width and alignment:
+The CJK catalog exercises the same primitives with East Asian width and
+alignment:
 
 ```sh
 cargo run -p urushi --example cjk_showcase
 ```
 
-Interactive and full-screen examples require a real terminal:
+Interactive, full-screen, and Ratatui examples require a real terminal:
 
 ```sh
-cargo run -p urushi-prompt --example wizard
-cargo run -p urushi-tui-app --example runtime_counter
+cargo run -p urushi-prompt --example release_wizard
+cargo run -p urushi-tui-app --example release_monitor
+cargo run -p urushi-adapter-ratatui --example themed_ratatui
 ```
+
+The release wizard demonstrates typed fields, validation, selection, and
+terminal restoration. The release monitor demonstrates asynchronous effects,
+state updates, live drawing, and restartable application flow. The Ratatui
+example draws an Urushi view into an application-owned Ratatui buffer.
 
 ## Workspace crates
 
@@ -147,6 +210,21 @@ cargo run -p urushi-tui-app --example runtime_counter
 All workspace crates in one release use the same version. Add only the crates
 that correspond to the surfaces your application presents.
 
+## Compatibility and limitations
+
+- **Rust:** Urushi 0.1.0 requires Rust 1.90 or newer.
+- **Platforms:** CI checks default and all-feature builds on Linux, macOS, and
+  Windows, plus the complete feature graph with Rust 1.90.
+- **Terminal capabilities:** Colors, attributes, hyperlinks, and graphics vary
+  by terminal. Applications must not use decoration as the only carrier of
+  meaning.
+- **Version coordination:** Keep workspace crates on the same release version
+  and review the changelog when upgrading.
+
+See [Current limitations](website/src/content/docs/docs/reference/limitations.md)
+for the boundaries that affect prompt placement, low-level TUI ownership,
+Ratatui integration, graphics lifecycles, and terminal capability handling.
+
 ## Documentation
 
 - [Changelog](CHANGELOG.md)
@@ -155,11 +233,6 @@ that correspond to the surfaces your application presents.
 - [Crates and Cargo features](website/src/content/docs/docs/reference/crates.md)
 - [Current limitations](website/src/content/docs/docs/reference/limitations.md)
 - [Developer architecture](docs/architecture.md)
-
-The 0.1.0 release gate checks default and all-feature builds on Linux, macOS,
-and Windows, and checks the complete feature graph with Rust 1.90. Decoration
-still depends on detected terminal capabilities, so applications must not use
-color, attributes, hyperlinks, or graphics as the only carrier of meaning.
 
 ## Acknowledgments
 

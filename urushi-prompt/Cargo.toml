@@ -16,3 +16,6 @@ urushi-terminal = { path = "../urushi-terminal", version = "=0.1.0" }
 
 [target.'cfg(not(unix))'.dependencies]
 urushi-terminal = { path = "../urushi-terminal", version = "=0.1.0", features = ["crossterm"] }
+
+[dev-dependencies]
+urushi-terminal = { path = "../urushi-terminal", version = "=0.1.0", features = ["crossterm"] }
