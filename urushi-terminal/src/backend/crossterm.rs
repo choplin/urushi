@@ -107,7 +107,7 @@ impl<W: Write> CommandWriter for CrosstermBackend<W> {
             Command::SetStyle(style) => write_style(&mut self.writer, style),
             Command::ResetStyle => queue!(self.writer, SetAttribute(Attribute::Reset), ResetColor),
             Command::SetHyperlink(Some(link)) => write_hyperlink_start(&mut self.writer, link),
-            Command::SetHyperlink(None) => self.writer.write_all(b"\x1b]8;;\x1b\\"),
+            Command::SetHyperlink(None) => super::ansi::write_hyperlink_end(&mut self.writer),
             Command::ApplicationProgram(payload) => {
                 write_control_string(&mut self.writer, b"\x1b_", payload)
             }
@@ -319,29 +319,7 @@ fn write_hyperlink_start(
     writer: &mut impl Write,
     link: crate::TerminalHyperlink<'_>,
 ) -> io::Result<()> {
-    writer.write_all(b"\x1b]8;")?;
-    for (index, parameter) in link.parameters.iter().enumerate() {
-        if index != 0 {
-            writer.write_all(b":")?;
-        }
-        write_osc_field(writer, parameter.key, b":;=")?;
-        writer.write_all(b"=")?;
-        write_osc_field(writer, parameter.value, b":;=")?;
-    }
-    writer.write_all(b";")?;
-    write_osc_field(writer, link.uri, b"")?;
-    writer.write_all(b"\x1b\\")
-}
-
-fn write_osc_field(writer: &mut impl Write, value: &str, separators: &[u8]) -> io::Result<()> {
-    for byte in value.bytes() {
-        if byte < 0x20 || byte == 0x7f || separators.contains(&byte) {
-            write!(writer, "%{byte:02X}")?;
-        } else {
-            writer.write_all(&[byte])?;
-        }
-    }
-    Ok(())
+    super::ansi::write_hyperlink_start(writer, link)
 }
 
 fn convert_color(color: Color) -> CrosstermColor {

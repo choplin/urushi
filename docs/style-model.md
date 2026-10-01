@@ -54,8 +54,9 @@ bounds, wrap overflow, left horizontal alignment, or top vertical alignment.
 
 The text vocabulary is foreground, background, underline, hyperlink, and text
 attributes. A hyperlink is one URI plus zero or more OSC 8 parameters;
-construction percent-encodes control and delimiter characters so caller input
-cannot escape its field. The block vocabulary is the geometry — padding,
+the value retains those logical strings, and the terminal output boundary
+percent-encodes control and delimiter characters so caller input cannot escape
+its field. The block vocabulary is the geometry — padding,
 margin, the border glyph set, its four edge switches, complete logical text
 style, and color overrides, the six sizing properties, overflow, and the two
 alignments — together with named access to the text properties of the style
@@ -219,10 +220,11 @@ complete value, so a theme role resolves to the whole style its position uses.
 
 Renderers consume the values present in one `TextStyle`.
 
-- ANSI rendering emits the active colors, attributes, and underline, in SGR
-  parameter order so that one style always spells one sequence. It emits a
-  hyperlink as an OSC 8 scope around the styled run and closes the scope before
-  a line boundary.
+- ANSI rendering resolves and groups logical styles in `urushi`, then lowers
+  each run to `TerminalStyle` and `TerminalHyperlink`. The dependency-free
+  encoder in `urushi-terminal` owns SGR parameter spelling, resets, OSC 8 field
+  escaping, and OSC 8 framing. Static rendering and `AnsiWriter` share that
+  encoder; a hyperlink scope still closes before a line boundary.
 - The `urushi-adapter-ratatui` adapter maps the active attribute set to Ratatui's
   `add_modifier`; it does not populate `sub_modifier`. Its default cell-writing
   mode therefore follows Ratatui's patch semantics, while the explicit
@@ -235,8 +237,9 @@ Renderers consume the values present in one `TextStyle`.
   canonical effective style.
 
 A style value does not serialize an arbitrary string itself. `render_text`
-serializes the styled spans of a `StyledText` without layout, while `render`
-serializes the styled graphemes of a `ResolvedView`. This keeps output feature
+groups and serializes the styled spans of a `StyledText` without layout, while
+`render` does the same for the styled graphemes of a `ResolvedView`; both hand
+terminal byte spelling to `urushi-terminal`. This keeps output feature
 selection at the rendering boundary instead of making it a natural-looking
 escape hatch on `TextStyle`.
 

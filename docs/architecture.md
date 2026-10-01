@@ -224,8 +224,8 @@ a role are documented with the extension point itself, in
 | Crate | Responsibility | Dependencies within the workspace |
 | --- | --- | --- |
 | [`urushi-derive`](../urushi-derive/) | Procedural derives for typed component data. | None within the workspace |
-| [`urushi-terminal`](../urushi-terminal/) | Workspace-independent terminal contracts and inspection: style and geometry primitives, commands, events, queries, session restoration, terminal/non-terminal classification, visible size, and capabilities. | None within the workspace |
-| [`urushi`](../urushi/) | Logical styles, themes, renderer-neutral views and components, layout, ANSI serialization, and standard-stream output convenience. | `urushi-derive`, `urushi-terminal` |
+| [`urushi-terminal`](../urushi-terminal/) | Workspace-independent terminal contracts and inspection: style and geometry primitives, commands, dependency-free ANSI encoding, events, queries, session restoration, terminal/non-terminal classification, visible size, and capabilities. | None within the workspace |
+| [`urushi`](../urushi/) | Logical styles, themes, renderer-neutral views and components, layout, static ANSI rendering policy, and standard-stream output convenience. | `urushi-derive`, `urushi-terminal` |
 | [`urushi-cli`](../urushi-cli/) | Opinionated semantic summaries and warnings for human-facing, non-interactive CLI output. | `urushi` |
 | [`urushi-graphics`](../urushi-graphics/) | Image data and presentations, resolved anchor-to-image placement, terminal graphics encoders, and reusable graphics lifecycle machinery. Retaining that state belongs to an opted-in host runtime. | `urushi`, `urushi-terminal` |
 | [`urushi-prompt`](../urushi-prompt/) | Typed input, select, and confirm forms; prompt state transitions; inline and alternate-screen presentations; terminal session setup and cleanup. | `urushi`, `urushi-terminal` |
@@ -250,7 +250,7 @@ to share styling.
 | [`theme`](../urushi/src/theme/) | Semantic color tokens, reusable component roles, canonical component presentations, application role resolution, and explicit light/dark selection. | `style`, `component` |
 | [`view`](../urushi/src/view/) | The renderer-neutral `View` tree and the one layout pass in its three phases — width, height, and assembly — behind `measure`, direct `resolve`, and optional retained `Resolver::resolve` (`Size`, `Available`, `StyledGrapheme`, `ResolvedView`). Stateless Canvas assembly rasterizes and immediately composes one command at a time after sizing; a retained resolver may privately reuse equivalent evaluation artifacts. | `style`, `text` |
 | [`component`](../urushi/src/component/) | Reusable semantic data and the independent concrete presentations that compose it into primitive `View` trees. | `theme`, `view`, `text` |
-| [`render`](../urushi/src/render/) | Feature selection and translation of a `ResolvedView` to ANSI text. | `style`, `view`, `urushi-terminal` |
+| [`render`](../urushi/src/render/) | Feature selection, run coalescing and scope ordering, and translation of a `ResolvedView` to ANSI text through `urushi-terminal`'s encoder. | `style`, `view`, `urushi-terminal` |
 | [`output`](../urushi/src/output.rs) | Standard-stream convenience: detection, width selection, rendering policy, and one static write. | `view`, `render`, `urushi-terminal` |
 
 ## TUI crate responsibilities
@@ -392,9 +392,12 @@ traits remain usable independently for tests and non-interactive output.
 Queries take mutable access because an implementation may have to write a
 request and consume its response from the same connection.
 
-`backend::ansi::AnsiWriter` encodes the output protocol without a terminal
-framework. `backend::native::NativeTerminal` owns `/dev/tty`, Unix raw mode,
-window queries, input decoding, and that encoder as one concrete interactive
+`backend::ansi::AnsiWriter` owns dependency-free SGR and OSC 8 byte spelling as
+well as the remaining output protocol. Static rendering uses its scoped style
+and hyperlink operations, while `AnsiWriter` command output uses the same
+implementation and the Crossterm adapter delegates OSC 8 fallback encoding to
+it. `backend::native::NativeTerminal` owns `/dev/tty`, Unix raw mode, window
+queries, input decoding, and that encoder as one concrete interactive
 connection. Crossterm remains an optional cross-platform adapter, and its types
 stay inside `backend::crossterm`. The crate root exposes only Urushi-owned
 contracts and values.

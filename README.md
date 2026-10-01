@@ -197,14 +197,14 @@ example draws an Urushi view into an application-owned Ratatui buffer.
 
 | Crate | Responsibility |
 | --- | --- |
-| [`urushi`](urushi/) | Styles, themes, components, renderer-neutral views, layout, ANSI rendering, and standard-stream output. |
+| [`urushi`](urushi/) | Styles, themes, components, renderer-neutral views, layout, static rendering policy, and standard-stream output. |
 | [`urushi-cli`](urushi-cli/) | Opinionated presentations for human-facing, non-interactive CLI output. |
 | [`urushi-prompt`](urushi-prompt/) | Typed input, selection, and confirmation forms with validation. |
 | [`urushi-tui`](urushi-tui/) | Synchronous frames, cell buffers, diffing, and transactional terminal output. |
 | [`urushi-tui-app`](urushi-tui-app/) | TEA-style applications, effects, subscriptions, scheduling, input, and terminal lifecycle. |
 | [`urushi-adapter-ratatui`](urushi-adapter-ratatui/) | Stateless Urushi view and style adapters for caller-owned Ratatui buffers. |
 | [`urushi-graphics`](urushi-graphics/) | Image components and Kitty/Sixel terminal graphics with text fallback. |
-| [`urushi-terminal`](urushi-terminal/) | Shared terminal commands, events, geometry, capabilities, and session restoration. |
+| [`urushi-terminal`](urushi-terminal/) | Shared terminal commands, ANSI encoding, events, geometry, capabilities, and session restoration. |
 | [`urushi-derive`](urushi-derive/) | Derive macros used by typed Urushi components. |
 
 All workspace crates in one release use the same version. Add only the crates

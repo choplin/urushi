@@ -2,12 +2,10 @@
 
 mod block;
 mod border;
-mod color;
 mod grid;
 mod hyperlink;
 mod layout;
 mod text;
-mod underline;
 
 pub use block::BlockStyle;
 pub use border::Border;

@@ -208,7 +208,9 @@ Two boundaries follow from this shape:
   theme.
 - **Select Graphic Rendition (SGR) encoding happens below the plan.** A run
   carries text and a style, not escape sequences. The executor turns a run into
-  bytes.
+  terminal commands, and the `urushi-terminal` output backend owns their byte
+  encoding. The same encoder spells styles for static rendering without moving
+  run construction or cursor planning into the terminal crate.
 
 Because a row is the unit the plan compares to decide whether to redraw, the
 Frame stage emits runs in a canonical form, defined in
