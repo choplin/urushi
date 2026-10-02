@@ -18,7 +18,16 @@ let style_key = FieldKey::<String>::new("style");
 let proceed_key = FieldKey::<ConfirmAnswer>::new("proceed");
 ```
 
-Field names must be non-empty and unique within the form.
+The key types determine the types returned after submission:
+
+| Key | Submitted type |
+|---|---|
+| `name_key` | `String` |
+| `style_key` | `String` |
+| `proceed_key` | `ConfirmAnswer` |
+
+An empty key name returns `FieldConfigError::EmptyName`; duplicate names return
+`FormBuildError::DuplicateFieldName` when the form is built.
 
 ## Build the fields and group
 
@@ -50,8 +59,25 @@ let group = Group::builder()
 # Ok::<(), Box<dyn std::error::Error>>(())
 ```
 
-Builder validation rejects empty groups, empty field names, and an empty select
-option list before terminal interaction begins.
+This group renders all three fields in insertion order:
+
+<pre class="terminal-preview" aria-label="Greeting group with input, select, and confirmation fields"><code><span class="ansi-bold">Greeting setup</span>
+<span class="ansi-dim">Choose how the greeting should be generated.</span>
+
+<span class="ansi-cyan">┃</span> <span class="ansi-bold">What is your name?</span>
+<span class="ansi-cyan">┃ ›</span> <span class="ansi-dim">e.g. Alex</span>
+
+  Choose a greeting style
+  › Friendly
+    Formal
+
+  Generate the greeting?
+    Yes     No</code></pre>
+
+Builder validation happens before terminal interaction: an empty group returns
+`GroupBuildError::EmptyGroup`, an empty select option list returns
+`FieldConfigError::EmptyOptions`, and duplicate field names are rejected when
+the form is built.
 
 ## Build and run the form
 
@@ -78,26 +104,73 @@ match form.run(&theme)? {
 ```
 
 When `Form::run` opens this form, all three fields share one inline region. The
-active field is marked by the rail; colors and text attributes come from the
-supplied theme:
+active field is marked by the accent rail; muted help and placeholders retain
+their theme roles.
 
-```text title="Initial prompt"
-Greeting setup
-Choose how the greeting should be generated.
+### 1. Enter the name
 
-┃ What is your name?
-┃ › e.g. Alex
+<pre class="terminal-preview" aria-label="Alex typed into the focused name field"><code><span class="ansi-bold">Greeting setup</span>
+<span class="ansi-dim">Choose how the greeting should be generated.</span>
+
+<span class="ansi-cyan">┃</span> <span class="ansi-bold">What is your name?</span>
+<span class="ansi-cyan">┃ ›</span> Alex<span class="ansi-reverse"> </span>
 
   Choose a greeting style
   › Friendly
     Formal
 
   Generate the greeting?
-
     Yes     No
 
-  enter continue • shift+tab back • esc cancel
+  <span class="ansi-dim">enter continue • shift+tab back • esc cancel</span></code></pre>
+
+### 2. Advance and choose a style
+
+After `Enter`, the input is accepted and focus moves to the select. `Down`
+makes `Formal` the typed selection:
+
+<pre class="terminal-preview" aria-label="Formal selected in the focused greeting style field"><code><span class="ansi-bold">Greeting setup</span>
+<span class="ansi-dim">Choose how the greeting should be generated.</span>
+
+  What is your name?
+  › Alex
+
+<span class="ansi-cyan">┃</span> <span class="ansi-bold">Choose a greeting style</span>
+<span class="ansi-cyan">┃</span>   Friendly
+<span class="ansi-cyan">┃ ›</span> <span class="ansi-cyan ansi-bold">Formal</span>
+
+  Generate the greeting?
+    Yes     No
+
+  <span class="ansi-dim">↑/↓ select • enter continue • shift+tab back • esc cancel</span></code></pre>
+
+### 3. Accept the confirmation default
+
+`Enter` advances to confirmation. Because this field has `Some(true)`, `Yes`
+is selected as the default and submitting it records `ConfirmSource::Default`:
+
+<pre class="terminal-preview" aria-label="Yes default focused in confirmation field"><code>  What is your name?
+  › Alex
+
+  Choose a greeting style
+    Friendly
+  › Formal
+
+<span class="ansi-cyan">┃</span> <span class="ansi-bold">Generate the greeting?</span>
+<span class="ansi-cyan">┃</span>   <span class="ansi-cyan ansi-bold">Yes</span>     No
+
+  <span class="ansi-dim">←/→ choose • y yes • n no • enter submit • shift+tab back • esc cancel</span></code></pre>
+
+### 4. Resume the command
+
+Submitting produces `FormOutcome::Submitted`; the code above prints:
+
+```text title="Program output"
+formal greeting for Alex
 ```
+
+Pressing `Esc` at any active field instead produces `FormOutcome::Cancelled`
+and the code prints `Cancelled.` to stderr. No partial `FormValues` is exposed.
 
 `FormValues::get` returns `None` if the key name or type does not match. A form
 that reaches `Submitted` contains every accepted field value; cancellation
@@ -141,10 +214,19 @@ match form.run_with_terminal(&mut terminal, theme)? {
 # Ok::<(), Box<dyn std::error::Error>>(())
 ```
 
+If OSC 11 reports a light background, `themes.select` supplies the light theme;
+if the query has no usable reply, this example supplies the dark fallback. The
+prompt still has the same structure, but the selected semantic palette changes:
+
+<pre class="terminal-preview" aria-label="Prompt roles after selecting a terminal-aware theme"><code><span class="ansi-cyan">┃</span> <span class="ansi-bold">What is your name?</span>
+<span class="ansi-cyan">┃ ›</span> <span class="ansi-dim">e.g. Alex</span>
+  <span class="ansi-dim">enter continue • shift+tab back • esc cancel</span></code></pre>
+
 `ThemeMode::Auto` classifies a successful OSC 11 observation and uses the
 explicit fallback when the terminal provides no usable reply. The form then
 queries size and rendering capabilities, draws the inline interaction, and
 restores the caller-owned connection without querying its background again.
 
 Next, configure [fields and validation](/docs/prompts/fields/) or control
-[placement and resize behavior](/docs/prompts/placement/).
+[placement and resize behavior](/docs/prompts/placement/). The
+[prompt reference](/docs/prompts/reference/) lists every default and error.

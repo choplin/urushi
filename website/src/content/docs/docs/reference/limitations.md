@@ -6,6 +6,16 @@ description: User-visible limitations and incomplete paths in Urushi 0.1.0.
 Urushi 0.1.0 is an early release. The following boundaries affect application
 design.
 
+## Terminal restoration is best effort across abnormal termination
+
+The application runtime reports restoration failures on normal and error
+returns. If application code panics and unwinds, `TerminalSession` attempts
+restoration from `Drop`, where a cleanup error cannot be returned. No in-process
+guard can restore the pre-session cursor position or run after `panic =
+"abort"`, `kill -9`, or a signal whose handling does not unwind through the
+session. Applications that need orderly signal shutdown must subscribe to the
+signal and return `Effect::shutdown()` from the resulting update.
+
 ## A low-level frame loop owns its session
 
 `urushi-tui` provides synchronous frame presentation, not terminal lifecycle
@@ -38,14 +48,21 @@ The prompt architecture supports choosing between an inline region and an
 alternate-screen viewport without changing the form or field model. In 0.1.0,
 only the inline presentation is exposed through the public form API.
 
-## Graphics need a lifecycle owner
+## Automatic graphics lifecycle integration is runtime-only
 
-The one-shot `render_view` path is stateless and supports Kitty and Sixel output
-with fallback text. Presentation across frames requires a host to own Kitty
-uploads and placements or Sixel's cached encoding and complete-scene redraw,
-plus recovery and cleanup policy. `urushi-tui-app` provides that owner when its
-`graphics` feature is enabled; other prompt, low-level TUI, or Ratatui hosts
-must drive the public Kitty or Sixel lifecycle themselves.
+`urushi-tui-app` can own Kitty or Sixel presentation across frames when its
+`graphics` feature is enabled. Prompts, a caller-driven `urushi-tui::Screen`,
+and the Ratatui adapter do not yet integrate that lifecycle automatically.
+Those hosts must drive the public Kitty or Sixel lifecycle themselves or keep
+the image's text fallback. See [Rendering and lifecycle](/docs/graphics/rendering-and-lifecycle/).
+
+## Canvas draws in terminal cells
+
+Canvas currently places Views, text, sparse cells, marker paths, and connected
+line networks at terminal-cell coordinates. It does not yet provide sampled
+geometry rasterized through half-block, quadrant, sextant, Braille, or octant
+glyphs. Use the existing cell-space commands when their resolution is
+sufficient; do not treat Canvas as a subcell plotting API.
 
 ## Terminal feature support varies
 

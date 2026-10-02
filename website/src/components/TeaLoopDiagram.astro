@@ -1,0 +1,245 @@
+<figure class="tea-loop" role="group" aria-labelledby="tea-loop-caption">
+  <figcaption id="tea-loop-caption">The Urushi application loop</figcaption>
+  <p>
+    Boxes are values. Labels on arrows are functions or runtime actions. The
+    runtime draws each View, then delivers the next Message.
+  </p>
+
+  <svg class="tea-loop__desktop" viewBox="0 0 900 410" role="img" aria-labelledby="tea-desktop-title tea-desktop-desc">
+    <title id="tea-desktop-title">The Urushi TEA application loop</title>
+    <desc id="tea-desktop-desc">
+      In a closed loop, a message enters update, update changes the model, view
+      turns the model into a View, and the runtime draws it. Input, subscription
+      events, and effect completions become the next message.
+    </desc>
+    <defs>
+      <marker id="tea-arrow" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto">
+        <path d="M0,0 L10,5 L0,10 Z" class="tea-loop__arrow-head" />
+      </marker>
+    </defs>
+
+    <rect x="36" y="28" width="828" height="220" rx="18" class="tea-loop__boundary" />
+    <text x="60" y="61" class="tea-loop__boundary-label">YOUR APPLICATION</text>
+
+    <rect x="72" y="105" width="176" height="72" rx="10" class="tea-loop__node tea-loop__node--accent" />
+    <text x="160" y="134" class="tea-loop__node-title">Message</text>
+    <text x="160" y="158" class="tea-loop__node-detail">data: what happened</text>
+
+    <rect x="362" y="105" width="176" height="72" rx="10" class="tea-loop__node tea-loop__node--strong" />
+    <text x="450" y="134" class="tea-loop__node-title">Model</text>
+    <text x="450" y="158" class="tea-loop__node-detail">data: current state</text>
+
+    <rect x="652" y="105" width="176" height="72" rx="10" class="tea-loop__node tea-loop__node--accent" />
+    <text x="740" y="134" class="tea-loop__node-title">View</text>
+    <text x="740" y="158" class="tea-loop__node-detail">data: next frame</text>
+
+    <path d="M248 141 H354" class="tea-loop__arrow" marker-end="url(#tea-arrow)" />
+    <text x="301" y="119" class="tea-loop__operation">update</text>
+
+    <path d="M538 141 H644" class="tea-loop__arrow" marker-end="url(#tea-arrow)" />
+    <text x="591" y="119" class="tea-loop__operation">view</text>
+
+    <rect x="286" y="286" width="328" height="76" rx="38" class="tea-loop__runtime" />
+    <text x="450" y="316" class="tea-loop__node-title">Urushi runtime + terminal</text>
+    <text x="450" y="342" class="tea-loop__node-detail">draw View · wait for the next event</text>
+
+    <path d="M740 177 V216 C740 260 614 245 614 278" class="tea-loop__arrow tea-loop__arrow--loop" marker-end="url(#tea-arrow)" />
+    <text x="688" y="237" class="tea-loop__edge-label">draw</text>
+
+    <path d="M286 324 H160 C88 324 88 236 160 236 V185" class="tea-loop__arrow tea-loop__arrow--loop" marker-end="url(#tea-arrow)" />
+    <text x="181" y="306" class="tea-loop__edge-label">next Message</text>
+
+    <text x="450" y="397" class="tea-loop__source-label">
+      Messages come from input, subscription events, and effect completions.
+    </text>
+  </svg>
+
+  <svg class="tea-loop__mobile" viewBox="0 0 420 650" role="img" aria-labelledby="tea-mobile-title tea-mobile-desc">
+    <title id="tea-mobile-title">The Urushi TEA application loop</title>
+    <desc id="tea-mobile-desc">
+      In a closed loop, a message enters update, update changes the model, view
+      turns the model into a View, and the runtime draws it. Runtime events
+      become the next message.
+    </desc>
+    <defs>
+      <marker id="tea-mobile-arrow" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto">
+        <path d="M0,0 L10,5 L0,10 Z" class="tea-loop__arrow-head" />
+      </marker>
+    </defs>
+
+    <rect x="56" y="24" width="328" height="414" rx="18" class="tea-loop__boundary" />
+    <text x="80" y="57" class="tea-loop__boundary-label">YOUR APPLICATION</text>
+
+    <rect x="106" y="82" width="228" height="66" rx="10" class="tea-loop__node tea-loop__node--accent" />
+    <text x="220" y="110" class="tea-loop__node-title">Message</text>
+    <text x="220" y="132" class="tea-loop__node-detail">data: what happened</text>
+
+    <rect x="106" y="220" width="228" height="66" rx="10" class="tea-loop__node tea-loop__node--strong" />
+    <text x="220" y="248" class="tea-loop__node-title">Model</text>
+    <text x="220" y="270" class="tea-loop__node-detail">data: current state</text>
+
+    <rect x="106" y="358" width="228" height="66" rx="10" class="tea-loop__node tea-loop__node--accent" />
+    <text x="220" y="386" class="tea-loop__node-title">View</text>
+    <text x="220" y="408" class="tea-loop__node-detail">data: next frame</text>
+
+    <path d="M220 148 V212" class="tea-loop__arrow" marker-end="url(#tea-mobile-arrow)" />
+    <text x="252" y="178" class="tea-loop__operation">update</text>
+
+    <path d="M220 286 V350" class="tea-loop__arrow" marker-end="url(#tea-mobile-arrow)" />
+    <text x="247" y="316" class="tea-loop__operation">view</text>
+
+    <rect x="92" y="500" width="256" height="76" rx="38" class="tea-loop__runtime" />
+    <text x="220" y="530" class="tea-loop__node-title">Runtime + terminal</text>
+    <text x="220" y="556" class="tea-loop__node-detail">draw · wait for an event</text>
+
+    <path d="M220 424 V492" class="tea-loop__arrow tea-loop__arrow--loop" marker-end="url(#tea-mobile-arrow)" />
+    <text x="247" y="462" class="tea-loop__edge-label">draw</text>
+    <path d="M92 538 H34 V115 H98" class="tea-loop__arrow tea-loop__arrow--loop" marker-end="url(#tea-mobile-arrow)" />
+    <text x="42" y="326" class="tea-loop__edge-label tea-loop__edge-label--vertical">next Message</text>
+
+    <text x="210" y="622" class="tea-loop__source-label">input · subscriptions · effect completions</text>
+  </svg>
+</figure>
+
+<style>
+  .tea-loop {
+    margin: 1.5rem 0;
+    padding: 1rem;
+    border: 1px solid var(--sl-color-gray-5);
+    border-radius: 0.75rem;
+    background:
+      linear-gradient(135deg, color-mix(in srgb, var(--sl-color-accent) 6%, transparent), transparent 44%),
+      var(--sl-color-bg-nav);
+  }
+
+  .tea-loop figcaption {
+    color: var(--sl-color-white);
+    font-size: var(--sl-text-h4);
+    font-weight: 650;
+  }
+
+  .tea-loop > p {
+    margin: 0.25rem 0 0.75rem;
+    color: var(--sl-color-gray-2);
+    font-size: var(--sl-text-sm);
+  }
+
+  .tea-loop svg {
+    display: block;
+    width: 100%;
+    height: auto;
+  }
+
+  .tea-loop__mobile {
+    display: none !important;
+  }
+
+  .tea-loop__boundary {
+    fill: color-mix(in srgb, var(--sl-color-bg) 78%, transparent);
+    stroke: var(--sl-color-gray-4);
+    stroke-width: 2;
+  }
+
+  .tea-loop__boundary-label {
+    fill: var(--sl-color-gray-2);
+    font-family: var(--__sl-font-mono);
+    font-size: 14px;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+  }
+
+  .tea-loop__node,
+  .tea-loop__runtime {
+    fill: var(--sl-color-bg);
+    stroke: var(--sl-color-gray-4);
+    stroke-width: 2;
+  }
+
+  .tea-loop__runtime {
+    fill: color-mix(in srgb, var(--sl-color-accent) 8%, var(--sl-color-bg));
+    stroke-dasharray: 8 6;
+  }
+
+  .tea-loop__node--accent {
+    fill: color-mix(in srgb, var(--sl-color-accent) 12%, var(--sl-color-bg));
+    stroke: var(--sl-color-accent-high);
+  }
+
+  .tea-loop__node--strong {
+    stroke: var(--sl-color-text-accent);
+    stroke-width: 3;
+  }
+
+  .tea-loop__node-title,
+  .tea-loop__node-detail,
+  .tea-loop__edge-label,
+  .tea-loop__operation,
+  .tea-loop__source-label {
+    text-anchor: middle;
+  }
+
+  .tea-loop__node-title {
+    fill: var(--sl-color-white);
+    font-family: var(--__sl-font);
+    font-size: 17px;
+    font-weight: 700;
+  }
+
+  .tea-loop__node-detail {
+    fill: var(--sl-color-gray-2);
+    font-family: var(--__sl-font);
+    font-size: 14px;
+  }
+
+  .tea-loop__edge-label,
+  .tea-loop__source-label {
+    fill: var(--sl-color-gray-2);
+    font-family: var(--__sl-font);
+    font-size: 12px;
+  }
+
+  .tea-loop__source-label {
+    font-size: 13px;
+  }
+
+  .tea-loop__operation {
+    fill: var(--sl-color-white);
+    font-family: var(--__sl-font-mono);
+    font-size: 15px;
+    font-weight: 700;
+  }
+
+  .tea-loop__edge-label--vertical {
+    writing-mode: vertical-rl;
+  }
+
+  .tea-loop__arrow {
+    fill: none;
+    stroke: var(--sl-color-text-accent);
+    stroke-linecap: round;
+    stroke-linejoin: round;
+    stroke-width: 2.5;
+  }
+
+  .tea-loop__arrow--loop {
+    stroke-width: 3;
+  }
+
+  .tea-loop__arrow-head {
+    fill: var(--sl-color-text-accent);
+  }
+
+  @media (max-width: 40rem) {
+    .tea-loop {
+      padding: 0.75rem;
+    }
+
+    .tea-loop__desktop {
+      display: none !important;
+    }
+
+    .tea-loop__mobile {
+      display: block !important;
+    }
+  }
+</style>

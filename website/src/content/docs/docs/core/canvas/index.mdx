@@ -1,0 +1,184 @@
+---
+title: Canvas
+description: Understand finite free-positioned drawing and run a complete Canvas program.
+---
+
+import CanvasCoordinatesDiagram from '../../../../../components/CanvasCoordinatesDiagram.astro';
+import CapabilityCatalog from '../../../../../components/CapabilityCatalog.astro';
+
+`Canvas` is Urushi's finite, renderer-neutral drawing surface. Use it when the
+result depends on signed cell coordinates, overlap, clipping, sparse cells, or
+connected line geometry.
+
+Canvas is one kind of `View`. It can appear inside rows, columns, blocks, CLI
+output, prompts, or full-screen applications.
+
+The current Canvas is a **cell-space** surface: each integer coordinate
+addresses one terminal cell. It does not provide sampled, pixel-like, Braille,
+or other subcell drawing. Use the documented cell commands and line networks;
+sampled and subcell drawing are not implemented.
+
+## See what Canvas draws
+
+<CapabilityCatalog
+  label="Canvas capability catalog"
+  items={[
+    {
+      title: 'Positioned content',
+      description: 'Place text, Views, and sparse cells at signed coordinates.',
+      href: '/docs/core/canvas/draw-content/',
+      lines: [[{ text: 'A       B' }], [{ text: '    note', className: 'demo-accent' }], [{ text: 'C       D' }]],
+    },
+    {
+      title: 'Paths and networks',
+      description: 'Draw lines, rectangles, polylines, and connected junctions.',
+      href: '/docs/core/canvas/draw-paths/',
+      lines: [[{ text: '┌──┬──┐' }], [{ text: '│  ├──┤' }], [{ text: '└──┴──┘' }]],
+    },
+    {
+      title: 'Composition and clipping',
+      description: 'Replace, overlay, or customize overlapping cells.',
+      href: '/docs/core/canvas/composition/',
+      lines: [[{ text: 'base:  ABCD', className: 'demo-muted' }], [{ text: 'over:   ─┼─' }], [{ text: 'result: A─┼─' }]],
+    },
+    {
+      title: 'Components on Canvas',
+      description: 'Place semantic tables or other Views beside explicit geometry.',
+      href: '/docs/core/canvas/components/',
+      lines: [[{ text: 'Name State  ─┐' }], [{ text: 'core ready', className: 'demo-success' }], [{ text: '          ──┘' }]],
+    },
+  ]}
+/>
+
+[Run the complete Canvas quickstart ↓](#quickstart)
+
+## Choose the right drawing model
+
+| Need | Start with |
+|---|---|
+| Text and boxes in normal horizontal or vertical flow | [Layout](/docs/core/layout/) |
+| A list, table, tree, or scrollbar with reusable meaning | [Components](/docs/core/components/) |
+| Content at explicit `(x, y)` positions | Canvas |
+| Overlapping layers or custom cell composition | Canvas |
+| Lines, polylines, rectangles, or connected junctions | Canvas |
+
+These models compose. A component produces a `View`; a Canvas can place that
+View at a coordinate; and the resulting Canvas remains an ordinary `View`.
+
+## How Canvas resolves and draws
+
+Canvas separates immutable frame data from drawing after layout:
+
+1. The surrounding `View` layout chooses a finite Canvas size.
+2. Canvas calls each owned `CanvasItem` once, in insertion order.
+3. Each item records commands into a frame-scoped `CanvasContext`.
+4. Urushi rasterizes, composes, and clips those commands into the settled
+   rectangle.
+
+An item can read `CanvasContext::size()` while it records commands. It therefore
+sees the final size and can place content relative to the right or bottom edge.
+Items do not measure the Canvas.
+
+### Coordinates and clipping
+
+`Position::new(x, y)` is relative to the Canvas's top-left cell:
+
+<CanvasCoordinatesDiagram />
+
+Negative coordinates are valid. Commands outside the finite surface are
+clipped rather than shifting the Canvas or increasing its size.
+
+### Drawing order and composition
+
+Items and their commands draw in insertion order. Later commands combine with
+existing cells using a `Composition` rule:
+
+- `Replace` writes a complete cell;
+- `Overlay` changes only supplied symbol or style fields; and
+- `Custom` calls an application function for each affected cell.
+
+`view` defaults to `Replace`. Text, paths, line networks, and sparse cells
+default to `Overlay`.
+
+### Boundary with layout and components
+
+Rows, columns, grids, blocks, and viewports measure and place children. Canvas
+does not infer positions from its items or derive an intrinsic size from them.
+Application-defined items require a finite parent allocation or fallback extent.
+
+Canvas also does not carry the meaning of a list, table, tree, or scrollbar.
+Keep that meaning in a Component and place its resulting `View` into Canvas
+when it needs explicit coordinates.
+
+## Quickstart
+
+This example draws a finite status panel and places text inside it:
+
+```sh
+cargo new canvas-demo
+cd canvas-demo
+cargo add urushi
+```
+
+Replace `src/main.rs` with:
+
+```rust
+use std::io;
+
+use urushi::{
+    Canvas, CanvasContext, CanvasItem, Grapheme, Position, Size, TextStyle,
+    View,
+};
+
+#[derive(Debug, Clone, PartialEq)]
+struct StatusPanel;
+
+impl CanvasItem for StatusPanel {
+    fn draw(&self, canvas: &mut CanvasContext) {
+        canvas.rectangle(
+            Position::new(0, 0),
+            9,
+            3,
+            Grapheme::new("·"),
+            TextStyle::new(),
+        );
+        canvas.text(
+            Position::new(2, 1),
+            "ready",
+            TextStyle::new().bold(),
+        );
+    }
+}
+
+fn main() -> io::Result<()> {
+    let view = View::canvas(
+        Canvas::new()
+            .extent(Size::new(9, 3))
+            .item(StatusPanel),
+    );
+
+    urushi::println_view(&view)
+}
+```
+
+Run it with `cargo run`:
+
+<p class="terminal-preview-label">Rendered output</p>
+<pre class="terminal-preview" aria-label="A Canvas rectangle containing bold text"><code>·········
+· <span class="ansi-bold">ready</span> ·
+·········</code></pre>
+
+`extent` supplies a fallback size because standard output does not provide a
+finite height. `CanvasItem::draw` receives the settled size and records signed
+coordinate commands. `View::canvas` makes the result composable with every
+other Urushi View.
+
+## Continue by task
+
+- [Size and place a Canvas](/docs/core/canvas/size-and-place/)
+- [Draw text, Views, and cells](/docs/core/canvas/draw-content/)
+- [Draw paths and connected lines](/docs/core/canvas/draw-paths/)
+- [Control composition and clipping](/docs/core/canvas/composition/)
+- [Define a custom CanvasItem](/docs/core/canvas/custom-items/)
+- [Combine Components and Canvas](/docs/core/canvas/components/)
+- [Look up the complete Canvas API](/docs/core/canvas/reference/)

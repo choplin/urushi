@@ -1,0 +1,13 @@
+[package]
+name = "urushi-showcase-terminal-fixtures"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[dependencies]
+urushi = { path = "../../../urushi" }
+urushi-prompt = { path = "../../../urushi-prompt" }
+urushi-terminal = { path = "../../../urushi-terminal", features = ["crossterm"] }
+urushi-tui-app = { path = "../../../urushi-tui-app" }
+
+[workspace]

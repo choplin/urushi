@@ -4,16 +4,78 @@ description: Understand Urushi's TEA application framework, backend boundary, an
 ---
 
 import ArchitectureDiagram from '../../../../components/ArchitectureDiagram.astro';
+import TeaLoopDiagram from '../../../../components/TeaLoopDiagram.astro';
+import TerminalRecording from '../../../../components/TerminalRecording.astro';
 
-`urushi-tui-app` contains Urushi's runnable full-screen application framework.
-The application model follows The Elm Architecture
-(TEA): an application describes its state, messages, updates, view, effects,
-and subscriptions, while the runtime owns event delivery, drawing, and terminal
-resources.
+`urushi-tui-app` is the starting point for a new full-screen application. You
+describe the application's state, the events it accepts, how those events
+change state, and how the current state looks. The runtime owns the event loop,
+drawing, and terminal session.
+
+This model is The Elm Architecture (TEA). The name identifies a small set of
+responsibilities; you do not need to know Elm or TEA before using Urushi. The
+[first-application tutorial](/docs/tui/application/) introduces every part while
+building a complete keyboard-driven program.
 
 Use it for applications whose interface remains active: dashboards, browsers,
 inspectors, monitors, editors, and other screens where input changes a model
 and the current model is redrawn.
+
+## See one application run
+
+The counter below receives two key events. Each key immediately updates the
+Model, while slower background work returns later as Effect-completion
+Messages. Quitting restores the terminal and returns the final Model:
+
+<TerminalRecording
+  src="/docs/media/tui-runtime-counter.mp4"
+  poster="/docs/media/tui-runtime-counter.png"
+  label="A full-screen Urushi counter processing key events and delayed effects"
+  caption="Cyan and yellow are emitted by the real View renderer. The gap between key updates and effect completions is the application loop at work, not a prerecorded text animation."
+/>
+
+## TEA in plain language
+
+A TEA application is a loop with one source of truth:
+
+1. The **Model** contains everything that can change the application's
+   behavior or appearance.
+2. A **Message** describes one event, such as a key press, timer tick, or file
+   load result.
+3. **update** handles that message and changes the model.
+4. **view** reads the model and returns the next Urushi `View`.
+5. The runtime draws that View and waits for the next message.
+
+`update` is the only place that mutates the model. `view` does not perform work
+or write to the terminal; it only describes what the current model should look
+like. One-shot work is returned as an **Effect**, and ongoing event sources are
+declared as **Subscriptions**. Their results re-enter the same loop as messages.
+
+This means a key does not modify a widget directly. It becomes a message, the
+message changes the model, and the model produces a new View. That one-way path
+is what keeps application behavior testable without a live terminal.
+
+<TeaLoopDiagram />
+
+In the recording, `key updates` belongs to the Model. The runtime turns each
+keypress into a Message, calls `update`, calls `view` with the changed Model,
+and draws the returned View. The delayed job does not mutate the Model from a
+worker thread; its result returns through the same Message entrance. That is
+TEA in Urushi.
+
+[Build your first application without prior TEA knowledge →](/docs/tui/application/)
+
+## Choose who owns the loop
+
+| Starting point | Choose | You own | Urushi owns |
+|---|---|---|---|
+| Build a new full-screen application | [`urushi-tui-app`](/docs/tui/application/) | Domain model, messages, update rules, and View | Input sources, effects, ordered delivery, drawing, and terminal restoration |
+| Drive a synchronous terminal loop yourself | [`urushi-tui`](/docs/tui/screen-and-frame/) | Session, events, resize decisions, timing, and shutdown | Screen buffers, cell diffing, transactional commit, and failed-draw recovery |
+| Add Views to an existing Ratatui application | [`urushi-adapter-ratatui`](/docs/tui/ratatui/) | Ratatui terminal, event loop, state, scheduling, and graphics lifecycle | Stateless View resolution and writes into the supplied Ratatui buffer |
+
+These are ownership choices, not progressively more advanced layers. Start
+with the row matching the loop the application already has. The recording and
+first-application tutorial use the first row.
 
 ## What the framework covers
 
@@ -31,7 +93,8 @@ and the current model is redrawn.
   surface and writes a frame of terminal cells.
 - **Runtime ownership.** The runtime orders accepted messages, reconciles
   subscriptions, coalesces physical draws without dropping model transitions,
-  and restores the terminal session on every exit path.
+  and restores the terminal session on normal and error returns. During panic
+  unwinding its session guard makes a final best-effort restoration attempt.
 - **A production entry point.** `urushi_tui_app::run(app)` supplies the default
   executor, clock, terminal connection, presentation, and session profile.
   `Runtime::new(app)` makes the physical backend, executor, clock, and session
@@ -48,6 +111,13 @@ presentation machinery; it does not prescribe those product semantics.
 The `View` is the same renderer-neutral tree used by the rest of Urushi. A
 full-screen application does not need a second layout language, and its model
 does not contain Ratatui or another backend's types.
+
+Use [Layout](/docs/core/layout/) for ordinary screen structure,
+[components](/docs/core/components/) for lists, tables, trees, and scrollbars,
+and [Canvas](/docs/core/canvas/) for positioned or overlapping drawing.
+To place Kitty or Sixel images in those layouts, add
+[terminal graphics](/docs/graphics/) and let the runtime own their frame
+lifecycle.
 
 A `view` method can use core layout and theme values directly:
 
@@ -85,7 +155,11 @@ Effects describe work outside the model. Subscriptions describe ongoing input,
 surface, timer, signal, or application-defined sources. Their results return as
 messages and pass through the same ordered update path.
 
-[Build an application with the runtime model →](/docs/tui/runtime/)
+[Build your first application →](/docs/tui/application/)
+
+[Choose effects, subscriptions, and backpressure →](/docs/tui/effects-and-subscriptions/)
+
+[Understand message ordering and draw scheduling →](/docs/tui/delivery-and-drawing/)
 
 ## The native frame engine
 
@@ -97,6 +171,8 @@ succeeds. A caller can drive it synchronously without the application runtime.
 `Application` remains written against Urushi types, not a presentation backend.
 The runtime resolves its `View` and writes the resulting graphemes through the
 same `Frame` API.
+
+[Build a caller-owned loop with Screen and Frame →](/docs/tui/screen-and-frame/)
 
 ## Ratatui is an optional adapter
 
@@ -123,3 +199,13 @@ boundaries:
 The low-level frame engine is a concrete Urushi `Screen`, not a replaceable
 Ratatui-backed terminal, and Ratatui is not a runtime dependency. Choose only
 the package whose ownership model the application needs.
+
+## Continue by task
+
+- [Build your first complete application](/docs/tui/application/)
+- [Configure the application runtime](/docs/tui/runtime/)
+- [Choose effects, subscriptions, cancellation, and backpressure](/docs/tui/effects-and-subscriptions/)
+- [Understand message delivery and drawing](/docs/tui/delivery-and-drawing/)
+- [Drive a native Screen and Frame loop](/docs/tui/screen-and-frame/)
+- [Integrate an existing Ratatui application](/docs/tui/ratatui/)
+- [Look up the complete TUI API](/docs/tui/reference/)

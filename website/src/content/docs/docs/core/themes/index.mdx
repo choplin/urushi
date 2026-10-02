@@ -1,0 +1,121 @@
+---
+title: Themes
+description: Understand semantic roles and render component output with a built-in Theme.
+---
+
+import FlowDiagram from '../../../../../components/FlowDiagram.astro';
+import CapabilityCatalog from '../../../../../components/CapabilityCatalog.astro';
+
+A `Theme` names appearance by meaning rather than by component or renderer.
+Semantic tokens supply colors, while `ComponentTheme` supplies canonical
+styles and presentations for panels, lists, tables, trees, and scrollbars.
+
+## See meaning survive presentation changes
+
+<CapabilityCatalog
+  label="Theme capability catalog"
+  items={[
+    {
+      title: 'Semantic text roles',
+      description: 'Ask for accent, success, warning, or error instead of a fixed color.',
+      href: '/docs/core/themes/customize/',
+      lines: [[{ text: 'accent', className: 'demo-accent' }], [{ text: 'success', className: 'demo-success' }], [{ text: 'warning', className: 'demo-warning' }]],
+    },
+    {
+      title: 'Light and dark selection',
+      description: 'Resolve the same role set against an observed or chosen mode.',
+      href: '/docs/core/themes/adaptive/',
+      lines: [[{ text: 'Light  ', className: 'demo-muted' }, { text: 'Build ready', className: 'demo-accent' }], [{ text: 'Dark   ', className: 'demo-muted' }, { text: 'Build ready', className: 'demo-success' }]],
+    },
+    {
+      title: 'Component presentations',
+      description: 'One Theme supplies canonical list, table, tree, and scrollbar styling.',
+      href: '/docs/core/components/',
+      lines: [[{ text: '╭ Results ─╮' }], [{ text: '│ ✓ 42 pass', className: 'demo-success' }], [{ text: '╰───────────╯' }]],
+    },
+  ]}
+/>
+
+[Run the complete Theme quickstart ↓](#quickstart)
+
+## How themes preserve meaning
+
+<FlowDiagram
+  title="From meaning to terminal appearance"
+  description="Themes preserve semantic intent while the active renderer decides which capabilities it can express."
+  lanes={[{
+    steps: [
+      { title: 'Semantic role', detail: 'accent, success, warning, error', kind: 'data' },
+      { title: 'Theme', detail: 'Selects tokens and component presentations', via: 'theme', kind: 'process', tone: 'accent' },
+      { title: 'Concrete Style', detail: 'Colors and attributes', via: 'style', kind: 'data' },
+      { title: 'Renderer', detail: 'Expresses the supported capabilities', via: 'render', kind: 'actor', tone: 'strong' },
+    ],
+  }]}
+/>
+
+`accent`, `success`, `warning`, and `error` remain stable application choices
+even when the final colors differ between light and dark backgrounds.
+
+A Theme also owns canonical component presentations. `theme.table(&table)`,
+for example, binds Table data to the Theme's border, spacing, and role styles
+and returns a View.
+
+Themes do not inspect the terminal. `ThemeMode` expresses a selection policy;
+the application supplies an optional observed terminal background. This keeps
+terminal I/O in the surface that owns the session. The same Theme can style
+static CLI output, prompts, Urushi TUI frames, and Views rendered into Ratatui
+without forcing those surfaces to share control flow.
+
+## Quickstart
+
+```sh
+cargo new theme-demo
+cd theme-demo
+cargo add urushi
+```
+
+Replace `src/main.rs` with:
+
+```rust
+use std::io;
+
+use urushi::{ComponentRole, Table, ThemePreset, View};
+
+fn main() -> io::Result<()> {
+    let theme = ThemePreset::get("Catppuccin Mocha")
+        .expect("built-in theme")
+        .theme();
+
+    let heading = View::text(
+        "Build status",
+        theme.text_style(ComponentRole::Accent),
+    );
+    let table = Table::text()
+        .headers(["Target", "State"])
+        .row(["release", "ready"]);
+    let view = View::column(
+        urushi::Align::Left,
+        [heading, theme.table(&table)],
+    );
+
+    urushi::println_view(&view)
+}
+```
+
+<p class="terminal-preview-label">Rendered output</p>
+<pre class="terminal-preview" aria-label="Catppuccin Mocha themed heading and table"><code><span class="ansi-bold" style="color:#74a8fc">Build status</span>
+┌─────────┬───────┐
+│ <span class="ansi-bold" style="color:#cdd6f4">Target</span>  │ <span class="ansi-bold" style="color:#cdd6f4">State</span> │
+├─────────┼───────┤
+│ <span style="color:#cdd6f4">release</span> │ <span style="color:#cdd6f4">ready</span> │
+└─────────┴───────┘</code></pre>
+
+Run it with `cargo run`. The preset supplies semantic tokens and complete
+component presentations. The code asks for meaning (`Accent`, canonical Table)
+rather than choosing concrete colors and border styles at each call site.
+
+## Continue by task
+
+- [Select light and dark themes](/docs/core/themes/adaptive/)
+- [Define tokens and custom roles](/docs/core/themes/customize/)
+- [Look up the complete Themes API](/docs/core/themes/reference/)

@@ -35,10 +35,13 @@ when a host evaluates successive immutable view snapshots and wants to reuse
 unchanged materialized subtree output:
 
 ```rust
-use urushi::{Available, Resolver, resolve};
+use urushi::{Available, Resolver, TextStyle, View, resolve};
 
 let mut resolver = Resolver::new();
 let available = Available::size(80, 24);
+let first_view = View::text("status: loading", TextStyle::new());
+let next_view = View::text("status: ready", TextStyle::new().bold());
+
 let _first = resolver.resolve(&first_view, available)?;
 let next = resolver.resolve(&next_view, available)?;
 

@@ -3,7 +3,8 @@ title: CLI overview
 description: Build terminal-aware static command output, structured components, and opinionated CLI presentations.
 ---
 
-import ArchitectureDiagram from '../../../../components/ArchitectureDiagram.astro';
+import CapabilityCatalog from '../../../../components/CapabilityCatalog.astro';
+import FlowDiagram from '../../../../components/FlowDiagram.astro';
 
 Urushi's CLI surface is for output that is written once and then returns
 control to the command. It ranges from styling one line to composing a complete
@@ -15,51 +16,105 @@ It does not enter raw mode or install an event loop. Use
 
 ## What you can build
 
-- **Styled text:** apply logical colors, emphasis, underlines, and hyperlinks
-  without embedding ANSI sequences in content.
-- **Adaptive layouts:** compose rows, columns, grids, bordered blocks, titles,
-  padding, alignment, fixed or filling dimensions, wrapping, and clipping.
-- **Structured output:** present lists, tables, and trees through reusable,
-  theme-derived presentations.
-- **A CLI visual language:** use `urushi-cli` for semantic summaries and
-  warnings with consistent rails, glyphs, hierarchy, and roles. In 0.1.0,
-  `Summary` and `Warning` are the shipped presentations.
-- **Terminal-aware delivery:** write to stdout or stderr with terminal width
-  and capability detection, while redirected output remains plain text without
-  ANSI styling.
+<CapabilityCatalog
+  label="Static CLI output catalog"
+  items={[
+    {
+      title: 'Styled text',
+      description: 'Color, emphasis, underlines, and links without ANSI in content.',
+      href: '/docs/cli/styled-output/',
+      lines: [[{ text: '✓ ', className: 'demo-success' }, { text: 'Build complete', className: 'demo-accent' }], [{ text: '  release profile', className: 'demo-muted' }]],
+    },
+    {
+      title: 'Adaptive layout',
+      description: 'Blocks, rows, columns, grids, alignment, wrapping, and clipping.',
+      href: '/docs/cli/layout/',
+      lines: [[{ text: '╭ Build ─╮╭ Tests ─╮' }], [{ text: '│ ready   ││ 42 pass │' }], [{ text: '╰─────────╯╰─────────╯' }]],
+    },
+    {
+      title: 'Structured results',
+      description: 'Lists, tables, trees, summaries, and warnings with shared roles.',
+      href: '/docs/cli/presentations/',
+      lines: [[{ text: '◇ Result', className: 'demo-accent' }], [{ text: '│ Target  aarch64' }], [{ text: '│ Status  ready', className: 'demo-success' }]],
+    },
+    {
+      title: 'Terminal-aware delivery',
+      description: 'ANSI for capable terminals and clean plain text when redirected.',
+      href: '/docs/cli/output-behavior/',
+      lines: [[{ text: 'terminal  ', className: 'demo-muted' }, { text: 'ready', className: 'demo-success' }], [{ text: 'redirect  ready' }]],
+    },
+  ]}
+/>
+
+For explicit coordinates, overlap, and connected lines, compose the result with
+[Canvas](/docs/core/canvas/). `urushi-cli` adds the opinionated Summary and
+Warning language; core `urushi` supplies the underlying styles, layout, and
+components.
+
+[Run the complete CLI quickstart ↓](#quickstart-render-a-result)
 
 All of these paths produce either `StyledText` or a renderer-neutral `View`.
 That keeps layout and meaning separate from the final terminal capabilities.
 
-<ArchitectureDiagram kind="cli" />
+<FlowDiagram
+  title="From command result to output"
+  description="Choose a presentation layer, produce one shared View, then let the output destination select ANSI or plain text."
+  lanes={[
+    {
+      label: 'Domain-specific presentation',
+      steps: [
+        { title: 'Content and meaning', detail: 'Text, data, and command result', kind: 'data' },
+        { title: 'Core urushi', detail: 'Styles, layout, and components', via: 'compose', kind: 'process', tone: 'accent' },
+        { title: 'View', detail: 'Renderer-neutral presentation', via: 'produce', kind: 'data', tone: 'strong' },
+        { title: 'Output destination', detail: 'Terminal ANSI or redirected plain text', via: 'resolve + render', kind: 'actor' },
+      ],
+    },
+    {
+      label: 'Opinionated CLI presentation',
+      steps: [
+        { title: 'Semantic result', detail: 'Summary or warning data', kind: 'data' },
+        { title: 'urushi-cli', detail: 'Shared rails, glyphs, hierarchy, and roles', via: 'present', kind: 'process', tone: 'accent' },
+        { title: 'View', detail: 'The same renderer-neutral value', via: 'produce', kind: 'data', tone: 'strong' },
+        { title: 'Output destination', detail: 'Terminal ANSI or redirected plain text', via: 'resolve + render', kind: 'actor' },
+      ],
+    },
+  ]}
+/>
 
-## A representative result
+## Quickstart: render a result
 
 This example uses the opinionated layer to turn semantic result data into a
 view, then sends that view through the ordinary static-output path:
 
+```sh
+cargo new result-demo
+cd result-demo
+cargo add urushi urushi-cli
+```
+
 ```rust
+use std::io;
+
+use urushi::ThemePreset;
 use urushi_cli::{CliTheme, Summary};
 
-let cli = CliTheme::from_theme(&theme);
-let view = cli.summary(
-    &Summary::new("Build complete")
-        .field("Target", "aarch64-apple-darwin")
-        .field("Profile", "release")
-        .field("Output", "target/release/app"),
-);
+fn main() -> io::Result<()> {
+    let theme = ThemePreset::get("Catppuccin Mocha")
+        .expect("built-in theme")
+        .theme();
+    let cli = CliTheme::from_theme(&theme);
+    let view = cli.summary(
+        &Summary::new("Build complete")
+            .field("Target", "aarch64-apple-darwin")
+            .field("Profile", "release")
+            .field("Output", "target/release/app"),
+    );
 
-urushi::println_view(&view)?;
-# Ok::<(), std::io::Error>(())
+    urushi::println_view(&view)
+}
 ```
 
-```text title="Rendered output"
-│
-◇  Build complete
-│  Target   aarch64-apple-darwin
-│  Profile  release
-│  Output   target/release/app
-```
+<pre className="terminal-preview" aria-label="Build summary with muted rails, cyan bold status, and aligned fields"><code><span className="ansi-dim">│</span>{'\n'}<span className="ansi-cyan ansi-bold">◇  Build complete</span>{'\n'}<span className="ansi-dim">│  Target</span>{'   '}aarch64-apple-darwin{'\n'}<span className="ansi-dim">│  Profile</span>{'  '}release{'\n'}<span className="ansi-dim">│  Output</span>{'   '}target/release/app</code></pre>
 
 The same output pipeline can render a view assembled directly from core layout
 primitives or from a reusable list, table, or tree presentation.
@@ -81,3 +136,4 @@ combined with core layouts.
 - [Compose blocks and layouts](/docs/cli/layout/)
 - [Use opinionated CLI presentations](/docs/cli/presentations/)
 - [Understand terminal and redirected output](/docs/cli/output-behavior/)
+- [Look up all CLI settings and defaults](/docs/cli/reference/)

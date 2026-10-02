@@ -1,0 +1,142 @@
+---
+title: Components
+description: Understand semantic component data and render lists, tables, trees, and scrollbars.
+---
+
+import FlowDiagram from '../../../../../components/FlowDiagram.astro';
+import CapabilityCatalog from '../../../../../components/CapabilityCatalog.astro';
+
+Components keep reusable meaning separate from terminal presentation. Build an
+immutable data value, then ask a `Theme` or an explicit presentation policy to
+compose it into a `View`.
+
+## See the component catalog
+
+<CapabilityCatalog
+  label="Component catalog"
+  items={[
+    {
+      title: 'Lists',
+      description: 'Ordered, nested, hidden, or windowed entries.',
+      href: '/docs/core/components/list/',
+      lines: [[{ text: '• build' }], [{ text: '  1. compile' }], [{ text: '  2. test', className: 'demo-accent' }]],
+    },
+    {
+      title: 'Tables',
+      description: 'Headers, typed rows, separators, padding, and widths.',
+      href: '/docs/core/components/table/',
+      lines: [[{ text: 'Name    State' }], [{ text: 'core    ready', className: 'demo-success' }], [{ text: 'prompt  ready' }]],
+    },
+    {
+      title: 'Trees',
+      description: 'Hierarchy, connectors, indentation, hiding, and offsets.',
+      href: '/docs/core/components/tree/',
+      lines: [[{ text: 'src' }], [{ text: '├─ core' }], [{ text: '└─ prompt', className: 'demo-accent' }]],
+    },
+    {
+      title: 'Scrollbars',
+      description: 'Proportional or marker position within finite content.',
+      href: '/docs/core/components/scrollbar/',
+      lines: [[{ text: '│' }], [{ text: '█', className: 'demo-accent' }], [{ text: '│' }]],
+    },
+  ]}
+/>
+
+[Run the complete Components quickstart ↓](#quickstart)
+
+| Content | Data | Canonical presentation |
+|---|---|---|
+| Ordered or nested entries | `List<T>` | `theme.list(&list)` |
+| Rows and columns with headers and rules | `Table<Row>` | `theme.table(&table)` |
+| A hierarchy | `Tree<T>` | `theme.tree(&tree)` |
+| Position inside finite content | `Scrollbar` | `theme.scrollbar(&scrollbar)` |
+
+## How components become Views
+
+Every core component has three layers:
+
+<FlowDiagram
+  title="How components become Views"
+  description="Component meaning and presentation policy are composed into the same renderer-neutral View used everywhere else."
+  lanes={[{
+    steps: [
+      { title: 'Semantic data', detail: 'Content and semantic state', kind: 'data' },
+      { title: 'Presentation policy', detail: 'Formatting, glyphs, spacing, borders, and styles', via: 'plus', kind: 'data', tone: 'accent' },
+      { title: 'Compose', detail: 'Snapshot data and presentation together', via: 'apply', kind: 'process' },
+      { title: 'View', detail: 'An immutable renderer-neutral value', via: 'result', kind: 'data', tone: 'strong' },
+    ],
+  }]}
+/>
+
+- The data value owns content and semantic state, such as list nesting or a
+  scrollbar's content and viewport lengths.
+- The presentation owns formatting, glyphs, spacing, borders, and styles.
+- Composition snapshots both into an ordinary renderer-neutral `View`.
+
+`Theme` supplies the canonical presentation for each component. Use it for the
+ordinary case; construct or clone a presentation policy when one component
+needs a different visual rule.
+
+Components do not write output, read events, own focus, or retain an event
+loop. The caller owns interaction state and produces new component data when it
+changes.
+
+List, Table, Tree, and Scrollbar presentations may use Canvas internally where
+intrinsic geometry or connected lines require it. That is an implementation of
+their presentation, not their meaning. Application code can also place the
+resulting View into Canvas when a semantic component needs explicit coordinates.
+
+## Quickstart
+
+```sh
+cargo new component-demo
+cd component-demo
+cargo add urushi
+```
+
+Replace `src/main.rs` with:
+
+```rust
+use std::io;
+
+use urushi::{Table, ThemePreset};
+
+fn main() -> io::Result<()> {
+    let theme = ThemePreset::get("Catppuccin Mocha")
+        .expect("built-in theme")
+        .theme();
+
+    let table = Table::text()
+        .headers(["Package", "Status"])
+        .row(["urushi", "ready"])
+        .row(["urushi-prompt", "ready"]);
+
+    urushi::println_view(&theme.table(&table))
+}
+```
+
+Run it with `cargo run`:
+
+```text title="Rendered output"
+┌───────────────┬────────┐
+│ Package       │ Status │
+├───────────────┼────────┤
+│ urushi        │ ready  │
+│ urushi-prompt │ ready  │
+└───────────────┴────────┘
+```
+
+The table owns data, the theme owns its canonical border and role styles, and
+`theme.table` returns the View that `println_view` resolves and writes.
+
+## Continue by task
+
+- [Build lists](/docs/core/components/list/)
+- [Build tables](/docs/core/components/table/)
+- [Build trees](/docs/core/components/tree/)
+- [Show viewport position with a scrollbar](/docs/core/components/scrollbar/)
+- [Customize component presentations](/docs/core/components/custom-presentations/)
+- [Look up the complete Components API](/docs/core/components/reference/)
+
+Use [Layout](/docs/core/layout/) for one-off geometry without reusable meaning.
+Use [Canvas](/docs/core/canvas/) for coordinates, overlap, or connected drawing.

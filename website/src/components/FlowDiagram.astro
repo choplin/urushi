@@ -1,0 +1,65 @@
+---
+interface Step {
+  title: string;
+  detail?: string;
+  via?: string;
+  kind: 'data' | 'process' | 'state' | 'actor';
+  tone?: 'default' | 'accent' | 'strong' | 'muted';
+}
+
+interface Lane {
+  label?: string;
+  steps: Step[];
+}
+
+interface Props {
+  title: string;
+  description: string;
+  lanes: Lane[];
+  direction?: 'horizontal' | 'vertical';
+}
+
+const { title, description, lanes, direction = 'horizontal' } = Astro.props;
+---
+
+<figure
+  class:list={['flow-diagram', `flow-diagram--${direction}`]}
+  role="group"
+  aria-label={title}
+>
+  <figcaption>{title}</figcaption>
+  <p class="flow-diagram__description">{description}</p>
+  <div class="flow-diagram__lanes">
+    {lanes.map((lane) => (
+      <section class="flow-diagram__lane">
+        {lane.label && <h3>{lane.label}</h3>}
+        <ol>
+          {lane.steps.map((step, index) => (
+            <li
+              class:list={[
+                'flow-diagram__step',
+                `is-${step.tone ?? 'default'}`,
+                `is-${step.kind}`,
+              ]}
+            >
+              {index > 0 && (
+                <div class="flow-diagram__connector" aria-label={step.via ? `then ${step.via}` : 'then'}>
+                  {step.via && <span>{step.via}</span>}
+                  <svg viewBox="0 0 64 20" aria-hidden="true">
+                    <path d="M1 10 H55" />
+                    <path d="M48 3 L56 10 L48 17" />
+                  </svg>
+                </div>
+              )}
+              <div class="flow-diagram__node">
+                <span class="flow-diagram__kind">{step.kind}</span>
+                <strong>{step.title}</strong>
+                {step.detail && <span class="flow-diagram__detail">{step.detail}</span>}
+              </div>
+            </li>
+          ))}
+        </ol>
+      </section>
+    ))}
+  </div>
+</figure>

@@ -55,21 +55,26 @@ Run the program:
 cargo run
 ```
 
-The program renders this panel:
+The program renders this panel. The preview preserves the requested green,
+bold message and bright-black border instead of flattening them into plain
+documentation text:
 
-```text
-╭────────────────╮
-│ Build complete │
-╰────────────────╯
-```
+<pre class="terminal-preview" aria-label="Rounded bright-black panel containing green bold status text"><code><span class="ansi-bright-black">╭────────────────╮</span>
+<span class="ansi-bright-black">│</span> <span class="ansi-green ansi-bold">Build complete</span> <span class="ansi-bright-black">│</span>
+<span class="ansi-bright-black">╰────────────────╯</span></code></pre>
 
-In a color-capable terminal, the message is green and bold, and the border is
-bright black. The exact appearance follows the terminal's capabilities.
+The exact appearance follows the terminal's capabilities.
 
 ## 4. Check redirected output
 
 ```sh
 cargo run > result.txt
+```
+
+```text title="result.txt"
+╭────────────────╮
+│ Build complete │
+╰────────────────╯
 ```
 
 When stdout is redirected, Urushi emits an unbounded plain-text representation.
@@ -79,6 +84,9 @@ while retaining supported non-color attributes.
 
 ## Next steps
 
-- [Compose rows, columns, and blocks](/docs/cli/layout/)
+- [Understand View, Urushi's shared presentation value](/docs/core/views/)
+- [Explore blocks and layouts](/docs/core/layout/)
+- [Present lists, tables, trees, and scrollbars](/docs/core/components/)
+- [Draw positioned content with Canvas](/docs/core/canvas/)
 - [Create a reusable semantic theme](/docs/core/themes/)
 - [Choose another terminal surface](/docs/use-cases/)

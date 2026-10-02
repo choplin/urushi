@@ -4,6 +4,7 @@ description: Build typed, validated, blocking terminal forms that preserve the s
 ---
 
 import ArchitectureDiagram from '../../../../components/ArchitectureDiagram.astro';
+import TerminalRecording from '../../../../components/TerminalRecording.astro';
 
 `urushi-prompt` is for short decisions made while a command is running: asking
 for text, choosing from known values, confirming an action, or combining those
@@ -14,95 +15,127 @@ Prefer flags and arguments when the complete operation can be specified before
 execution. Use a prompt when the user needs context from the running command to
 make the decision.
 
+## See the complete interaction
+
+This form collects text, moves focus into a typed selection, confirms the
+choice, restores the terminal, and returns values to the command:
+
+<TerminalRecording
+  src="/docs/media/prompt-wizard.mp4"
+  poster="/docs/media/prompt-wizard.png"
+  label="A terminal form collecting a name, greeting style, and confirmation"
+  caption="Type Aki, choose Formal, accept the default confirmation, and receive ordinary program output after the prompt session closes. The recording runs the real urushi-prompt runtime."
+/>
+
+The moving focus rail, selection highlight, contextual help, and final
+`Good day, Aki.` are all part of the same blocking `Form::run` call. The code
+below builds that shape; the field guides explain each behavior separately.
+
+[Run the complete Prompt quickstart ↓](#quickstart-run-a-form)
+
 ## Install the prompt surface
 
 ```sh
 cargo add urushi-prompt
 ```
 
+```toml title="Cargo.toml"
+[dependencies]
+urushi-prompt = "0.1.0"
+```
+
 The crate re-exports `urushi` for styling, so a prompt-only application does
 not need a separate direct dependency on the core crate.
 
-## What a form can do
-
-- **Collect typed values.** `Input` returns a `String`, `Select<T>` keeps the
-  visible label separate from its typed value, and `Confirm` records both the
-  yes-or-no answer and whether a configured default supplied it.
-- **Build a guided flow.** Fields carry questions, descriptions, placeholders,
-  and contextual help. Non-empty groups add a title and description, and a
-  form runs its groups and fields in order with forward and backward
-  navigation.
-- **Validate before advancing.** Inputs can be required and can run synchronous
-  validators. Validation and unanswered-confirmation messages appear with the
-  field while its current value remains visible.
-- **Handle longer choices.** Select fields support keyboard navigation,
-  filtering, a bounded visible row count, and a configurable no-match message.
-- **Return an all-or-nothing result.** `FieldKey<T>` retrieves submitted values
-  with their Rust type. Cancellation exposes no partial value collection.
-- **Fit into existing command output.** The current inline surface can start on
-  a new line, at the current line, or at a caller-supplied column, and its width
-  can be capped without taking over the full screen.
-- **Reuse a caller-owned terminal.** `Form::run_with_terminal` runs the complete
-  prompt session on one `TerminalBackend`. The caller can query that connection
-  first, select a light or dark theme, and then pass both to the form.
-
-<ArchitectureDiagram kind="prompt" />
-
-## A representative form
+## Quickstart: run a form
 
 The form model, field behavior, validation, and theme are configured together:
 
 ```rust
 use urushi_prompt::{
-    FieldKey, Form, Group, Input, Select, SelectOption,
+    Confirm, ConfirmAnswer, FieldKey, Form, FormOutcome, Group, Input, Select,
+    SelectOption,
+    urushi::ThemePreset,
 };
 
-let name_key = FieldKey::<String>::new("name");
-let style_key = FieldKey::<String>::new("style");
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let name_key = FieldKey::<String>::new("name");
+    let style_key = FieldKey::<String>::new("style");
+    let proceed_key = FieldKey::<ConfirmAnswer>::new("proceed");
+    let group = Group::builder()
+        .title("Greeting setup")
+        .description("Review three values before generating a greeting.")
+        .field(
+            Input::new(name_key.clone(), "What is your name?", "")?
+                .placeholder("e.g. Alex")
+                .required(),
+        )
+        .field(Select::new(
+            style_key.clone(),
+            "Choose a greeting style",
+            vec![
+                SelectOption::new("Friendly", "friendly".to_owned()),
+                SelectOption::new("Formal", "formal".to_owned()),
+            ],
+        )?)
+        .field(Confirm::new(
+            proceed_key.clone(),
+            "Generate the greeting?",
+            Some(true),
+        )?)
+        .build()?;
 
-let group = Group::builder()
-    .title("Greeting setup")
-    .description("Choose how the greeting should be generated.")
-    .field(
-        Input::new(name_key.clone(), "What is your name?", "")?
-            .placeholder("e.g. Alex")
-            .required(),
-    )
-    .field(Select::new(
-        style_key.clone(),
-        "Choose a greeting style",
-        vec![
-            SelectOption::new("Friendly", "friendly".to_owned()),
-            SelectOption::new("Formal", "formal".to_owned()),
-        ],
-    )?)
-    .build()?;
-
-let form = Form::builder().group(group).build()?;
-let outcome = form.run(&theme)?;
-# let _ = outcome;
-# Ok::<(), Box<dyn std::error::Error>>(())
+    let form = Form::builder().group(group).build()?;
+    let theme = ThemePreset::get("Catppuccin Mocha")
+        .expect("built-in theme")
+        .theme();
+    if let FormOutcome::Submitted(values) = form.run(&theme)? {
+        let name = values.get(&name_key).expect("submitted name");
+        let style = values.get(&style_key).expect("submitted style");
+        let proceed = values.get(&proceed_key).expect("submitted confirmation");
+        let greeting = match (style.as_str(), proceed.value) {
+            (_, false) => "No greeting generated.".to_owned(),
+            ("formal", true) => format!("Good day, {name}."),
+            (_, true) => format!("Hi, {name}!"),
+        };
+        println!("{greeting}");
+    }
+    Ok(())
+}
 ```
 
 When the form opens, the active field is marked by the focused gutter and the
 remaining fields stay visible as space allows:
 
-```text title="Initial prompt"
-Greeting setup
-Choose how the greeting should be generated.
+<pre className="terminal-preview" aria-label="Initial form with the name field focused"><code><span className="ansi-bold">Greeting setup</span>{'\n'}<span className="ansi-dim">Review three values before generating a greeting.</span>{'\n\n'}<span className="ansi-cyan">┃</span>{' '}<span className="ansi-bold">What is your name?</span>{'\n'}<span className="ansi-cyan">┃ ›</span>{' '}<span className="ansi-dim">e.g. Alex</span>{'\n\n  Choose a greeting style\n  › Friendly\n    Formal\n\n  Generate the greeting?\n  Yes  No\n\n  '}<span className="ansi-dim">enter continue • shift+tab back • esc cancel</span></code></pre>
 
-┃ What is your name?
-┃ › e.g. Alex
+After the user enters `Aki`, chooses `Formal`, accepts `Yes`, and submits, the
+command resumes with typed values:
 
-  Choose a greeting style
-  › Friendly
-    Formal
-
-  enter continue • shift+tab back • esc cancel
+```text title="Program output"
+Good day, Aki.
 ```
 
-`FormOutcome::Submitted` contains the typed values addressed by the two keys;
+`FormOutcome::Submitted` contains the typed values addressed by the three keys;
 `FormOutcome::Cancelled` contains no partial values.
+
+## What a form can do
+
+| Need | Use | See it in the recording |
+|---|---|---|
+| Collect editable text | `Input` | `Aki` remains visible after advancing |
+| Choose a typed value | `Select<T>` | the blue selection moves to `Formal` |
+| Confirm an action | `Confirm` | `Yes` is focused and submitted |
+| Validate before advancing | required/custom validators | the field keeps its value and shows the error |
+| Navigate a guided flow | groups and ordered fields | the focus rail moves through one form |
+| Return typed values or cancellation | `FieldKey<T>` and `FormOutcome` | ordinary output appears only after restoration |
+
+Longer selections can filter and scroll a bounded set of rows. Inline
+placement can begin on a new line, reuse the current line, or start at a known
+column. Those settings are detailed in the task guides rather than duplicated
+in the first runnable example.
+
+<ArchitectureDiagram kind="prompt" />
 
 ## Presentation and terminal ownership
 
@@ -128,3 +161,4 @@ not yet public.
 - [Build and read a complete form](/docs/prompts/form/)
 - [Configure fields and validation](/docs/prompts/fields/)
 - [Choose inline placement and resize behavior](/docs/prompts/placement/)
+- [Look up every field, form, outcome, and default](/docs/prompts/reference/)

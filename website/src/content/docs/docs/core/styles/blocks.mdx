@@ -1,0 +1,286 @@
+---
+title: Block geometry
+description: Apply margin, borders, padding, dimensions, alignment, overflow, and fill styles.
+---
+
+import BoxModelDiagram from '../../../../../components/BoxModelDiagram.astro';
+
+`BlockStyle` controls the rectangle around one child View. Its operations are
+independent, so the output below separates them before combining them.
+
+This is a Layout guide. Although the Rust type is named `BlockStyle`, the
+capabilities on this page decide space and placement. For cell color,
+attributes, underlines, and hyperlinks, use [Styles](/docs/core/styles/).
+
+| Capability | Main API | Visible effect |
+|---|---|---|
+| Outer spacing | `margin` | Blank cells outside the border |
+| Border and edges | `border`, `border_*` | Glyphs around enabled edges |
+| Inner spacing | `padding` | Cells between border and child |
+| Dimensions | `width`, `height`, `Length` | Fixed, intrinsic, or parent-filled allocation |
+| Child placement | `align`, `vertical_align` | Horizontal and vertical free-space distribution |
+| Long text | `overflow` | Wrap, clip, ellipsis, or a custom marker |
+| Block-created cell style | `from_text_style`, border color builders | Fill padding/alignment cells and style border cells |
+
+## See the box model
+
+The order is always outermost to innermost:
+
+<BoxModelDiagram />
+
+This complete example gives each layer enough space to remain visible:
+
+```rust
+use std::io;
+
+use urushi::{
+    Align, BlockStyle, Border, TextStyle, VerticalAlign, View,
+};
+
+fn main() -> io::Result<()> {
+    let view = View::block(
+        BlockStyle::new()
+            .margin((1, 0))
+            .border(Border::ROUNDED)
+            .padding((0, 1))
+            .width(20)
+            .height(5)
+            .align(Align::Center)
+            .vertical_align(VerticalAlign::Center),
+        View::text("build complete", TextStyle::new()),
+    );
+
+    urushi::println_view(&view)
+}
+```
+
+```text title="Rendered output"
+
+╭──────────────────╮
+│                  │
+│  build complete  │
+│                  │
+╰──────────────────╯
+
+```
+
+The blank first and last rows are vertical margin. The border begins inside
+that margin. Padding guarantees at least one cell beside the child; alignment
+receives the remaining free cells.
+
+The same layers are highlighted here because spaces alone do not reveal which
+part owns them:
+
+<pre class="terminal-preview box-model-preview" aria-label="Block box model with margin, border, padding, and content highlighted"><code><span class="margin-cell">                      </span>
+<span class="ansi-cyan">╭──────────────────╮</span>
+<span class="ansi-cyan">│</span><span class="padding-cell">                  </span><span class="ansi-cyan">│</span>
+<span class="ansi-cyan">│</span><span class="padding-cell"> </span><span class="content-cell"> build complete </span><span class="padding-cell"> </span><span class="ansi-cyan">│</span>
+<span class="ansi-cyan">│</span><span class="padding-cell">                  </span><span class="ansi-cyan">│</span>
+<span class="ansi-cyan">╰──────────────────╯</span>
+<span class="margin-cell">                      </span></code></pre>
+
+## Align inside a fixed size
+
+Horizontal alignment moves the child without changing the block width:
+
+```rust
+use std::io;
+use urushi::{Align, BlockStyle, Border, TextStyle, View};
+
+fn main() -> io::Result<()> {
+    for align in [Align::Left, Align::Center, Align::Right] {
+        let view = View::block(
+            BlockStyle::new()
+                .border(Border::NORMAL)
+                .width(12)
+                .align(align),
+            View::text("status", TextStyle::new()),
+        );
+        urushi::println_view(&view)?;
+    }
+    Ok(())
+}
+```
+
+```text title="Left, center, and right"
+┌──────────┐
+│status    │
+└──────────┘
+┌──────────┐
+│  status  │
+└──────────┘
+┌──────────┐
+│    status│
+└──────────┘
+```
+
+Vertical alignment uses the free rows created by `height`:
+
+```rust
+use std::io;
+use urushi::{BlockStyle, Border, TextStyle, VerticalAlign, View};
+
+fn main() -> io::Result<()> {
+    for align in [
+        VerticalAlign::Top,
+        VerticalAlign::Center,
+        VerticalAlign::Bottom,
+    ] {
+        let view = View::block(
+            BlockStyle::new()
+                .border(Border::NORMAL)
+                .width(12)
+                .height(5)
+                .vertical_align(align),
+            View::text("status", TextStyle::new()),
+        );
+        urushi::println_view(&view)?;
+    }
+    Ok(())
+}
+```
+
+```text title="Top, center, and bottom"
+┌──────────┐
+│status    │
+│          │
+│          │
+└──────────┘
+┌──────────┐
+│          │
+│status    │
+│          │
+└──────────┘
+┌──────────┐
+│          │
+│          │
+│status    │
+└──────────┘
+```
+
+Width and height accept fixed cells or `Length::fill(weight)`. Fill requires a
+finite reference size from the parent. A zero fill weight is invalid; use
+`Length::try_fill` when it must produce a `Result` instead of panicking.
+
+```rust
+use urushi::{Available, BlockStyle, Length, TextStyle, View, resolve};
+
+let fill = View::block(
+    BlockStyle::new().width(Length::fill(1)),
+    View::text("x", TextStyle::new()),
+);
+assert_eq!(resolve(&fill, Available::columns(12))?.size().width(), 12);
+assert!(Length::try_fill(0).is_err());
+
+let minimum = View::block(
+    BlockStyle::new().min_width(8),
+    View::text("x", TextStyle::new()),
+);
+let maximum = View::block(
+    BlockStyle::new().max_width(5),
+    View::text("abcdefgh", TextStyle::new()),
+);
+assert_eq!(resolve(&minimum, Available::NONE)?.size().width(), 8);
+assert_eq!(resolve(&maximum, Available::NONE)?.size().width(), 5);
+# Ok::<(), urushi::LayoutError>(())
+```
+
+```text title="Resolved widths"
+fill(1) in 12 available columns → 12
+min_width(8) around "x"         → 8
+max_width(5) around "abcdefgh"  → 5
+try_fill(0)                     → Err(InvalidFillWeight)
+```
+
+## Select borders and edges
+
+Choose a glyph repertoire with `border`, then disable individual edges. This
+example leaves the bottom open:
+
+```rust
+use std::io;
+use urushi::{BlockStyle, Border, TextStyle, View};
+
+fn main() -> io::Result<()> {
+    let view = View::block(
+        BlockStyle::new()
+            .border(Border::ROUNDED)
+            .border_bottom(false)
+            .padding((0, 1)),
+        View::text("open", TextStyle::new()),
+    );
+    urushi::println_view(&view)
+}
+```
+
+```text title="Rendered output"
+╭──────╮
+│ open │
+```
+
+`border_top`, `border_right`, `border_bottom`, and `border_left` can be toggled
+independently. Border foreground and background are also independent from the
+style used for padding and alignment cells.
+
+## Choose overflow behavior
+
+Overflow changes only content that exceeds the available width:
+
+```rust
+use std::io;
+use urushi::{BlockStyle, Overflow, TextStyle, View};
+
+fn main() -> io::Result<()> {
+    for overflow in [
+        Overflow::Wrap,
+        Overflow::clip(),
+        Overflow::ellipsis(),
+    ] {
+        let view = View::block(
+            BlockStyle::new().width(10).overflow(overflow),
+            View::text("alpha beta gamma", TextStyle::new()),
+        );
+        urushi::println_view(&view)?;
+    }
+    Ok(())
+}
+```
+
+```text title="Wrap, clip, and ellipsis"
+alpha beta
+gamma
+alpha beta
+alpha bet…
+```
+
+`Overflow::clip_with` selects another one-cell marker. Width is measured in
+terminal cells. Height always clips rows that do not fit inside the resolved
+frame.
+
+## Style block-created cells
+
+Block appearance does not cascade into child text. `from_text_style` applies a
+fill to cells created by padding and alignment, while the child retains its own
+`TextStyle`:
+
+```rust
+use urushi::{BlockStyle, Border, Color, TextStyle, View};
+
+let view = View::block(
+    BlockStyle::from_text_style(
+        TextStyle::new().background(Color::BLUE),
+    )
+    .border(Border::ROUNDED)
+    .border_foreground(Color::CYAN)
+    .padding((0, 1)),
+    View::text("child", TextStyle::new().foreground(Color::YELLOW)),
+);
+# let _ = view;
+```
+
+<pre class="terminal-preview" aria-label="Cyan border, blue padding cells, and independently yellow child text"><code><span class="ansi-cyan">╭───────╮</span>
+<span class="ansi-cyan">│</span><span class="ansi-blue"> </span><span class="ansi-yellow">child</span><span class="ansi-blue"> </span><span class="ansi-cyan">│</span>
+<span class="ansi-cyan">╰───────╯</span></code></pre>
+
+Use `BlockStyle::from_text_style` only for block-created cells. Give content its
+own text style when its appearance must remain explicit.

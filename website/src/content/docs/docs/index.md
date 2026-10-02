@@ -12,17 +12,31 @@ Those surfaces do not share one event loop. They share the presentation choices
 that should remain consistent: semantic themes, renderer-neutral views,
 box-model layout, and terminal-aware width measurement.
 
+## Find a presentation concept
+
+The documentation follows the same vocabulary as Urushi's presentation model.
+
+| Concept | Read this for |
+|---|---|
+| [View](/docs/core/views/) | The renderer-neutral presentation value shared by every Urushi surface |
+| [Styles](/docs/core/styles/) | Cell colors, attributes, underlines, and hyperlinks |
+| [Layout](/docs/core/layout/) | Box geometry, sizing, rows, columns, grids, viewports, and anchors |
+| [Themes](/docs/core/themes/) | Semantic roles shared across output, prompts, and TUIs |
+| [Components](/docs/core/components/) | Lists, tables, trees, and scrollbars |
+| [Canvas](/docs/core/canvas/) | Positioned cells, overlapping content, and connected lines |
+| [Text width](/docs/core/text-width/) | Graphemes, CJK, emoji, tabs, and wrapping |
+
 ## Start from what you are building
 
 | I want to… | Start with | Crate |
 |---|---|---|
-| Style text, borders, spacing, or layout | [CLI overview](/docs/cli/) | `urushi` |
-| Apply an opinionated CLI visual language | [CLI presentations](/docs/cli/presentations/) | `urushi-cli` |
-| Ask the user for input or a selection | [Prompt overview](/docs/prompts/) | `urushi-prompt` |
-| Build a full-screen application from `init`, `update`, `view`, and `subscriptions` | [TUI overview](/docs/tui/) | `urushi-tui-app` |
-| Drive a synchronous frame loop yourself | [TUI overview](/docs/tui/) | `urushi-tui` |
-| Add Urushi views to an existing Ratatui app | [Ratatui adapter](/docs/tui/ratatui/) | `urushi-adapter-ratatui` |
-| Display Kitty or Sixel images with text fallback | [Display terminal images](/docs/graphics/) | `urushi-graphics` |
+| Write terminal-aware stdout or stderr and return | <a class="docs-task-link" href="/docs/cli/">CLI overview</a> | `urushi` |
+| Apply an opinionated CLI visual language | <a class="docs-task-link" href="/docs/cli/presentations/">CLI presentations</a> | `urushi-cli` |
+| Ask the user for input or a selection | <a class="docs-task-link" href="/docs/prompts/">Prompt overview</a> | `urushi-prompt` |
+| Build a full-screen application from `init`, `update`, `view`, and `subscriptions` | <a class="docs-task-link" href="/docs/tui/">TUI overview</a> | `urushi-tui-app` |
+| Drive a synchronous frame loop yourself | <a class="docs-task-link" href="/docs/tui/">TUI overview</a> | `urushi-tui` |
+| Add Urushi views to an existing Ratatui app | <a class="docs-task-link" href="/docs/tui/ratatui/">Ratatui adapter</a> | `urushi-adapter-ratatui` |
+| Display Kitty or Sixel images with text fallback | <a class="docs-task-link" href="/docs/graphics/">Display terminal images</a> | `urushi-graphics` |
 
 If you want to see the core workflow first, complete the
 [quickstart](/docs/quickstart/).
@@ -45,9 +59,7 @@ urushi::println_view(&view)?;
 # Ok::<(), std::io::Error>(())
 ```
 
-```text title="Rendered output"
-Build complete
-```
+<pre class="terminal-preview" aria-label="Bold terminal output"><code><span class="ansi-bold">Build complete</span></code></pre>
 
 `println_view` inspects stdout, resolves the view against the available terminal
 width, selects supported rendering features, and writes one static result. It
@@ -70,7 +82,7 @@ needs to replace the terminal backend, executor, clock, or session options.
 The caller-owned [Ratatui adapter](/docs/tui/ratatui/) is a separate crate for
 applications that already have a loop.
 
-[Build a runnable TUI →](/docs/tui/runtime/)
+[Build your first application →](/docs/tui/application/)
 
 ## What stays shared
 
@@ -92,7 +104,7 @@ lifecycle. The shared foundation carries the parts that should remain coherent:
 
 Each surface owns its interaction model:
 
-- static output performs one write and returns;
+- static output locks one standard stream, writes its result, and returns;
 - a prompt temporarily owns a blocking terminal session;
 - the Urushi TUI runtime owns delivery, drawing, and terminal lifecycle; and
 - when an application uses only the Ratatui adapter, that application keeps its

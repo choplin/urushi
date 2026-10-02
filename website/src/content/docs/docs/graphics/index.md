@@ -1,14 +1,52 @@
 ---
-title: Display terminal images
-description: Compose an image region with fallback text and render it through Kitty or Sixel when supported.
+title: Terminal graphics
+description: Add Kitty or Sixel image regions to an Urushi View while preserving text fallback.
 ---
 
-Image support lives in `urushi-graphics`; the core crate remains independent
-from pixel data and graphics protocols. Images still participate in the same
-layout as text: the presentation reserves a generic anchored region, and the
-graphics layer overlays an image only after that complete view resolves.
+`urushi-graphics` adds raster images to the shared presentation model. An image
+first reserves an anchored rectangle in an ordinary `View`; after layout,
+the selected graphics protocol overlays pixels in that resolved rectangle. The
+same View already contains fallback text for terminals without usable graphics.
 
-## Install the graphics surface
+This is separate from [Canvas](/docs/core/canvas/): Canvas draws graphemes in
+terminal cells, while terminal graphics send pixel data through Kitty or Sixel.
+
+## See the graphics paths
+
+<div class="overview-catalog">
+  <a href="#quickstart">
+    <pre>┌──────────────┐
+│ pixel image  │
+│    [logo]    │
+└──────────────┘</pre>
+    <strong>Image region with fallback</strong>
+    <span>The same View reserves cells for Kitty/Sixel pixels or readable text.</span>
+  </a>
+  <a href="/docs/graphics/rendering-and-lifecycle/#own-a-lifecycle-in-another-host">
+    <pre><span class="demo-accent">Kitty</span>  retained
+<span class="demo-warning">Sixel</span>  repaint
+Text   fallback</pre>
+    <strong>Explicit lifecycle ownership</strong>
+    <span>One-shot output, Urushi runtime, or a caller-owned interactive host.</span>
+  </a>
+</div>
+
+[Run the complete terminal graphics quickstart ↓](#quickstart)
+
+## What the graphics surface provides
+
+| Need | API or owner | Result |
+|---|---|---|
+| Put RGBA pixels in layout | `Image` + `ImagePresentation` | A fixed-cell View region with text fallback |
+| Write one complete result and return | `render_view` | Stateless Kitty, Sixel, or fallback selection |
+| Keep images across full-screen frames | `urushi-tui-app` with `graphics` | Runtime-owned selection, repaint, recovery, and cleanup |
+| Integrate another interactive host | `KittyLifecycle` or `SixelLifecycle` | Caller-owned protocol state and frame policy |
+
+## Quickstart
+
+This complete Unix example displays one red pixel over an eight-by-three-cell
+region. A supported terminal shows the scaled image; any other terminal keeps
+the `[logo]` fallback.
 
 ```toml
 [dependencies]
@@ -17,100 +55,52 @@ urushi-graphics = "0.1.0"
 urushi-terminal = "0.1.0"
 ```
 
-## Create an image view
-
-`Image::rgba` takes checked RGBA bytes and two stable identities: one for the
-placement and one for the pixel asset. The byte length must match the supplied
-pixel dimensions.
-
 ```rust
-use urushi_graphics::{CellSize, Image, ImagePresentation, PixelSize};
+use urushi_graphics::{
+    CellSize, Image, ImagePresentation, PixelSize, render_view,
+};
+use urushi_terminal::backend::native::NativeTerminal;
 
-let image = Image::rgba(
-    "logo-placement",
-    "logo-rgba",
-    PixelSize::new(1, 1),
-    [196, 68, 52, 255],
-)?.fallback("[logo]");
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let image = Image::rgba(
+        "logo-placement",
+        "logo-rgba",
+        PixelSize::new(1, 1),
+        [196, 68, 52, 255],
+    )?
+    .fallback("[logo]");
 
-let view = ImagePresentation::new().compose(
-    &image,
-    CellSize::new(8, 3),
-);
-# Ok::<(), urushi_graphics::InvalidRgbaRaster>(())
+    let view = ImagePresentation::new()
+        .compose(&image, CellSize::new(8, 3));
+
+    let mut terminal = NativeTerminal::open()?;
+    render_view(&mut terminal, &view)?;
+    Ok(())
+}
 ```
 
-Before a graphics protocol is selected, that eight-by-three-cell view contains
-the text fallback:
+The fallback cells occupy the same layout rectangle as the image:
 
-```text title="Fallback cells"
+```text title="Fallback output"
 [logo]
 
 
 ```
 
-The returned `View` contains an anchored image region and visible fallback
-text. It can participate in ordinary row, column, block, and layout
-composition.
+`Image::rgba` validates that the byte length is `width × height × 4`. The first
+key identifies this placement; the second identifies reusable pixel content.
+`CellSize` controls layout in terminal cells, not source-pixel dimensions.
 
-## Render against terminal capabilities
+## Choose the presentation lifecycle
 
-`render_view` resolves and writes the complete view, locates its image regions,
-and queries the supplied terminal for positive capability evidence.
+| Program shape | Start with |
+|---|---|
+| One rendered result followed by process exit | `render_view` |
+| An Urushi TEA application | `Runtime::graphics` |
+| A custom event loop or renderer | A protocol lifecycle owned by that host |
+| Existing Ratatui application | Its loop must drive a protocol lifecycle; the adapter does not do so automatically |
 
-```rust
-use urushi_graphics::render_view;
-
-let protocol = render_view(&mut terminal, &view)?;
-```
-
-The return value is the protocol used, or `None` when the fallback remains.
-
-## Protocol selection
-
-Urushi applies this order:
-
-1. Kitty, when Kitty graphics support is detected;
-2. Sixel, when Sixel support and cell-pixel geometry are both available; or
-3. the text fallback already present in the view.
-
-A terminal may report both protocols; Kitty wins. The one-shot renderer is
-stateless and treats the terminal's top-left cell as the view origin.
-
-## Use images in the Urushi TUI runtime
-
-The full-screen runtime can own image presentation across frames alongside its
-cell output. Depend on the image model directly and enable the integration
-feature:
-
-```toml
-[dependencies]
-urushi = "0.1.0"
-urushi-graphics = "0.1.0"
-urushi-tui-app = { version = "0.1.0", features = ["graphics"] }
-```
-
-An application still returns an ordinary `View` containing an
-`ImagePresentation`. Select automatic or explicit protocol behavior on the
-runtime:
-
-```rust
-use urushi_tui_app::{GraphicsPreference, Runtime};
-
-let final_model = Runtime::new(application)
-    .graphics(GraphicsPreference::Auto)
-    .run()?;
-# let _ = final_model;
-# Ok::<(), urushi_tui_app::Error>(())
-```
-
-For Kitty, the runtime retains uploads and placements between frames. Sixel is
-immediate-mode terminal output: the runtime caches encoded cell-row bands but
-emits the complete visible image scene on every successful presentation. The
-same terminal owner coordinates repaint, recovery, and cleanup for either
-protocol and restores the full-screen session. An explicit Kitty or Sixel
-preference returns an error when the selected protocol cannot be used.
-
-Hosts outside `urushi-tui-app` can own the public `kitty::KittyLifecycle` or
-`sixel::SixelLifecycle` values themselves. They remain responsible for deciding
-when to prepare, present, repaint, scroll, and clean up retained protocol state.
+Read [Rendering and lifecycle](/docs/graphics/rendering-and-lifecycle/) for
+protocol selection, runtime configuration, clipping, and host responsibilities.
+Use the [Graphics reference](/docs/graphics/reference/) for the complete public
+surface.

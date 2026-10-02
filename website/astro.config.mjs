@@ -1,8 +1,14 @@
 // @ts-check
 import { defineConfig } from 'astro/config';
+import { satteri } from '@astrojs/markdown-satteri';
 import starlight from '@astrojs/starlight';
+import rustdocHiddenLines from './scripts/remark-rustdoc-hidden-lines.mjs';
 
 export default defineConfig({
+  publicDir: './.generated-public',
+  markdown: {
+    processor: satteri({ mdastPlugins: [rustdocHiddenLines] }),
+  },
   integrations: [
     starlight({
       title: 'Urushi',
@@ -15,7 +21,7 @@ export default defineConfig({
       },
       sidebar: [
         {
-          label: 'Start here',
+          label: 'Overview',
           items: [
             { label: 'Introduction', slug: 'docs' },
             { label: 'Quickstart', slug: 'docs/quickstart' },
@@ -23,46 +29,119 @@ export default defineConfig({
           ],
         },
         {
+          label: 'Presentation model',
+          items: [
+            { label: 'Overview', slug: 'docs/concepts/presentation-foundation' },
+            { label: 'View', slug: 'docs/core/views' },
+            {
+              label: 'Styles',
+              collapsed: true,
+              items: [
+                { label: 'Overview', slug: 'docs/core/styles' },
+                { label: 'Text appearance and links', slug: 'docs/core/styles/text' },
+                { label: 'Reference', slug: 'docs/core/styles/reference' },
+              ],
+            },
+            {
+              label: 'Layout',
+              collapsed: true,
+              items: [
+                { label: 'Overview', slug: 'docs/core/layout' },
+                { label: 'Block geometry', slug: 'docs/core/styles/blocks' },
+                { label: 'Rows and columns', slug: 'docs/core/views/blocks-and-layouts' },
+                { label: 'Grid', slug: 'docs/core/views/grid' },
+                { label: 'Viewports and anchors', slug: 'docs/core/views/projection-and-anchors' },
+                { label: 'Reference', slug: 'docs/core/views/reference' },
+              ],
+            },
+            {
+              label: 'Themes',
+              collapsed: true,
+              items: [
+                { label: 'Overview', slug: 'docs/core/themes' },
+                { label: 'Light and dark themes', slug: 'docs/core/themes/adaptive' },
+                { label: 'Custom themes and roles', slug: 'docs/core/themes/customize' },
+                { label: 'Reference', slug: 'docs/core/themes/reference' },
+              ],
+            },
+            {
+              label: 'Components',
+              collapsed: true,
+              items: [
+                { label: 'Overview', slug: 'docs/core/components' },
+                { label: 'Lists', slug: 'docs/core/components/list' },
+                { label: 'Tables', slug: 'docs/core/components/table' },
+                { label: 'Trees', slug: 'docs/core/components/tree' },
+                { label: 'Scrollbars', slug: 'docs/core/components/scrollbar' },
+                { label: 'Custom presentations', slug: 'docs/core/components/custom-presentations' },
+                { label: 'Reference', slug: 'docs/core/components/reference' },
+              ],
+            },
+            {
+              label: 'Canvas',
+              collapsed: true,
+              items: [
+                { label: 'Overview', slug: 'docs/core/canvas' },
+                { label: 'Sizing and placement', slug: 'docs/core/canvas/size-and-place' },
+                { label: 'Text, Views, and cells', slug: 'docs/core/canvas/draw-content' },
+                { label: 'Paths and line networks', slug: 'docs/core/canvas/draw-paths' },
+                { label: 'Composition and clipping', slug: 'docs/core/canvas/composition' },
+                { label: 'Custom CanvasItem', slug: 'docs/core/canvas/custom-items' },
+                { label: 'Components on Canvas', slug: 'docs/core/canvas/components' },
+                { label: 'Reference', slug: 'docs/core/canvas/reference' },
+              ],
+            },
+            {
+              label: 'Text width',
+              collapsed: true,
+              items: [
+                { label: 'Overview', slug: 'docs/core/text-width' },
+                { label: 'Tabs and wrapping', slug: 'docs/core/text-width/tabs-and-wrapping' },
+                { label: 'Reference', slug: 'docs/core/text-width/reference' },
+              ],
+            },
+          ],
+        },
+        {
           label: 'CLI output',
           items: [
-            { label: 'CLI overview', slug: 'docs/cli' },
-            { label: 'Style ordinary output', slug: 'docs/cli/styled-output' },
-            { label: 'Compose blocks and layouts', slug: 'docs/cli/layout' },
+            { label: 'Overview', slug: 'docs/cli' },
+            { label: 'Styled output', slug: 'docs/cli/styled-output' },
+            { label: 'Blocks and layouts', slug: 'docs/cli/layout' },
             { label: 'CLI presentations', slug: 'docs/cli/presentations' },
             { label: 'Output behavior', slug: 'docs/cli/output-behavior' },
+            { label: 'Reference', slug: 'docs/cli/reference' },
           ],
         },
         {
           label: 'Prompts',
           items: [
-            { label: 'Prompt overview', slug: 'docs/prompts' },
-            { label: 'Build a form', slug: 'docs/prompts/form' },
+            { label: 'Overview', slug: 'docs/prompts' },
+            { label: 'Forms', slug: 'docs/prompts/form' },
             { label: 'Fields and validation', slug: 'docs/prompts/fields' },
             { label: 'Placement and resize', slug: 'docs/prompts/placement' },
+            { label: 'Reference', slug: 'docs/prompts/reference' },
           ],
         },
         {
           label: 'TUI',
           items: [
-            { label: 'TUI overview', slug: 'docs/tui' },
-            { label: 'Full-screen runtime', slug: 'docs/tui/runtime' },
-            { label: 'Use the Ratatui adapter', slug: 'docs/tui/ratatui' },
+            { label: 'Overview', slug: 'docs/tui' },
+            { label: 'Build your first application', slug: 'docs/tui/application' },
+            { label: 'Application runtime', slug: 'docs/tui/runtime' },
+            { label: 'Effects and subscriptions', slug: 'docs/tui/effects-and-subscriptions' },
+            { label: 'Message delivery and drawing', slug: 'docs/tui/delivery-and-drawing' },
+            { label: 'Native Screen and Frame', slug: 'docs/tui/screen-and-frame' },
+            { label: 'Ratatui adapter', slug: 'docs/tui/ratatui' },
+            { label: 'Reference', slug: 'docs/tui/reference' },
           ],
         },
         {
           label: 'Graphics',
           items: [
-            { label: 'Display terminal images', slug: 'docs/graphics' },
-          ],
-        },
-        {
-          label: 'Core model',
-          items: [
-            { label: 'Styles and views', slug: 'docs/core/styles-and-views' },
-            { label: 'Themes', slug: 'docs/core/themes' },
-            { label: 'Terminal width and CJK', slug: 'docs/core/text-width' },
-            { label: 'Components', slug: 'docs/core/components' },
-            { label: 'Presentation foundation', slug: 'docs/concepts/presentation-foundation' },
+            { label: 'Overview', slug: 'docs/graphics' },
+            { label: 'Rendering and lifecycle', slug: 'docs/graphics/rendering-and-lifecycle' },
+            { label: 'Reference', slug: 'docs/graphics/reference' },
           ],
         },
         {

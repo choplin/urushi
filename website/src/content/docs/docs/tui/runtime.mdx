@@ -1,9 +1,10 @@
 ---
-title: TUI runtime
+title: Application runtime
 description: Model a full-screen application with Urushi's TEA-style Application, Effect, and Subscription values.
 ---
 
 import ArchitectureDiagram from '../../../../components/ArchitectureDiagram.astro';
+import FlowDiagram from '../../../../components/FlowDiagram.astro';
 
 The `urushi-tui-app` crate is a runnable TEA-style full-screen application
 framework. An application owns its domain choices; the runtime owns the live
@@ -80,15 +81,21 @@ results, and other external events all become messages before they reach it.
 This keeps application transitions directly testable without opening a
 terminal.
 
+For a complete persistent application with keyboard input, application focus,
+surface changes, errors, and user-driven shutdown, follow the
+[interactive application guide](/docs/tui/application/).
+
 ## Run the application
 
 `urushi_tui_app::run` supplies the production executor, clock, terminal backend,
 full-screen presentation, and session defaults:
 
 ```rust
-let final_model = urushi_tui_app::run(Counter)?;
-println!("final count: {final_model}");
-# Ok::<(), urushi_tui_app::Error>(())
+fn main() -> Result<(), urushi_tui_app::Error> {
+    let final_model = urushi_tui_app::run(Counter)?;
+    println!("final count: {final_model}");
+    Ok(())
+}
 ```
 
 The example renders `0`, delivers the delayed `Increment` message, updates the
@@ -98,6 +105,23 @@ returns that final model and the program prints:
 ```text title="Output after the full-screen session closes"
 final count: 1
 ```
+
+The production session profile is explicit. Builder methods replace these
+choices before the session is entered:
+
+| Session choice | Default | Observable consequence |
+|---|---:|---|
+| Raw mode | On | Keys reach the application immediately instead of line-buffered input |
+| Alternate screen | On | The full-screen application does not overwrite the primary shell buffer |
+| Bracketed paste | On | A paste can arrive as one `Input::Paste` value |
+| Focus reporting | On | `Input::Focus` can be produced by a supporting terminal |
+| Keyboard enhancement | Disambiguate escape codes and report event types, when supported | `KeyKind::Press`, `Repeat`, and `Release` can be distinguished |
+| Mouse capture | Off | Terminal text selection remains available until `.mouse(true)` is selected |
+| Cursor hidden | On | The cursor stays hidden unless a resolved View requests a position |
+
+An input subscription receives only events that the selected terminal and
+session modes can produce. In particular, handle key kind deliberately rather
+than assuming every terminal reports releases.
 
 ## Return effects instead of performing work in `update`
 
@@ -109,6 +133,62 @@ out of order.
 Use an effect for filesystem or network I/O and for expensive preparation that
 would make input handling or `view` slow. Keep `update` focused on state
 transitions and keep `view` cheap enough to evaluate for a frame.
+
+This complete transition starts blocking work, then handles its result as an
+ordinary message:
+
+```rust
+use urushi_tui_app::Effect;
+
+#[derive(Debug, PartialEq)]
+enum Message {
+    Load,
+    Loaded(String),
+}
+
+fn update(status: &mut String, message: Message) -> Effect<Message> {
+    match message {
+        Message::Load => {
+            *status = "Loading".into();
+            Effect::perform(|| Message::Loaded("Ready".into()))
+        }
+        Message::Loaded(value) => {
+            *status = value;
+            Effect::none()
+        }
+    }
+}
+
+let mut status = "Idle".to_owned();
+let _work = update(&mut status, Message::Load);
+assert_eq!(status, "Loading");
+
+// The runtime executes _work and later delivers its Loaded message.
+let _ = update(&mut status, Message::Loaded("Ready".into()));
+assert_eq!(status, "Ready");
+```
+
+<FlowDiagram
+  title="Observable model states"
+  description="Each delivered message moves the model to the state used by the next View."
+  lanes={[{
+    steps: [
+      { title: 'Idle', kind: 'state' },
+      { title: 'Loading', via: 'Load', kind: 'state', tone: 'accent' },
+      { title: 'Ready', detail: 'status = “Ready”', via: 'Loaded', kind: 'state', tone: 'strong' },
+    ],
+  }]}
+/>
+
+`perform_latest` and `future_latest` replace unfinished work under the same
+key. `after_latest` does the same for a delayed message, which makes it the
+debounce form. `batch` starts independent effects concurrently; completion
+order is deliberately unspecified. Return a later effect from the `update`
+that receives an earlier completion when ordering is required.
+
+See [Effects and subscriptions](/docs/tui/effects-and-subscriptions/) for every
+effect form, latest-only work, batch and shutdown behavior, and observable
+completion traces.
 
 ## Declare ongoing sources as subscriptions
 
@@ -126,6 +206,50 @@ appears and stops when it is no longer declared. Source admission policy is
 explicit; the runtime does not inspect application message variants to decide
 which events may be replaced or backpressured.
 
+For example, this application listens for input at all times but runs the clock
+only while `running` is true:
+
+```rust
+use std::time::Duration;
+use urushi_tui_app::{Input, Subscription};
+
+enum Message {
+    Input(Input),
+    Tick,
+}
+
+fn subscriptions(running: bool) -> Subscription<Message> {
+    let input = Subscription::input(Message::Input);
+    let clock = if running {
+        Subscription::interval(
+            "refresh-clock",
+            Duration::from_secs(1),
+            |_| Message::Tick,
+        )
+    } else {
+        Subscription::none()
+    };
+    Subscription::batch([input, clock])
+}
+
+let _active = subscriptions(true);
+let _paused = subscriptions(false);
+```
+
+| Model state | Reconciled sources | Observable result |
+|---|---|---|
+| `running = true` | input + `refresh-clock` | keys and one `Tick` per second can reach `update` |
+| `running = false` | input only | the keyed clock is stopped; no later ticks are accepted from it |
+
+Changing an interval's key or period replaces its identity and restarts it.
+For custom producers, choose `Admission::bounded(capacity)` when every accepted
+value must wait in FIFO order, or `Admission::latest()` when a newer pending
+value may replace an older one.
+
+See [Effects and subscriptions](/docs/tui/effects-and-subscriptions/) for
+custom producers, source identity, reconciliation, `Sender`, `SendError`, and
+bounded-versus-latest backpressure.
+
 ## Presentation boundary
 
 The runtime architecture does not make Ratatui part of `Application`:
@@ -138,7 +262,7 @@ committed cell buffers, diffing, output commit, and failed-output recovery.
 Those presentation resources do not enter the `Application` model.
 
 Ratatui also remains available as an explicit adapter for applications that
-own their own loop. See [Use the Ratatui integration](/docs/tui/ratatui/).
+own their own loop. See the [Ratatui adapter](/docs/tui/ratatui/).
 
 ## Configure the runtime
 
@@ -150,7 +274,8 @@ own their own loop. See [Use the Ratatui integration](/docs/tui/ratatui/).
 3. apply every accepted message through `update`;
 4. coalesce physical draws without skipping logical model transitions;
 5. resolve the latest `View` once for the selected terminal's frame; and
-6. restore the terminal session on normal exit, errors, and panic unwinding.
+6. restore the terminal session on normal and error returns, and attempt
+   restoration from the session guard during panic unwinding.
 
 The builder makes the physical backend, executor, clock, and session options
 selectable. Presentation always uses the concrete `urushi_tui::Screen`; these
@@ -159,14 +284,47 @@ runtime-owned dependencies are not fields added to the application model:
 ```rust
 use urushi_tui_app::Runtime;
 
-let final_model = Runtime::new(Counter)
-    .mouse(true)
-    .focus_change(true)
-    .run()?;
+fn main() -> Result<(), urushi_tui_app::Error> {
+    let final_model = Runtime::new(Counter)
+        .mouse(true)
+        .bracketed_paste(false)
+        .run()?;
 
-assert_eq!(final_model, 1);
-# Ok::<(), urushi_tui_app::Error>(())
+    assert_eq!(final_model, 1);
+    Ok(())
+}
 ```
+
+[Message delivery and drawing](/docs/tui/delivery-and-drawing/) defines the
+ordering contract behind accepted messages, subscription reconciliation,
+effect starts, coalesced draws, surface changes, draw failures, and shutdown.
+
+## Add terminal images
+
+Enable the optional `graphics` feature when the runtime should present Kitty or
+Sixel images contained in the application's View:
+
+```toml
+[dependencies]
+urushi = "0.1.0"
+urushi-graphics = "0.1.0"
+urushi-tui-app = { version = "0.1.0", features = ["graphics"] }
+```
+
+The runtime builder selects automatic, required-protocol, or text-only behavior
+with `Runtime::graphics(GraphicsPreference)`. It then owns retained image state,
+repaint, failure recovery, cleanup, and terminal restoration alongside cell
+frames. Image construction remains in `urushi-graphics` rather than the
+application crate.
+
+On Unix, enabling `graphics` makes the default runtime open Urushi's native
+bidirectional terminal connection so it can positively query Kitty and Sixel
+support before the input reader starts. On platforms without that native
+connection, the portable default backend reports no graphics protocol evidence:
+`Auto` keeps the text fallback, while an explicit `Kitty` or `Sixel` request
+requires a custom `TerminalBackend` that supplies confirmed capabilities.
+
+[Configure graphics rendering and lifecycle →](/docs/graphics/rendering-and-lifecycle/#let-the-urushi-runtime-own-frames)
 
 ## What the application crate exposes
 
@@ -181,3 +339,5 @@ The public runtime surface includes:
 The synchronous `Screen` and `Frame` live in `urushi-tui`. Caller-owned
 Ratatui integration lives in `urushi-adapter-ratatui`; it is not a runtime
 backend. See the [TUI overview](/docs/tui/) for the complete boundary.
+The [TUI reference](/docs/tui/reference/) indexes every runtime, frame-engine,
+and Ratatui-adapter API.

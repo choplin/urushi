@@ -19,6 +19,10 @@ urushi = "0.1.0"
 
 [Style ordinary output →](/docs/cli/styled-output/)
 
+To choose the drawing vocabulary first, compare
+[View](/docs/core/views/), [layouts](/docs/core/layout/), [components](/docs/core/components/),
+and [Canvas](/docs/core/canvas/).
+
 ## Build opinionated CLI presentations
 
 Use `urushi-cli` for an opinionated visual language for human-facing,
@@ -70,7 +74,7 @@ Call `urushi_tui_app::run(app)` for the production defaults. Use
 `Runtime::new(app)` when the application needs to replace the terminal backend,
 executor, clock, or session options.
 
-[Build a full-screen application →](/docs/tui/runtime/)
+[Build your first full-screen application →](/docs/tui/application/)
 
 ## Add UI to an existing Ratatui application
 

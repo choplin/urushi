@@ -1,0 +1,148 @@
+<figure class="box-model" role="group" aria-labelledby="box-model-caption">
+  <figcaption id="box-model-caption">Box-model order</figcaption>
+  <p>
+    Each rectangle contains the next one. Space is measured from the outside
+    inward: margin, border, padding, then the child View.
+  </p>
+
+  <div
+    class="box-model__diagram"
+    role="img"
+    aria-label="Margin contains the border, the border contains padding, and padding contains the child View."
+  >
+    <div class="box-model__layer box-model__margin">
+      <span class="box-model__label">
+        <strong>Margin</strong>
+        <small>outside spacing</small>
+      </span>
+      <div class="box-model__layer box-model__border">
+        <span class="box-model__label">
+          <strong>Border</strong>
+          <small>edge glyphs</small>
+        </span>
+        <div class="box-model__layer box-model__padding">
+          <span class="box-model__label">
+            <strong>Padding</strong>
+            <small>inside spacing</small>
+          </span>
+          <div class="box-model__content">
+            <strong>Content</strong>
+            <span>child View</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</figure>
+
+<style>
+  .box-model {
+    margin: 1.5rem 0;
+    padding: 1rem;
+    border: 1px solid var(--sl-color-gray-5);
+    border-radius: 0.75rem;
+    background: var(--sl-color-bg-nav);
+  }
+
+  .box-model figcaption {
+    color: var(--sl-color-white);
+    font-size: var(--sl-text-h4);
+    font-weight: 650;
+  }
+
+  .box-model > p {
+    margin: 0.25rem 0 1rem;
+    color: var(--sl-color-gray-2);
+    font-size: var(--sl-text-sm);
+  }
+
+  .box-model__diagram {
+    max-width: 42rem;
+    margin-inline: auto;
+  }
+
+  .box-model__layer {
+    position: relative;
+    padding: 3.25rem 2.25rem 2.25rem;
+    border-radius: 0.65rem;
+  }
+
+  .box-model__margin {
+    border: 1px dashed var(--sl-color-gray-3);
+    background: color-mix(in srgb, var(--sl-color-gray-4) 24%, transparent);
+  }
+
+  .box-model__border {
+    border: 0.35rem solid var(--sl-color-text-accent);
+    background: color-mix(in srgb, var(--sl-color-accent) 11%, var(--sl-color-bg));
+  }
+
+  .box-model__padding {
+    border: 1px solid color-mix(in srgb, var(--sl-color-accent-high) 75%, var(--sl-color-gray-3));
+    background:
+      repeating-linear-gradient(
+        135deg,
+        color-mix(in srgb, var(--sl-color-accent) 10%, transparent) 0 8px,
+        transparent 8px 16px
+      ),
+      var(--sl-color-bg);
+  }
+
+  .box-model__content {
+    display: grid;
+    min-height: 5.5rem;
+    place-content: center;
+    border: 2px solid var(--sl-color-accent-high);
+    border-radius: 0.5rem;
+    background: color-mix(in srgb, var(--sl-color-accent) 20%, var(--sl-color-bg));
+    color: var(--sl-color-white);
+    text-align: center;
+  }
+
+  .box-model__content strong {
+    font-size: 1.05rem;
+  }
+
+  .box-model__content span {
+    color: var(--sl-color-gray-2);
+    font-size: var(--sl-text-sm);
+  }
+
+  .box-model__label {
+    position: absolute;
+    top: 0.75rem;
+    left: 1rem;
+    display: flex;
+    align-items: baseline;
+    gap: 0.5rem;
+    color: var(--sl-color-white);
+  }
+
+  .box-model__label small {
+    color: var(--sl-color-gray-2);
+    font-size: 0.75rem;
+  }
+
+  @media (max-width: 40rem) {
+    .box-model {
+      padding: 0.75rem;
+    }
+
+    .box-model__layer {
+      padding: 2.8rem 0.85rem 0.85rem;
+    }
+
+    .box-model__border {
+      border-width: 0.25rem;
+    }
+
+    .box-model__label {
+      left: 0.75rem;
+      gap: 0.35rem;
+    }
+
+    .box-model__label small {
+      font-size: 0.68rem;
+    }
+  }
+</style>

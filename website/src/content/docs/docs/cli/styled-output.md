@@ -23,11 +23,10 @@ urushi::println(&text)?;
 # Ok::<(), std::io::Error>(())
 ```
 
-The result is one line. On a capable terminal, the text is green and bold:
+The result is one line. This preview preserves the color and weight selected by
+the `TextStyle`:
 
-```text title="Rendered output"
-Build complete
-```
+<pre class="terminal-preview" aria-label="Green bold text reading Build complete"><code><span class="ansi-green ansi-bold">Build complete</span></code></pre>
 
 `print` and `println` target stdout. `eprint` and `eprintln` target stderr.
 
@@ -53,13 +52,12 @@ urushi::println_view(&view)?;
 # Ok::<(), std::io::Error>(())
 ```
 
-The same message becomes a complete terminal rectangle:
+The same message becomes a complete terminal rectangle. The border uses the
+muted bright-black color and the child text remains bold:
 
-```text title="Rendered output"
-╭────────────────╮
-│ Build complete │
-╰────────────────╯
-```
+<pre class="terminal-preview" aria-label="Bright-black rounded border around bold Build complete text"><code><span class="ansi-bright-black">╭────────────────╮</span>
+<span class="ansi-bright-black">│</span> <span class="ansi-bold">Build complete</span> <span class="ansi-bright-black">│</span>
+<span class="ansi-bright-black">╰────────────────╯</span></code></pre>
 
 The `*_view` functions resolve the complete view against the detected terminal
 width before rendering it.
@@ -84,4 +82,5 @@ Choose `StyledText` when the exact source lines should be preserved. Choose a
 `View` when the output should adapt to an available terminal rectangle.
 
 Next, [compose blocks and layouts](/docs/cli/layout/) or read the
-[standard-stream behavior](/docs/cli/output-behavior/).
+[standard-stream behavior](/docs/cli/output-behavior/). For every output
+helper, setting, and default, use the [CLI reference](/docs/cli/reference/).

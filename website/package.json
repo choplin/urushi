@@ -5,8 +5,9 @@
   "private": true,
   "packageManager": "pnpm@11.20.0",
   "scripts": {
-    "dev": "astro dev",
-    "build": "astro check && astro build",
+    "docs:api": "node ./scripts/prepare-api.mjs",
+    "dev": "pnpm docs:api && astro dev",
+    "build": "pnpm docs:api && astro check && astro build",
     "preview": "astro preview",
     "deploy": "pnpm build && wrangler deploy"
   },
@@ -17,6 +18,7 @@
   },
   "devDependencies": {
     "@astrojs/check": "^0.9.6",
+    "@astrojs/markdown-satteri": "0.4.2",
     "typescript": "^6.0.3",
     "wrangler": "^4.142.0"
   }

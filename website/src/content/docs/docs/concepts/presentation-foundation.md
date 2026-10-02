@@ -1,67 +1,88 @@
 ---
-title: One presentation foundation
-description: How Urushi shares styling, composition, and layout without conflating terminal surfaces.
+title: Presentation model
+description: Find the Urushi concept that owns each part of terminal presentation.
 ---
 
-Urushi treats plain output, prompts, and full-screen TUIs as different terminal
-surfaces built on the same presentation foundation. They are not stages in an
-application lifecycle, and one surface does not have to grow into another.
+Urushi uses the same presentation concepts for plain output, prompts, and
+full-screen TUIs. The concepts below match the sections in this sidebar: start
+with the term that describes what you need to control.
 
-## Shared below the surface
+<div class="overview-catalog">
+  <a href="/docs/core/views/">
+    <pre>View
+├─ heading
+└─ row → panels</pre>
+    <strong>View</strong>
+    <span>The shared presentation value.</span>
+  </a>
+  <a href="/docs/core/styles/">
+    <pre><span class="demo-accent">accent</span>
+<span class="demo-success">success</span>
+<strong>bold</strong> · <em>italic</em></pre>
+    <strong>Styles</strong>
+    <span>How terminal cells look.</span>
+  </a>
+  <a href="/docs/core/layout/">
+    <pre>╭ A ╮╭── B ──╮
+│   ││       │
+╰───╯╰───────╯</pre>
+    <strong>Layout</strong>
+    <span>How Views receive and occupy space.</span>
+  </a>
+  <a href="/docs/core/themes/">
+    <pre><span class="demo-accent">accent role</span>
+<span class="demo-warning">warning role</span>
+same meaning</pre>
+    <strong>Themes</strong>
+    <span>One semantic visual language.</span>
+  </a>
+  <a href="/docs/core/components/">
+    <pre>Name    State
+core    <span class="demo-success">ready</span>
+prompt  ready</pre>
+    <strong>Components</strong>
+    <span>Semantic lists, tables, trees, and scrollbars.</span>
+  </a>
+  <a href="/docs/core/canvas/">
+    <pre>┌──┬──┐
+│  ├──┤
+└──┴──┘</pre>
+    <strong>Canvas</strong>
+    <span>Coordinates, overlap, and connected lines.</span>
+  </a>
+  <a href="/docs/core/text-width/">
+    <pre>8 cells
+日本語
+status</pre>
+    <strong>Text width</strong>
+    <span>Grapheme-safe measurement, tabs, and wrapping.</span>
+  </a>
+</div>
 
-The shared model consists of five layers:
+[Build and render your first shared View →](/docs/core/views/#quickstart)
 
-| Layer | Responsibility |
-|---|---|
-| `Theme` | Assign semantic roles to logical styles and canonical component presentations. |
-| Components and presentations | Keep semantic data separate from the concrete policy that composes it into a `View`. |
-| `View` | Compose renderer-neutral primitives: text, blocks, rows, columns, grids, canvas content, viewports, and anchors. |
-| Layout | Resolve the box model and display width against an available area. |
-| Terminal | Describe commands, capabilities, events, geometry, and session restoration independently from a physical backend. |
+These are cooperating parts of one model, not competing ways to build an
+interface. Choose the card that names the result you want; each page begins
+with a runnable example and continues into the relevant settings.
 
-The result is a consistent visual language without forcing every surface into
-one event loop. Plain output remains a static write. A prompt owns its blocking
-interaction and cleanup. The full-screen TUI has its own TEA-style runtime,
-while the Ratatui adapter is a separate path for applications that already own
-their loop.
+## How the concepts fit together
 
-## Renderer-neutral views
+A `View` is the common value at the center of the model. A component keeps
+semantic data separate from its presentation, and a theme picks that
+presentation and the styles for semantic roles. Both produce Views without
+choosing a terminal backend.
 
-A `View` describes presentation before the destination is chosen. It can resolve
-to ANSI output for an ordinary CLI, into the full-screen runtime, or into a
-caller-owned Ratatui `Buffer` through the optional adapter.
+Styles determine how the View's cells look. Layout determines how Views occupy
+space and relate to one another. Text width determines how their content is
+measured in terminal cells. Canvas is a specialized View for content whose
+position or overlap must be expressed in those cells explicitly.
 
-That boundary keeps components reusable while allowing each renderer to preserve
-its own rules and capabilities.
+The completed View can then be resolved for an ordinary CLI write, a prompt,
+Urushi's full-screen runtime, or a caller-owned Ratatui buffer. Those surfaces
+have different event and output lifecycles, but they consume the same
+presentation model.
 
-Lists, tables, trees, summaries, and warnings are not extra `View` variants.
-Their presentations interpret semantic data and lower it into the same
-renderer-neutral primitives. Layout then receives the available area exactly
-once, regardless of which component produced the view.
-
-## Full-screen runtime and terminal backends
-
-The full-screen architecture is centered on `Application`: a pure program
-value with `init`, `update`, `view`, and `subscriptions`. The runtime owns the
-live model, effect execution, ordered delivery, frame scheduling, and terminal
-restoration. Application code does not own those resources and does not depend
-on a backend type.
-
-`urushi_tui_app::run` assembles and runs the end-to-end TEA lifecycle. It draws
-through the concrete `urushi-tui` `Screen` and `Frame`, whose Urushi-owned cell
-buffers provide diffing and transactional output. The caller-owned Ratatui path
-lives independently in `urushi-adapter-ratatui`; neither the frame engine nor
-the application runtime depends on Ratatui.
-
-## Semantic themes
-
-Components ask a `Theme` for semantic roles such as focused panels, prompt
-options, success, warning, or error. They do not decide concrete terminal
-colors themselves. Applications can therefore maintain one visual language
-across independently owned surfaces.
-
-## Width is part of presentation
-
-Terminal layout depends on display cells rather than bytes or Unicode scalar
-values. Urushi measures grapheme clusters and accounts for East Asian width when
-wrapping, aligning, joining borders, and resolving boxes.
+[Terminal graphics](/docs/graphics/) extend that model at its anchor boundary:
+an image reserves space as a View, then Kitty or Sixel pixels overlay the
+resolved region. Graphics are therefore not another layout primitive, and
+Canvas remains cell-space drawing rather than a pixel rasterizer.

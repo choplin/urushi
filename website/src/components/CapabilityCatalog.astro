@@ -1,0 +1,90 @@
+---
+interface Segment {
+  text: string;
+  className?: string;
+}
+
+interface Item {
+  title: string;
+  description: string;
+  href: string;
+  lines: Segment[][];
+}
+
+interface Props {
+  items: Item[];
+  label?: string;
+}
+
+const { items, label = 'Capability catalog' } = Astro.props;
+---
+
+<div class="capability-catalog" aria-label={label}>
+  {items.map((item) => (
+    <a class="capability-catalog__card" href={item.href}>
+      <pre class="capability-catalog__preview" aria-hidden="true"><code>{item.lines.map((line, lineIndex) => (
+        <>{line.map((segment) => <span class={segment.className}>{segment.text}</span>)}{lineIndex < item.lines.length - 1 ? '\n' : ''}</>
+      ))}</code></pre>
+      <strong>{item.title}</strong>
+      <span>{item.description}</span>
+    </a>
+  ))}
+</div>
+
+<style>
+  .capability-catalog {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 13rem), 1fr));
+    gap: 0.85rem;
+    margin: 1rem 0 1.75rem;
+  }
+
+  .capability-catalog__card {
+    display: flex;
+    min-width: 0;
+    padding: 0.8rem;
+    border: 1px solid var(--sl-color-gray-5);
+    border-radius: 0.65rem;
+    background: color-mix(in srgb, var(--sl-color-bg-nav) 88%, transparent);
+    color: inherit;
+    flex-direction: column;
+    gap: 0.35rem;
+    text-decoration: none;
+  }
+
+  .capability-catalog__card:hover {
+    border-color: var(--sl-color-accent-high);
+    background: color-mix(in srgb, var(--sl-color-accent) 8%, var(--sl-color-bg-nav));
+  }
+
+  .capability-catalog__preview {
+    min-height: 5.25rem;
+    margin: 0 0 0.35rem;
+    padding: 0.65rem;
+    overflow: hidden;
+    border: 0;
+    border-radius: 0.4rem;
+    background: #1e1e2e;
+    color: #cdd6f4;
+    font-size: 0.72rem;
+    line-height: 1.35;
+    white-space: pre;
+  }
+
+  .capability-catalog__card strong {
+    color: var(--sl-color-white);
+    line-height: 1.25;
+  }
+
+  .capability-catalog__card > span {
+    color: var(--sl-color-gray-2);
+    font-size: var(--sl-text-sm);
+    line-height: 1.4;
+  }
+
+  .capability-catalog__preview :global(.demo-accent) { color: #89b4fa; font-weight: 750; }
+  .capability-catalog__preview :global(.demo-success) { color: #a6e3a1; }
+  .capability-catalog__preview :global(.demo-warning) { color: #f9e2af; }
+  .capability-catalog__preview :global(.demo-muted) { color: #6c7086; }
+  .capability-catalog__preview :global(.demo-selected) { color: #11111b; background: #89b4fa; }
+</style>

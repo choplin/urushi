@@ -1,0 +1,327 @@
+---
+title: Native Screen and Frame
+description: Drive Urushi's synchronous cell renderer from a caller-owned terminal session and event loop.
+---
+
+import FlowDiagram from '../../../../components/FlowDiagram.astro';
+
+Use `urushi-tui` when your application already owns the synchronous loop but
+wants Urushi to manage cell buffers, incremental drawing, cursor output, and
+recovery after a partial write. `Screen` owns presentation history. It does not
+own input, raw mode, the alternate screen, application state, or scheduling.
+
+Choose [Application runtime](/docs/tui/runtime/) instead when the library should own
+message delivery, effects, subscriptions, and the terminal session. Use the
+[Ratatui integration](/docs/tui/ratatui/) when the destination is a Ratatui
+`Buffer` rather than Urushi's native terminal writer.
+
+## Install the synchronous renderer
+
+The default `crossterm` feature supplies a portable command writer. The
+terminal crate supplies the session, event, and query contracts used by the
+complete loop below.
+
+```toml
+[dependencies]
+urushi = "0.1.0"
+urushi-terminal = { version = "0.1.0", features = ["crossterm"] }
+urushi-tui = "0.1.0"
+```
+
+Disable `urushi-tui`'s default features when supplying another
+`urushi_terminal::CommandWriter`:
+
+```toml
+urushi-tui = { version = "0.1.0", default-features = false }
+```
+
+## Run a caller-owned synchronous loop
+
+This program enters and restores its own terminal session, reads events in its
+own loop, resolves one immutable `View` per frame, and copies that resolved
+rectangle into `Frame`. Press Left or Right to change the count and `q` to
+leave.
+
+```rust
+use std::{error::Error, io};
+
+use urushi::{Align, Available, TextStyle, VerticalAlign, View, resolve};
+use urushi_terminal::{
+    Event, EventSource, KeyCode, KeyKind, Position, SessionOptions,
+    TerminalQuery, TerminalSession,
+    backend::crossterm::CrosstermBackend,
+};
+use urushi_tui::{Frame, Screen};
+
+fn main() -> Result<(), Box<dyn Error>> {
+    // The host owns acquisition and restoration of terminal modes.
+    let mut session_backend = CrosstermBackend::new(io::stdout());
+    let mut session = TerminalSession::enter(
+        &mut session_backend,
+        SessionOptions {
+            raw_mode: true,
+            alternate_screen: true,
+            hide_cursor: true,
+            ..SessionOptions::default()
+        },
+    )?;
+
+    // Run and restoration are evaluated separately so an application error
+    // never skips explicit restoration.
+    let run_result = run_loop();
+    let restore_result = session.restore();
+    run_result?;
+    restore_result?;
+    Ok(())
+}
+
+fn run_loop() -> Result<(), Box<dyn Error>> {
+    // Input and output are host-owned handles for the same physical terminal.
+    let mut input = CrosstermBackend::new(io::sink());
+    let output = CrosstermBackend::new(io::stdout());
+    let mut screen = Screen::new(output, input.terminal_size()?)?;
+    let mut count = 0_i32;
+
+    loop {
+        draw_count(&mut screen, count)?;
+
+        match input.read_event()? {
+            Event::Key(key) if key.kind == KeyKind::Press => match key.code {
+                KeyCode::Char('q') | KeyCode::Escape => break,
+                KeyCode::Left => count -= 1,
+                KeyCode::Right => count += 1,
+                _ => {}
+            },
+            Event::Resize(size) => screen.resize(size)?,
+            _ => {}
+        }
+    }
+    Ok(())
+}
+
+fn draw_count(
+    screen: &mut Screen<CrosstermBackend<io::Stdout>>,
+    count: i32,
+) -> Result<(), Box<dyn Error>> {
+    let view = View::column(
+        Align::Left,
+        [
+            View::row(
+                VerticalAlign::Top,
+                [
+                    View::text("Count: ", TextStyle::new()),
+                    View::text(count.to_string(), TextStyle::new()),
+                    View::anchor("cursor"),
+                ],
+            ),
+            View::text("Left/Right changes the value; q exits", TextStyle::new()),
+        ],
+    );
+    let size = screen.size();
+    let resolved = resolve(
+        &view,
+        Available::size(size.columns(), size.rows()),
+    )?;
+    let cursor = resolved.anchor("cursor").and_then(|anchor| {
+        Some(Position::new(
+            usize::try_from(anchor.x()).ok()?,
+            usize::try_from(anchor.y()).ok()?,
+        ))
+    });
+
+    screen.draw(|frame| {
+        put_resolved(frame, &resolved);
+        frame.set_cursor(cursor);
+    })?;
+    Ok(())
+}
+
+fn put_resolved(frame: &mut Frame<'_>, resolved: &urushi::ResolvedView) {
+    for (row, cells) in resolved.rows().iter().enumerate() {
+        let mut column = 0;
+        for cell in cells {
+            frame.put(column, row, cell);
+            column += cell.width();
+        }
+    }
+}
+```
+
+The visible states are controlled by the caller's `count`, not by `Screen`:
+
+<FlowDiagram
+  title="State transitions"
+  description="The caller updates application state; Screen presents each resulting frame and restores the shell on exit."
+  lanes={[{
+    steps: [
+      { title: 'Count: 0▏', kind: 'state' },
+      { title: 'Count: 1▏', via: 'Right', kind: 'state', tone: 'accent' },
+      { title: 'Count: 0▏', via: 'Left', kind: 'state' },
+      { title: 'Restored shell', via: 'q', kind: 'state', tone: 'strong' },
+    ],
+  }]}
+/>
+
+`Frame::put` takes terminal-cell coordinates. Increment the column by
+`StyledGrapheme::width()`, not by one, because a resolved grapheme can occupy
+multiple cells. A zero-width cell or one that does not fit completely inside
+the frame is ignored. `Frame::set_cursor(Some(position))` shows and moves the
+cursor; `None` hides it.
+
+## Frame lifecycle and diffing
+
+Resolve before calling `draw`. Layout can fail, while the `draw` closure is a
+non-fallible, draw-scoped description of the next complete cell frame. At the
+start of every draw, the working frame is reset; omitting a cell therefore
+means that the next frame contains a blank there.
+
+| Starting state | What `Screen` writes | State after success | State after output failure |
+|---|---|---|---|
+| New, resized, or invalidated | clear, complete cell frame, cursor, flush | complete frame becomes the diff baseline | baseline is not committed; next draw clears and reconstructs everything |
+| Valid committed baseline | changed cells only, cursor, flush | working frame becomes the new baseline | old baseline is retained; next draw clears and reconstructs everything |
+| `draw_with` presentation | changed cells, cursor, extra presentation, flush | cells and presentation complete one transaction | any presentation or flush error forces the same complete repair |
+
+The physical terminal may have accepted a prefix before returning an error.
+That is why retry is deliberately a clear plus complete redraw rather than a
+diff from either the old or attempted frame.
+
+## Resize the cell surface
+
+Pass the size from every `Event::Resize` to `Screen::resize` before resolving
+the next View:
+
+```rust
+use urushi_terminal::Event;
+
+fn handle<W: urushi_terminal::CommandWriter>(
+    screen: &mut urushi_tui::Screen<W>,
+    event: Event,
+) -> std::io::Result<()> {
+    if let Event::Resize(size) = event {
+        screen.resize(size)?;
+    }
+    Ok(())
+}
+```
+
+Resize replaces both buffers and invalidates the physical baseline. The next
+draw therefore resolves against the new dimensions and emits the entire frame.
+If a graphics lifecycle owns terminal placements, clear that lifecycle before
+resizing; the graphics example below shows the ordering.
+
+## Invalidate after out-of-band output
+
+`Screen` can diff only against physical cells it still controls. Call
+`invalidate` when another owner has already changed the surface:
+
+```rust
+fn external_change<W: urushi_terminal::CommandWriter>(
+    screen: &mut urushi_tui::Screen<W>,
+) {
+    // An external renderer changed what is physically visible.
+    screen.invalidate();
+    // The next draw clears and reconstructs the complete Urushi cell frame.
+}
+```
+
+Use `modify_surface` when the direct terminal operation should go through the
+writer owned by `Screen`:
+
+```rust
+use urushi_terminal::{ClearRegion, Command, CommandWriter};
+
+fn clear_directly<W: CommandWriter>(
+    screen: &mut urushi_tui::Screen<W>,
+) -> std::io::Result<()> {
+    screen.modify_surface(|writer| {
+        writer.write_command(Command::Clear(ClearRegion::Screen))
+    })?;
+    Ok(())
+}
+```
+
+`modify_surface` marks the baseline invalid before calling the closure, so the
+next draw is complete whether that closure succeeds or fails. Do not use it for
+output that should participate in the current frame transaction; use
+`draw_with` for that case.
+
+## Attach graphics to the same frame transaction
+
+`draw_with` writes cells and the requested cursor first, then gives the owned
+writer to an additional presenter, and commits the cell baseline only after
+the presenter and final flush succeed. This is the correct attachment point
+for retained Kitty graphics:
+
+```rust
+use std::io;
+
+use urushi::{Available, ResolvedView, View, resolve};
+use urushi_graphics::kitty::KittyLifecycle;
+use urushi_terminal::{CommandWriter, PixelSize as CellPixelSize};
+use urushi_tui::{Frame, Screen};
+
+fn put_resolved(frame: &mut Frame<'_>, resolved: &ResolvedView) {
+    for (row, cells) in resolved.rows().iter().enumerate() {
+        let mut column = 0;
+        for cell in cells {
+            frame.put(column, row, cell);
+            column += cell.width();
+        }
+    }
+}
+
+fn draw_with_kitty<W: CommandWriter>(
+    screen: &mut Screen<W>,
+    kitty: &mut KittyLifecycle,
+    view: &View,
+    cell_pixels: Option<CellPixelSize>,
+) -> io::Result<()> {
+    let size = screen.size();
+    let resolved = resolve(
+        view,
+        Available::size(size.columns(), size.rows()),
+    )
+    .map_err(io::Error::other)?;
+
+    screen.draw_with(
+        |frame| put_resolved(frame, &resolved),
+        |writer| kitty.present(view, &resolved, cell_pixels, writer),
+    )
+}
+
+fn resize_with_kitty<W: CommandWriter>(
+    screen: &mut Screen<W>,
+    kitty: &mut KittyLifecycle,
+    size: urushi_tui::TerminalSize,
+) -> io::Result<()> {
+    screen.modify_surface(|writer| kitty.clear(writer))?;
+    screen.resize(size)
+}
+```
+
+Keep one lifecycle for one terminal presentation. Before exit, call
+`screen.modify_surface(|writer| kitty.clear(writer))` and then restore the
+terminal session. A `draw_with` presentation must not clear or replace the
+cell layer. For Sixel, a changed scene requires
+`modify_surface(|writer| sixel.clear(writer))`, a complete cell redraw, and
+then `sixel.present` through `draw_with`.
+
+See [Rendering and lifecycle](/docs/graphics/rendering-and-lifecycle/) for
+protocol selection, cell-pixel geometry, clipping, retry behavior, and
+fallback ownership.
+
+## Ownership checklist
+
+| Concern | Owner with `urushi-tui::Screen` |
+|---|---|
+| Application model and state transitions | caller |
+| Frame timing and redraw decisions | caller |
+| Input reads and event dispatch | caller |
+| Raw mode, alternate screen, mouse/paste modes, restoration | caller, usually `TerminalSession` |
+| View layout | `urushi::resolve`, invoked by caller |
+| Working and committed cell buffers | `Screen` |
+| Cell diff, cursor command, flush, and failed-write repair | `Screen` |
+| Graphics protocol lifecycle | caller, attached with `draw_with` and `modify_surface` |
+
+The complete method list is in the [TUI reference](/docs/tui/reference/) and
+the [generated `urushi-tui` API](/api/urushi_tui/index.html).

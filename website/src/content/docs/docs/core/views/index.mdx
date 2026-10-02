@@ -1,0 +1,235 @@
+---
+title: View
+description: Understand the renderer-neutral presentation value at the center of Urushi.
+---
+
+import FlowDiagram from '../../../../../components/FlowDiagram.astro';
+import CapabilityCatalog from '../../../../../components/CapabilityCatalog.astro';
+
+A `View` is Urushi's central presentation value: a renderer-neutral description
+of content and composition before any terminal surface draws it. Every View
+resolves to a rectangle of styled terminal cells. The same View can become
+static CLI output, a prompt frame, an Urushi TUI frame, cells in an existing
+Ratatui application, or a fallback region beneath terminal graphics.
+
+Styles decorate Views. Layout combines and sizes them. Components and themes
+produce them. Canvas is a free-positioned View node. Output surfaces decide
+when and where the resolved result is drawn. This shared value is what lets the
+rest of Urushi compose without sharing one event loop or terminal lifecycle.
+
+## See the shared presentation value
+
+<CapabilityCatalog
+  label="View node catalog"
+  items={[
+    {
+      title: 'Text and style',
+      description: 'Plain or multi-style grapheme-safe content.',
+      href: '/docs/core/styles/',
+      lines: [[{ text: 'Build ', className: 'demo-muted' }, { text: 'ready', className: 'demo-success' }], [{ text: '日本語 + emoji' }]],
+    },
+    {
+      title: 'Blocks and layout',
+      description: 'Border, padding, rows, columns, grids, and viewports.',
+      href: '/docs/core/layout/',
+      lines: [[{ text: '╭ Status ─╮' }], [{ text: '│ ', className: 'demo-muted' }, { text: 'running', className: 'demo-accent' }, { text: '  │' }], [{ text: '╰──────────╯' }]],
+    },
+    {
+      title: 'Semantic components',
+      description: 'Lists, tables, trees, and scrollbars composed into Views.',
+      href: '/docs/core/components/',
+      lines: [[{ text: 'Package   State' }], [{ text: 'urushi    ready', className: 'demo-success' }], [{ text: 'prompt    ready' }]],
+    },
+    {
+      title: 'Canvas and anchors',
+      description: 'Coordinates, overlap, line geometry, and reported regions.',
+      href: '/docs/core/canvas/',
+      lines: [[{ text: '┌───┐' }], [{ text: '│ ┼─┼──' }], [{ text: '└───┘' }]],
+    },
+  ]}
+/>
+
+Every card above is still a `View`. The difference is how the value is built,
+not which renderer or application surface can use it.
+
+[Run the complete View quickstart ↓](#quickstart)
+
+## Choose a View node
+
+| Need | Use |
+|---|---|
+| One plain or multi-style text flow | `text` or `styled_text` |
+| Box model, border, title, dimensions, alignment, or overflow | `block` or `titled_block` |
+| Horizontal arrangement | `row` |
+| Vertical arrangement | `column` |
+| Shared column widths | `grid` |
+| Finite window onto larger content | `viewport` |
+| Report a resolved region or cursor origin | `anchor_block` or `anchor` |
+| Explicit coordinates, overlap, or line geometry | [Canvas](/docs/core/canvas/) |
+| Reusable list, table, tree, or scrollbar meaning | [Components](/docs/core/components/) |
+
+## How View resolution works
+
+A View is a value, not an event loop or a terminal session. Text, blocks, rows,
+columns, grids, viewports, and Canvas surfaces all resolve to rectangles. That
+common shape lets a bordered block sit beside a table or Canvas just as text can.
+
+Build the complete tree first, then resolve it once under an `Available` area:
+
+<FlowDiagram
+  title="View resolution"
+  description="Resolution applies one available area to the complete immutable View tree."
+  lanes={[{
+    steps: [
+      { title: 'View tree', detail: 'Content and composition', kind: 'data' },
+      { title: 'Available area', detail: 'Finite or unbounded axes', via: 'with', kind: 'data', tone: 'accent' },
+      { title: 'Layout resolution', detail: 'Measure, allocate, place, and collect anchors', via: 'resolve', kind: 'process' },
+      { title: 'ResolvedView', detail: 'A rectangle of styled cells', via: 'result', kind: 'data', tone: 'strong' },
+    ],
+  }]}
+/>
+
+Resolution performs terminal-cell measurement, wrapping, box sizing,
+allocation, placement, viewport projection, and anchor collection. A renderer
+then turns the `ResolvedView` into ANSI output, a prompt frame, an Urushi TUI
+screen, or Ratatui cells. `print_view` and `println_view` perform resolution and
+rendering for standard streams.
+
+`Available::NONE` means unbounded, not zero. Nodes with intrinsic content can
+resolve without an allocation. Area-dependent claims such as `Length::Fill`,
+projected viewport axes, and a Canvas without a fallback extent require a finite
+allocation.
+
+A viewport does not scroll itself, an anchor does not own focus, and a View does
+not read events or retain application state. The application changes its state
+and produces a new View; the selected output surface owns its lifecycle.
+
+## Quickstart
+
+This example stacks a heading above two bordered status blocks:
+
+```sh
+cargo new view-demo
+cd view-demo
+cargo add urushi
+```
+
+Replace `src/main.rs` with:
+
+```rust
+use std::io;
+
+use urushi::{
+    Align, BlockStyle, Border, Color, TextStyle, VerticalAlign, View,
+};
+
+fn status(name: &str, value: &str, color: Color) -> View {
+    View::titled_block(
+        BlockStyle::new().border(Border::ROUNDED).padding((0, 1)),
+        name,
+        View::text(value, TextStyle::new().foreground(color).bold()),
+    )
+}
+
+fn main() -> io::Result<()> {
+    let statuses = View::row(
+        VerticalAlign::Top,
+        [
+            status("Build", "ready", Color::GREEN),
+            status("Tests", "passing", Color::CYAN),
+        ],
+    );
+
+    let view = View::column(
+        Align::Left,
+        [
+            View::text("Workspace", TextStyle::new().bold()),
+            statuses,
+        ],
+    );
+
+    urushi::println_view(&view)
+}
+```
+
+Run it with `cargo run`:
+
+<p class="terminal-preview-label">Rendered output</p>
+<pre class="terminal-preview" aria-label="A column containing a heading and a row of status blocks"><code><span class="ansi-bold">Workspace</span>
+╭ Build ╮╭ Tests ──╮
+│ <span class="ansi-green ansi-bold">ready</span> ││ <span class="ansi-cyan ansi-bold">passing</span> │
+╰───────╯╰─────────╯</code></pre>
+
+`row` arranges children horizontally; `column` arranges them vertically. Each
+block measures its title, padding, border, and child before the parent row
+chooses its height.
+
+## Retain repeated resolution across frames
+
+Use the free `resolve` function for a one-shot View or when the caller does not
+retain a rendering object. Use one `Resolver` when the same host repeatedly
+resolves immutable View snapshots and wants unchanged subtree output to be
+reused between frames. Both paths produce the same observable `ResolvedView`.
+
+This complete example resolves two frames. Only the viewport origin changes,
+so the retained child can be reprojected instead of being assembled again:
+
+```rust
+use std::error::Error;
+
+use urushi::{
+    Available, Projection, ProjectionBoundary, RenderSettings, Resolver,
+    TextStyle, View, Viewport, render,
+};
+
+fn frame(origin: i64) -> View {
+    View::viewport(
+        Viewport::horizontal(Projection::new(
+            origin,
+            ProjectionBoundary::Preserve,
+        )),
+        View::text("ABCDEFGH", TextStyle::new()),
+    )
+}
+
+fn main() -> Result<(), Box<dyn Error>> {
+    let mut resolver = Resolver::new();
+    let area = Available::size(4, 1);
+
+    let first = resolver.resolve(&frame(0), area)?;
+    let second = resolver.resolve(&frame(2), area)?;
+
+    assert_eq!(render(&first, &RenderSettings::default()), "ABCD");
+    assert_eq!(render(&second, &RenderSettings::default()), "CDEF");
+
+    resolver.clear();
+    let rebuilt = resolver.resolve(&frame(2), area)?;
+    assert_eq!(rebuilt, second);
+    Ok(())
+}
+```
+
+```text title="Two resolved frames"
+frame 1, origin 0: ABCD
+frame 2, origin 2: CDEF
+after clear:          CDEF
+```
+
+`clear` drops every retained evaluation artifact; it does not change layout
+semantics. Call it when the host deliberately wants a cold rebuild. Ordinary
+View or available-area changes already invalidate the affected artifacts, so
+application code does not clear the Resolver after every state update.
+
+The Resolver retains reconciliation inputs and materialized View output only.
+It does not own application state, clocks, event handling, redraw scheduling,
+terminal capabilities, graphics protocol state, or the output surface. The
+host updates its state, builds the next immutable View, decides when to draw,
+and keeps one Resolver with that drawing lifecycle.
+
+## Continue by task
+
+- [Size and arrange Views with Layout](/docs/core/layout/)
+- [Change cell appearance with Styles](/docs/core/styles/)
+- [Present semantic data with Components](/docs/core/components/)
+- [Draw at explicit coordinates with Canvas](/docs/core/canvas/)
+- [Look up the complete View and layout API](/docs/core/views/reference/)

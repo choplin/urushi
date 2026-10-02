@@ -1,0 +1,365 @@
+---
+title: Build your first application
+description: Learn the TEA model by building and running a complete keyboard-driven Urushi TUI.
+---
+
+import TeaLoopDiagram from '../../../../components/TeaLoopDiagram.astro';
+
+This tutorial builds a task list that stays open, moves its selection with the
+arrow keys, and exits with `q` or Escape. It assumes Rust knowledge, but it does
+not assume that you know The Elm Architecture (TEA).
+
+By the end, you will have one runnable program and know where application
+state, events, state changes, rendering, and terminal input belong.
+
+## Understand the application model
+
+TEA is a one-way state-management model. The name comes from the Elm language,
+but using it in Urushi does not require Elm knowledge.
+
+An application has four essential parts:
+
+| Part | Question it answers | Urushi representation |
+|---|---|---|
+| Model | What is true right now? | Your `Model` type |
+| Message | What happened? | Your `Message` enum |
+| Update | How does that event change the state? | `Application::update` |
+| View | What should the current state look like? | `Application::view` |
+
+The runtime repeats the same loop for every event. This is the same basic loop
+shown in the [official Elm guide](https://guide.elm-lang.org/architecture/),
+with Urushi `View`, `Effect`, and `Subscription` values at its runtime boundary:
+
+<TeaLoopDiagram />
+
+The application never asks the terminal what happened and never redraws it
+directly. Instead, it declares which event sources it wants through
+`subscriptions`. The runtime turns those events into messages, calls `update`,
+then draws the `View` returned by `view`.
+
+Two additional values cover work outside that cycle:
+
+- An **Effect** is one requested action, such as loading a file, waiting for a
+  delay, or shutting down. Its result comes back as another message.
+- A **Subscription** is an ongoing source, such as keyboard input, resize
+  observations, or a timer. It remains active while the application declares
+  it.
+
+For this first application, keyboard input is the only subscription and
+shutdown is the only effect.
+
+## Create the package
+
+Create a binary package and add the renderer-neutral view crate plus the
+application runtime:
+
+```toml title="Cargo.toml"
+[package]
+name = "task-list"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+urushi = "0.1.0"
+urushi-tui-app = "0.1.0"
+```
+
+## Define the state and events
+
+The model is the complete application state. If a value can change what the
+user sees or what the next event does, put it in the model.
+
+```rust
+struct Model {
+    tasks: Vec<&'static str>,
+    selected: usize,
+}
+```
+
+Messages describe events; they do not contain behavior. Terminal input is
+wrapped in an application message so that every change still passes through
+`update`.
+
+```rust
+use urushi_tui_app::Input;
+
+enum Message {
+    Input(Input),
+}
+```
+
+The empty `TaskList` value describes the application itself. Configuration
+that does not change while the program runs can live here. This example has no
+configuration, so it is a unit struct:
+
+```rust
+struct TaskList;
+```
+
+## Initialize the model
+
+`init` returns the initial model and any work that should start with it. The
+tasks already exist in memory, so there is no startup work and the effect is
+`Effect::none()`.
+
+```rust
+fn init(&self) -> (Model, Effect<Message>) {
+    let model = Model {
+        tasks: vec![
+            "Review pull request",
+            "Write release notes",
+            "Publish documentation",
+        ],
+        selected: 0,
+    };
+    (model, Effect::none())
+}
+```
+
+The runtime owns this model for the entire session. Application code receives
+`&mut Model` only in `update`; all other application methods can only read it.
+
+## Update state from messages
+
+`update` handles one message at a time. Up and Down change `selected`; `q` and
+Escape request an orderly shutdown. Returning a value describes what the
+runtime should do next—it does not perform terminal I/O inside `update`.
+
+```rust
+fn update(&self, model: &mut Model, message: Message) -> Effect<Message> {
+    let Message::Input(input) = message;
+
+    if let Input::Key(key) = input {
+        if key.kind == KeyKind::Release {
+            return Effect::none();
+        }
+
+        match key.code {
+            KeyCode::Up => {
+                model.selected = model.selected.saturating_sub(1);
+            }
+            KeyCode::Down => {
+                let last = model.tasks.len().saturating_sub(1);
+                model.selected = (model.selected + 1).min(last);
+            }
+            KeyCode::Char('q') | KeyCode::Escape => {
+                return Effect::shutdown();
+            }
+            _ => {}
+        }
+    }
+
+    Effect::none()
+}
+```
+
+The same model and message can be tested without starting a terminal: create a
+model, call `update` with a chosen message, and assert the new state.
+
+## Turn the model into a View
+
+`view` is a projection: it reads the model and returns a renderer-neutral
+`View`. It should not read files, wait, mutate the model, or write to the
+terminal. The runtime may call it whenever a frame is needed.
+
+```rust
+fn view(&self, model: &Model) -> View {
+    let mut rows = vec![View::text(
+        "Tasks",
+        TextStyle::new().foreground(Color::CYAN).bold(),
+    )];
+
+    for (index, task) in model.tasks.iter().enumerate() {
+        let selected = index == model.selected;
+        let marker = if selected { ">" } else { " " };
+        let style = if selected {
+            TextStyle::new().foreground(Color::GREEN).bold()
+        } else {
+            TextStyle::new()
+        };
+        rows.push(View::text(format!("{marker} {task}"), style));
+    }
+
+    rows.push(View::text(
+        "↑/↓ select · q/Esc quit",
+        TextStyle::new().dim(),
+    ));
+    View::column(Align::Left, rows)
+}
+```
+
+For the initial model, that View renders as:
+
+<pre className="terminal-preview" aria-label="Task list with the first task selected"><code><span className="ansi-cyan ansi-bold">Tasks</span>{'\n'}<span className="ansi-green ansi-bold">&gt; Review pull request</span>{'\n'}  Write release notes{'\n'}  Publish documentation{'\n'}<span className="ansi-dim">↑/↓ select · q/Esc quit</span></code></pre>
+
+The View describes content and layout. It does not know whether the runtime
+will update every terminal cell or only the cells that changed.
+
+## Subscribe to keyboard input
+
+An application receives nothing unless it declares a source. Map each runtime
+`Input` value into the `Message::Input` variant:
+
+```rust
+fn subscriptions(&self, _model: &Model) -> Subscription<Message> {
+    Subscription::input(Message::Input)
+}
+```
+
+The runtime starts this subscription after initialization and keeps it active
+while the application continues to return it. More advanced applications can
+return different subscriptions for different model states.
+
+## Run the application
+
+Put the pieces together in `src/main.rs`:
+
+```rust title="src/main.rs"
+use urushi::{Align, Color, TextStyle, View};
+use urushi_tui_app::{
+    run, Application, Effect, Input, KeyCode, KeyKind, Subscription,
+};
+
+struct TaskList;
+
+struct Model {
+    tasks: Vec<&'static str>,
+    selected: usize,
+}
+
+enum Message {
+    Input(Input),
+}
+
+impl Application for TaskList {
+    type Model = Model;
+    type Message = Message;
+
+    fn init(&self) -> (Model, Effect<Message>) {
+        let model = Model {
+            tasks: vec![
+                "Review pull request",
+                "Write release notes",
+                "Publish documentation",
+            ],
+            selected: 0,
+        };
+        (model, Effect::none())
+    }
+
+    fn update(&self, model: &mut Model, message: Message) -> Effect<Message> {
+        let Message::Input(input) = message;
+
+        if let Input::Key(key) = input {
+            if key.kind == KeyKind::Release {
+                return Effect::none();
+            }
+
+            match key.code {
+                KeyCode::Up => {
+                    model.selected = model.selected.saturating_sub(1);
+                }
+                KeyCode::Down => {
+                    let last = model.tasks.len().saturating_sub(1);
+                    model.selected = (model.selected + 1).min(last);
+                }
+                KeyCode::Char('q') | KeyCode::Escape => {
+                    return Effect::shutdown();
+                }
+                _ => {}
+            }
+        }
+
+        Effect::none()
+    }
+
+    fn view(&self, model: &Model) -> View {
+        let mut rows = vec![View::text(
+            "Tasks",
+            TextStyle::new().foreground(Color::CYAN).bold(),
+        )];
+
+        for (index, task) in model.tasks.iter().enumerate() {
+            let selected = index == model.selected;
+            let marker = if selected { ">" } else { " " };
+            let style = if selected {
+                TextStyle::new().foreground(Color::GREEN).bold()
+            } else {
+                TextStyle::new()
+            };
+            rows.push(View::text(format!("{marker} {task}"), style));
+        }
+
+        rows.push(View::text(
+            "↑/↓ select · q/Esc quit",
+            TextStyle::new().dim(),
+        ));
+        View::column(Align::Left, rows)
+    }
+
+    fn subscriptions(&self, _model: &Model) -> Subscription<Message> {
+        Subscription::input(Message::Input)
+    }
+}
+
+fn main() -> Result<(), urushi_tui_app::Error> {
+    let final_model = run(TaskList)?;
+
+    // The full-screen terminal session has been restored at this point.
+    println!("Selected: {}", final_model.tasks[final_model.selected]);
+    Ok(())
+}
+```
+
+Run it:
+
+```sh
+cargo run
+```
+
+Press Down once. The runtime delivers an input message, `update` changes
+`selected` from `0` to `1`, and `view` describes the next frame:
+
+<pre className="terminal-preview" aria-label="Task list after pressing Down once"><code><span className="ansi-cyan ansi-bold">Tasks</span>{'\n'}  Review pull request{'\n'}<span className="ansi-green ansi-bold">&gt; Write release notes</span>{'\n'}  Publish documentation{'\n'}<span className="ansi-dim">↑/↓ select · q/Esc quit</span></code></pre>
+
+Press `q`. `update` returns `Effect::shutdown()`, the runtime stops input,
+restores the terminal session, and returns the final model. Ordinary output is
+safe again:
+
+```text title="Output after the full-screen session closes"
+Selected: Write release notes
+```
+
+## Trace one key press
+
+Nothing jumps directly from a key to a screen mutation. Pressing Down follows
+the same explicit path every time:
+
+| Stage | Value in this application |
+|---|---|
+| Terminal input | `Input::Key(KeyCode::Down)` |
+| Application message | `Message::Input(input)` |
+| Update | `selected: 0 → 1` |
+| View | second task receives the marker and selected style |
+| Runtime | resolves the View and draws the changed cells |
+
+That separation is the practical value of TEA: application decisions are
+ordinary state transitions, so they can be read and tested without a terminal.
+Terminal ownership and drawing remain runtime concerns.
+
+## Grow the application without changing the loop
+
+Larger applications use the same loop; they add message variants and model
+fields rather than introducing another control flow.
+
+| Need | Add to the application | Continue with |
+|---|---|---|
+| Load files or call a service | loading/result model states and an effect whose result is a message | [Effects and subscriptions](/docs/tui/effects-and-subscriptions/) |
+| React to resize | a surface message and, only when application decisions require it, surface data in the model | [Application runtime](/docs/tui/runtime/) |
+| Add focus, modes, or navigation | focus/mode fields in the model and input branches in `update` | [Application runtime](/docs/tui/runtime/) |
+| Understand ordering and redraw timing | no new application mechanism; learn the runtime guarantees | [Message delivery and drawing](/docs/tui/delivery-and-drawing/) |
+| Control the terminal loop yourself | replace the application runtime with caller-owned `Screen` and `Frame` | [Native Screen and Frame](/docs/tui/screen-and-frame/) |
+
+Keep the same boundary as the application grows: `update` changes state,
+`view` describes it, effects request one-shot work, and subscriptions declare
+ongoing sources.

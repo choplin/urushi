@@ -20,10 +20,8 @@ let view = View::column(
 );
 ```
 
-```text title="Rendered output"
-Build
-Complete
-```
+<pre class="terminal-preview" aria-label="Bold Build above regular Complete"><code><span class="ansi-bold">Build</span>
+Complete</code></pre>
 
 `View::column` stacks children and aligns them horizontally. `View::row` places
 children side by side and takes a `VerticalAlign`.
@@ -51,14 +49,12 @@ let view = View::block(
 
 The resolved view is:
 
-```text title="Rendered output"
-╭──────────────────────────────╮
-│                              │
-│  A status message that can   │
-│  wrap.                       │
-│                              │
-╰──────────────────────────────╯
-```
+<pre class="terminal-preview" aria-label="Wrapped status message inside a bright-black rounded border with padding"><code><span class="ansi-bright-black">╭──────────────────────────────╮</span>
+<span class="ansi-bright-black">│</span>                              <span class="ansi-bright-black">│</span>
+<span class="ansi-bright-black">│</span>  A status message that can   <span class="ansi-bright-black">│</span>
+<span class="ansi-bright-black">│</span>  wrap.                       <span class="ansi-bright-black">│</span>
+<span class="ansi-bright-black">│</span>                              <span class="ansi-bright-black">│</span>
+<span class="ansi-bright-black">╰──────────────────────────────╯</span></code></pre>
 
 `BlockStyle` owns margin, border, padding, dimensions, alignment, overflow, and
 the style of the geometry it creates. Its text style does not implicitly flow
@@ -69,6 +65,41 @@ into children; every child carries its own complete style.
 Fixed cell lengths are not the only option. `Length::fill(weight)` distributes
 remaining space among siblings. Minimum and maximum dimensions constrain the
 result after demand and available space are considered.
+
+A `Length::fill(1)` child and `Length::fill(2)` child split 30 cells into 10 and
+20 cells before their minimum and maximum limits are applied:
+
+```rust
+use urushi::{BlockStyle, Border, Length, TextStyle, VerticalAlign, View};
+
+let view = View::row(VerticalAlign::Top, [
+    View::block(
+        BlockStyle::new()
+            .border(Border::NORMAL)
+            .width(Length::fill(1))
+            .min_width(6)
+            .max_width(10),
+        View::text("left", TextStyle::new()),
+    ),
+    View::block(
+        BlockStyle::new()
+            .border(Border::NORMAL)
+            .width(Length::fill(2))
+            .min_width(8)
+            .max_width(20),
+        View::text("right", TextStyle::new()),
+    ),
+]);
+```
+
+```text title="Resolved at 30 columns"
+┌────────┐┌──────────────────┐
+│left    ││right             │
+└────────┘└──────────────────┘
+```
+
+Use fixed lengths for stable report columns and fill lengths when a row should
+absorb the remaining terminal width.
 
 Use `measure` when you need the natural size without a constraint. Use
 `resolve` when you need the actual cell rectangle for a known area.
@@ -111,6 +142,7 @@ let view = View::titled_block(
 └────────────────────┘
 ```
 
-See [Styles and views](/docs/core/styles-and-views/) for the model behind these
-types and [Terminal width and CJK text](/docs/core/text-width/) for measurement
-rules.
+See [Layout](/docs/core/layout/) for the complete built-in layout
+vocabulary, [Canvas](/docs/core/canvas/) for free-positioned drawing, and
+[Terminal width and CJK text](/docs/core/text-width/) for measurement rules.
+The [CLI reference](/docs/cli/reference/) lists the output helpers and defaults.

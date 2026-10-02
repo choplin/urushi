@@ -2,4 +2,5 @@
 /.pnpm-store
 /website/.astro
 /website/dist
+/website/.generated-public
 /website/node_modules
