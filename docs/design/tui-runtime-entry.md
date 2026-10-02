@@ -48,10 +48,16 @@ that supplies none gets what `run` gives. The session options — raw mode,
 alternate screen, the input modes, mouse capture — sit on the same builder;
 their defaults are in [`tui-terminal-ownership.md`](tui-terminal-ownership.md).
 
-The default physical terminal is provided by the default `crossterm` feature.
-A build of `urushi-tui-app` without `crossterm` retains the full application
-framework but must supply its physical connection with `.backend(backend)`
-before `.run()` becomes available.
+The default `crossterm` feature provides the short entry point and its physical
+terminal choice. A cell-only build uses the portable Crossterm backend. On
+Unix, a build with the optional `graphics` feature instead uses
+`NativeTerminal`: graphics selection needs positive replies from the same
+bidirectional connection before its event reader starts. On a platform without
+that native connection the portable backend provides no positive graphics
+evidence, so automatic selection keeps text fallback unless the caller supplies
+a query-capable backend. A build of `urushi-tui-app` without `crossterm` retains
+the full application framework but must supply its physical connection with
+`.backend(backend)` before `.run()` becomes available.
 
 ### The executor boundary
 
@@ -79,16 +85,19 @@ declared `Subscription::terminal_errors(f)`: the failure reaches `update` as
 committed, and the runtime goes on to draw again at the next opportunity. The
 application decides in `update` — ignore, record, save and shut down. Without
 that subscription the failure ends the run with `Error::Terminal`. The general
-rule is that an error the runtime cannot hand to anyone is fatal, and the
-terminal session is restored on every exit path the same way.
+rule is that an error the runtime cannot hand to anyone is fatal. On normal and
+error returns the runtime attempts restoration and can report a restoration
+failure.
 
 Input reads and surface queries have no application error subscription. Their
 failure therefore follows the general fatal rule and returns
 `Error::Terminal`; terminal restoration still runs before `run` returns.
 
 A panic in `update`, `view`, `subscriptions`, or `init` is not caught. It
-unwinds through `run`; `TerminalSession` restores the terminal during the
-unwind, as [`tui-terminal-ownership.md`](tui-terminal-ownership.md) requires.
+unwinds through `run`; `TerminalSession` makes a best-effort restoration attempt
+from `Drop`, where another cleanup error cannot be returned. Process abort,
+`kill -9`, and undeclared signals that bypass unwinding cannot run that guard,
+as [`tui-terminal-ownership.md`](tui-terminal-ownership.md) specifies.
 
 ## Why one builder behind `run`
 

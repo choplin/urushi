@@ -63,8 +63,10 @@ pub struct DefaultTerminal;
 /// A blocking full-screen application runtime.
 ///
 /// [`Runtime::new`] uses the production executor, clock, and TUI session
-/// profile. With the `crossterm` feature it also supplies the production
-/// terminal backend; a runtime-only build must provide one with
+/// profile. With the `crossterm` feature it also supplies a production
+/// terminal backend: graphics-enabled Unix builds use the native bidirectional
+/// connection for capability queries, and other builds use Crossterm. A
+/// runtime-only build must provide one with
 /// [`backend`](Runtime::backend). Builders replace those boundaries or
 /// individual session choices before [`run`](Runtime::run) takes ownership and
 /// blocks the calling thread.
@@ -96,7 +98,11 @@ impl<A> Runtime<A, DefaultTerminal> {
         }
     }
 
-    /// Runs with the default Crossterm backend.
+    /// Runs with the default production terminal backend.
+    ///
+    /// A graphics-enabled Unix build uses the native bidirectional connection
+    /// so protocol capabilities can be positively queried. Other builds use
+    /// the portable Crossterm backend.
     #[cfg(feature = "crossterm")]
     pub fn run(self) -> Result<A::Model, Error>
     where
@@ -112,13 +118,38 @@ impl<A> Runtime<A, DefaultTerminal> {
         } = self;
         Runtime {
             application,
-            backend: urushi_terminal::backend::crossterm::CrosstermBackend::new(io::stdout()),
+            backend: open_default_terminal()?,
             executor,
             clock,
             session,
             presentation,
         }
         .run()
+    }
+}
+
+#[cfg(all(feature = "crossterm", feature = "graphics", unix))]
+type ProductionTerminal = urushi_terminal::backend::native::NativeTerminal;
+
+#[cfg(all(feature = "crossterm", not(all(feature = "graphics", unix))))]
+type ProductionTerminal = urushi_terminal::backend::crossterm::CrosstermBackend<std::io::Stdout>;
+
+/// Opens the default physical connection for the enabled presentation.
+///
+/// Runtime-owned graphics require positive capability replies. On Unix the
+/// native connection owns both sides of `/dev/tty`, so it can issue those
+/// queries before its event reader starts. The portable Crossterm adapter
+/// remains the default where the native connection is unavailable and for
+/// cell-only builds, whose presentation does not require capability probing.
+#[cfg(feature = "crossterm")]
+fn open_default_terminal() -> io::Result<ProductionTerminal> {
+    #[cfg(all(feature = "graphics", unix))]
+    {
+        ProductionTerminal::open()
+    }
+    #[cfg(not(all(feature = "graphics", unix)))]
+    {
+        Ok(ProductionTerminal::new(io::stdout()))
     }
 }
 
@@ -528,6 +559,17 @@ mod tests {
 
     use super::*;
     use crate::{Effect, Input, Subscription, Surface};
+
+    #[cfg(all(feature = "crossterm", feature = "graphics", unix))]
+    #[test]
+    fn graphics_default_uses_the_query_capable_native_connection() {
+        fn returns_native(
+            _open: fn() -> io::Result<urushi_terminal::backend::native::NativeTerminal>,
+        ) {
+        }
+
+        returns_native(open_default_terminal);
+    }
 
     fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
         mutex

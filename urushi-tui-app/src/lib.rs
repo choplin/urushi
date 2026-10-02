@@ -15,9 +15,11 @@
 //!
 //! # Cargo features
 //!
-//! - `crossterm` is enabled by default and provides the production terminal
-//!   backend used by [`run`] and [`Runtime::run`]. With default features
-//!   disabled, supply a backend through [`Runtime::backend`].
+//! - `crossterm` is enabled by default and provides [`run`] and
+//!   [`Runtime::run`]. Cell-only builds and platforms without the native Unix
+//!   connection use its portable backend; graphics-enabled Unix builds use the
+//!   native bidirectional backend so protocol support can be queried. With
+//!   default features disabled, supply a backend through [`Runtime::backend`].
 //! - `graphics` integrates Kitty or Sixel presentation and re-exports
 //!   `GraphicsPreference` for runtime selection. The runtime retains Kitty
 //!   uploads and caches encoded Sixel bands while redrawing each complete

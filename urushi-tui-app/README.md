@@ -20,6 +20,11 @@ urushi-graphics = "0.1.0"
 urushi-tui-app = { version = "0.1.0", features = ["graphics"] }
 ```
 
+On Unix this configuration makes the default runtime use Urushi's native
+bidirectional terminal connection so it can positively query Kitty and Sixel
+support. On other platforms automatic selection keeps the text fallback unless
+the application supplies a capability-aware backend.
+
 The 0.1 API is in early development. See [Choose a terminal surface](https://github.com/choplin/urushi#choose-a-terminal-surface) and [docs.rs](https://docs.rs/urushi-tui-app).
 
 Licensed under the MIT License.
