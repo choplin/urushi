@@ -1099,7 +1099,7 @@ checksum = "1fc81956842c57dac11422a97c3b8195a1ff727f06e85c84ed2e8aa277c9a0fd"
 
 [[package]]
 name = "urushi"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "divan",
  "unicode-segmentation",
@@ -1110,7 +1110,7 @@ dependencies = [
 
 [[package]]
 name = "urushi-adapter-ratatui"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "ratatui",
  "urushi",
@@ -1118,14 +1118,14 @@ dependencies = [
 
 [[package]]
 name = "urushi-cli"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "urushi",
 ]
 
 [[package]]
 name = "urushi-derive"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "proc-macro-crate",
  "proc-macro2",
@@ -1135,7 +1135,7 @@ dependencies = [
 
 [[package]]
 name = "urushi-graphics"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "base64",
  "icy_sixel",
@@ -1145,7 +1145,7 @@ dependencies = [
 
 [[package]]
 name = "urushi-prompt"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "unicode-segmentation",
  "urushi",
@@ -1154,7 +1154,7 @@ dependencies = [
 
 [[package]]
 name = "urushi-terminal"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "crossterm",
  "libc",
@@ -1163,7 +1163,7 @@ dependencies = [
 
 [[package]]
 name = "urushi-tui"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "compact_str",
  "divan",
@@ -1174,7 +1174,7 @@ dependencies = [
 
 [[package]]
 name = "urushi-tui-app"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "futures-core",
  "libc",

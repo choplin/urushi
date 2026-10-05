@@ -12,4 +12,4 @@ keywords = ["cli", "terminal", "style", "ansi"]
 categories = ["command-line-interface"]
 
 [dependencies]
-urushi = { path = "../urushi", version = "=0.1.0" }
+urushi = { path = "../urushi", version = "=0.1.1" }

@@ -14,5 +14,5 @@ categories = ["command-line-interface", "graphics"]
 [dependencies]
 base64 = "0.22"
 icy_sixel = "=0.5.1"
-urushi = { path = "../urushi", version = "=0.1.0" }
-urushi-terminal = { path = "../urushi-terminal", version = "=0.1.0" }
+urushi = { path = "../urushi", version = "=0.1.1" }
+urushi-terminal = { path = "../urushi-terminal", version = "=0.1.1" }

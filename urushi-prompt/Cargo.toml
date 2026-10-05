@@ -11,11 +11,11 @@ repository.workspace = true
 
 [dependencies]
 unicode-segmentation.workspace = true
-urushi = { path = "../urushi", version = "=0.1.0" }
-urushi-terminal = { path = "../urushi-terminal", version = "=0.1.0" }
+urushi = { path = "../urushi", version = "=0.1.1" }
+urushi-terminal = { path = "../urushi-terminal", version = "=0.1.1" }
 
 [target.'cfg(not(unix))'.dependencies]
-urushi-terminal = { path = "../urushi-terminal", version = "=0.1.0", features = ["crossterm"] }
+urushi-terminal = { path = "../urushi-terminal", version = "=0.1.1", features = ["crossterm"] }
 
 [dev-dependencies]
-urushi-terminal = { path = "../urushi-terminal", version = "=0.1.0", features = ["crossterm"] }
+urushi-terminal = { path = "../urushi-terminal", version = "=0.1.1", features = ["crossterm"] }

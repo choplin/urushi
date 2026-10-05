@@ -13,8 +13,8 @@ categories = ["command-line-interface"]
 
 [dependencies]
 compact_str = "0.9.1"
-urushi = { path = "../urushi", version = "=0.1.0" }
-urushi-terminal = { path = "../urushi-terminal", version = "=0.1.0" }
+urushi = { path = "../urushi", version = "=0.1.1" }
+urushi-terminal = { path = "../urushi-terminal", version = "=0.1.1" }
 unicode-width.workspace = true
 
 [features]
