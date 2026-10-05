@@ -4,8 +4,8 @@ A TEA-style application framework for full-screen Urushi interfaces.
 
 ```toml
 [dependencies]
-urushi = "0.1.0"
-urushi-tui-app = "0.1.0"
+urushi = "0.1.1"
+urushi-tui-app = "0.1.1"
 ```
 
 Applications describe model initialization, pure updates, views, effects, and subscriptions. The runtime owns ordered delivery, scheduling, terminal input, frame presentation, and session restoration. Enable `graphics` to integrate `urushi-graphics` with the same terminal owner.
@@ -15,9 +15,9 @@ directly and enable the runtime integration:
 
 ```toml
 [dependencies]
-urushi = "0.1.0"
-urushi-graphics = "0.1.0"
-urushi-tui-app = { version = "0.1.0", features = ["graphics"] }
+urushi = "0.1.1"
+urushi-graphics = "0.1.1"
+urushi-tui-app = { version = "0.1.1", features = ["graphics"] }
 ```
 
 On Unix this configuration makes the default runtime use Urushi's native

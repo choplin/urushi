@@ -4,7 +4,7 @@ Composable styling, layout, semantic components, and terminal rendering for Rust
 
 ```toml
 [dependencies]
-urushi = "0.1.0"
+urushi = "0.1.1"
 ```
 
 Urushi keeps logical styles and `View` values independent from terminal output, with CJK-aware measurement and one renderer-neutral layout pass. It can feed plain CLI output, `urushi-prompt`, the native Urushi TUI stack, or `urushi-adapter-ratatui`.

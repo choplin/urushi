@@ -4,7 +4,7 @@ Backend-independent terminal contracts and target-specific inspection for the Ur
 
 ```toml
 [dependencies]
-urushi-terminal = "0.1.0"
+urushi-terminal = "0.1.1"
 ```
 
 The default build exposes commands, events, sessions, styles, and capability

@@ -4,8 +4,8 @@ Synchronous full-screen presentation for Urushi.
 
 ```toml
 [dependencies]
-urushi = "0.1.0"
-urushi-tui = "0.1.0"
+urushi = "0.1.1"
+urushi-tui = "0.1.1"
 ```
 
 `Screen` and draw-scoped `Frame` own Urushi cell buffers, diffing, and transactional terminal output. The caller still owns application state, input, terminal queries, raw mode, session restoration, and the event loop. The default `crossterm` feature re-exports the portable backend.

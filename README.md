@@ -24,7 +24,7 @@ Urushi gives command output, interactive prompts, and full-screen TUIs one
 shared presentation foundation while each surface keeps its own interaction
 and terminal lifecycle.
 
-**Status:** Urushi 0.1.0 is in early development. Public APIs may change before
+**Status:** Urushi 0.1.1 is in early development. Public APIs may change before
 1.0.
 
 ## Why Urushi?
@@ -105,7 +105,7 @@ surface to its dependency set and first task.
 
 ## Quickstart
 
-Urushi 0.1.0 requires Rust 1.90 or newer. Create a small application and add
+Urushi 0.1.1 requires Rust 1.90 or newer. Create a small application and add
 the core crate:
 
 ```sh
@@ -232,7 +232,7 @@ that correspond to the surfaces your application presents.
 
 ## Compatibility and limitations
 
-- **Rust:** Urushi 0.1.0 requires Rust 1.90 or newer.
+- **Rust:** Urushi 0.1.1 requires Rust 1.90 or newer.
 - **Platforms:** CI checks default and all-feature builds on Linux, macOS, and
   Windows, plus the complete feature graph with Rust 1.90.
 - **Terminal capabilities:** Colors, attributes, hyperlinks, and graphics vary

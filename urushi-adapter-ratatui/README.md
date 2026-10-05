@@ -4,8 +4,8 @@ Stateless Ratatui adapters for Urushi views and logical styles.
 
 ```toml
 [dependencies]
-urushi = "0.1.0"
-urushi-adapter-ratatui = "0.1.0"
+urushi = "0.1.1"
+urushi-adapter-ratatui = "0.1.1"
 ```
 
 The application retains ownership of its Ratatui terminal and event loop. This crate resolves Urushi views into caller-owned `Buffer` regions and converts the supported logical style subset without moving Ratatui types into Urushi core.
