@@ -35,4 +35,5 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Shared terminal commands, events, geometry, capability detection, and
   session restoration across the prompt, TUI, and graphics surfaces.
 
+[Unreleased]: https://github.com/choplin/urushi/compare/v0.1.0...HEAD
 [0.1.0]: https://github.com/choplin/urushi/releases/tag/v0.1.0

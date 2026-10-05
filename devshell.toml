@@ -1,11 +1,7 @@
 [devshell]
 name = "urushi"
-packages = ["cargo-sweep"]
+packages = ["cargo-release", "cargo-sweep"]
 
 [[env]]
 name = "CARGO_HOME"
 eval = "${CARGO_HOME:-$HOME/.cargo}"
-
-[[env]]
-name = "PATH"
-prefix = "${CARGO_HOME}/bin"

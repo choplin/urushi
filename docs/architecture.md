@@ -234,8 +234,7 @@ a role are documented with the extension point itself, in
 | `urushi-adapter-ratatui` | Optional Ratatui integration: logical-style conversion, stateless widgets, resolved-cell writing, and anchor translation for a caller-owned Ratatui buffer. | `urushi` |
 
 The packages share one release version and are published in dependency order;
-[`design/release-packaging.md`](design/release-packaging.md) defines that
-release boundary and its verification gates.
+[`releasing.md`](releasing.md) describes the maintainer workflow.
 
 `urushi-prompt` owns interactive prompt behavior. The core crate must not gain
 prompt-specific navigation, validation, cursor, or form-submission policy merely
