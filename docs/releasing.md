@@ -2,7 +2,8 @@
 
 Urushi publishes all nine workspace crates at one version. Internal registry
 dependencies use that exact version, so releases are coordinated with
-`cargo-release` rather than publishing crates individually.
+`cargo-release` rather than publishing crates individually. GitHub Actions is
+the only production release executor; local use stops at the preview.
 
 The release configuration is defined by [`release.toml`](../release.toml).
 
@@ -12,14 +13,13 @@ The release configuration is defined by [`release.toml`](../release.toml).
   with `origin/main`.
 - Confirm that CI passed for that commit, including the host matrix, MSRV,
   formatting, Clippy, rustdoc, and package checks.
-- Prepare and merge a release PR that changes `Unreleased` in
+- Prepare a reviewed change on `main` that changes `Unreleased` in
   [`CHANGELOG.md`](../CHANGELOG.md) into the dated release section, adds a new
   empty `Unreleased` section and comparison link, and updates every README
   version example to the target version.
 - Leave workspace package and internal dependency versions unchanged in that
-  PR; `cargo-release` owns those changes.
-- Make crates.io credentials available through Cargo's credential provider or
-  the release environment.
+  change; `cargo-release` owns those changes.
+- Confirm that the release preparation is pushed to `origin/main`.
 
 Enter the development shell so the flake-locked Rust and `cargo-release`
 versions are used:
@@ -31,7 +31,7 @@ nix develop
 Use the `cargo-release` binary directly. Do not use `cargo release`, because
 Cargo plugin dispatch can select a different executable from `CARGO_HOME`.
 
-## Preview and execute
+## Preview locally
 
 Preview the release without changing Git or publishing anything:
 
@@ -46,10 +46,22 @@ Confirm that the preview:
 - selects all publishable crates in dependency order; and
 - plans one release commit, one `v<version>` tag, and a push to `origin`.
 
-After explicit human approval, execute the same release:
+Do not pass `--execute` locally. The production credentials are short-lived
+and available only to the release workflow.
+
+## Execute through GitHub Actions
+
+Each crate must trust the `choplin/urushi` repository and
+`.github/workflows/release.yml` in its crates.io Trusted Publishing settings.
+No GitHub environment is part of that identity.
+
+After explicit human approval of the preview, dispatch **Release crates** from
+the `main` branch and enter the exact version. The workflow repeats the preview,
+exchanges its GitHub OIDC identity for a short-lived crates.io token, and then
+runs:
 
 ```sh
-cargo-release release <version> --workspace --execute
+cargo-release release <version> --workspace --execute --no-confirm
 ```
 
 The execute path updates package versions, internal dependencies, and
@@ -60,27 +72,18 @@ order, creates the tag, and pushes the commit and tag.
 ## Resume an interrupted release
 
 Published crate versions cannot be replaced. Keep the generated release commit
-unchanged and preview the remaining publications:
+unchanged. After identifying and correcting the failure, dispatch **Release
+crates** again from `main` with the same version.
+
+The repeated workflow preview shows the remaining publications. During
+execution, `cargo-release` skips versions that already exist and continues in
+dependency order. Once all packages resolve from crates.io, it creates the
+missing tag and pushes the release commit and tag.
+
+For diagnosis only, the individual local previews are:
 
 ```sh
 cargo-release release publish --workspace
-```
-
-After checking the remaining set, continue it:
-
-```sh
-cargo-release release publish --workspace --execute
-```
-
-Already-published versions are skipped. Once all packages resolve from
-crates.io, create a missing tag or push through the corresponding preview and
-execute steps:
-
-```sh
-cargo-release release tag --workspace
-cargo-release release tag --workspace --execute
-cargo-release release push --workspace
-cargo-release release push --workspace --execute
 ```
 
 Do not edit the release contents, reuse the version for a different commit, or
