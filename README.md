@@ -5,6 +5,18 @@
 <p align="center">Composable styling, components, prompts, and terminal UI for Rust.</p>
 
 <p align="center">
+  <a href="https://urushi.choplin.dev/">Website</a> ·
+  <a href="https://urushi.choplin.dev/docs/">Documentation</a> ·
+  <a href="https://docs.rs/urushi">API reference</a>
+</p>
+
+<p align="center">
+  <a href="https://crates.io/crates/urushi"><img src="https://img.shields.io/crates/v/urushi" alt="crates.io"></a>
+  <a href="https://github.com/choplin/urushi/actions/workflows/ci.yml"><img src="https://github.com/choplin/urushi/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <a href="LICENSE-MIT"><img src="https://img.shields.io/crates/l/urushi" alt="License"></a>
+</p>
+
+<p align="center">
   <img src="assets/brand/urushi-readme-hero.png" width="100%" alt="Urushi brings text styling, layout, and components together for command output, interactive prompts, and full-screen terminal applications">
 </p>
 
@@ -34,9 +46,9 @@ and renderer-neutral views remain shared across all three surfaces.
 
 | Surface | What it gives you | Start with |
 | --- | --- | --- |
-| **Command output** | Composable layouts and semantic presentations that degrade safely when redirected | [`urushi`](website/src/content/docs/docs/cli/styled-output.md) or [`urushi-cli`](website/src/content/docs/docs/cli/presentations.md) |
-| **Interactive prompts** | Typed input, validation, selection, and confirmation in a blocking session | [`urushi-prompt`](website/src/content/docs/docs/prompts/index.mdx) |
-| **Full-screen applications** | State, updates, effects, subscriptions, drawing, and terminal lifecycle | [`urushi-tui-app`](website/src/content/docs/docs/tui/runtime.mdx) |
+| **Command output** | Composable layouts and semantic presentations that degrade safely when redirected | [`urushi`](https://urushi.choplin.dev/docs/cli/styled-output/) or [`urushi-cli`](https://urushi.choplin.dev/docs/cli/presentations/) |
+| **Interactive prompts** | Typed input, validation, selection, and confirmation in a blocking session | [`urushi-prompt`](https://urushi.choplin.dev/docs/prompts/) |
+| **Full-screen applications** | State, updates, effects, subscriptions, drawing, and terminal lifecycle | [`urushi-tui-app`](https://urushi.choplin.dev/docs/tui/runtime/) |
 
 ### Command output
 
@@ -85,10 +97,10 @@ Run stateful TUIs with a TEA-style application runtime.
 | Requirement | Use |
 | --- | --- |
 | Own the input, timing, and terminal session | [`urushi-tui`](urushi-tui/) for a synchronous frame loop |
-| Render inside an existing Ratatui application | [`urushi-adapter-ratatui`](website/src/content/docs/docs/tui/ratatui.md) |
-| Present Kitty or Sixel images with text fallback | [`urushi-graphics`](website/src/content/docs/docs/graphics/index.md) |
+| Render inside an existing Ratatui application | [`urushi-adapter-ratatui`](https://urushi.choplin.dev/docs/tui/ratatui/) |
+| Present Kitty or Sixel images with text fallback | [`urushi-graphics`](https://urushi.choplin.dev/docs/graphics/) |
 
-[Choose by use case](website/src/content/docs/docs/use-cases.md) maps each
+[Choose by use case](https://urushi.choplin.dev/docs/use-cases/) maps each
 surface to its dependency set and first task.
 
 ## Quickstart
@@ -145,7 +157,7 @@ styling. `NO_COLOR=1` disables color without discarding other supported text
 attributes.
 
 For a guided explanation of this example, follow the
-[quickstart](website/src/content/docs/docs/quickstart.md).
+[quickstart](https://urushi.choplin.dev/docs/quickstart/).
 
 ## How the shared model works
 
@@ -163,7 +175,7 @@ Theme → component presentation → View → layout → terminal surface
 
 This boundary lets a CLI summary, prompt, and TUI use the same theme without
 pretending that they have the same interaction model. Read the
-[presentation foundation](website/src/content/docs/docs/concepts/presentation-foundation.md)
+[presentation foundation](https://urushi.choplin.dev/docs/concepts/presentation-foundation/)
 for the complete model.
 
 ## Run the examples
@@ -229,17 +241,19 @@ that correspond to the surfaces your application presents.
 - **Version coordination:** Keep workspace crates on the same release version
   and review the changelog when upgrading.
 
-See [Current limitations](website/src/content/docs/docs/reference/limitations.md)
+See [Current limitations](https://urushi.choplin.dev/docs/reference/limitations/)
 for the boundaries that affect prompt placement, low-level TUI ownership,
 Ratatui integration, graphics lifecycles, and terminal capability handling.
 
 ## Documentation
 
 - [Changelog](CHANGELOG.md)
-- [Quickstart](website/src/content/docs/docs/quickstart.md)
-- [Choose by use case](website/src/content/docs/docs/use-cases.md)
-- [Crates and Cargo features](website/src/content/docs/docs/reference/crates.md)
-- [Current limitations](website/src/content/docs/docs/reference/limitations.md)
+- [Website](https://urushi.choplin.dev/)
+- [API documentation](https://docs.rs/urushi)
+- [Quickstart](https://urushi.choplin.dev/docs/quickstart/)
+- [Choose by use case](https://urushi.choplin.dev/docs/use-cases/)
+- [Crates and Cargo features](https://urushi.choplin.dev/docs/reference/crates/)
+- [Current limitations](https://urushi.choplin.dev/docs/reference/limitations/)
 - [Developer architecture](docs/architecture.md)
 
 ## Acknowledgments
