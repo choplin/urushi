@@ -7,15 +7,15 @@ This page is the task-oriented index to the text API. Use the generated Rust
 API reference for every signature, generic bound, trait implementation, and
 source link:
 
-- [Complete `urushi` API](/api/urushi/index.html)
-- [`PrintableLines`](/api/urushi/struct.PrintableLines.html),
-  [`PrintableText`](/api/urushi/struct.PrintableText.html), and
-  [`Grapheme`](/api/urushi/struct.Grapheme.html)
-- [`TextSpan`](/api/urushi/struct.TextSpan.html),
-  [`StyledText`](/api/urushi/struct.StyledText.html), and
-  [`StyledTextError`](/api/urushi/struct.StyledTextError.html)
-- [`TabPolicy`](/api/urushi/struct.TabPolicy.html) and
-  [`InvalidTabMarker`](/api/urushi/enum.InvalidTabMarker.html)
+- [Complete `urushi` API](https://docs.rs/urushi/latest/urushi/index.html)
+- [`PrintableLines`](https://docs.rs/urushi/latest/urushi/struct.PrintableLines.html),
+  [`PrintableText`](https://docs.rs/urushi/latest/urushi/struct.PrintableText.html), and
+  [`Grapheme`](https://docs.rs/urushi/latest/urushi/struct.Grapheme.html)
+- [`TextSpan`](https://docs.rs/urushi/latest/urushi/struct.TextSpan.html),
+  [`StyledText`](https://docs.rs/urushi/latest/urushi/struct.StyledText.html), and
+  [`StyledTextError`](https://docs.rs/urushi/latest/urushi/struct.StyledTextError.html)
+- [`TabPolicy`](https://docs.rs/urushi/latest/urushi/struct.TabPolicy.html) and
+  [`InvalidTabMarker`](https://docs.rs/urushi/latest/urushi/enum.InvalidTabMarker.html)
 
 ## Printable text
 

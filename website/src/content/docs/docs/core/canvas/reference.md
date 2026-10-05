@@ -9,20 +9,20 @@ It is the task-oriented index to that API. Use the generated Rust API
 reference for every exact signature, generic bound, trait implementation, and
 source link:
 
-- [Complete `urushi` API](/api/urushi/index.html)
-- [`Canvas`](/api/urushi/struct.Canvas.html),
-  [`CanvasSizing`](/api/urushi/struct.CanvasSizing.html), and
-  [`CanvasItem`](/api/urushi/trait.CanvasItem.html)
-- [`CanvasContext`](/api/urushi/struct.CanvasContext.html),
-  [`Position`](/api/urushi/struct.Position.html), and
-  [`Size`](/api/urushi/struct.Size.html)
-- [`Composition`](/api/urushi/enum.Composition.html),
-  [`CanvasCell`](/api/urushi/struct.CanvasCell.html),
-  [`CellContribution`](/api/urushi/struct.CellContribution.html), and
-  [`PositionedCell`](/api/urushi/struct.PositionedCell.html)
-- [`LineNetwork`](/api/urushi/struct.LineNetwork.html),
-  [`LineContinuations`](/api/urushi/struct.LineContinuations.html), and
-  [`LineGlyphs`](/api/urushi/struct.LineGlyphs.html)
+- [Complete `urushi` API](https://docs.rs/urushi/latest/urushi/index.html)
+- [`Canvas`](https://docs.rs/urushi/latest/urushi/struct.Canvas.html),
+  [`CanvasSizing`](https://docs.rs/urushi/latest/urushi/struct.CanvasSizing.html), and
+  [`CanvasItem`](https://docs.rs/urushi/latest/urushi/trait.CanvasItem.html)
+- [`CanvasContext`](https://docs.rs/urushi/latest/urushi/struct.CanvasContext.html),
+  [`Position`](https://docs.rs/urushi/latest/urushi/struct.Position.html), and
+  [`Size`](https://docs.rs/urushi/latest/urushi/struct.Size.html)
+- [`Composition`](https://docs.rs/urushi/latest/urushi/enum.Composition.html),
+  [`CanvasCell`](https://docs.rs/urushi/latest/urushi/struct.CanvasCell.html),
+  [`CellContribution`](https://docs.rs/urushi/latest/urushi/struct.CellContribution.html), and
+  [`PositionedCell`](https://docs.rs/urushi/latest/urushi/struct.PositionedCell.html)
+- [`LineNetwork`](https://docs.rs/urushi/latest/urushi/struct.LineNetwork.html),
+  [`LineContinuations`](https://docs.rs/urushi/latest/urushi/struct.LineContinuations.html), and
+  [`LineGlyphs`](https://docs.rs/urushi/latest/urushi/struct.LineGlyphs.html)
 
 ## Surface and sizing
 

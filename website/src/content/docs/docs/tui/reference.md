@@ -15,7 +15,7 @@ for a caller-owned Ratatui buffer.
 
 ## Application runtime: `urushi-tui-app`
 
-[Complete generated API](/api/urushi_tui_app/index.html)
+[Complete generated API](https://docs.rs/urushi-tui-app/latest/urushi_tui_app/index.html)
 
 | Area | Public surface |
 |---|---|
@@ -37,7 +37,7 @@ direct `urushi-graphics` dependency to construct images.
 
 ## Native frame engine: `urushi-tui`
 
-[Complete generated API](/api/urushi_tui/index.html)
+[Complete generated API](https://docs.rs/urushi-tui/latest/urushi_tui/index.html)
 
 | Type | Public surface and role |
 |---|---|
@@ -53,7 +53,7 @@ needed.
 
 ## Ratatui adapter: `urushi-adapter-ratatui`
 
-[Complete generated API](/api/urushi_adapter_ratatui/index.html)
+[Complete generated API](https://docs.rs/urushi-adapter-ratatui/latest/urushi_adapter_ratatui/index.html)
 
 | Area | Public surface |
 |---|---|

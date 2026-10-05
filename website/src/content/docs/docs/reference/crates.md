@@ -8,15 +8,15 @@ terminal surfaces they use.
 
 | Crate | Purpose |
 |---|---|
-| [`urushi`](/api/urushi/index.html) | Logical styles, themes, renderer-neutral views, components, layout, ANSI rendering, and standard-stream output. |
-| [`urushi-cli`](/api/urushi_cli/index.html) | Opinionated presentations for human-facing, non-interactive CLI output; 0.1.0 includes summaries and warnings. |
-| [`urushi-prompt`](/api/urushi_prompt/index.html) | Typed input, select, and confirm fields with validation; 0.1.0 exposes inline presentation, while alternate-screen presentation is part of the target architecture. |
-| [`urushi-tui`](/api/urushi_tui/index.html) | Synchronous full-screen `Screen` and draw-scoped `Frame`, with Urushi-owned cell buffers, diffing, and transactional output. |
-| [`urushi-tui-app`](/api/urushi_tui_app/index.html) | TEA-style `Application` and `Runtime`, including effects, subscriptions, delivery, drawing, input, and terminal-session ownership. |
-| [`urushi-adapter-ratatui`](/api/urushi_adapter_ratatui/index.html) | Stateless style, view, cell, and anchor adapters for a buffer owned by an existing Ratatui application. |
-| [`urushi-graphics`](/api/urushi_graphics/index.html) | Image components plus Kitty and Sixel terminal graphics adapters. |
-| [`urushi-terminal`](/api/urushi_terminal/index.html) | Shared terminal commands, events, geometry, capabilities, and session restoration. |
-| [`urushi-derive`](/api/urushi_derive/index.html) | Derive support used by the Urushi crates. |
+| [`urushi`](https://docs.rs/urushi/latest/urushi/index.html) | Logical styles, themes, renderer-neutral views, components, layout, ANSI rendering, and standard-stream output. |
+| [`urushi-cli`](https://docs.rs/urushi-cli/latest/urushi_cli/index.html) | Opinionated presentations for human-facing, non-interactive CLI output; 0.1.0 includes summaries and warnings. |
+| [`urushi-prompt`](https://docs.rs/urushi-prompt/latest/urushi_prompt/index.html) | Typed input, select, and confirm fields with validation; 0.1.0 exposes inline presentation, while alternate-screen presentation is part of the target architecture. |
+| [`urushi-tui`](https://docs.rs/urushi-tui/latest/urushi_tui/index.html) | Synchronous full-screen `Screen` and draw-scoped `Frame`, with Urushi-owned cell buffers, diffing, and transactional output. |
+| [`urushi-tui-app`](https://docs.rs/urushi-tui-app/latest/urushi_tui_app/index.html) | TEA-style `Application` and `Runtime`, including effects, subscriptions, delivery, drawing, input, and terminal-session ownership. |
+| [`urushi-adapter-ratatui`](https://docs.rs/urushi-adapter-ratatui/latest/urushi_adapter_ratatui/index.html) | Stateless style, view, cell, and anchor adapters for a buffer owned by an existing Ratatui application. |
+| [`urushi-graphics`](https://docs.rs/urushi-graphics/latest/urushi_graphics/index.html) | Image components plus Kitty and Sixel terminal graphics adapters. |
+| [`urushi-terminal`](https://docs.rs/urushi-terminal/latest/urushi_terminal/index.html) | Shared terminal commands, events, geometry, capabilities, and session restoration. |
+| [`urushi-derive`](https://docs.rs/urushi-derive/latest/urushi_derive/index.html) | Derive support used by the Urushi crates. |
 
 All crates currently share the same release version. Start with `urushi`, then
 add the crates that correspond to the surfaces the application presents.

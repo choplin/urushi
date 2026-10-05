@@ -256,6 +256,18 @@ Ratatui integration, graphics lifecycles, and terminal capability handling.
 - [Current limitations](https://urushi.choplin.dev/docs/reference/limitations/)
 - [Developer architecture](docs/architecture.md)
 
+To work on the documentation site locally:
+
+```sh
+pnpm --dir website install --frozen-lockfile
+pnpm --dir website dev
+```
+
+Use `pnpm --dir website build` for a production build. Documentation-site
+changes deploy automatically after they reach `main`; see the [documentation
+site design](docs/documentation-site.md) for the complete build, publishing,
+and recovery contract.
+
 ## Acknowledgments
 
 [Charm](https://charm.sh)'s libraries were among the references consulted in

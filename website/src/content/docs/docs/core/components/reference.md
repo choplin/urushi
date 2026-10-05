@@ -7,15 +7,15 @@ This page is the task-oriented index to the component API. Use the generated
 Rust API reference for every signature, generic bound, trait implementation,
 and source link:
 
-- [Complete `urushi` API](/api/urushi/index.html)
-- [`List`](/api/urushi/struct.List.html) and
-  [`ListPresentation`](/api/urushi/struct.ListPresentation.html)
-- [`Table`](/api/urushi/struct.Table.html) and
-  [`TablePresentation`](/api/urushi/struct.TablePresentation.html)
-- [`Tree`](/api/urushi/struct.Tree.html) and
-  [`TreePresentation`](/api/urushi/struct.TreePresentation.html)
-- [`Scrollbar`](/api/urushi/struct.Scrollbar.html) and
-  [`ScrollbarPresentation`](/api/urushi/struct.ScrollbarPresentation.html)
+- [Complete `urushi` API](https://docs.rs/urushi/latest/urushi/index.html)
+- [`List`](https://docs.rs/urushi/latest/urushi/struct.List.html) and
+  [`ListPresentation`](https://docs.rs/urushi/latest/urushi/struct.ListPresentation.html)
+- [`Table`](https://docs.rs/urushi/latest/urushi/struct.Table.html) and
+  [`TablePresentation`](https://docs.rs/urushi/latest/urushi/struct.TablePresentation.html)
+- [`Tree`](https://docs.rs/urushi/latest/urushi/struct.Tree.html) and
+  [`TreePresentation`](https://docs.rs/urushi/latest/urushi/struct.TreePresentation.html)
+- [`Scrollbar`](https://docs.rs/urushi/latest/urushi/struct.Scrollbar.html) and
+  [`ScrollbarPresentation`](https://docs.rs/urushi/latest/urushi/struct.ScrollbarPresentation.html)
 
 ## Canonical Theme methods
 

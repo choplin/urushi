@@ -7,20 +7,20 @@ This page is the task-oriented index to the View API. Use the generated Rust
 API reference for every signature, generic bound, trait implementation, and
 source link:
 
-- [Complete `urushi` API](/api/urushi/index.html)
-- [`View`](/api/urushi/enum.View.html),
-  [`BlockTitle`](/api/urushi/struct.BlockTitle.html), and
-  [`GridStyle`](/api/urushi/struct.GridStyle.html)
-- [`BlockStyle`](/api/urushi/struct.BlockStyle.html),
-  [`Border`](/api/urushi/struct.Border.html),
-  [`Length`](/api/urushi/enum.Length.html), and
-  [`Overflow`](/api/urushi/enum.Overflow.html)
-- [`Viewport`](/api/urushi/struct.Viewport.html),
-  [`Key`](/api/urushi/struct.Key.html), and
-  [`ResolvedView`](/api/urushi/struct.ResolvedView.html)
-- [`Available`](/api/urushi/struct.Available.html),
-  [`LayoutError`](/api/urushi/struct.LayoutError.html), and
-  [`LayoutErrorKind`](/api/urushi/enum.LayoutErrorKind.html)
+- [Complete `urushi` API](https://docs.rs/urushi/latest/urushi/index.html)
+- [`View`](https://docs.rs/urushi/latest/urushi/enum.View.html),
+  [`BlockTitle`](https://docs.rs/urushi/latest/urushi/struct.BlockTitle.html), and
+  [`GridStyle`](https://docs.rs/urushi/latest/urushi/struct.GridStyle.html)
+- [`BlockStyle`](https://docs.rs/urushi/latest/urushi/struct.BlockStyle.html),
+  [`Border`](https://docs.rs/urushi/latest/urushi/struct.Border.html),
+  [`Length`](https://docs.rs/urushi/latest/urushi/enum.Length.html), and
+  [`Overflow`](https://docs.rs/urushi/latest/urushi/enum.Overflow.html)
+- [`Viewport`](https://docs.rs/urushi/latest/urushi/struct.Viewport.html),
+  [`Key`](https://docs.rs/urushi/latest/urushi/struct.Key.html), and
+  [`ResolvedView`](https://docs.rs/urushi/latest/urushi/struct.ResolvedView.html)
+- [`Available`](https://docs.rs/urushi/latest/urushi/struct.Available.html),
+  [`LayoutError`](https://docs.rs/urushi/latest/urushi/struct.LayoutError.html), and
+  [`LayoutErrorKind`](https://docs.rs/urushi/latest/urushi/enum.LayoutErrorKind.html)
 
 ## Block geometry
 

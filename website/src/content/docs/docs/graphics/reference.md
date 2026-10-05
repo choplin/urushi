@@ -6,13 +6,13 @@ description: Complete reference for image values, selection, rendering, and prot
 This page indexes every public graphics API. Use the generated Rust API for
 exact signatures, trait implementations, and source links:
 
-- [Complete `urushi-graphics` API](/api/urushi_graphics/index.html)
-- [`Image`](/api/urushi_graphics/struct.Image.html) and
-  [`ImagePresentation`](/api/urushi_graphics/struct.ImagePresentation.html)
-- [`GraphicsPreference`](/api/urushi_graphics/enum.GraphicsPreference.html) and
-  [`GraphicsSelection`](/api/urushi_graphics/enum.GraphicsSelection.html)
-- [`KittyLifecycle`](/api/urushi_graphics/kitty/struct.KittyLifecycle.html) and
-  [`SixelLifecycle`](/api/urushi_graphics/sixel/struct.SixelLifecycle.html)
+- [Complete `urushi-graphics` API](https://docs.rs/urushi-graphics/latest/urushi_graphics/index.html)
+- [`Image`](https://docs.rs/urushi-graphics/latest/urushi_graphics/struct.Image.html) and
+  [`ImagePresentation`](https://docs.rs/urushi-graphics/latest/urushi_graphics/struct.ImagePresentation.html)
+- [`GraphicsPreference`](https://docs.rs/urushi-graphics/latest/urushi_graphics/enum.GraphicsPreference.html) and
+  [`GraphicsSelection`](https://docs.rs/urushi-graphics/latest/urushi_graphics/enum.GraphicsSelection.html)
+- [`KittyLifecycle`](https://docs.rs/urushi-graphics/latest/urushi_graphics/kitty/struct.KittyLifecycle.html) and
+  [`SixelLifecycle`](https://docs.rs/urushi-graphics/latest/urushi_graphics/sixel/struct.SixelLifecycle.html)
 
 ## Image data and placement
 

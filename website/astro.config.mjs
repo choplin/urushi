@@ -2,10 +2,11 @@
 import { defineConfig } from 'astro/config';
 import { satteri } from '@astrojs/markdown-satteri';
 import starlight from '@astrojs/starlight';
+import { cloudflareBuildOutput } from './scripts/cloudflare-build-output.mjs';
 import rustdocHiddenLines from './scripts/remark-rustdoc-hidden-lines.mjs';
 
 export default defineConfig({
-  publicDir: './.generated-public',
+  site: 'https://urushi.choplin.dev',
   markdown: {
     processor: satteri({ mdastPlugins: [rustdocHiddenLines] }),
   },
@@ -156,5 +157,6 @@ export default defineConfig({
         },
       ],
     }),
+    cloudflareBuildOutput(),
   ],
 });

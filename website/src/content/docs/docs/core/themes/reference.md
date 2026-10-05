@@ -7,13 +7,13 @@ This page is the task-oriented index to the theme API. Use the generated Rust
 API reference for every signature, generic bound, trait implementation, and
 source link:
 
-- [Complete `urushi` API](/api/urushi/index.html)
-- [`Theme`](/api/urushi/struct.Theme.html),
-  [`SemanticTokens`](/api/urushi/struct.SemanticTokens.html), and
-  [`ComponentTheme`](/api/urushi/struct.ComponentTheme.html)
-- [`ThemePreset`](/api/urushi/struct.ThemePreset.html),
-  [`ThemeMode`](/api/urushi/enum.ThemeMode.html), and
-  [`ComponentRole`](/api/urushi/enum.ComponentRole.html)
+- [Complete `urushi` API](https://docs.rs/urushi/latest/urushi/index.html)
+- [`Theme`](https://docs.rs/urushi/latest/urushi/struct.Theme.html),
+  [`SemanticTokens`](https://docs.rs/urushi/latest/urushi/struct.SemanticTokens.html), and
+  [`ComponentTheme`](https://docs.rs/urushi/latest/urushi/struct.ComponentTheme.html)
+- [`ThemePreset`](https://docs.rs/urushi/latest/urushi/struct.ThemePreset.html),
+  [`ThemeMode`](https://docs.rs/urushi/latest/urushi/enum.ThemeMode.html), and
+  [`ComponentRole`](https://docs.rs/urushi/latest/urushi/enum.ComponentRole.html)
 
 ## Theme
 

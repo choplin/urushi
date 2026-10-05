@@ -1,6 +1,7 @@
 /target
 /.pnpm-store
 /website/.astro
+/website/.cloudflare
+/website/.env*
 /website/dist
-/website/.generated-public
 /website/node_modules

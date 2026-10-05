@@ -7,10 +7,10 @@ This page is the task-oriented index to the style API. The generated Rust API
 reference supplies every signature, generic bound, trait implementation, and
 source link:
 
-- [Complete `urushi` API](/api/urushi/index.html)
-- [`TextStyle`](/api/urushi/struct.TextStyle.html),
-  [`Color`](/api/urushi/enum.Color.html), and
-  [`Hyperlink`](/api/urushi/struct.Hyperlink.html)
+- [Complete `urushi` API](https://docs.rs/urushi/latest/urushi/index.html)
+- [`TextStyle`](https://docs.rs/urushi/latest/urushi/struct.TextStyle.html),
+  [`Color`](https://docs.rs/urushi/latest/urushi/enum.Color.html), and
+  [`Hyperlink`](https://docs.rs/urushi/latest/urushi/struct.Hyperlink.html)
 
 Box geometry, dimensions, alignment, borders, and overflow are indexed in the
 [Layout reference](/docs/core/views/reference/).

@@ -45,6 +45,13 @@ provide. A contract stated without its purpose is not comprehensible. What it
 does not carry is the defense of that shape against the alternatives it was
 chosen over.
 
+A developer-tooling or delivery subsystem may also keep its bounded operating
+contract in its top-level document when that contract is part of understanding
+the subsystem as a whole. Keep the repository README to the ordinary path and
+put credentials, automation boundaries, failure behavior, and recovery detail
+in the subsystem document. This exception does not make top-level documents
+general-purpose runbooks or a place for unrelated procedures.
+
 ## `design/`: one design issue per file
 
 Each file under [`design/`](design/) answers exactly one design issue in full:

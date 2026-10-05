@@ -236,6 +236,10 @@ a role are documented with the extension point itself, in
 The packages share one release version and are published in dependency order;
 [`releasing.md`](releasing.md) describes the maintainer workflow.
 
+The public documentation site is a separate delivery subsystem. Its authored
+content, generated API-reference boundary, build, hosting, and production
+operation are defined in [`documentation-site.md`](documentation-site.md).
+
 `urushi-prompt` owns interactive prompt behavior. The core crate must not gain
 prompt-specific navigation, validation, cursor, or form-submission policy merely
 to share styling.

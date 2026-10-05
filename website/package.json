@@ -4,13 +4,16 @@
   "version": "0.1.0",
   "private": true,
   "packageManager": "pnpm@11.20.0",
+  "engines": {
+    "node": ">=22.19.0"
+  },
   "scripts": {
     "brand:prepare": "node ./scripts/prepare-brand.mjs",
-    "docs:api": "node ./scripts/prepare-api.mjs",
-    "dev": "pnpm brand:prepare && pnpm docs:api && astro dev",
-    "build": "pnpm brand:prepare && pnpm docs:api && astro check && astro build",
+    "dev": "pnpm brand:prepare && cf dev",
+    "build": "pnpm brand:prepare && astro check && cf build",
     "preview": "astro preview",
-    "deploy": "pnpm build && wrangler deploy"
+    "deploy": "pnpm build && cf deploy --prebuilt --mode production --dry-run && cf deploy --prebuilt --mode production",
+    "deploy:dry-run": "pnpm build && cf deploy --prebuilt --mode production --dry-run"
   },
   "dependencies": {
     "@astrojs/starlight": "^0.42.4",
@@ -20,7 +23,7 @@
   "devDependencies": {
     "@astrojs/check": "^0.9.6",
     "@astrojs/markdown-satteri": "0.4.2",
-    "typescript": "^6.0.3",
-    "wrangler": "^4.142.0"
+    "cf": "1.0.0-beta.12",
+    "typescript": "^6.0.3"
   }
 }
