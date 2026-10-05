@@ -6,51 +6,67 @@ import SiteLayout from '../layouts/SiteLayout.astro';
   title="Urushi — One visual language. Every terminal surface."
   description="A shared presentation foundation for styled output, interactive prompts, and full-screen applications in Rust."
 >
-  <section class="hero section-shell">
-    <div class="hero-copy">
-      <p class="eyebrow"><b>01</b><span></span> Rust terminal UI library</p>
-      <h1>One visual<br />language.<br /><em>Every terminal surface.</em></h1>
-      <p class="hero-lede">
-        <strong>Urushi is a UI library for Rust terminals.</strong> Style plain
-        output, build interactive prompts, or build a full-screen TUI on one
-        shared presentation foundation.
-      </p>
-      <ul class="hero-surfaces" aria-label="Supported terminal interfaces">
-        <li>Styled text</li>
-        <li>CLI</li>
-        <li>Prompts</li>
-        <li>Full-screen TUI</li>
-      </ul>
-      <div class="hero-actions">
-        <a class="button button-primary" href="/docs/">Get started <span aria-hidden="true">→</span></a>
-        <a class="button button-secondary" href="#foundation">Explore the foundation</a>
-      </div>
-    </div>
-
-    <div class="terminal-stage" aria-label="Urushi terminal presentation example">
-      <div class="terminal-chrome">
-        <div class="terminal-label"><span>URUSHI</span> / Rust UI preview</div>
-        <div class="terminal-status">80 × 24</div>
-      </div>
-      <div class="terminal-screen">
-        <div class="command"><span class="kw">use</span> urushi_cli::&#123;CliTheme, Summary&#125;;</div>
-        <div class="terminal-gap"></div>
-        <div class="summary-box">
-          <div class="summary-title"><span class="success-mark">✓</span> Build complete</div>
-          <div class="summary-row"><span>Target</span><strong>aarch64-apple-darwin</strong></div>
-          <div class="summary-row"><span>Profile</span><strong>release</strong></div>
-          <div class="summary-row"><span>Output</span><strong>target/release/app</strong></div>
+  <section class="hero-export" aria-labelledby="hero-title">
+    <div class="hero-top-rule" aria-hidden="true"></div>
+    <div class="hero-intro">
+      <p class="hero-eyebrow">URUSHI / RUST TERMINAL UI LIBRARY</p>
+      <h1 class="hero-headline" id="hero-title">One visual language. Every terminal surface.</h1>
+      <div class="hero-intro-meta">
+        <p class="hero-lede">
+          A composable UI library for Rust terminals. Style command output,
+          build interactive prompts, and run full-screen TUIs on one shared
+          presentation foundation.
+        </p>
+        <div class="hero-intro-actions">
+          <a class="button button-primary" href="/docs/">Get started <span aria-hidden="true">→</span></a>
+          <a class="button button-secondary" href="#foundation">Explore the foundation</a>
         </div>
-        <div class="terminal-foot"><span>Theme</span><span>→</span><span>View</span><span>→</span><span>stdout</span></div>
       </div>
-      <div class="layer layer-one"></div>
-      <div class="layer layer-two"></div>
     </div>
-  </section>
 
-  <section class="hero-statement" aria-label="Urushi proposition">
-    <p>Different interfaces.</p>
-    <strong>One underlying model.</strong>
+    <div class="hero-export-canvas">
+      <h2 class="hero-group-heading hero-left-heading">BUILDING BLOCKS</h2>
+      <h2 class="hero-group-heading hero-center-heading">SHARED PRESENTATION</h2>
+      <h2 class="hero-group-heading hero-right-heading">TERMINAL SURFACES</h2>
+
+      <strong class="hero-input-label hero-text-label">TEXT</strong>
+      <div class="hero-input-box hero-text-box" aria-hidden="true"></div>
+      <span class="hero-input-copy hero-text-copy">styled text · links · attributes</span>
+      <span class="hero-connector hero-text-connector" aria-hidden="true"></span>
+
+      <strong class="hero-input-label hero-layout-label">LAYOUT</strong>
+      <div class="hero-input-box hero-layout-box" aria-hidden="true"></div>
+      <span class="hero-input-copy hero-layout-copy">block · row · column · grid</span>
+      <span class="hero-connector hero-layout-connector" aria-hidden="true"></span>
+
+      <strong class="hero-input-label hero-components-label">COMPONENTS</strong>
+      <div class="hero-input-box hero-components-box" aria-hidden="true"></div>
+      <span class="hero-input-copy hero-components-copy">list · table · tree · scrollbar</span>
+      <span class="hero-connector hero-components-connector" aria-hidden="true"></span>
+
+      <span class="hero-left-collector" aria-hidden="true"></span>
+      <span class="hero-hub-input" aria-hidden="true"></span>
+      <div class="hero-urushi-icon" aria-hidden="true"></div>
+      <strong class="hero-wordmark">urushi</strong>
+      <span class="hero-model">THEME · VIEW · LAYOUT</span>
+      <span class="hero-hub-output" aria-hidden="true"></span>
+      <span class="hero-right-collector" aria-hidden="true"></span>
+
+      <span class="hero-output-connector hero-command-connector" aria-hidden="true"></span>
+      <span class="hero-output-marker hero-command-marker" aria-hidden="true"></span>
+      <strong class="hero-output-label hero-command-label">COMMAND OUTPUT</strong>
+      <span class="hero-output-copy hero-command-copy">$ build complete</span>
+
+      <span class="hero-output-connector hero-prompts-connector" aria-hidden="true"></span>
+      <span class="hero-output-marker hero-prompts-marker" aria-hidden="true"></span>
+      <strong class="hero-output-label hero-prompts-label">INTERACTIVE PROMPTS</strong>
+      <span class="hero-output-copy hero-prompts-copy">Deploy? [y/N]</span>
+
+      <span class="hero-output-connector hero-tui-connector" aria-hidden="true"></span>
+      <span class="hero-output-marker hero-tui-marker" aria-hidden="true"></span>
+      <strong class="hero-output-label hero-tui-label">FULL-SCREEN TUI</strong>
+      <span class="hero-output-copy hero-tui-copy">build → test → ship</span>
+    </div>
   </section>
 
   <section class="surface-section section-shell" aria-labelledby="surface-heading">

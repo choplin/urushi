@@ -16,11 +16,19 @@ const { title, description } = Astro.props;
     <meta name="viewport" content="width=device-width" />
     <meta name="description" content={description} />
     <meta name="theme-color" content="#090909" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600;700&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="icon" type="image/png" href="/brand/urushi-icon.png" />
     <title>{title}</title>
   </head>
   <body>
     <header class="site-header">
       <a class="brand" href="/" aria-label="Urushi home">
+        <img src="/brand/urushi-icon.png" width="44" height="44" alt="" />
         <span>urushi</span>
       </a>
       <nav aria-label="Primary navigation">
@@ -34,6 +42,7 @@ const { title, description } = Astro.props;
     </main>
     <footer class="site-footer">
       <a class="brand footer-brand" href="/">
+        <img src="/brand/urushi-icon.png" width="44" height="44" alt="" />
         <span>urushi</span>
       </a>
       <p>Presentation infrastructure for Rust terminal applications.</p>

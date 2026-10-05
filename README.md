@@ -1,8 +1,16 @@
 # Urushi
 
-Urushi is a UI library for Rust terminal applications. It gives command output,
-interactive prompts, and full-screen TUIs one shared presentation foundation
-while each surface keeps its own interaction and terminal lifecycle.
+<p align="center"><strong>One visual language. Every terminal surface.</strong></p>
+
+<p align="center">Composable styling, components, prompts, and terminal UI for Rust.</p>
+
+<p align="center">
+  <img src="assets/brand/urushi-readme-hero.png" width="100%" alt="Urushi brings text styling, layout, and components together for command output, interactive prompts, and full-screen terminal applications">
+</p>
+
+Urushi gives command output, interactive prompts, and full-screen TUIs one
+shared presentation foundation while each surface keeps its own interaction
+and terminal lifecycle.
 
 **Status:** Urushi 0.1.0 is in early development. Public APIs may change before
 1.0.

@@ -5,9 +5,10 @@
   "private": true,
   "packageManager": "pnpm@11.20.0",
   "scripts": {
+    "brand:prepare": "node ./scripts/prepare-brand.mjs",
     "docs:api": "node ./scripts/prepare-api.mjs",
-    "dev": "pnpm docs:api && astro dev",
-    "build": "pnpm docs:api && astro check && astro build",
+    "dev": "pnpm brand:prepare && pnpm docs:api && astro dev",
+    "build": "pnpm brand:prepare && pnpm docs:api && astro check && astro build",
     "preview": "astro preview",
     "deploy": "pnpm build && wrangler deploy"
   },

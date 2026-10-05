@@ -14,6 +14,7 @@ export default defineConfig({
       title: 'Urushi',
       description:
         'A shared presentation model for Rust terminal applications.',
+      favicon: '/brand/urushi-icon.png',
       disable404Route: true,
       customCss: ['./src/styles/starlight.css'],
       components: {

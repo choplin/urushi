@@ -4,7 +4,10 @@ import Default from '@astrojs/starlight/components/Header.astro';
 
 <div class="docs-site-header">
   <div class="docs-site-banner">
-    <a href="/" aria-label="Urushi home">Urushi</a>
+    <a href="/" aria-label="Urushi home">
+      <img src="/brand/urushi-icon.png" width="36" height="36" alt="" />
+      <span>Urushi</span>
+    </a>
     <span>Documentation</span>
   </div>
   <Default />
@@ -30,9 +33,23 @@ import Default from '@astrojs/starlight/components/Header.astro';
   }
 
   .docs-site-banner a {
+    align-items: center;
     color: #dc5947;
+    display: inline-flex;
     font-weight: 800;
+    gap: 0.15rem;
     text-decoration: none;
+  }
+
+  .docs-site-banner img {
+    display: block;
+    height: 2rem;
+    width: 2rem;
+  }
+
+  .docs-site-banner a span {
+    color: #dc5947;
+    opacity: 1;
   }
 
   .docs-site-banner span {

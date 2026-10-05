@@ -1,0 +1,1242 @@
+{
+  "version": "2.18",
+  "children": [
+    {
+      "type": "frame",
+      "id": "Pgvq6",
+      "x": 0,
+      "y": 0,
+      "name": "repository-context/urushi/icon/final",
+      "clip": true,
+      "width": 1100,
+      "height": 1000,
+      "fill": "$urushi-ink",
+      "layout": "vertical",
+      "gap": 24,
+      "padding": 56,
+      "children": [
+        {
+          "type": "frame",
+          "id": "DIWxJ",
+          "name": "Final Icon Header",
+          "width": "fill_container",
+          "layout": "vertical",
+          "gap": 10,
+          "children": [
+            {
+              "type": "text",
+              "id": "YcKBF",
+              "name": "Final Icon Eyebrow",
+              "fill": "$urushi-vermilion-bright",
+              "content": "URUSHI / ICON / SELECTED",
+              "fontFamily": "JetBrains Mono",
+              "fontSize": 14,
+              "fontWeight": "600",
+              "letterSpacing": 1.8
+            },
+            {
+              "type": "text",
+              "id": "OQNws",
+              "name": "Final Icon Title",
+              "fill": "$urushi-paper",
+              "content": "Raden Grid / Original 05",
+              "fontFamily": "Space Grotesk",
+              "fontSize": 48,
+              "fontWeight": "600",
+              "letterSpacing": -1.6
+            },
+            {
+              "type": "text",
+              "id": "Cu5JG",
+              "name": "Final Icon Subtitle",
+              "fill": "$urushi-muted",
+              "content": "Five lacquered UI cells: modular, multicolor, and unmistakably urushi.",
+              "fontFamily": "Space Grotesk",
+              "fontSize": 18,
+              "fontWeight": "normal"
+            }
+          ]
+        },
+        {
+          "type": "frame",
+          "id": "CsJUu",
+          "name": "Final Icon Body",
+          "width": "fill_container",
+          "height": 650,
+          "gap": 40,
+          "justifyContent": "center",
+          "alignItems": "center",
+          "children": [
+            {
+              "type": "frame",
+              "id": "Yon6B",
+              "name": "Final Icon Hero Stage",
+              "width": 620,
+              "height": 620,
+              "fill": "#050505",
+              "cornerRadius": 32,
+              "stroke": "$urushi-vermilion",
+              "strokeWidth": 1,
+              "justifyContent": "center",
+              "alignItems": "center",
+              "children": [
+                {
+                  "type": "frame",
+                  "id": "OZolC",
+                  "name": "Final Icon Artwork",
+                  "width": 580,
+                  "height": 580,
+                  "fill": {
+                    "type": "image",
+                    "enabled": true,
+                    "url": "urushi-icon.png",
+                    "mode": "fill"
+                  }
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "r4Y0QA",
+              "name": "Final Icon Size Checks",
+              "width": 260,
+              "layout": "vertical",
+              "gap": 24,
+              "children": [
+                {
+                  "type": "text",
+                  "id": "tiIxG",
+                  "name": "Final Icon Size Heading",
+                  "fill": "$urushi-muted",
+                  "content": "SIZE CHECK",
+                  "fontFamily": "JetBrains Mono",
+                  "fontSize": 11,
+                  "fontWeight": "600",
+                  "letterSpacing": 1.3
+                },
+                {
+                  "type": "frame",
+                  "id": "joRgo",
+                  "name": "128px Size Row",
+                  "width": "fill_container",
+                  "height": 128,
+                  "gap": 16,
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "frame",
+                      "id": "Ua4E8",
+                      "name": "128px Final Preview",
+                      "width": 128,
+                      "height": 128,
+                      "fill": {
+                        "type": "image",
+                        "enabled": true,
+                        "url": "urushi-icon.png",
+                        "mode": "fill"
+                      },
+                      "stroke": "$urushi-line",
+                      "strokeWidth": 1
+                    },
+                    {
+                      "type": "text",
+                      "id": "X9bVe",
+                      "name": "128px Size Label",
+                      "fill": "$urushi-muted",
+                      "content": "128 PX",
+                      "fontFamily": "JetBrains Mono",
+                      "fontSize": 10,
+                      "fontWeight": "600",
+                      "letterSpacing": 1.1
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "kcqEg",
+                  "name": "64px Size Row",
+                  "width": "fill_container",
+                  "height": 64,
+                  "gap": 16,
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "frame",
+                      "id": "RGnNI",
+                      "name": "64px Final Preview",
+                      "width": 64,
+                      "height": 64,
+                      "fill": {
+                        "type": "image",
+                        "enabled": true,
+                        "url": "urushi-icon.png",
+                        "mode": "fill"
+                      },
+                      "stroke": "$urushi-line",
+                      "strokeWidth": 1
+                    },
+                    {
+                      "type": "text",
+                      "id": "ncZUD",
+                      "name": "64px Size Label",
+                      "fill": "$urushi-muted",
+                      "content": "64 PX",
+                      "fontFamily": "JetBrains Mono",
+                      "fontSize": 10,
+                      "fontWeight": "600",
+                      "letterSpacing": 1.1
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "OlZmN",
+                  "name": "32px Size Row",
+                  "width": "fill_container",
+                  "height": 40,
+                  "gap": 16,
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "frame",
+                      "id": "zRmgp",
+                      "name": "32px Final Preview",
+                      "width": 32,
+                      "height": 32,
+                      "fill": {
+                        "type": "image",
+                        "enabled": true,
+                        "url": "urushi-icon.png",
+                        "mode": "fill"
+                      },
+                      "stroke": "$urushi-line",
+                      "strokeWidth": 1
+                    },
+                    {
+                      "type": "text",
+                      "id": "YU4kq",
+                      "name": "32px Size Label",
+                      "fill": "$urushi-muted",
+                      "content": "32 PX",
+                      "fontFamily": "JetBrains Mono",
+                      "fontSize": 10,
+                      "fontWeight": "600",
+                      "letterSpacing": 1.1
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "type": "frame",
+          "id": "VL1Vr",
+          "name": "Final Icon Footer",
+          "width": "fill_container",
+          "height": 60,
+          "stroke": "$urushi-line",
+          "strokeWidth": {
+            "top": 1
+          },
+          "padding": [
+            18,
+            0,
+            0,
+            0
+          ],
+          "justifyContent": "space_between",
+          "alignItems": "center",
+          "children": [
+            {
+              "type": "text",
+              "id": "yDOkQ",
+              "name": "Final Icon Status",
+              "fill": "$urushi-paper",
+              "content": "SELECTED — preserve composition, palette, and negative space",
+              "fontFamily": "Space Grotesk",
+              "fontSize": 17,
+              "fontWeight": "normal"
+            },
+            {
+              "type": "text",
+              "id": "TH95v",
+              "name": "Final Icon Asset Label",
+              "fill": "$urushi-muted",
+              "content": "05-raden-grid.png",
+              "fontFamily": "JetBrains Mono",
+              "fontSize": 11,
+              "fontWeight": "normal",
+              "letterSpacing": 1.1
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "frame",
+      "id": "eHuGV",
+      "x": 1240,
+      "y": 0,
+      "name": "repository-context/urushi/hero/candidate-7-orthogonal-hub-web",
+      "clip": true,
+      "width": 1600,
+      "height": 900,
+      "fill": "$urushi-ink",
+      "layout": "none",
+      "children": [
+        {
+          "type": "rectangle",
+          "id": "tYfsF",
+          "x": 0,
+          "y": 0,
+          "name": "Orthogonal Hub Top Rule",
+          "fill": "$urushi-vermilion-bright",
+          "width": 1600,
+          "height": 2
+        },
+        {
+          "type": "text",
+          "id": "WtGvh",
+          "x": 72,
+          "y": 54,
+          "name": "Orthogonal Hub Eyebrow",
+          "fill": "$urushi-muted",
+          "content": "URUSHI / RUST TERMINAL UI LIBRARY",
+          "fontFamily": "JetBrains Mono",
+          "fontSize": 15,
+          "fontWeight": "600",
+          "letterSpacing": 1.5
+        },
+        {
+          "type": "text",
+          "id": "lOYv0",
+          "x": 72,
+          "y": 84,
+          "name": "Orthogonal Hub Headline",
+          "fill": "$urushi-paper",
+          "content": "One visual language. Every terminal surface.",
+          "fontFamily": "Space Grotesk",
+          "fontSize": 54,
+          "fontWeight": "600",
+          "letterSpacing": -1.6
+        },
+        {
+          "type": "text",
+          "id": "yE1iv",
+          "x": 196,
+          "y": 220,
+          "name": "Orthogonal Hub Left Heading",
+          "fill": "$urushi-muted",
+          "content": "BUILDING BLOCKS",
+          "fontFamily": "JetBrains Mono",
+          "fontSize": 14,
+          "fontWeight": "700",
+          "letterSpacing": 1.4
+        },
+        {
+          "type": "text",
+          "id": "ZLXr5",
+          "x": 746,
+          "y": 220,
+          "name": "Orthogonal Hub Center Heading",
+          "fill": "$urushi-muted",
+          "content": "SHARED PRESENTATION",
+          "fontFamily": "JetBrains Mono",
+          "fontSize": 14,
+          "fontWeight": "700",
+          "letterSpacing": 1.4
+        },
+        {
+          "type": "text",
+          "id": "j7rRP2",
+          "x": 1196,
+          "y": 220,
+          "name": "Orthogonal Hub Right Heading",
+          "fill": "$urushi-muted",
+          "content": "TERMINAL SURFACES",
+          "fontFamily": "JetBrains Mono",
+          "fontSize": 14,
+          "fontWeight": "700",
+          "letterSpacing": 1.4
+        },
+        {
+          "type": "text",
+          "id": "yoVQn",
+          "x": 48,
+          "y": 296,
+          "name": "Orthogonal TEXT Label",
+          "fill": "$urushi-paper",
+          "content": "TEXT",
+          "fontFamily": "JetBrains Mono",
+          "fontSize": 17,
+          "fontWeight": "700",
+          "letterSpacing": 0.8
+        },
+        {
+          "type": "frame",
+          "id": "c9xC8",
+          "x": 196,
+          "y": 270,
+          "name": "Orthogonal TEXT Sample",
+          "width": 430,
+          "height": 78,
+          "fill": "$urushi-surface",
+          "stroke": "#4A4843",
+          "strokeWidth": 1,
+          "layout": "none"
+        },
+        {
+          "type": "rectangle",
+          "id": "NzZrE",
+          "x": 626,
+          "y": 309,
+          "name": "Orthogonal TEXT Connector",
+          "fill": "#4A4843",
+          "width": 30,
+          "height": 1
+        },
+        {
+          "type": "text",
+          "id": "uMy2Q",
+          "x": 48,
+          "y": 436,
+          "name": "Orthogonal STYLE Label",
+          "fill": "$urushi-paper",
+          "content": "LAYOUT",
+          "fontFamily": "JetBrains Mono",
+          "fontSize": 17,
+          "fontWeight": "700",
+          "letterSpacing": 0.8
+        },
+        {
+          "type": "frame",
+          "id": "OFBnJ",
+          "x": 196,
+          "y": 410,
+          "name": "Orthogonal STYLE Sample",
+          "width": 430,
+          "height": 78,
+          "fill": "$urushi-surface",
+          "stroke": "#4A4843",
+          "strokeWidth": 1,
+          "layout": "none"
+        },
+        {
+          "type": "text",
+          "id": "F8yzQ5",
+          "x": 228,
+          "y": 438,
+          "name": "Orthogonal STYLE Sample Text",
+          "fill": "$urushi-paper",
+          "content": "block · row · column · grid",
+          "lineHeight": 1.25,
+          "fontFamily": "JetBrains Mono",
+          "fontSize": 18,
+          "fontWeight": "normal"
+        },
+        {
+          "type": "rectangle",
+          "id": "vUDNm",
+          "x": 626,
+          "y": 449,
+          "name": "Orthogonal STYLE Connector",
+          "fill": "#4A4843",
+          "width": 30,
+          "height": 1
+        },
+        {
+          "type": "text",
+          "id": "mN2IZ",
+          "x": 48,
+          "y": 576,
+          "name": "Orthogonal LAYOUT Label",
+          "fill": "$urushi-paper",
+          "content": "COMPONENTS",
+          "fontFamily": "JetBrains Mono",
+          "fontSize": 17,
+          "fontWeight": "700",
+          "letterSpacing": 0.8
+        },
+        {
+          "type": "frame",
+          "id": "zdJU0",
+          "x": 196,
+          "y": 550,
+          "name": "Orthogonal LAYOUT Sample",
+          "width": 430,
+          "height": 78,
+          "fill": "$urushi-surface",
+          "stroke": "#4A4843",
+          "strokeWidth": 1,
+          "layout": "none"
+        },
+        {
+          "type": "text",
+          "id": "Cpsvm",
+          "x": 228,
+          "y": 578,
+          "name": "Orthogonal LAYOUT Sample Text",
+          "fill": "$urushi-paper",
+          "content": "list · table · tree · scrollbar",
+          "lineHeight": 1.25,
+          "fontFamily": "JetBrains Mono",
+          "fontSize": 17,
+          "fontWeight": "normal"
+        },
+        {
+          "type": "rectangle",
+          "id": "s7j6k",
+          "x": 626,
+          "y": 589,
+          "name": "Orthogonal LAYOUT Connector",
+          "fill": "#4A4843",
+          "width": 30,
+          "height": 1
+        },
+        {
+          "type": "rectangle",
+          "id": "ECTLW",
+          "x": 656,
+          "y": 309,
+          "name": "Orthogonal Left Collector",
+          "fill": "#4A4843",
+          "width": 1,
+          "height": 281
+        },
+        {
+          "type": "rectangle",
+          "id": "bJwbj",
+          "x": 656,
+          "y": 449,
+          "name": "Orthogonal Hub Input",
+          "fill": "#4A4843",
+          "width": 34,
+          "height": 1
+        },
+        {
+          "type": "frame",
+          "id": "i72Bm",
+          "x": 690,
+          "y": 299,
+          "name": "Orthogonal Urushi Icon",
+          "width": 300,
+          "height": 300,
+          "fill": {
+            "type": "image",
+            "enabled": true,
+            "url": "urushi-icon.png",
+            "mode": "fill"
+          }
+        },
+        {
+          "type": "text",
+          "id": "Ng6UT",
+          "x": 755,
+          "y": 554,
+          "name": "Orthogonal Urushi Wordmark",
+          "fill": "$urushi-paper",
+          "content": "urushi",
+          "fontFamily": "Space Grotesk",
+          "fontSize": 60,
+          "fontWeight": "600",
+          "letterSpacing": -1.8
+        },
+        {
+          "type": "text",
+          "id": "Ze4qx",
+          "x": 738,
+          "y": 641,
+          "name": "Orthogonal Urushi Model",
+          "fill": "#B8B4AC",
+          "content": "THEME · VIEW · LAYOUT",
+          "fontFamily": "JetBrains Mono",
+          "fontSize": 14,
+          "fontWeight": "600",
+          "letterSpacing": 1.3
+        },
+        {
+          "type": "rectangle",
+          "id": "C8fQ7",
+          "x": 990,
+          "y": 449,
+          "name": "Orthogonal Hub Output",
+          "fill": "#4A4843",
+          "width": 34,
+          "height": 1
+        },
+        {
+          "type": "rectangle",
+          "id": "a2D3to",
+          "x": 1024,
+          "y": 309,
+          "name": "Orthogonal Right Collector",
+          "fill": "#4A4843",
+          "width": 1,
+          "height": 281
+        },
+        {
+          "type": "rectangle",
+          "id": "z9mHsc",
+          "x": 1024,
+          "y": 309,
+          "name": "Orthogonal COMMAND OUTPUT Connector",
+          "fill": "#4A4843",
+          "width": 132,
+          "height": 1
+        },
+        {
+          "type": "rectangle",
+          "id": "kKNK6",
+          "x": 1156,
+          "y": 299,
+          "name": "Orthogonal COMMAND OUTPUT Marker",
+          "fill": "$urushi-vermilion-bright",
+          "width": 20,
+          "height": 20
+        },
+        {
+          "type": "text",
+          "id": "QV1ZE",
+          "x": 1196,
+          "y": 289,
+          "name": "Orthogonal COMMAND OUTPUT Label",
+          "fill": "$urushi-paper",
+          "content": "COMMAND OUTPUT",
+          "fontFamily": "JetBrains Mono",
+          "fontSize": 16,
+          "fontWeight": "700",
+          "letterSpacing": 0.7
+        },
+        {
+          "type": "text",
+          "id": "tdvDP",
+          "x": 1196,
+          "y": 323,
+          "name": "Orthogonal COMMAND OUTPUT Sample",
+          "fill": "#B8B4AC",
+          "content": "$ build complete",
+          "fontFamily": "JetBrains Mono",
+          "fontSize": 18,
+          "fontWeight": "normal"
+        },
+        {
+          "type": "rectangle",
+          "id": "xpWZQ",
+          "x": 1024,
+          "y": 449,
+          "name": "Orthogonal INTERACTIVE PROMPTS Connector",
+          "fill": "#4A4843",
+          "width": 132,
+          "height": 1
+        },
+        {
+          "type": "rectangle",
+          "id": "ob74q",
+          "x": 1156,
+          "y": 439,
+          "name": "Orthogonal INTERACTIVE PROMPTS Marker",
+          "fill": "$urushi-gold",
+          "width": 20,
+          "height": 20
+        },
+        {
+          "type": "text",
+          "id": "Evw1N",
+          "x": 1196,
+          "y": 429,
+          "name": "Orthogonal INTERACTIVE PROMPTS Label",
+          "fill": "$urushi-paper",
+          "content": "INTERACTIVE PROMPTS",
+          "fontFamily": "JetBrains Mono",
+          "fontSize": 16,
+          "fontWeight": "700",
+          "letterSpacing": 0.7
+        },
+        {
+          "type": "text",
+          "id": "mnkCi",
+          "x": 1196,
+          "y": 463,
+          "name": "Orthogonal INTERACTIVE PROMPTS Sample",
+          "fill": "#B8B4AC",
+          "content": "Deploy? [y/N]",
+          "fontFamily": "JetBrains Mono",
+          "fontSize": 18,
+          "fontWeight": "normal"
+        },
+        {
+          "type": "rectangle",
+          "id": "KVijf",
+          "x": 1024,
+          "y": 589,
+          "name": "Orthogonal FULL-SCREEN TUI Connector",
+          "fill": "#4A4843",
+          "width": 132,
+          "height": 1
+        },
+        {
+          "type": "rectangle",
+          "id": "g2ae50",
+          "x": 1156,
+          "y": 579,
+          "name": "Orthogonal FULL-SCREEN TUI Marker",
+          "fill": "$urushi-green",
+          "width": 20,
+          "height": 20
+        },
+        {
+          "type": "text",
+          "id": "f1jUC9",
+          "x": 1196,
+          "y": 569,
+          "name": "Orthogonal FULL-SCREEN TUI Label",
+          "fill": "$urushi-paper",
+          "content": "FULL-SCREEN TUI",
+          "fontFamily": "JetBrains Mono",
+          "fontSize": 16,
+          "fontWeight": "700",
+          "letterSpacing": 0.7
+        },
+        {
+          "type": "text",
+          "id": "bzc76",
+          "x": 1196,
+          "y": 603,
+          "name": "Orthogonal FULL-SCREEN TUI Sample",
+          "fill": "#B8B4AC",
+          "content": "build → test → ship",
+          "fontFamily": "JetBrains Mono",
+          "fontSize": 18,
+          "fontWeight": "normal"
+        },
+        {
+          "type": "text",
+          "id": "t7yKUt",
+          "x": 228,
+          "y": 298,
+          "name": "Text Capabilities",
+          "fill": "$urushi-paper",
+          "content": "styled text · links · attributes",
+          "fontFamily": "JetBrains Mono",
+          "fontSize": 17,
+          "fontWeight": "normal"
+        }
+      ]
+    },
+    {
+      "type": "frame",
+      "id": "papAq",
+      "x": 1440,
+      "y": 980,
+      "name": "repository-context/urushi/readme-hero/candidate-4-orthogonal-hub",
+      "clip": true,
+      "width": 1200,
+      "height": 280,
+      "fill": "$urushi-ink",
+      "layout": "none",
+      "children": [
+        {
+          "type": "rectangle",
+          "id": "iT3RH",
+          "x": 0,
+          "y": 0,
+          "name": "README Orthogonal Top Rule",
+          "fill": "$urushi-vermilion-bright",
+          "width": 1200,
+          "height": 2
+        },
+        {
+          "type": "text",
+          "id": "wBrgI",
+          "x": 134,
+          "y": 28,
+          "name": "README Orthogonal Left Heading",
+          "fill": "$urushi-muted",
+          "content": "BUILDING BLOCKS",
+          "fontFamily": "JetBrains Mono",
+          "fontSize": 13,
+          "fontWeight": "700",
+          "letterSpacing": 1.2
+        },
+        {
+          "type": "text",
+          "id": "UVeLi",
+          "x": 16,
+          "y": 82,
+          "name": "README Orthogonal Left TEXT",
+          "fill": "$urushi-paper",
+          "content": "TEXT",
+          "fontFamily": "JetBrains Mono",
+          "fontSize": 13,
+          "fontWeight": "700"
+        },
+        {
+          "type": "rectangle",
+          "id": "K2mJuI",
+          "x": 388,
+          "y": 91,
+          "name": "README Orthogonal Left Line 0",
+          "fill": "#4A4843",
+          "width": 26,
+          "height": 1
+        },
+        {
+          "type": "text",
+          "id": "CDuWp",
+          "x": 16,
+          "y": 152,
+          "name": "README Orthogonal Left STYLE",
+          "fill": "$urushi-paper",
+          "content": "LAYOUT",
+          "fontFamily": "JetBrains Mono",
+          "fontSize": 13,
+          "fontWeight": "700"
+        },
+        {
+          "type": "rectangle",
+          "id": "gmQ67",
+          "x": 388,
+          "y": 161,
+          "name": "README Orthogonal Left Line 1",
+          "fill": "#4A4843",
+          "width": 26,
+          "height": 1
+        },
+        {
+          "type": "text",
+          "id": "JnC3u",
+          "x": 16,
+          "y": 222,
+          "name": "README Orthogonal Left LAYOUT",
+          "fill": "$urushi-paper",
+          "content": "COMPONENTS",
+          "fontFamily": "JetBrains Mono",
+          "fontSize": 13,
+          "fontWeight": "700"
+        },
+        {
+          "type": "rectangle",
+          "id": "kk2Kf",
+          "x": 388,
+          "y": 231,
+          "name": "README Orthogonal Left Line 2",
+          "fill": "#4A4843",
+          "width": 26,
+          "height": 1
+        },
+        {
+          "type": "rectangle",
+          "id": "YjQpM",
+          "x": 414,
+          "y": 91,
+          "name": "README Orthogonal Left Collector",
+          "fill": "#4A4843",
+          "width": 1,
+          "height": 140
+        },
+        {
+          "type": "rectangle",
+          "id": "BA171",
+          "x": 414,
+          "y": 161,
+          "name": "README Orthogonal Hub Input",
+          "fill": "#4A4843",
+          "width": 50,
+          "height": 1
+        },
+        {
+          "type": "frame",
+          "id": "ur4PM",
+          "x": 464,
+          "y": 83,
+          "name": "README Orthogonal Icon",
+          "width": 156,
+          "height": 156,
+          "fill": {
+            "type": "image",
+            "enabled": true,
+            "url": "urushi-icon.png",
+            "mode": "fill"
+          }
+        },
+        {
+          "type": "text",
+          "id": "X18CXu",
+          "x": 594,
+          "y": 130,
+          "name": "README Orthogonal Wordmark",
+          "fill": "$urushi-paper",
+          "content": "urushi",
+          "fontFamily": "Space Grotesk",
+          "fontSize": 48,
+          "fontWeight": "600",
+          "letterSpacing": -1.5
+        },
+        {
+          "type": "text",
+          "id": "fU8RA",
+          "x": 594,
+          "y": 196,
+          "name": "README Orthogonal Model",
+          "fill": "#B8B4AC",
+          "content": "THEME · VIEW · LAYOUT",
+          "fontFamily": "JetBrains Mono",
+          "fontSize": 12,
+          "fontWeight": "600",
+          "letterSpacing": 1.1
+        },
+        {
+          "type": "rectangle",
+          "id": "b9CnH",
+          "x": 769,
+          "y": 161,
+          "name": "README Orthogonal Hub Output",
+          "fill": "#4A4843",
+          "width": 50,
+          "height": 1
+        },
+        {
+          "type": "rectangle",
+          "id": "HsGWc",
+          "x": 819,
+          "y": 91,
+          "name": "README Orthogonal Right Collector",
+          "fill": "#4A4843",
+          "width": 1,
+          "height": 140
+        },
+        {
+          "type": "rectangle",
+          "id": "Ac6zb",
+          "x": 819,
+          "y": 91,
+          "name": "README Orthogonal Right Line 0",
+          "fill": "#4A4843",
+          "width": 50,
+          "height": 1
+        },
+        {
+          "type": "rectangle",
+          "id": "GWzee",
+          "x": 869,
+          "y": 83,
+          "name": "README Orthogonal Right Marker 0",
+          "fill": "$urushi-vermilion-bright",
+          "width": 16,
+          "height": 16
+        },
+        {
+          "type": "text",
+          "id": "KUW13",
+          "x": 904,
+          "y": 83,
+          "name": "README Orthogonal Right COMMAND OUTPUT",
+          "fill": "$urushi-paper",
+          "content": "COMMAND OUTPUT",
+          "fontFamily": "JetBrains Mono",
+          "fontSize": 13,
+          "fontWeight": "700"
+        },
+        {
+          "type": "rectangle",
+          "id": "f3pVN",
+          "x": 819,
+          "y": 161,
+          "name": "README Orthogonal Right Line 1",
+          "fill": "#4A4843",
+          "width": 50,
+          "height": 1
+        },
+        {
+          "type": "rectangle",
+          "id": "fZ7Uu",
+          "x": 869,
+          "y": 153,
+          "name": "README Orthogonal Right Marker 1",
+          "fill": "$urushi-gold",
+          "width": 16,
+          "height": 16
+        },
+        {
+          "type": "text",
+          "id": "bvdFg",
+          "x": 904,
+          "y": 153,
+          "name": "README Orthogonal Right INTERACTIVE PROMPTS",
+          "fill": "$urushi-paper",
+          "content": "INTERACTIVE PROMPTS",
+          "fontFamily": "JetBrains Mono",
+          "fontSize": 13,
+          "fontWeight": "700"
+        },
+        {
+          "type": "rectangle",
+          "id": "bGtbY",
+          "x": 819,
+          "y": 231,
+          "name": "README Orthogonal Right Line 2",
+          "fill": "#4A4843",
+          "width": 50,
+          "height": 1
+        },
+        {
+          "type": "rectangle",
+          "id": "dAboZ",
+          "x": 869,
+          "y": 223,
+          "name": "README Orthogonal Right Marker 2",
+          "fill": "$urushi-green",
+          "width": 16,
+          "height": 16
+        },
+        {
+          "type": "text",
+          "id": "u6QTg",
+          "x": 904,
+          "y": 223,
+          "name": "README Orthogonal Right FULL-SCREEN TUI",
+          "fill": "$urushi-paper",
+          "content": "FULL-SCREEN TUI",
+          "fontFamily": "JetBrains Mono",
+          "fontSize": 13,
+          "fontWeight": "700"
+        },
+        {
+          "type": "text",
+          "id": "LoAO6",
+          "x": 134,
+          "y": 82,
+          "name": "README Semantic Roles Values",
+          "fill": "#B8B4AC",
+          "content": "styles · links · attributes",
+          "fontFamily": "JetBrains Mono",
+          "fontSize": 13,
+          "fontWeight": "normal"
+        },
+        {
+          "type": "text",
+          "id": "uF2xM",
+          "x": 134,
+          "y": 152,
+          "name": "README View Primitives Values",
+          "fill": "#B8B4AC",
+          "content": "block · row · column · grid",
+          "fontFamily": "JetBrains Mono",
+          "fontSize": 13,
+          "fontWeight": "normal"
+        },
+        {
+          "type": "text",
+          "id": "E1ZfE",
+          "x": 134,
+          "y": 222,
+          "name": "README Components Values",
+          "fill": "#B8B4AC",
+          "content": "list · table · tree · scrollbar",
+          "fontFamily": "JetBrains Mono",
+          "fontSize": 13,
+          "fontWeight": "normal"
+        },
+        {
+          "type": "text",
+          "id": "offDT",
+          "x": 530,
+          "y": 28,
+          "name": "README Shared Presentation Heading",
+          "fill": "$urushi-muted",
+          "content": "SHARED PRESENTATION",
+          "fontFamily": "JetBrains Mono",
+          "fontSize": 13,
+          "fontWeight": "700",
+          "letterSpacing": 1.2
+        },
+        {
+          "type": "text",
+          "id": "C8L1n",
+          "x": 904,
+          "y": 28,
+          "name": "README Terminal Surfaces Heading",
+          "fill": "$urushi-muted",
+          "content": "TERMINAL SURFACES",
+          "fontFamily": "JetBrains Mono",
+          "fontSize": 13,
+          "fontWeight": "700",
+          "letterSpacing": 1.2
+        }
+      ]
+    },
+    {
+      "type": "frame",
+      "id": "gmQKI",
+      "x": 2940,
+      "y": 0,
+      "name": "repository-context/urushi/icon/editable-source",
+      "reusable": true,
+      "clip": true,
+      "width": 512,
+      "height": 512,
+      "fill": {
+        "type": "color",
+        "color": "#000000",
+        "enabled": false
+      },
+      "layout": "none",
+      "children": [
+        {
+          "type": "rectangle",
+          "id": "XMiuR",
+          "x": 161.1,
+          "y": 161,
+          "name": "Vermilion Northwest",
+          "fill": "#C14531FE",
+          "width": 55.9,
+          "height": 56,
+          "stroke": {
+            "type": "color",
+            "color": "#000000",
+            "enabled": false
+          },
+          "strokeWidth": 1,
+          "effect": {
+            "type": "shadow",
+            "shadowType": "outer",
+            "enabled": false,
+            "color": "#00000000"
+          }
+        },
+        {
+          "type": "rectangle",
+          "id": "gWLDj",
+          "x": 295,
+          "y": 161,
+          "name": "Gold Northeast",
+          "fill": "#B79A5DFE",
+          "width": 55.6,
+          "height": 56,
+          "stroke": {
+            "type": "color",
+            "color": "#000000",
+            "enabled": false
+          },
+          "strokeWidth": 1,
+          "effect": {
+            "type": "shadow",
+            "shadowType": "outer",
+            "enabled": false,
+            "color": "#00000000"
+          }
+        },
+        {
+          "type": "rectangle",
+          "id": "h7gtki",
+          "x": 226.6,
+          "y": 225.6,
+          "name": "Vermilion Center",
+          "fill": "#C14531FD",
+          "width": 59,
+          "height": 60,
+          "stroke": {
+            "type": "color",
+            "color": "#000000",
+            "enabled": false
+          },
+          "strokeWidth": 1,
+          "effect": {
+            "type": "shadow",
+            "shadowType": "outer",
+            "enabled": false,
+            "color": "#00000000"
+          }
+        },
+        {
+          "type": "rectangle",
+          "id": "rLpi8",
+          "x": 161.1,
+          "y": 293.7,
+          "name": "Green Southwest",
+          "fill": "#7DB39BFE",
+          "width": 56.7,
+          "height": 56.8,
+          "stroke": {
+            "type": "color",
+            "color": "#000000",
+            "enabled": false
+          },
+          "strokeWidth": 1,
+          "effect": {
+            "type": "shadow",
+            "shadowType": "outer",
+            "enabled": false,
+            "color": "#00000000"
+          }
+        },
+        {
+          "type": "rectangle",
+          "id": "NUQhj",
+          "x": 294.3,
+          "y": 293.7,
+          "name": "Vermilion Southeast",
+          "fill": "#C14531FD",
+          "width": 56.6,
+          "height": 56.8,
+          "stroke": {
+            "type": "color",
+            "color": "#000000",
+            "enabled": false
+          },
+          "strokeWidth": 1,
+          "effect": {
+            "type": "shadow",
+            "shadowType": "outer",
+            "enabled": false,
+            "color": "#00000000"
+          }
+        }
+      ]
+    }
+  ],
+  "variables": {
+    "urushi-ink": {
+      "type": "color",
+      "value": "#090909"
+    },
+    "urushi-surface": {
+      "type": "color",
+      "value": "#151514"
+    },
+    "urushi-surface-raised": {
+      "type": "color",
+      "value": "#1D1D1B"
+    },
+    "urushi-paper": {
+      "type": "color",
+      "value": "#F4F2ED"
+    },
+    "urushi-muted": {
+      "type": "color",
+      "value": "#9C9992"
+    },
+    "urushi-vermilion": {
+      "type": "color",
+      "value": "#BD3F30"
+    },
+    "urushi-vermilion-bright": {
+      "type": "color",
+      "value": "#DC5947"
+    },
+    "urushi-gold": {
+      "type": "color",
+      "value": "#B79A60"
+    },
+    "urushi-green": {
+      "type": "color",
+      "value": "#79B59A"
+    },
+    "urushi-line": {
+      "type": "color",
+      "value": "#393834"
+    }
+  },
+  "fileToken": "9f6a268a-a23d-485d-9fdf-043facc5537a"
+}
