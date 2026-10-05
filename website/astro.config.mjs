@@ -19,6 +19,7 @@ export default defineConfig({
       customCss: ['./src/styles/starlight.css'],
       components: {
         Header: './src/components/DocsHeader.astro',
+        SocialIcons: './src/components/DocsSocialLinks.astro',
       },
       sidebar: [
         {

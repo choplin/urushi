@@ -1,0 +1,26 @@
+---
+import GitHubIcon from './GitHubIcon.astro';
+---
+
+<a href="https://github.com/choplin/urushi" rel="me">
+  <GitHubIcon />
+  <span>GitHub</span>
+</a>
+
+<style>
+  @layer starlight.core {
+    a {
+      align-items: center;
+      color: var(--sl-color-text-accent);
+      display: inline-flex;
+      gap: 0.4rem;
+      margin: -0.5em;
+      padding: 0.5em;
+      text-decoration: none;
+    }
+
+    a:hover {
+      color: var(--sl-color-white);
+    }
+  }
+</style>

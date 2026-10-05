@@ -1,4 +1,5 @@
 ---
+import GitHubIcon from '../components/GitHubIcon.astro';
 import '../styles/home.css';
 
 interface Props {
@@ -34,6 +35,10 @@ const { title, description } = Astro.props;
       <nav aria-label="Primary navigation">
         <a href="/docs/">Docs</a>
         <a href="/docs/reference/crates/">Crates</a>
+        <a class="github-link" href="https://github.com/choplin/urushi">
+          <GitHubIcon />
+          <span>GitHub</span>
+        </a>
         <a class="nav-cta" href="/docs/">Get started <span aria-hidden="true">↗</span></a>
       </nav>
     </header>
@@ -46,7 +51,13 @@ const { title, description } = Astro.props;
         <span>urushi</span>
       </a>
       <p>Presentation infrastructure for Rust terminal applications.</p>
-      <p class="footer-meta">MIT</p>
+      <p class="footer-meta">
+        <a class="github-link" href="https://github.com/choplin/urushi">
+          <GitHubIcon />
+          <span>GitHub</span>
+        </a>
+        <span aria-hidden="true">·</span> MIT
+      </p>
     </footer>
   </body>
 </html>

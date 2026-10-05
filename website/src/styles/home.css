@@ -103,6 +103,13 @@ a {
   color: var(--paper);
 }
 
+.github-link {
+  align-items: center;
+  display: inline-flex;
+  gap: 0.4rem;
+  text-decoration: none;
+}
+
 .site-header .nav-cta {
   background: var(--vermilion);
   color: #fff;
@@ -817,6 +824,9 @@ h1 em {
 }
 
 .footer-meta {
+  align-items: center;
+  display: flex;
+  gap: 0.5rem;
   justify-self: end;
   margin: 0;
 }
