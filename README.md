@@ -244,11 +244,9 @@ Ratatui integration, graphics lifecycles, and terminal capability handling.
 
 ## Acknowledgments
 
-The API design takes [Lip Gloss](https://github.com/charmbracelet/lipgloss) as
-its primary reference; `urushi-prompt` does the same with
-[Huh](https://github.com/charmbracelet/huh). Thanks to the
-[Charm](https://charm.sh) team for demonstrating how a coherent terminal UI
-stack can feel.
+[Charm](https://charm.sh)'s libraries were among the references consulted in
+developing Urushi. Thanks to the Charm team for their well-designed and
+comprehensive suite of terminal UI libraries.
 
 ## License
 
