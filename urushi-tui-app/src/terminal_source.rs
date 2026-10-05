@@ -20,6 +20,9 @@ use super::subscription::{Source, SourceKind};
 const READ_POLL_INTERVAL: Duration = Duration::from_millis(25);
 
 /// Adds the runtime-owned terminal sources to another source spawner.
+///
+/// `T` is a shared handle: every clone addresses the same serialized physical
+/// terminal connection.
 pub(crate) struct TerminalSourceSpawner<T, Message> {
     owner: Arc<Owner<T, Message>>,
     executor: Arc<dyn Executor>,
@@ -27,12 +30,12 @@ pub(crate) struct TerminalSourceSpawner<T, Message> {
 }
 
 struct Owner<T, Message> {
-    shared: Arc<Shared<T, Message>>,
+    terminal: T,
+    shared: Arc<Shared<Message>>,
     worker: Mutex<Option<JoinHandle<()>>>,
 }
 
-struct Shared<T, Message> {
-    terminal: Mutex<T>,
+struct Shared<Message> {
     sources: Arc<Mutex<Sources<Message>>>,
     source_changed: Condvar,
     failure: Failure,
@@ -72,7 +75,7 @@ struct Failure {
 
 impl<T, Message> TerminalSourceSpawner<T, Message>
 where
-    T: EventSource + TerminalQuery + Send + 'static,
+    T: Clone + EventSource + TerminalQuery + Send + Sync + 'static,
     Message: Send + 'static,
 {
     pub(crate) fn new(
@@ -81,7 +84,6 @@ where
         fallback: Arc<dyn SourceSpawner<Message>>,
     ) -> io::Result<Self> {
         let shared = Arc::new(Shared {
-            terminal: Mutex::new(terminal),
             sources: Arc::new(Mutex::new(Sources {
                 input: None,
                 surface: None,
@@ -97,11 +99,13 @@ where
             surface_sizes: Arc::new(Mutex::new(SurfaceSizes::default())),
         });
         let worker_shared = Arc::clone(&shared);
+        let worker_terminal = terminal.clone();
         let worker = thread::Builder::new()
             .name("urushi-terminal-input".into())
-            .spawn(move || read_events(worker_shared))?;
+            .spawn(move || read_events(worker_terminal, worker_shared))?;
         Ok(Self {
             owner: Arc::new(Owner {
+                terminal,
                 shared,
                 worker: Mutex::new(Some(worker)),
             }),
@@ -146,19 +150,28 @@ where
         let (publisher, mut slot) = surface_slot();
         let publisher = Arc::new(publisher);
         let id = {
-            let mut terminal = lock(&self.owner.shared.terminal);
+            // Owning Sources linearizes the initial query and publication with
+            // resize observations, whose delivery acquires the same lock.
+            let mut sources = lock(&self.owner.shared.sources);
+            let mut terminal = self.owner.terminal.clone();
             let initial = Surface::from_window_size(terminal.window_size()?);
-            let id = self.register_surface(Arc::clone(&mapper), Arc::clone(&publisher));
+            let id = sources.next_id;
+            sources.next_id = sources.next_id.wrapping_add(1);
+            sources.surface = Some(SurfaceEndpoint {
+                id,
+                mapper: Arc::clone(&mapper),
+                publisher: Arc::clone(&publisher),
+            });
             let mut sizes = lock(&self.owner.shared.surface_sizes);
             sizes.pending = Some(initial);
             publisher.publish(mapper(initial));
             slot.try_accept(&deliveries);
             sizes.accepted = sizes.pending.take();
+            drop(sizes);
+            drop(sources);
+            self.owner.shared.source_changed.notify_all();
             id
         };
-        // The reader could publish a newer resize after the terminal lock is
-        // released. Accepting whichever observation is then latest is correct;
-        // notifying the runtime while holding the terminal lock is not.
         let acceptance_deliveries = deliveries.clone();
         let acceptance_shared = Arc::clone(&self.owner.shared);
         let acceptance = self.executor.spawn(Box::pin(async move {
@@ -192,24 +205,6 @@ where
         self.owner.shared.source_changed.notify_all();
         id
     }
-
-    fn register_surface(
-        &self,
-        mapper: Mapper<Surface, Message>,
-        publisher: Arc<SurfaceMessagePublisher<Message>>,
-    ) -> usize {
-        let mut sources = lock(&self.owner.shared.sources);
-        let id = sources.next_id;
-        sources.next_id = sources.next_id.wrapping_add(1);
-        sources.surface = Some(SurfaceEndpoint {
-            id,
-            mapper,
-            publisher,
-        });
-        drop(sources);
-        self.owner.shared.source_changed.notify_all();
-        id
-    }
 }
 
 impl<T, Message> Clone for TerminalSourceSpawner<T, Message> {
@@ -224,7 +219,7 @@ impl<T, Message> Clone for TerminalSourceSpawner<T, Message> {
 
 impl<T, Message> SourceSpawner<Message> for TerminalSourceSpawner<T, Message>
 where
-    T: EventSource + TerminalQuery + Send + 'static,
+    T: Clone + EventSource + TerminalQuery + Send + Sync + 'static,
     Message: Send + 'static,
 {
     fn start(
@@ -269,16 +264,15 @@ impl<T, Message> Drop for Owner<T, Message> {
     }
 }
 
-struct RunningInput<T, Message> {
-    shared: Arc<Shared<T, Message>>,
+struct RunningInput<Message> {
+    shared: Arc<Shared<Message>>,
     id: usize,
     inbox_closer: SourceInboxCloser<Message>,
     _acceptance: Box<dyn Execution>,
 }
 
-impl<T, Message> RunningSource<Message> for RunningInput<T, Message>
+impl<Message> RunningSource<Message> for RunningInput<Message>
 where
-    T: EventSource + TerminalQuery + Send + 'static,
     Message: Send + 'static,
 {
     fn refresh(&mut self, source: Source<Message>) {
@@ -294,7 +288,7 @@ where
     }
 }
 
-impl<T, Message> Drop for RunningInput<T, Message> {
+impl<Message> Drop for RunningInput<Message> {
     fn drop(&mut self) {
         let mut sources = lock(&self.shared.sources);
         if sources
@@ -311,15 +305,14 @@ impl<T, Message> Drop for RunningInput<T, Message> {
     }
 }
 
-struct RunningSurface<T, Message> {
-    shared: Arc<Shared<T, Message>>,
+struct RunningSurface<Message> {
+    shared: Arc<Shared<Message>>,
     id: usize,
     acceptance: Option<Box<dyn Execution>>,
 }
 
-impl<T, Message> RunningSource<Message> for RunningSurface<T, Message>
+impl<Message> RunningSource<Message> for RunningSurface<Message>
 where
-    T: EventSource + TerminalQuery + Send + 'static,
     Message: Send + 'static,
 {
     fn refresh(&mut self, source: Source<Message>) {
@@ -335,7 +328,7 @@ where
     }
 }
 
-impl<T, Message> Drop for RunningSurface<T, Message> {
+impl<Message> Drop for RunningSurface<Message> {
     fn drop(&mut self) {
         drop(self.acceptance.take());
         let mut sources = lock(&self.shared.sources);
@@ -370,7 +363,7 @@ impl<Message> RunningSource<Message> for PassiveSource {
     fn refresh(&mut self, _source: Source<Message>) {}
 }
 
-fn read_events<T, Message>(shared: Arc<Shared<T, Message>>)
+fn read_events<T, Message>(mut terminal: T, shared: Arc<Shared<Message>>)
 where
     T: EventSource + TerminalQuery,
     Message: Send + 'static,
@@ -382,13 +375,10 @@ where
         }
         drop(sources);
 
-        let event = {
-            let mut terminal = lock(&shared.terminal);
-            match terminal.poll_event_timeout(READ_POLL_INTERVAL) {
-                Ok(Some(event)) => observe(&shared, &mut *terminal, event),
-                Ok(None) => Ok(None),
-                Err(error) => Err(error),
-            }
+        let event = match terminal.poll_event_timeout(READ_POLL_INTERVAL) {
+            Ok(Some(event)) => observe(&shared, &mut terminal, event),
+            Ok(None) => Ok(None),
+            Err(error) => Err(error),
         };
 
         match event {
@@ -488,7 +478,7 @@ impl<Message: Send + 'static> Observation<Message> {
 }
 
 fn observe<T, Message>(
-    shared: &Shared<T, Message>,
+    shared: &Shared<Message>,
     terminal: &mut T,
     event: Event,
 ) -> io::Result<Option<Observation<Message>>>
@@ -525,8 +515,8 @@ where
     }
 }
 
-fn input_observation<T, Message>(
-    shared: &Shared<T, Message>,
+fn input_observation<Message>(
+    shared: &Shared<Message>,
     input: Input,
 ) -> Option<Observation<Message>> {
     let sources = lock(&shared.sources);
@@ -537,9 +527,7 @@ fn input_observation<T, Message>(
     })
 }
 
-fn surface_endpoint<T, Message>(
-    shared: &Shared<T, Message>,
-) -> Option<SurfaceDeliveryEndpoint<Message>> {
+fn surface_endpoint<Message>(shared: &Shared<Message>) -> Option<SurfaceDeliveryEndpoint<Message>> {
     let sources = lock(&shared.sources);
     sources.surface.as_ref().map(|endpoint| {
         (
@@ -550,15 +538,11 @@ fn surface_endpoint<T, Message>(
     })
 }
 
-fn presentation_endpoint<T, Message>(
-    shared: &Shared<T, Message>,
-) -> Option<DeliveryQueue<Message>> {
+fn presentation_endpoint<Message>(shared: &Shared<Message>) -> Option<DeliveryQueue<Message>> {
     lock(&shared.sources).presentation.clone()
 }
 
-fn wait_for_source<'a, T, Message>(
-    shared: &'a Shared<T, Message>,
-) -> MutexGuard<'a, Sources<Message>> {
+fn wait_for_source<'a, Message>(shared: &'a Shared<Message>) -> MutexGuard<'a, Sources<Message>> {
     let mut sources = lock(&shared.sources);
     while !sources.stopping
         && sources.input.is_none()

@@ -13,6 +13,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   interactive output now share escaping and sequence generation, while
   hyperlink getters return their logical, unescaped values.
 
+### Fixed
+
+- Prevented idle terminal input polling from delaying initial TUI surface
+  registration and rendering.
+
 ## [0.1.0] - 2026-09-30
 
 ### Added

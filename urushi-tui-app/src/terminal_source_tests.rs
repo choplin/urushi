@@ -460,6 +460,43 @@ fn initial_surface_query_failure_prevents_runtime_construction() {
 }
 
 #[test]
+fn surface_registration_does_not_wait_for_a_blocking_input_poll() {
+    let (terminal, probe) = FakeTerminal::blocking_poll(window(80, 24, 640, 384));
+    let harness = Harness::new(TerminalSize::ZERO);
+    let spawner = Arc::new(
+        TerminalSourceSpawner::new(terminal, harness.executor(), Arc::new(RejectSources)).unwrap(),
+    );
+    let mut subscriptions = SubscriptionExecutor::new(
+        Arc::clone(&spawner) as Arc<dyn SourceSpawner<()>>,
+        harness.deliveries(),
+    );
+
+    subscriptions
+        .reconcile(Subscription::input(|_| ()))
+        .unwrap();
+    probe.wait_until_polling();
+
+    let (registered, registration) = std::sync::mpsc::channel();
+    let registration_spawner = Arc::clone(&spawner);
+    let registration_deliveries = harness.deliveries();
+    let registration_thread = std::thread::spawn(move || {
+        let result = registration_spawner
+            .start_surface(Arc::new(|_| ()), registration_deliveries)
+            .map(drop);
+        registered.send(result).unwrap();
+    });
+    let result = registration.recv_timeout(Duration::from_secs(1));
+    probe.release_poll();
+    registration_thread.join().unwrap();
+
+    result
+        .expect("surface registration must not wait for the input poll")
+        .unwrap();
+    subscriptions.stop();
+    assert!(!harness.complete_effect(0));
+}
+
+#[test]
 fn event_read_failure_reaches_the_runtime_failure_path() {
     let (terminal, _probe) = FakeTerminal::new(
         [Err(io::Error::new(
@@ -707,6 +744,7 @@ fn window(columns: usize, rows: usize, width: usize, height: usize) -> WindowSiz
     )
 }
 
+#[derive(Clone)]
 struct FakeTerminal {
     shared: Arc<FakeShared>,
 }
@@ -725,6 +763,9 @@ struct FakeState {
     windows: VecDeque<io::Result<WindowSize>>,
     polls: usize,
     queries: usize,
+    block_poll: bool,
+    polling: bool,
+    poll_released: bool,
 }
 
 impl FakeTerminal {
@@ -738,6 +779,9 @@ impl FakeTerminal {
                 windows: windows.into_iter().collect(),
                 polls: 0,
                 queries: 0,
+                block_poll: false,
+                polling: false,
+                poll_released: false,
             }),
             changed: Condvar::new(),
         });
@@ -747,6 +791,12 @@ impl FakeTerminal {
             },
             FakeProbe { shared },
         )
+    }
+
+    fn blocking_poll(window: WindowSize) -> (Self, FakeProbe) {
+        let (terminal, probe) = Self::new([], [Ok(window)]);
+        probe.shared.state.lock().unwrap().block_poll = true;
+        (terminal, probe)
     }
 }
 
@@ -767,6 +817,13 @@ impl EventSource for FakeTerminal {
         let mut state = self.shared.state.lock().unwrap();
         state.polls += 1;
         self.shared.changed.notify_all();
+        if !timeout.is_zero() && state.block_poll {
+            state.polling = true;
+            self.shared.changed.notify_all();
+            while !state.poll_released {
+                state = self.shared.changed.wait(state).unwrap();
+            }
+        }
         if state.events.is_empty() && !timeout.is_zero() {
             let (next, _) = self.shared.changed.wait_timeout(state, timeout).unwrap();
             state = next;
@@ -820,6 +877,26 @@ impl FakeProbe {
             state = next;
             assert!(!timeout.timed_out() || state.polls >= expected);
         }
+    }
+
+    fn wait_until_polling(&self) {
+        let deadline = Instant::now() + Duration::from_secs(2);
+        let mut state = self.shared.state.lock().unwrap();
+        while !state.polling {
+            let remaining = deadline.saturating_duration_since(Instant::now());
+            assert!(
+                !remaining.is_zero(),
+                "terminal reader did not start polling"
+            );
+            let (next, timeout) = self.shared.changed.wait_timeout(state, remaining).unwrap();
+            state = next;
+            assert!(!timeout.timed_out() || state.polling);
+        }
+    }
+
+    fn release_poll(&self) {
+        self.shared.state.lock().unwrap().poll_released = true;
+        self.shared.changed.notify_all();
     }
 
     fn wait_for_queries(&self, expected: usize) {
