@@ -53,7 +53,7 @@ and available only to the release workflow.
 
 Each crate must trust the `choplin/urushi` repository and
 `.github/workflows/release.yml` in its crates.io Trusted Publishing settings.
-No GitHub environment is part of that identity.
+The trusted identity is restricted to the `release` GitHub environment.
 
 After explicit human approval of the preview, dispatch **Release crates** from
 the `main` branch and enter the exact version. The workflow repeats the preview,
