@@ -67,7 +67,9 @@ cargo-release release <version> --workspace --execute --no-confirm
 The execute path updates package versions, internal dependencies, and
 `Cargo.lock`. Cargo verifies each package before publishing it. On success,
 `cargo-release` creates one release commit, publishes crates in dependency
-order, creates the tag, and pushes the commit and tag.
+order, creates the tag, and pushes the commit and tag. The workflow then creates
+the matching GitHub Release using that version's `CHANGELOG.md` section. A
+pre-release version creates a pre-release on GitHub.
 
 ## Resume an interrupted release
 
@@ -89,12 +91,12 @@ cargo-release release publish --workspace
 Do not edit the release contents, reuse the version for a different commit, or
 try to upload an existing crate version again.
 
-## Finish the release
+## Verify the release
 
 Build a clean consumer using registry dependencies only, covering the static
-output, Prompt, Ratatui adapter, and TUI application paths. After that check,
-create the GitHub Release for `v<version>` and record the commit, CI result,
-published packages, consumer verification, tag, and GitHub Release URLs.
+output, Prompt, Ratatui adapter, and TUI application paths. Record the commit,
+CI result, published packages, consumer verification, tag, and GitHub Release
+URLs.
 
 Urushi does not use `dist`; it publishes libraries rather than application
 binaries or installers.
